@@ -230,9 +230,12 @@ class NotebookWorkspace(
 
     fun addSectionAtFocus(): SectionNode = addSection(focusedSectionId)
 
-    fun addPage(title: String = "无标题页"): NotePage {
+    fun addPage(
+        title: String = "无标题页",
+        viewSettings: PageViewSettings = PageViewSettings(),
+    ): NotePage {
         val section = selectedSection() ?: error("Cannot add page without a selected section")
-        val page = NotePage(nextId("page"), title)
+        val page = NotePage(nextId("page"), title, viewSettings = viewSettings)
         section.pages += page
         selectedPageSectionId = section.id
         selectedPageId = page.id

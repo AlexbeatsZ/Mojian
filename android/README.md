@@ -17,16 +17,21 @@ model of a future independent notebook application. It does not read or modify N
   eraser, and freeform lasso selection;
 - an icon-only drawing ribbon where the first tap selects a tool and a second tap opens its options;
 - a cursor tool that places a session-only text caret on the paper and opens the Android keyboard;
-- a clean writing canvas without duplicate page-title or current-tool status overlays;
+- a clean writing canvas without duplicate breadcrumb or current-tool status overlays;
 - canvas-right search and full-page controls; full-page view uses a centered floating toolbox whose
   visibility is controlled by its pen button;
+- a working icon-only View ribbon with normal/full-page modes, preset 50–800% zoom controls, a
+  persistent finger-pinch zoom lock that leaves ribbon zoom controls active, page-width fit, the shared baseline menu, page colors,
+  unbounded or automatically growing paginated A4 paper, optional page title, and light/dark page backgrounds;
+- a compact page-pane `+` dialog that remembers the last successfully created page's paper,
+  baseline, and color configuration without saving cancelled changes;
 - a panorama-hand toggle for one-finger panning; off restores the default two-finger-only gestures;
 - a File/Backstage notebook information page with a bottom Options entry; prediction and page-pane
   range live in that settings panel instead of the workspace;
 - preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, and clear.
 
-Notebook hierarchy, pages, text boxes, and strokes are still session-only. Search, non-drawing ribbon tabs,
-pixel erasing, and lasso move/resize are explicit later-feature shells.
+Notebook hierarchy, pages, text boxes, and strokes are still session-only. Search, Insert,
+pixel erasing, and unsupported File actions are explicit later-feature shells.
 
 ## Safety boundary
 

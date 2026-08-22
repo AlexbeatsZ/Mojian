@@ -6,21 +6,41 @@ const val DOCUMENT_UNITS_PER_MM = 12.16225f
 
 enum class PaperSize(
     val menuLabel: String,
-    val widthMm: Float,
+    val widthMm: Float?,
     val heightMm: Float?,
 ) {
-    AUTO("自动", 210f, null),
-    A4_PORTRAIT("A4", 210f, 297f),
-    A4_LANDSCAPE("A4 横向", 297f, 210f),
-    LETTER_PORTRAIT("Letter", 215.9f, 279.4f),
-    LETTER_LANDSCAPE("Letter 横向", 279.4f, 215.9f),
+    BOUNDLESS("无界页面", null, null),
+    A4("A4", 210f, 297f),
     ;
 
-    val documentWidth: Float
-        get() = widthMm * DOCUMENT_UNITS_PER_MM
+    val documentWidth: Float?
+        get() = widthMm?.times(DOCUMENT_UNITS_PER_MM)
 
     val documentHeight: Float?
         get() = heightMm?.times(DOCUMENT_UNITS_PER_MM)
+}
+
+object A4PageLayout {
+    const val PAGE_GAP_MM = 12f
+    const val AUTO_GROW_MARGIN_MM = 24f
+
+    val pageWidth: Float = 210f * DOCUMENT_UNITS_PER_MM
+    val pageHeight: Float = 297f * DOCUMENT_UNITS_PER_MM
+    val pageGap: Float = PAGE_GAP_MM * DOCUMENT_UNITS_PER_MM
+    val autoGrowMargin: Float = AUTO_GROW_MARGIN_MM * DOCUMENT_UNITS_PER_MM
+
+    fun pageTop(index: Int): Float = index.coerceAtLeast(0) * (pageHeight + pageGap)
+
+    fun pageBottom(index: Int): Float = pageTop(index) + pageHeight
+
+    fun requiredPageCount(
+        contentBottom: Float,
+        currentPageCount: Int,
+    ): Int {
+        var count = currentPageCount.coerceAtLeast(1)
+        while (contentBottom >= pageBottom(count - 1) - autoGrowMargin) count++
+        return count
+    }
 }
 
 enum class PageColor(
@@ -39,30 +59,49 @@ enum class PageColor(
 }
 
 data class PageViewSettings(
-    var paperSize: PaperSize = PaperSize.AUTO,
+    var paperSize: PaperSize = PaperSize.BOUNDLESS,
     var pageColor: PageColor = PageColor.WHITE,
+    var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD,
     var pageTitleVisible: Boolean = true,
     var darkBackground: Boolean = true,
+    var a4PageCount: Int = 1,
 ) {
     fun toJson(): JSONObject =
         JSONObject().apply {
             put("paperSize", paperSize.name)
             put("pageColor", pageColor.name)
+            put("backgroundFormat", backgroundFormat.name)
             put("pageTitleVisible", pageTitleVisible)
             put("darkBackground", darkBackground)
+            put("a4PageCount", a4PageCount.coerceAtLeast(1))
         }
 
     companion object {
         fun fromJson(json: JSONObject): PageViewSettings =
             PageViewSettings(
-                paperSize =
-                    runCatching { PaperSize.valueOf(json.optString("paperSize", PaperSize.AUTO.name)) }
-                        .getOrDefault(PaperSize.AUTO),
+                paperSize = restorePaperSize(json.optString("paperSize", PaperSize.BOUNDLESS.name)),
                 pageColor =
                     runCatching { PageColor.valueOf(json.optString("pageColor", PageColor.WHITE.name)) }
                         .getOrDefault(PageColor.WHITE),
+                backgroundFormat =
+                    runCatching {
+                        CanvasBackgroundFormat.valueOf(
+                            json.optString("backgroundFormat", CanvasBackgroundFormat.GRID_STANDARD.name),
+                        )
+                    }.getOrDefault(CanvasBackgroundFormat.GRID_STANDARD),
                 pageTitleVisible = json.optBoolean("pageTitleVisible", true),
                 darkBackground = json.optBoolean("darkBackground", true),
+                a4PageCount = json.optInt("a4PageCount", 1).coerceAtLeast(1),
             )
+
+        private fun restorePaperSize(saved: String): PaperSize =
+            when (saved) {
+                "A4",
+                "A4_PORTRAIT",
+                "A4_LANDSCAPE",
+                "LETTER_PORTRAIT",
+                "LETTER_LANDSCAPE" -> PaperSize.A4
+                else -> PaperSize.BOUNDLESS
+            }
     }
 }

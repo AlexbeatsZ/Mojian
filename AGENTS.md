@@ -33,6 +33,7 @@
 - Selecting a notebook in the black pane clears section focus and updates the gray pane: in direct/current-section mode the page list is empty and page addition is grayed out/disabled, while in recursive mode the gray pane displays all sections, nested sub-sections, and pages across the entire notebook.
 - User settings are persisted across app restarts and updates in `SharedPreferences`: tool presets (widths, pressure, flow, opacity, colors, eraser radius, added/deleted tools, selected tool), pressure-eraser dwell time (`dwellMillis`) and pressure threshold (`pressureThreshold`), sidebar visibility (`sectionPaneVisible`, `pagePaneVisible`), page pane mode (`CURRENT_SECTION` vs `RECURSIVE`), and active notebook/section/page selection.
 - Pressure eraser's press dwell time (50–500 ms) and pressure threshold (40–100%) are directly tunable in both the eraser tool and pen tool dropdown flyouts.
+- The working icon-only View ribbon now provides normal/full-page modes, 50/75/100/125/150/200/400/800% presets and step controls, a persistent lock that blocks only finger-pinch scaling while keeping two-finger translation and ribbon zoom actions active, 100% reset, page-width fit, the shared baseline menu, page colors, unbounded or automatically growing A4 paper, optional document-surface page titles, and light/dark page backgrounds. Page appearance and baseline settings persist per page; logical black ink and default canvas text remap with the background.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -73,6 +74,8 @@
 - [x] Persist tool shelf presets, sidebar visibility, page modes, active selections, and pressure eraser parameters across app updates/restarts.
 - [x] Add adjustable press dwell time and pressure threshold controls to the eraser tool dropdown.
 - [x] Add insert-space and background format (rule lines/grid styles) tool group to the right of the panorama hand in the drawing ribbon.
+- [x] Add the functional icon-only View ribbon and reuse the drawing ribbon's completed baseline/background-format implementation.
+- [x] Add the page-pane creation dialog with remembered unbounded/A4, baseline, and page-color configuration; A4 pages append Word-style sheets as content approaches the bottom.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
@@ -87,6 +90,7 @@
 - Initial handwriting lab package must remain `com.meta.inklab`, request no network/storage permission, and store no durable user content.
 - Lab build and lint: from `android`, run `.\gradlew.bat :app:assembleDebug :app:lintDebug`.
 - Workspace unit tests: from `android`, run `.\gradlew.bat :app:testDebugUnitTest`; navigation tests cover unlimited section depth and both page-pane modes, while tool tests cover required presets and add/delete behavior.
+- View tests cover explicit anchor-preserving zoom, page-width fitting, A4 auto-growth thresholds, legacy paper migration, and page-view preference JSON round trips.
 - Debug APK: `android\app\build\outputs\apk\debug\app-debug.apk`; installed debug package/activity: `com.meta.inklab.debug/com.meta.inklab.MainActivity`.
 - Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
@@ -112,3 +116,5 @@
 - Keep section and page pane data types separate. The black pane recursively flattens only `SectionNode`; the gray pane either lists direct `NotePage` items or a separate recursive stream of section headers plus owned pages. A deep-page selection must not silently change the black-pane root.
 - Keep text input modality filtering at the text-layer dispatch boundary. Changing only the selected toolbar mode cannot prevent an enabled `EditText` tree from consuming stylus events.
 - Render and hit-test a mixed ink/tag selection through one top-level overlay, but keep the underlying content transforms in their owning layers so selection chrome never becomes document content.
+- Preferences load before the view hierarchy exists. Restore canvas-affecting values into ordinary state fields, then apply them while building the corresponding view; never dereference a `lateinit` canvas view from `loadPreferences()`.
+- Treat A4 as a paginated document policy, not one fixed canvas rectangle. Grow the stored sheet count before content reaches the last sheet's bottom, keep explicit inter-sheet gaps, and never shrink automatically while editing.

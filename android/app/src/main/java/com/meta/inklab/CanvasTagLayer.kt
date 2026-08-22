@@ -62,6 +62,8 @@ class CanvasTagLayer(
 
     fun allTags(): List<CanvasTag> = tags.toList()
 
+    fun contentBottom(): Float = tags.maxOfOrNull { it.documentY + dp(10f) } ?: 0f
+
     fun clear() {
         tags.clear()
         selectedTags.clear()

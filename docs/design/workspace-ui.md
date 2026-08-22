@@ -114,17 +114,46 @@ allows one-finger panning while preserving two-finger pinch; deselecting it rest
 navigation. Choosing any drawing tool also exits panorama-hand mode.
 
 The insert space and background format group directly to the right of panorama hand provides:
-- an insert space tool toggle;
-- a background format tool that opens a flyout menu offering default grid, rule lines with left margin,
-  dense grid, and blank page formatting, instantly updating the underlying canvas.
+- an insert space tool toggle supporting stylus hover preview lines, drag displacement, and downward content shifting;
+- a background format tool that opens a flyout menu offering ruled lines (narrow, standard with margin line, wide, clean), grid styles (standard, dense, wide), dot matrix styles (standard, dense, wide), and blank page formatting, instantly updating and persisting on the underlying canvas.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
 dark note theme. A future persisted document must store the logical palette value and theme-map it
 at render time rather than serializing the temporary display color.
 
-The canvas has no permanent page-title/breadcrumb card and no permanent current-tool/zoom card.
-The gray page pane already identifies the selected page, and tool details belong to the second-tap
-flyout; duplicating either on the paper obstructs handwriting.
+The canvas has no permanent breadcrumb card and no permanent current-tool/zoom card. The optional
+page title is document-surface content near the paper's top edge, not floating chrome, and the View
+ribbon can hide it. The gray page pane already identifies the selected page, while tool details
+belong to the second-tap flyout.
+
+## View ribbon and page surface
+
+The `视图` tab is working and follows the same compact, icon-only ribbon language as drawing. It
+does not add explanatory captions; only functional values such as the current zoom percentage and
+paper-size menu names are visible. Accessibility descriptions and hover tooltips remain present.
+
+- `整页视图` and `普通视图` drive the existing full-page chrome state. Normal view exposes search
+  and enter-full-page at the paper's top-right; full-page view exposes the floating-toolbar pen,
+  search, and exit-full-page controls.
+- Zoom uses the shared `ViewportState`: the preset menu contains 50/75/100/125/150/200/400/800%,
+  with discrete zoom in/out, 100% reset, and page-width fit. A lock icon directly to the left of
+  the percentage disables only finger-pinch scale changes while continuing to allow two-finger
+  translation; presets and ribbon buttons still change the locked scale, and the lock state
+  persists. The accepted range remains 50–800%, and every scale change preserves wet/dry
+  document-coordinate parity.
+- The View-ribbon baseline icon directly reuses the drawing ribbon's background-format menu instead
+  of creating a second grid/rule implementation. The selected baseline is stored per page.
+- Page color, paper size, baseline, page-title visibility, and light-versus-dark page background are
+  stored per page. Paper options are only unbounded and A4. A4 is a paginated document policy, not a
+  fixed single sheet: it renders consecutive A4 sheets with visible gaps and appends sheets before
+  edited content reaches the final sheet's bottom. Automatic editing never shrinks the sheet count.
+- Switching the page between light and dark backgrounds remaps logical black ink and default text
+  editor colors for readability without changing blue/red ink.
+
+The page pane's `+` opens a compact creation dialog with unbounded/A4 template cards, the shared
+baseline selector, and page-color swatches. It contains no explanatory paragraph. Only a successful
+creation becomes the next dialog's default configuration; cancelling leaves the remembered template
+unchanged.
 
 ## Start ribbon and page tags
 

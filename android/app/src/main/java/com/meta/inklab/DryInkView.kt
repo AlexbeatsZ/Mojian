@@ -18,15 +18,34 @@ import androidx.ink.strokes.Stroke
 import kotlin.math.floor
 import kotlin.math.sqrt
 
-enum class CanvasBackgroundFormat(val label: String) {
-    GRID("默认网格"),
-    RULE_LINES("标尺横线"),
-    DENSE_GRID("密集网格"),
-    BLANK("空白页面"),
+enum class BackgroundCategory(val label: String) {
+    BLANK("空白"),
+    RULE_LINES("横线"),
+    GRID("网格"),
+    DOTS("点阵"),
+}
+
+enum class CanvasBackgroundFormat(
+    val label: String,
+    val category: BackgroundCategory,
+    val stepMultiplier: Float = 1f,
+    val showMarginLine: Boolean = false,
+) {
+    BLANK("空白 (无底纹)", BackgroundCategory.BLANK),
+    RULE_STANDARD("标准横线 (带边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = true),
+    RULE_NARROW("窄行距横线", BackgroundCategory.RULE_LINES, 0.75f, showMarginLine = true),
+    RULE_WIDE("宽行距横线", BackgroundCategory.RULE_LINES, 1.35f, showMarginLine = true),
+    RULE_CLEAN("纯横线 (无边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = false),
+    GRID_STANDARD("标准方格", BackgroundCategory.GRID, 1f),
+    GRID_DENSE("密集方格", BackgroundCategory.GRID, 0.5f),
+    GRID_WIDE("宽距方格", BackgroundCategory.GRID, 1.5f),
+    DOTS_STANDARD("标准点阵", BackgroundCategory.DOTS, 1f),
+    DOTS_DENSE("密集点阵", BackgroundCategory.DOTS, 0.5f),
+    DOTS_WIDE("宽距点阵", BackgroundCategory.DOTS, 1.5f),
 }
 
 class DryInkView(context: Context) : View(context) {
-    var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID
+    var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
         set(value) {
             field = value
             invalidate()
@@ -37,6 +56,11 @@ class DryInkView(context: Context) : View(context) {
     private val lassoPoints = mutableListOf<DocumentPoint>()
     private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
     private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
+    private val dotPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(52, 76, 92)
+            style = Paint.Style.FILL
+        }
     private val marginLinePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(160, 50, 50)
@@ -131,6 +155,17 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun strokeCount(): Int = strokes.size
+
+    fun contentBottom(): Float {
+        var bottom = 0f
+        for (stroke in strokes) {
+            val inputs = stroke.inputs
+            for (index in 0 until inputs.size) {
+                bottom = maxOf(bottom, inputs.get(index).y + stroke.brush.size * 0.5f)
+            }
+        }
+        return bottom
+    }
 
     fun setViewport(matrix: Matrix) {
         documentToView.set(matrix)
@@ -404,30 +439,56 @@ class DryInkView(context: Context) : View(context) {
     }
 
     private fun drawGrid(canvas: Canvas) {
-        if (backgroundFormat == CanvasBackgroundFormat.BLANK) return
+        if (backgroundFormat.category == BackgroundCategory.BLANK) return
         val visible = visibleDocumentBounds()
-        val step = if (backgroundFormat == CanvasBackgroundFormat.DENSE_GRID) gridStep * 0.5f else gridStep
+        val step = gridStep * backgroundFormat.stepMultiplier
 
-        if (backgroundFormat != CanvasBackgroundFormat.RULE_LINES) {
-            var x = floor(visible.left / step) * step
-            while (x <= visible.right) {
-                val index = floor(x / step).toInt()
-                canvas.drawLine(x, visible.top, x, visible.bottom, if (index % 4 == 0) majorGridPaint else thinGridPaint)
-                x += step
-            }
-        } else {
-            val marginX = 64f * resources.displayMetrics.density
-            if (visible.left <= marginX && visible.right >= marginX) {
-                canvas.drawLine(marginX, visible.top, marginX, visible.bottom, marginLinePaint)
-            }
-        }
+        when (backgroundFormat.category) {
+            BackgroundCategory.BLANK -> return
 
-        var y = floor(visible.top / step) * step
-        while (y <= visible.bottom) {
-            val index = floor(y / step).toInt()
-            val paint = if (index % 4 == 0) majorGridPaint else thinGridPaint
-            canvas.drawLine(visible.left, y, visible.right, y, paint)
-            y += step
+            BackgroundCategory.RULE_LINES -> {
+                if (backgroundFormat.showMarginLine) {
+                    val marginX = 64f * resources.displayMetrics.density
+                    if (visible.left <= marginX && visible.right >= marginX) {
+                        canvas.drawLine(marginX, visible.top, marginX, visible.bottom, marginLinePaint)
+                    }
+                }
+                var y = floor(visible.top / step) * step
+                while (y <= visible.bottom) {
+                    val index = floor(y / step).toInt()
+                    val paint = if (index % 4 == 0) majorGridPaint else thinGridPaint
+                    canvas.drawLine(visible.left, y, visible.right, y, paint)
+                    y += step
+                }
+            }
+
+            BackgroundCategory.GRID -> {
+                var x = floor(visible.left / step) * step
+                while (x <= visible.right) {
+                    val index = floor(x / step).toInt()
+                    canvas.drawLine(x, visible.top, x, visible.bottom, if (index % 4 == 0) majorGridPaint else thinGridPaint)
+                    x += step
+                }
+                var y = floor(visible.top / step) * step
+                while (y <= visible.bottom) {
+                    val index = floor(y / step).toInt()
+                    canvas.drawLine(visible.left, y, visible.right, y, if (index % 4 == 0) majorGridPaint else thinGridPaint)
+                    y += step
+                }
+            }
+
+            BackgroundCategory.DOTS -> {
+                val dotRadius = 1.25f * resources.displayMetrics.density
+                var x = floor(visible.left / step) * step
+                while (x <= visible.right) {
+                    var y = floor(visible.top / step) * step
+                    while (y <= visible.bottom) {
+                        canvas.drawCircle(x, y, dotRadius, dotPaint)
+                        y += step
+                    }
+                    x += step
+                }
+            }
         }
     }
 

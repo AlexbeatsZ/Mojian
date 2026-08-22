@@ -1,9 +1,9 @@
 package com.meta.inklab
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
@@ -13,7 +13,8 @@ enum class PageSurfaceLayer {
     FOREGROUND,
 }
 
-/** Draws the page beneath the document layers and masks finite paper above them. */
+/** Draws an unbounded canvas or a Word-like stack of automatically growing A4 sheets. */
+@SuppressLint("ViewConstructor")
 class PageSurfaceView(
     context: Context,
     private val viewport: ViewportState,
@@ -30,6 +31,11 @@ class PageSurfaceView(
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
         }
+    private val documentPageRect = RectF()
+    private val firstMappedPageRect = RectF()
+    private val lastMappedPageRect = RectF()
+    private val previousMappedPageRect = RectF()
+    private val nextMappedPageRect = RectF()
     private var settings = PageViewSettings()
     private var pageTitle = ""
 
@@ -58,24 +64,38 @@ class PageSurfaceView(
         titlePaint.color = if (settings.darkBackground) 0xFFEFEFEF.toInt() else 0xFF202020.toInt()
         titlePaint.textSize = TITLE_SIZE_MM * DOCUMENT_UNITS_PER_MM
 
+        if (settings.paperSize == PaperSize.BOUNDLESS) {
+            drawBoundless(canvas)
+            return
+        }
+
+        val pageCount = settings.a4PageCount.coerceAtLeast(1)
+        val documentToView = viewport.documentToViewMatrix()
         if (layer == PageSurfaceLayer.BACKGROUND) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), workspacePaint)
             canvas.save()
-            canvas.concat(viewport.documentToViewMatrix())
-            canvas.drawRect(documentPageRect(), pagePaint)
+            canvas.concat(documentToView)
+            for (index in 0 until pageCount) {
+                setDocumentPageRect(index, documentPageRect)
+                canvas.drawRect(documentPageRect, pagePaint)
+            }
             canvas.restore()
             return
         }
 
-        val mappedPage = documentPageRect()
-        viewport.documentToViewMatrix().mapRect(mappedPage)
-        maskOutsidePage(canvas, mappedPage)
-        canvas.drawRect(mappedPage, borderPaint)
+        mapPageRect(0, documentToView, firstMappedPageRect)
+        mapPageRect(pageCount - 1, documentToView, lastMappedPageRect)
+        maskOutsidePages(canvas, pageCount, documentToView)
+        for (index in 0 until pageCount) {
+            mapPageRect(index, documentToView, nextMappedPageRect)
+            canvas.drawRect(nextMappedPageRect, borderPaint)
+        }
 
         if (settings.pageTitleVisible && pageTitle.isNotBlank()) {
             canvas.save()
-            canvas.concat(viewport.documentToViewMatrix())
-            canvas.clipRect(documentPageRect())
+            canvas.concat(documentToView)
+            setDocumentPageRect(0, documentPageRect)
+            canvas.clipRect(documentPageRect)
             canvas.drawText(
                 pageTitle,
                 TITLE_LEFT_MM * DOCUMENT_UNITS_PER_MM,
@@ -86,32 +106,78 @@ class PageSurfaceView(
         }
     }
 
-    private fun documentPageRect(): RectF {
-        val documentHeight = settings.paperSize.documentHeight
-        if (documentHeight != null) {
-            return RectF(0f, 0f, settings.paperSize.documentWidth, documentHeight)
+    private fun drawBoundless(canvas: Canvas) {
+        if (layer == PageSurfaceLayer.BACKGROUND) {
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pagePaint)
+            return
         }
-        val inverse = Matrix()
-        val visibleBottom =
-            if (viewport.documentToViewMatrix().invert(inverse)) {
-                val visible = RectF(0f, 0f, width.toFloat(), height.toFloat()).also(inverse::mapRect)
-                visible.bottom.coerceAtLeast(0f) + height / viewport.scale
-            } else {
-                height.toFloat()
-            }
-        return RectF(0f, 0f, settings.paperSize.documentWidth, visibleBottom)
+        if (settings.pageTitleVisible && pageTitle.isNotBlank()) {
+            canvas.save()
+            canvas.concat(viewport.documentToViewMatrix())
+            canvas.drawText(
+                pageTitle,
+                TITLE_LEFT_MM * DOCUMENT_UNITS_PER_MM,
+                TITLE_BASELINE_MM * DOCUMENT_UNITS_PER_MM,
+                titlePaint,
+            )
+            canvas.restore()
+        }
     }
 
-    private fun maskOutsidePage(
-        canvas: Canvas,
-        page: RectF,
+    private fun setDocumentPageRect(
+        index: Int,
+        output: RectF,
     ) {
-        canvas.drawRect(0f, 0f, page.left.coerceAtLeast(0f), height.toFloat(), workspacePaint)
-        canvas.drawRect(page.right.coerceAtMost(width.toFloat()), 0f, width.toFloat(), height.toFloat(), workspacePaint)
-        canvas.drawRect(page.left, 0f, page.right, page.top.coerceAtLeast(0f), workspacePaint)
-        if (settings.paperSize.documentHeight != null) {
-            canvas.drawRect(page.left, page.bottom.coerceAtMost(height.toFloat()), page.right, height.toFloat(), workspacePaint)
+        output.set(0f, A4PageLayout.pageTop(index), A4PageLayout.pageWidth, A4PageLayout.pageBottom(index))
+    }
+
+    private fun mapPageRect(
+        index: Int,
+        documentToView: android.graphics.Matrix,
+        output: RectF,
+    ) {
+        setDocumentPageRect(index, output)
+        documentToView.mapRect(output)
+    }
+
+    private fun maskOutsidePages(
+        canvas: Canvas,
+        pageCount: Int,
+        documentToView: android.graphics.Matrix,
+    ) {
+        canvas.drawRect(0f, 0f, firstMappedPageRect.left.coerceAtLeast(0f), height.toFloat(), workspacePaint)
+        canvas.drawRect(
+            firstMappedPageRect.right.coerceAtMost(width.toFloat()),
+            0f,
+            width.toFloat(),
+            height.toFloat(),
+            workspacePaint,
+        )
+        canvas.drawRect(
+            firstMappedPageRect.left,
+            0f,
+            firstMappedPageRect.right,
+            firstMappedPageRect.top.coerceAtLeast(0f),
+            workspacePaint,
+        )
+        for (index in 0 until pageCount - 1) {
+            mapPageRect(index, documentToView, previousMappedPageRect)
+            mapPageRect(index + 1, documentToView, nextMappedPageRect)
+            canvas.drawRect(
+                firstMappedPageRect.left,
+                previousMappedPageRect.bottom,
+                firstMappedPageRect.right,
+                nextMappedPageRect.top,
+                workspacePaint,
+            )
         }
+        canvas.drawRect(
+            firstMappedPageRect.left,
+            lastMappedPageRect.bottom.coerceAtMost(height.toFloat()),
+            firstMappedPageRect.right,
+            height.toFloat(),
+            workspacePaint,
+        )
     }
 
     companion object {
