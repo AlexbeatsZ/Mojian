@@ -16,6 +16,8 @@
 - A user-authorized full local backup was created through Android's save picker as `/sdcard/Download/backup.zip` (1,579,602,577 bytes). Keep the tablet copy; the analysis copy is temporary and must not be committed.
 - The backup is an unencrypted ZIP containing 167 per-note `.in` nested ZIPs, two `.template` entries, and one `.tree`; per-note containers include a Room/SQLite v25 database and metadata, plus source PDFs when applicable.
 - Notein uses AndroidX Ink 1.0.0 exactly: its arm64 `libink.so` matches the Google Maven artifact in size and ELF Build ID.
+- Windows desktop port project `Notein-win` was initialized as a .NET 10 WPF desktop application (`Notein-win/src/Notein-win/`) with matching xUnit test suite (`Notein-win/tests/Notein-win.Tests/`). 15/15 unit tests pass and the solution builds cleanly with 0 warnings.
+- The `Notein-win` frontend ports the complete dark OneNote-desktop workspace: 32px vertical rail, black multi-notebook section pane with arbitrary recursive nesting, dual-mode gray page pane (`本层` and `递归`), full ribbon tabs (`开始`, `插入`, `绘图`, `视图`), full-screen Backstage (`文件`), interactive multi-layer canvas (background grids/dots/rules, insert objects with dark inversion, rich text boxes, red tags, ink strokes with pressure taper, whole-stroke eraser, and lasso transform handles), tool flyouts, and full-page mode floating toolbar.
 - Android workspace prototype v0.5.0 passes unit tests, debug build, and lint as `com.meta.inklab.debug`. It has no Internet/broad storage permission and remains separate from the untouched Notein package. The final build installed successfully and cold-launched in 833 ms; device screenshots verified the icon-only Insert ribbon, split/full-page composition, transient focus frame, center rule, and two-page PDF import. Physical stylus-hover tooltip and subjective pinch feel still require manual feedback.
 - The installed lab uses AndroidX Ink wet/dry authoring, motion prediction, one adjustable fountain-pen stroke, prediction toggle, undo, and clear. Controls are width 0.1–2.0 mm, pressure 0–400%, and ink flow 0–200%, with Notein-observed defaults 0.4 mm / 200% / 100%.
 - The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Completed ink applies the viewport inside `ViewStrokeRenderer` so screen-space antialiasing remains sharp while zoomed. Tests, build, and lint pass; the corrected APK was installed and cold-launched in 503 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
@@ -87,12 +89,17 @@
 - [x] Add the page-pane creation dialog with remembered unbounded/A4, baseline, and page-color configuration; A4 pages append Word-style sheets as content approaches the bottom.
 - [x] Implement the working Insert ribbon, persistent embedded asset boundary, independent image/PDF view filters, layered light-theme PDF export, and private notebook package export.
 - [x] Merge View/page-template work with Insert/export, add PDF-per-page import/export, independent focused split views, visible paper overflow, and adaptive full-page controls.
+- [x] Initialize and port Notein-win Windows desktop frontend (.NET 10 WPF MVVM) with OneNote-style dark workspace, ribbons, recursive section navigation, dual-mode page pane, multi-layer canvas, and full xUnit test suite.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
 
 # Build / Run / Test
 
+- Windows desktop client (`Notein-win`):
+  - Build solution: `dotnet build Notein-win\Notein-win.slnx` or `cd Notein-win; dotnet build`.
+  - Run unit tests: `cd Notein-win; dotnet test`.
+  - Launch desktop app: `cd Notein-win\src\Notein-win; dotnet run`.
 - ADB binary: `C:\Users\Meta\AppData\Local\Android\Sdk\platform-tools\adb.exe`.
 - Verify device: `adb devices -l`.
 - Installed package path: `adb shell pm path com.orion.notein`.
