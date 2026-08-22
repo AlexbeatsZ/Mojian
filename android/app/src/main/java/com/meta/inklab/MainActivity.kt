@@ -427,7 +427,7 @@ class MainActivity : Activity() {
 
         profileText =
             TextView(this).apply {
-                setTextColor(Color.rgb(78, 70, 82))
+                setTextColor(TEXT_SECONDARY)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
                 typeface = Typeface.create("monospace", Typeface.NORMAL)
                 setPadding(dp(10), dp(6), dp(10), dp(6))
