@@ -36,4 +36,59 @@ class ToolShelfTest {
         assertFalse(shelf.deleteSelected())
         assertEquals("only", shelf.selected.id)
     }
+
+    @Test
+    fun jsonRoundTripPreservesCustomizedToolsAndParameters() {
+        val shelf = ToolShelf()
+        val added = shelf.add(DrawingToolKind.PEN)
+        added.color = InkPalette.RED
+        added.widthMm = 1.2f
+        added.pressurePercent = 250
+        added.inkFlowPercent = 150
+        added.pressureEraseEnabled = false
+
+        val highlighter = shelf.tools.first { it.kind == DrawingToolKind.HIGHLIGHTER }
+        highlighter.widthMm = 8.0f
+        highlighter.opacityPercent = 50
+
+        val eraser = shelf.tools.first { it.kind == DrawingToolKind.ERASER }
+        eraser.eraserRadiusMm = 6.5f
+
+        shelf.select(added.id)
+
+        val json = shelf.toJson()
+        val restored = ToolShelf.fromJson(json)
+
+        org.junit.Assert.assertNotNull(restored)
+        assertEquals(shelf.tools.size, restored!!.tools.size)
+        assertEquals(added.id, restored.selectedId)
+
+        val restoredAdded = restored.tools.first { it.id == added.id }
+        assertEquals(InkPalette.RED, restoredAdded.color)
+        assertEquals(1.2f, restoredAdded.widthMm, 0.001f)
+        assertEquals(250, restoredAdded.pressurePercent)
+        assertEquals(150, restoredAdded.inkFlowPercent)
+        assertFalse(restoredAdded.pressureEraseEnabled)
+
+        val restoredHighlighter = restored.tools.first { it.kind == DrawingToolKind.HIGHLIGHTER }
+        assertEquals(8.0f, restoredHighlighter.widthMm, 0.001f)
+        assertEquals(50, restoredHighlighter.opacityPercent)
+
+        val restoredEraser = restored.tools.first { it.kind == DrawingToolKind.ERASER }
+        assertEquals(6.5f, restoredEraser.eraserRadiusMm, 0.001f)
+    }
+
+    @Test
+    fun restoreFromUpdatesInPlace() {
+        val target = ToolShelf()
+        val source = ToolShelf()
+        val pen = source.add(DrawingToolKind.PEN)
+        pen.widthMm = 0.8f
+
+        target.restoreFrom(source)
+
+        assertEquals(source.tools.size, target.tools.size)
+        assertEquals(pen.id, target.selectedId)
+        assertEquals(0.8f, target.tools.first { it.id == pen.id }.widthMm, 0.001f)
+    }
 }

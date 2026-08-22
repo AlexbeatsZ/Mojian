@@ -7,7 +7,7 @@ package com.meta.inklab
 class PressureEraserController(
     var enabled: Boolean = true,
     var pressureThreshold: Float = 0.78f,
-    val dwellMillis: Long = 140L,
+    var dwellMillis: Long = 140L,
     var stationarySlop: Float = 6f,
 ) {
     var isErasing: Boolean = false

@@ -123,6 +123,7 @@ class MainActivity : Activity() {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         window.statusBarColor = TITLE_PURPLE
         window.navigationBarColor = NAV_BACKGROUND
+        loadPreferences()
         currentBrush = brushFor(toolShelf.selected)
         setContentView(buildInterface())
         pressureEraser.stationarySlop = dp(2).toFloat()
@@ -343,6 +344,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
                         clearContentSelection()
+                        persistWorkspacePreferences()
                         renderWorkspace()
                         dialog.dismiss()
                     }
@@ -402,6 +404,7 @@ class MainActivity : Activity() {
                     predictionValue.setOnClickListener {
                         predictionEnabled = !predictionEnabled
                         predictionValue.text = if (predictionEnabled) "开启" else "关闭"
+                        persistWorkspacePreferences()
                     }
                     addView(settingsRow("笔迹预测", "使用预测触点降低快速书写时的视觉延迟。", predictionValue), LinearLayout.LayoutParams(MATCH, dp(72)))
 
@@ -410,6 +413,7 @@ class MainActivity : Activity() {
                         val mode = if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) PagePaneMode.RECURSIVE else PagePaneMode.CURRENT_SECTION
                         notebookLibrary.setPagePaneMode(mode)
                         pageModeValue.text = if (mode == PagePaneMode.CURRENT_SECTION) "本层" else "递归"
+                        persistWorkspacePreferences()
                         renderPages()
                     }
                     addView(settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
@@ -550,6 +554,75 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(dp(64), dp(36)),
             )
         }
+
+    private fun loadPreferences() {
+        val prefs = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+        predictionEnabled = prefs.getBoolean(KEY_PREDICTION_ENABLED, true)
+        sectionPaneVisible = prefs.getBoolean(KEY_SECTION_PANE_VISIBLE, true)
+        pagePaneVisible = prefs.getBoolean(KEY_PAGE_PANE_VISIBLE, true)
+        pressureEraser.pressureThreshold = prefs.getFloat(KEY_PRESSURE_THRESHOLD, 0.78f)
+        pressureEraser.dwellMillis = prefs.getLong(KEY_PRESSURE_DWELL_MILLIS, 140L)
+
+        val modeStr = prefs.getString(KEY_PAGE_PANE_MODE, PagePaneMode.CURRENT_SECTION.name)
+        val mode = runCatching { PagePaneMode.valueOf(modeStr ?: "") }.getOrDefault(PagePaneMode.CURRENT_SECTION)
+        notebookLibrary.setPagePaneMode(mode)
+
+        val shelfJson = prefs.getString(KEY_TOOL_SHELF, "")
+        if (!shelfJson.isNullOrBlank()) {
+            ToolShelf.fromJson(shelfJson)?.let { loadedShelf ->
+                toolShelf.restoreFrom(loadedShelf)
+            }
+        }
+        val savedPenId = prefs.getString(KEY_LAST_PEN_TOOL_ID, "")
+        if (!savedPenId.isNullOrEmpty() && toolShelf.tools.any { it.id == savedPenId }) {
+            lastPenToolId = savedPenId
+        }
+
+        val activeNotebookId = prefs.getString(KEY_ACTIVE_NOTEBOOK_ID, "")
+        if (!activeNotebookId.isNullOrEmpty() && notebookLibrary.notebooks.any { it.id == activeNotebookId }) {
+            notebookLibrary.selectNotebook(activeNotebookId)
+        }
+        val focusedSectionId = prefs.getString(KEY_FOCUSED_SECTION_ID, null)
+        if (focusedSectionId != null) {
+            if (focusedSectionId.isNotEmpty() && workspace.flattenSections().any { it.section.id == focusedSectionId }) {
+                workspace.selectSection(focusedSectionId)
+            } else {
+                workspace.focusNotebook()
+            }
+        }
+        val selectedPageId = prefs.getString(KEY_SELECTED_PAGE_ID, "")
+        if (!selectedPageId.isNullOrEmpty()) {
+            for (row in workspace.flattenSections()) {
+                if (row.section.pages.any { it.id == selectedPageId }) {
+                    workspace.selectPage(row.section.id, selectedPageId)
+                    break
+                }
+            }
+        }
+    }
+
+    private fun persistToolShelf() {
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_TOOL_SHELF, toolShelf.toJson())
+            .putString(KEY_LAST_PEN_TOOL_ID, lastPenToolId)
+            .apply()
+    }
+
+    private fun persistWorkspacePreferences() {
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_PREDICTION_ENABLED, predictionEnabled)
+            .putBoolean(KEY_SECTION_PANE_VISIBLE, sectionPaneVisible)
+            .putBoolean(KEY_PAGE_PANE_VISIBLE, pagePaneVisible)
+            .putString(KEY_PAGE_PANE_MODE, workspace.pagePaneMode.name)
+            .putFloat(KEY_PRESSURE_THRESHOLD, pressureEraser.pressureThreshold)
+            .putLong(KEY_PRESSURE_DWELL_MILLIS, pressureEraser.dwellMillis)
+            .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
+            .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
+            .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
+            .apply()
+    }
 
     private fun loadFullPageToolbarIds(): List<String> {
         val preferences = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
@@ -1108,6 +1181,7 @@ class MainActivity : Activity() {
                         notebookLibrary.selectNotebook(notebook.id)
                         notebook.focusNotebook()
                         clearContentSelection()
+                        persistWorkspacePreferences()
                         renderWorkspace()
                     }
                 }
@@ -1160,6 +1234,7 @@ class MainActivity : Activity() {
                             notebookLibrary.selectNotebook(notebook.id)
                             notebook.selectSection(section.id)
                             clearContentSelection()
+                            persistWorkspacePreferences()
                             renderWorkspace()
                         }
                     }
@@ -1295,6 +1370,7 @@ class MainActivity : Activity() {
                 )
                 setOnClickListener {
                     workspace.selectPage(row.sectionId, page.id)
+                    persistWorkspacePreferences()
                     renderPages()
                 }
             }
@@ -1462,6 +1538,7 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("笔宽", ((tool.widthMm * 10).roundToInt() - 1).coerceIn(0, 19), 19, { "${(it + 1) / 10f} mm" }) {
                         tool.widthMm = (it + 1) / 10f
+                        persistToolShelf()
                         rebuildBrush()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
@@ -1469,6 +1546,7 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("压感", tool.pressurePercent, 400, { "$it%" }) {
                         tool.pressurePercent = it
+                        persistToolShelf()
                         rebuildBrush()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
@@ -1476,6 +1554,7 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("出墨", tool.inkFlowPercent, 200, { "$it%" }) {
                         tool.inkFlowPercent = it
+                        persistToolShelf()
                         rebuildBrush()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
@@ -1483,13 +1562,22 @@ class MainActivity : Activity() {
                 addToolDetailLine(
                     detailChip(if (tool.pressureEraseEnabled) "压感橡皮 开" else "压感橡皮 关", tool.pressureEraseEnabled) {
                         tool.pressureEraseEnabled = !tool.pressureEraseEnabled
+                        persistToolShelf()
                         syncPressureEraserWithTool()
                         renderToolDetails()
                     },
                 )
                 toolDetailRow.addView(
-                    parameterControl("阈值", ((pressureEraser.pressureThreshold * 100).roundToInt() - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
+                    parameterControl("按压力度", ((pressureEraser.pressureThreshold * 100).roundToInt() - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
                         pressureEraser.pressureThreshold = (it + 40) / 100f
+                        persistWorkspacePreferences()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
+                toolDetailRow.addView(
+                    parameterControl("按压时间", ((pressureEraser.dwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
+                        pressureEraser.dwellMillis = (50 + it * 10).toLong()
+                        persistWorkspacePreferences()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
@@ -1500,6 +1588,7 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("宽度", ((tool.widthMm - 2f) * 2f).roundToInt().coerceIn(0, 20), 20, { "${2f + it / 2f} mm" }) {
                         tool.widthMm = 2f + it / 2f
+                        persistToolShelf()
                         rebuildBrush()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
@@ -1507,6 +1596,7 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("透明度", (tool.opacityPercent - 10).coerceIn(0, 60), 60, { "${it + 10}%" }) {
                         tool.opacityPercent = it + 10
+                        persistToolShelf()
                         rebuildBrush()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
@@ -1517,6 +1607,21 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("大小", ((tool.eraserRadiusMm - 2f) * 2f).roundToInt().coerceIn(0, 28), 28, { "${2f + it / 2f} mm" }) {
                         tool.eraserRadiusMm = 2f + it / 2f
+                        persistToolShelf()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
+                toolDetailRow.addView(
+                    parameterControl("按压力度", ((pressureEraser.pressureThreshold * 100).roundToInt() - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
+                        pressureEraser.pressureThreshold = (it + 40) / 100f
+                        persistWorkspacePreferences()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
+                toolDetailRow.addView(
+                    parameterControl("按压时间", ((pressureEraser.dwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
+                        pressureEraser.dwellMillis = (50 + it * 10).toLong()
+                        persistWorkspacePreferences()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
@@ -1546,6 +1651,7 @@ class MainActivity : Activity() {
                 }
                 fullPageToolbarConfig.remove("tool:$removedToolId")
                 persistFullPageToolbarIds()
+                persistToolShelf()
                 clearContentSelection()
                 if (removedToolId == lastPenToolId) {
                     toolShelf.tools.firstOrNull { it.kind == DrawingToolKind.PEN }?.let { lastPenToolId = it.id }
@@ -1568,6 +1674,7 @@ class MainActivity : Activity() {
                 for (color in InkPalette.entries) {
                     addView(colorButton(color, color == tool.color) {
                         tool.color = color
+                        persistToolShelf()
                         rebuildBrush()
                         renderToolShelf()
                         renderToolDetails()
@@ -1772,6 +1879,7 @@ class MainActivity : Activity() {
     private fun selectTool(id: String) {
         if (!toolShelf.select(id)) return
         if (toolShelf.selected.kind == DrawingToolKind.PEN) lastPenToolId = toolShelf.selected.id
+        persistToolShelf()
         tagLayer.cancelPlacement()
         restoreTextModeAfterTagPlacement = false
         setTextMode(false, rerender = false)
@@ -1996,11 +2104,13 @@ class MainActivity : Activity() {
 
     private fun toggleSectionPane() {
         sectionPaneVisible = !sectionPaneVisible
+        persistWorkspacePreferences()
         applyChromeVisibility()
     }
 
     private fun togglePagePane() {
         pagePaneVisible = !pagePaneVisible
+        persistWorkspacePreferences()
         applyChromeVisibility()
     }
 
@@ -2010,7 +2120,7 @@ class MainActivity : Activity() {
         ribbonTabs.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         drawingRibbon.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         floatingToolbox.visibility = if (fullPageMode && drawingToolbarVisible) View.VISIBLE else View.GONE
-        toolbarToggle.visibility = if (fullPageMode) View.VISIBLE else View.GONE
+        toolbarToggle.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         navigationRail.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         navigationPane.visibility = if (!fullPageMode && sectionPaneVisible) View.VISIBLE else View.GONE
         pagePane.visibility = if (!fullPageMode && pagePaneVisible) View.VISIBLE else View.GONE
@@ -2041,11 +2151,13 @@ class MainActivity : Activity() {
             menu.add("新建笔记本").setOnMenuItemClickListener {
                 notebookLibrary.addNotebook()
                 clearContentSelection()
+                persistWorkspacePreferences()
                 renderWorkspace()
                 true
             }
             menu.add("新建分区").setOnMenuItemClickListener {
                 workspace.addSectionAtFocus()
+                persistWorkspacePreferences()
                 renderWorkspace()
                 true
             }
@@ -2383,6 +2495,17 @@ class MainActivity : Activity() {
         private const val INTERNAL_UNITS_PER_MM = 12.16225f
         private const val OPTIONS_PREFERENCES = "workspace-options"
         private const val FULL_PAGE_TOOLBAR_KEY = "full-page-toolbar"
+        private const val KEY_TOOL_SHELF = "tool-shelf"
+        private const val KEY_LAST_PEN_TOOL_ID = "last-pen-tool-id"
+        private const val KEY_PREDICTION_ENABLED = "prediction-enabled"
+        private const val KEY_SECTION_PANE_VISIBLE = "section-pane-visible"
+        private const val KEY_PAGE_PANE_VISIBLE = "page-pane-visible"
+        private const val KEY_PAGE_PANE_MODE = "page-pane-mode"
+        private const val KEY_PRESSURE_THRESHOLD = "pressure-threshold"
+        private const val KEY_PRESSURE_DWELL_MILLIS = "pressure-dwell-millis"
+        private const val KEY_ACTIVE_NOTEBOOK_ID = "active-notebook-id"
+        private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
+        private const val KEY_SELECTED_PAGE_ID = "selected-page-id"
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
