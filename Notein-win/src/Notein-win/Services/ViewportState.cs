@@ -1,18 +1,19 @@
 using System.Windows;
 using System.Windows.Media;
+using Notein_win.Models;
 
 namespace Notein_win.Services;
 
 public class ViewportState
 {
-    public float MinScale { get; } = 0.2f;
+    public float MinScale { get; } = 0.5f;
     public float MaxScale { get; } = 8.0f;
 
     public float Scale { get; private set; } = 1.0f;
     public float TranslationX { get; private set; } = 0.0f;
     public float TranslationY { get; private set; } = 0.0f;
 
-    public ViewportState(float minScale = 0.2f, float maxScale = 8.0f)
+    public ViewportState(float minScale = 0.5f, float maxScale = 8.0f)
     {
         MinScale = minScale;
         MaxScale = maxScale;
@@ -57,6 +58,22 @@ public class ViewportState
         TranslationX = 0.0f;
         TranslationY = 0.0f;
     }
+
+    public void Restore(PageViewport state)
+    {
+        Scale = Math.Clamp(state.Scale, MinScale, MaxScale);
+        TranslationX = state.TranslationX;
+        TranslationY = state.TranslationY;
+    }
+
+    public void CopyTo(PageViewport state)
+    {
+        state.Scale = Scale;
+        state.TranslationX = TranslationX;
+        state.TranslationY = TranslationY;
+    }
+
+    public void SetScale(float scale, float anchorX, float anchorY) => ZoomAt(anchorX, anchorY, Math.Clamp(scale, MinScale, MaxScale) / Scale);
 
     public Point ViewToDocument(double viewX, double viewY) =>
         new((viewX - TranslationX) / Scale, (viewY - TranslationY) / Scale);

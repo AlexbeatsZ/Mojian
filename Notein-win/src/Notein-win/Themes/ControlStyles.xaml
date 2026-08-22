@@ -1,6 +1,11 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!-- Android vectors use a 24x24 viewport. WPF Path otherwise clips them at smaller sizes. -->
+    <Style TargetType="Path">
+        <Setter Property="Stretch" Value="Uniform" />
+    </Style>
+
     <!-- Hairline Separator -->
     <Style x:Key="HairlineVerticalSeparator" TargetType="Border">
         <Setter Property="Width" Value="1" />
@@ -18,30 +23,33 @@
 
     <!-- Ribbon Tab Button -->
     <Style x:Key="RibbonTabButtonStyle" TargetType="RadioButton">
-        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="FontSize" Value="13" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Padding" Value="12,6,12,6" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Width" Value="58" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="border"
-                            Background="{TemplateBinding Background}"
-                            CornerRadius="3,3,0,0"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
+                    <Grid Background="Transparent">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border x:Name="underline" Height="2" Background="{StaticResource AccentPurple}"
+                                VerticalAlignment="Bottom" Visibility="Collapsed" />
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource RibbonTabHover}" />
-                            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="border" Property="Background" Value="{StaticResource RibbonBackground}" />
-                            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
-                            <Setter Property="FontWeight" Value="Bold" />
+                            <Setter TargetName="border" Property="Background" Value="Transparent" />
+                            <Setter TargetName="underline" Property="Visibility" Value="Visible" />
+                            <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -84,6 +92,17 @@
         </Setter>
     </Style>
 
+    <Style x:Key="RibbonFileButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Width" Value="58" />
+        <Setter Property="MinWidth" Value="58" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
     <!-- Ribbon Toggle Button -->
     <Style x:Key="RibbonToggleButtonStyle" TargetType="ToggleButton">
         <Setter Property="Background" Value="Transparent" />
@@ -109,12 +128,39 @@
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" />
-                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource BorderStrong}" />
                             <Setter TargetName="border" Property="BorderThickness" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4" />
                         </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- The two normal-canvas actions are opaque 34dp squares on Android. -->
+    <Style x:Key="CanvasActionButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Width" Value="34" />
+        <Setter Property="MinWidth" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Margin" Value="0,0,4,0" />
+        <Setter Property="Padding" Value="7" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#333333" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -127,8 +173,8 @@
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Width" Value="28" />
-        <Setter Property="Height" Value="28" />
-        <Setter Property="Margin" Value="2,4,2,4" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Margin" Value="2,2,2,0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
@@ -145,9 +191,41 @@
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" />
-                            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource BorderStrong}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="1" />
+                            <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Android uses app-rendered dark menus; keep WPF popups in the same palette. -->
+    <Style TargetType="ContextMenu">
+        <Setter Property="Background" Value="{StaticResource PagePaneBackground}" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="2" />
+    </Style>
+
+    <Style TargetType="MenuItem">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinWidth" Value="150" />
+    </Style>
+
+    <Style TargetType="Separator">
+        <Setter Property="Background" Value="{StaticResource BorderHairline}" />
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Margin" Value="6,3" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Background="{TemplateBinding Background}" Height="{TemplateBinding Height}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

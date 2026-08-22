@@ -1,107 +1,279 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows.Input;
 using Notein_win.Models;
 using Notein_win.Services;
 
 namespace Notein_win.ViewModels;
 
-public class MainViewModel : ObservableObject
+public enum CanvasSlot { Left, Right }
+
+public sealed class MainViewModel : ObservableObject
 {
-    private readonly NotebookLibrary _library;
-    private readonly PageContentStorage _storage;
-    private readonly ToolShelf _toolShelf;
-    private readonly FullPageToolbarConfig _fullPageConfig;
+    private readonly PreferencesStore _preferencesStore;
+    private AppPreferences _preferences;
+    private WorkspaceStore _store;
+    private WorkspaceSettings _settings;
+    private NotebookLibrary _library;
+    private ToolShelf _toolShelf;
+    private FullPageToolbarConfig _fullPageConfig;
 
-    private bool _isSectionPaneVisible = true;
-    private bool _isPagePaneVisible = true;
-    private bool _isFullPageMode = false;
-    private bool _isFloatingToolbarVisible = true;
-    private bool _isToolFlyoutOpen = false;
+    private PageDocument? _primaryDocument;
+    private PageDocument? _secondaryDocument;
+    private PageAppearance _activePageAppearance = new();
+    private CanvasSlot _focusedSlot = CanvasSlot.Left;
     private RibbonTab _activeRibbonTab = RibbonTab.Draw;
-    private CanvasBackgroundFormat _backgroundFormat = CanvasBackgroundFormat.GridStandard;
-    private bool _singleFingerPanEnabled = false;
-    private bool _textModeEnabled = false;
-    private bool _insertSpaceModeEnabled = false;
-    private CanvasTagKind? _pendingTagKind = null;
-    private bool _isBackstageOpen = false;
+    private bool _isFullPageMode;
+    private bool _isSplitView;
+    private bool _isFloatingToolbarVisible = true;
+    private bool _isToolFlyoutOpen;
+    private bool _singleFingerPanEnabled;
+    private bool _textModeEnabled;
+    private bool _insertSpaceModeEnabled;
+    private CanvasTagKind? _pendingTagKind;
+    private bool _isBackstageOpen;
     private string _backstageTab = "Info";
-    private string _searchQuery = "";
-    private bool _predictionEnabled = true;
-
-    public NotebookLibrary Library => _library;
-    public NotebookWorkspace ActiveWorkspace => _library.ActiveNotebook;
-    public ToolShelf ToolShelf => _toolShelf;
-    public FullPageToolbarConfig FullPageConfig => _fullPageConfig;
+    private string _searchQuery = string.Empty;
+    private string _saveStateText = "已保存";
 
     public ObservableCollection<SectionRow> SectionRows { get; } = new();
     public ObservableCollection<PagePaneRow> PagePaneRows { get; } = new();
     public ObservableCollection<ToolPreset> Tools { get; } = new();
+    public ObservableCollection<ToolPreset> LassoTools { get; } = new();
+    public ObservableCollection<ToolPreset> EraserTools { get; } = new();
+    public ObservableCollection<ToolPreset> HighlighterTools { get; } = new();
+    public ObservableCollection<ToolPreset> PenTools { get; } = new();
+    public ObservableCollection<SearchResult> SearchResults { get; } = new();
+    public ObservableCollection<FullPageToolDescriptor> FullPageToolbarItems { get; } = new();
+    public ObservableCollection<FullPageToolDescriptor> FullPageToolbarAvailableItems { get; } = new();
+
+    public NotebookLibrary Library => _library;
+    public NotebookWorkspace ActiveWorkspace => _library.ActiveNotebook;
+    public WorkspaceStore Store => _store;
+    public string WorkspaceRoot => _store.RootDirectory;
+    public ToolShelf ToolShelf => _toolShelf;
+    public FullPageToolbarConfig FullPageConfig => _fullPageConfig;
+    public ToolPreset SelectedTool => _toolShelf.Selected;
+    public bool SelectedToolIsInk => SelectedTool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter;
+    public bool SelectedToolIsPen => SelectedTool.Kind == DrawingToolKind.Pen;
+    public bool SelectedToolIsHighlighter => SelectedTool.Kind == DrawingToolKind.Highlighter;
+    public bool SelectedToolIsEraser => SelectedTool.Kind == DrawingToolKind.Eraser;
+    public bool SelectedToolIsLasso => SelectedTool.Kind == DrawingToolKind.Lasso;
+
+    public PageDocument? PrimaryDocument
+    {
+        get => _primaryDocument;
+        private set
+        {
+            if (!SetField(ref _primaryDocument, value)) return;
+            OnPropertyChanged(nameof(PrimaryPageAppearance));
+            OnPropertyChanged(nameof(PrimaryPageTitle));
+        }
+    }
+
+    public PageDocument? SecondaryDocument
+    {
+        get => _secondaryDocument;
+        private set
+        {
+            if (!SetField(ref _secondaryDocument, value)) return;
+            OnPropertyChanged(nameof(SecondaryPageAppearance));
+            OnPropertyChanged(nameof(SecondaryPageTitle));
+        }
+    }
+
+    public PageDocument? FocusedDocument => FocusedSlot == CanvasSlot.Right ? SecondaryDocument : PrimaryDocument;
+    public PageAppearance PrimaryPageAppearance => AppearanceForDocument(PrimaryDocument);
+    public PageAppearance SecondaryPageAppearance => AppearanceForDocument(SecondaryDocument);
+    public string PrimaryPageTitle => TitleForDocument(PrimaryDocument);
+    public string SecondaryPageTitle => TitleForDocument(SecondaryDocument);
+
+    public PageAppearance ActivePageAppearance
+    {
+        get => _activePageAppearance;
+        private set => SetField(ref _activePageAppearance, value);
+    }
+
+    public bool IsPageTitleHidden => !ActivePageAppearance.ShowTitle;
+    public bool IsDarkPageBackground => ActivePageAppearance.Theme == PageTheme.Dark;
+
+    public CanvasSlot FocusedSlot
+    {
+        get => _focusedSlot;
+        private set
+        {
+            if (SetField(ref _focusedSlot, value))
+            {
+                OnPropertyChanged(nameof(IsLeftCanvasFocused));
+                OnPropertyChanged(nameof(IsRightCanvasFocused));
+                OnPropertyChanged(nameof(FocusedDocument));
+            }
+        }
+    }
+
+    public bool IsLeftCanvasFocused => FocusedSlot == CanvasSlot.Left;
+    public bool IsRightCanvasFocused => FocusedSlot == CanvasSlot.Right;
 
     public string ActiveNotebookTitle => ActiveWorkspace.Title;
-    public string ActiveSectionTitle => ActiveWorkspace.SelectedSection()?.Title ?? (ActiveWorkspace.FocusedSectionId == null ? "笔记本根目录" : "未选中分区");
-    public string ActivePageTitle => ActiveWorkspace.SelectedPage()?.Title ?? "无页面";
-    public string BreadcrumbText => string.Join(" > ", ActiveWorkspace.Breadcrumb().Select(s => s.Title));
+    public string ActiveSectionTitle => ActiveWorkspace.SelectedSection()?.Title ?? "笔记本根目录";
+    public string ActivePageTitle
+    {
+        get => ActiveWorkspace.SelectedPage()?.Title ?? "未选择页面";
+        set
+        {
+            var page = ActiveWorkspace.SelectedPage();
+            var normalized = value?.Trim();
+            if (page == null || string.IsNullOrWhiteSpace(normalized) || page.Title == normalized) return;
+            page.Title = normalized;
+            page.UpdatedAt = DateTime.UtcNow;
+            SaveLibrary();
+            RefreshNavigation();
+            OnPropertyChanged();
+        }
+    }
+
+    public string BreadcrumbText => string.Join("  /  ", ActiveWorkspace.Breadcrumb().Select(section => section.Title));
+    public string SaveStateText { get => _saveStateText; private set => SetField(ref _saveStateText, value); }
+    public bool HasActivePage => FocusedDocument != null;
 
     public bool IsSectionPaneVisible
     {
-        get => _isSectionPaneVisible;
-        set => SetField(ref _isSectionPaneVisible, value);
+        get => _settings.SectionPaneVisible;
+        set
+        {
+            if (_settings.SectionPaneVisible == value) return;
+            _settings.SectionPaneVisible = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
 
     public bool IsPagePaneVisible
     {
-        get => _isPagePaneVisible;
-        set => SetField(ref _isPagePaneVisible, value);
+        get => _settings.PagePaneVisible;
+        set
+        {
+            if (_settings.PagePaneVisible == value) return;
+            _settings.PagePaneVisible = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
     }
+
+    public bool ZoomLocked
+    {
+        get => _settings.ZoomLocked;
+        set
+        {
+            if (_settings.ZoomLocked == value) return;
+            _settings.ZoomLocked = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool PredictionEnabled
+    {
+        get => _settings.PredictionEnabled;
+        set
+        {
+            if (_settings.PredictionEnabled == value) return;
+            _settings.PredictionEnabled = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public ImageImportDisplayMode ImageDisplayMode
+    {
+        get => _settings.ImageDisplayMode;
+        set
+        {
+            if (_settings.ImageDisplayMode == value) return;
+            _settings.ImageDisplayMode = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public ImageImportDisplayMode PdfDisplayMode
+    {
+        get => _settings.PdfDisplayMode;
+        set
+        {
+            if (_settings.PdfDisplayMode == value) return;
+            _settings.PdfDisplayMode = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public PagePaneMode PagePaneMode
+    {
+        get => _settings.PagePaneMode;
+        set
+        {
+            if (_settings.PagePaneMode == value) return;
+            SaveFocusedDocument();
+            _settings.PagePaneMode = value;
+            ActiveWorkspace.SelectFirstPage(value);
+            LoadSelectedIntoFocusedSlot();
+            OnPropertyChanged();
+            SaveSettings();
+            SaveLibrary();
+            RefreshNavigation();
+        }
+    }
+
+    public bool CanAddPage => ActiveWorkspace.HasSelectedSection();
+
+    public RibbonTab ActiveRibbonTab
+    {
+        get => _activeRibbonTab;
+        set
+        {
+            if (!SetField(ref _activeRibbonTab, value)) return;
+            OnPropertyChanged(nameof(IsHomeRibbonVisible));
+            OnPropertyChanged(nameof(IsInsertRibbonVisible));
+            OnPropertyChanged(nameof(IsDrawRibbonVisible));
+            OnPropertyChanged(nameof(IsViewRibbonVisible));
+        }
+    }
+
+    public bool IsHomeRibbonVisible => ActiveRibbonTab == RibbonTab.Home;
+    public bool IsInsertRibbonVisible => ActiveRibbonTab == RibbonTab.Insert;
+    public bool IsDrawRibbonVisible => ActiveRibbonTab == RibbonTab.Draw;
+    public bool IsViewRibbonVisible => ActiveRibbonTab == RibbonTab.View;
 
     public bool IsFullPageMode
     {
         get => _isFullPageMode;
         set
         {
-            if (SetField(ref _isFullPageMode, value))
-            {
-                OnPropertyChanged(nameof(IsNormalChromeVisible));
-            }
+            if (!SetField(ref _isFullPageMode, value)) return;
+            OnPropertyChanged(nameof(IsNormalChromeVisible));
         }
     }
 
-    public bool IsNormalChromeVisible => !_isFullPageMode;
+    public bool IsNormalChromeVisible => !IsFullPageMode;
 
-    public bool IsFloatingToolbarVisible
+    public bool IsSplitView
     {
-        get => _isFloatingToolbarVisible;
-        set => SetField(ref _isFloatingToolbarVisible, value);
+        get => _isSplitView;
+        private set => SetField(ref _isSplitView, value);
     }
 
-    public bool IsToolFlyoutOpen
-    {
-        get => _isToolFlyoutOpen;
-        set => SetField(ref _isToolFlyoutOpen, value);
-    }
-
-    public RibbonTab ActiveRibbonTab
-    {
-        get => _activeRibbonTab;
-        set => SetField(ref _activeRibbonTab, value);
-    }
-
-    public CanvasBackgroundFormat BackgroundFormat
-    {
-        get => _backgroundFormat;
-        set => SetField(ref _backgroundFormat, value);
-    }
+    public bool IsFloatingToolbarVisible { get => _isFloatingToolbarVisible; set => SetField(ref _isFloatingToolbarVisible, value); }
+    public bool IsToolFlyoutOpen { get => _isToolFlyoutOpen; set => SetField(ref _isToolFlyoutOpen, value); }
 
     public bool SingleFingerPanEnabled
     {
         get => _singleFingerPanEnabled;
         set
         {
-            if (SetField(ref _singleFingerPanEnabled, value) && value)
-            {
-                TextModeEnabled = false;
-                InsertSpaceModeEnabled = false;
-            }
+            if (!SetField(ref _singleFingerPanEnabled, value) || !value) return;
+            TextModeEnabled = false;
+            InsertSpaceModeEnabled = false;
         }
     }
 
@@ -110,11 +282,9 @@ public class MainViewModel : ObservableObject
         get => _textModeEnabled;
         set
         {
-            if (SetField(ref _textModeEnabled, value) && value)
-            {
-                SingleFingerPanEnabled = false;
-                InsertSpaceModeEnabled = false;
-            }
+            if (!SetField(ref _textModeEnabled, value) || !value) return;
+            SingleFingerPanEnabled = false;
+            InsertSpaceModeEnabled = false;
         }
     }
 
@@ -123,73 +293,70 @@ public class MainViewModel : ObservableObject
         get => _insertSpaceModeEnabled;
         set
         {
-            if (SetField(ref _insertSpaceModeEnabled, value) && value)
-            {
-                SingleFingerPanEnabled = false;
-                TextModeEnabled = false;
-            }
+            if (!SetField(ref _insertSpaceModeEnabled, value) || !value) return;
+            SingleFingerPanEnabled = false;
+            TextModeEnabled = false;
         }
     }
 
-    public CanvasTagKind? PendingTagKind
-    {
-        get => _pendingTagKind;
-        set => SetField(ref _pendingTagKind, value);
-    }
-
-    public bool IsBackstageOpen
-    {
-        get => _isBackstageOpen;
-        set => SetField(ref _isBackstageOpen, value);
-    }
+    public CanvasTagKind? PendingTagKind { get => _pendingTagKind; set => SetField(ref _pendingTagKind, value); }
+    public bool IsBackstageOpen { get => _isBackstageOpen; set => SetField(ref _isBackstageOpen, value); }
 
     public string BackstageTab
     {
         get => _backstageTab;
-        set => SetField(ref _backstageTab, value);
+        set
+        {
+            if (!SetField(ref _backstageTab, value)) return;
+            OnPropertyChanged(nameof(IsBackstageInfo));
+            OnPropertyChanged(nameof(IsBackstageNew));
+            OnPropertyChanged(nameof(IsBackstageOpenPage));
+            OnPropertyChanged(nameof(IsBackstageSaveCopy));
+            OnPropertyChanged(nameof(IsBackstagePrint));
+            OnPropertyChanged(nameof(IsBackstageShare));
+            OnPropertyChanged(nameof(IsBackstageExport));
+            OnPropertyChanged(nameof(IsBackstageToolbar));
+            OnPropertyChanged(nameof(IsBackstageAccount));
+            OnPropertyChanged(nameof(IsBackstageOptions));
+        }
     }
+
+    public bool IsBackstageInfo => BackstageTab == "Info";
+    public bool IsBackstageNew => BackstageTab == "New";
+    public bool IsBackstageOpenPage => BackstageTab == "Open";
+    public bool IsBackstageSaveCopy => BackstageTab == "SaveCopy";
+    public bool IsBackstagePrint => BackstageTab == "Print";
+    public bool IsBackstageShare => BackstageTab == "Share";
+    public bool IsBackstageExport => BackstageTab == "Export";
+    public bool IsBackstageToolbar => BackstageTab == "Toolbar";
+    public bool IsBackstageAccount => BackstageTab == "Account";
+    public bool IsBackstageOptions => BackstageTab == "Options";
 
     public string SearchQuery
     {
         get => _searchQuery;
-        set => SetField(ref _searchQuery, value);
-    }
-
-    public bool PredictionEnabled
-    {
-        get => _predictionEnabled;
-        set => SetField(ref _predictionEnabled, value);
-    }
-
-    public PagePaneMode PagePaneMode
-    {
-        get => ActiveWorkspace.PagePaneMode;
         set
         {
-            if (ActiveWorkspace.PagePaneMode != value)
-            {
-                _library.SetPagePaneMode(value);
-                RefreshNavigation();
-                OnPropertyChanged();
-            }
+            if (!SetField(ref _searchQuery, value)) return;
+            RunSearch(value);
+            OnPropertyChanged(nameof(IsSearchOpen));
         }
     }
 
-    public bool CanAddPage => ActiveWorkspace.HasSelectedSection();
+    public bool IsSearchOpen => SearchResults.Count > 0;
 
-    public ToolPreset SelectedTool => _toolShelf.Selected;
-
-    // Events for View/Canvas consumption
     public event Action? RequestUndo;
+    public event Action? RequestRedo;
     public event Action? RequestClearPage;
-    public event Action<CanvasTagKind>? RequestPlaceTag;
+    public event Action<float?>? RequestZoom;
+    public event Action? RequestFitPageWidth;
+    public event Action? RequestAppearanceRefresh;
 
-    // Commands
     public ICommand ToggleSectionPaneCommand { get; }
     public ICommand TogglePagePaneCommand { get; }
     public ICommand ToggleFullPageCommand { get; }
     public ICommand ToggleFloatingToolbarCommand { get; }
-
+    public ICommand ToggleSplitViewCommand { get; }
     public ICommand SelectNotebookCommand { get; }
     public ICommand AddNotebookCommand { get; }
     public ICommand SelectSectionCommand { get; }
@@ -199,177 +366,613 @@ public class MainViewModel : ObservableObject
     public ICommand SelectPageCommand { get; }
     public ICommand AddPageCommand { get; }
     public ICommand SetPagePaneModeCommand { get; }
-
     public ICommand SelectRibbonTabCommand { get; }
     public ICommand SelectToolCommand { get; }
     public ICommand AddToolCommand { get; }
     public ICommand DeleteSelectedToolCommand { get; }
-    public ICommand TogglePanoramaHandCommand { get; }
-    public ICommand ToggleTextModeCommand { get; }
-    public ICommand ToggleInsertSpaceCommand { get; }
     public ICommand ArmTagPlacementCommand { get; }
     public ICommand SetBackgroundFormatCommand { get; }
-
+    public ICommand TogglePageThemeCommand { get; }
+    public ICommand SetPaperKindCommand { get; }
+    public ICommand SetImageDisplayModeCommand { get; }
+    public ICommand SetPdfDisplayModeCommand { get; }
     public ICommand OpenBackstageCommand { get; }
     public ICommand CloseBackstageCommand { get; }
     public ICommand SelectBackstageTabCommand { get; }
-
     public ICommand UndoCommand { get; }
+    public ICommand RedoCommand { get; }
     public ICommand ClearPageCommand { get; }
+    public ICommand ZoomCommand { get; }
+    public ICommand FitPageWidthCommand { get; }
+    public ICommand NavigateSearchResultCommand { get; }
+    public ICommand ToggleFullPageToolCommand { get; }
 
-    public MainViewModel()
+    public MainViewModel() : this(null, null) { }
+
+    public MainViewModel(string? workspaceRoot, PreferencesStore? preferencesStore)
     {
-        _library = NotebookLibrary.Sample();
-        _storage = new PageContentStorage();
-        _toolShelf = new ToolShelf();
-        _fullPageConfig = new FullPageToolbarConfig();
+        _preferencesStore = preferencesStore ?? new PreferencesStore();
+        _preferences = _preferencesStore.Load();
+        var root = workspaceRoot ?? (string.IsNullOrWhiteSpace(_preferences.WorkspaceRoot) ? WorkspaceStore.DefaultRoot : _preferences.WorkspaceRoot);
+        _store = new WorkspaceStore(root);
+        _library = _store.LoadLibrary();
+        _settings = _store.LoadSettings();
+        _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
+        _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
+        _preferences.WorkspaceRoot = _store.RootDirectory;
+        _preferencesStore.Save(_preferences);
 
         ToggleSectionPaneCommand = new RelayCommand(() => IsSectionPaneVisible = !IsSectionPaneVisible);
         TogglePagePaneCommand = new RelayCommand(() => IsPagePaneVisible = !IsPagePaneVisible);
         ToggleFullPageCommand = new RelayCommand(() => IsFullPageMode = !IsFullPageMode);
         ToggleFloatingToolbarCommand = new RelayCommand(() => IsFloatingToolbarVisible = !IsFloatingToolbarVisible);
-
-        SelectNotebookCommand = new RelayCommand<string>(id =>
-        {
-            if (id != null && _library.SelectNotebook(id))
-            {
-                RefreshNavigation();
-                OnPropertyChanged(nameof(ActiveWorkspace));
-                OnPropertyChanged(nameof(ActiveNotebookTitle));
-            }
-        });
-
-        AddNotebookCommand = new RelayCommand(() =>
-        {
-            _library.AddNotebook("新笔记本");
-            RefreshNavigation();
-            OnPropertyChanged(nameof(ActiveWorkspace));
-            OnPropertyChanged(nameof(ActiveNotebookTitle));
-        });
-
-        SelectSectionCommand = new RelayCommand<string>(id =>
-        {
-            if (id != null)
-            {
-                ActiveWorkspace.SelectSection(id);
-                RefreshNavigation();
-            }
-        });
-
-        FocusNotebookRootCommand = new RelayCommand(() =>
-        {
-            ActiveWorkspace.FocusNotebook();
-            RefreshNavigation();
-        });
-
-        AddSectionCommand = new RelayCommand(() =>
-        {
-            ActiveWorkspace.AddSectionAtFocus();
-            RefreshNavigation();
-        });
-
-        ToggleSectionExpandCommand = new RelayCommand<string>(id =>
-        {
-            if (id != null)
-            {
-                ActiveWorkspace.ToggleExpanded(id);
-                RefreshSectionRows();
-            }
-        });
-
-        SelectPageCommand = new RelayCommand<PagePaneRow.PageItemRow>(item =>
-        {
-            if (item != null)
-            {
-                ActiveWorkspace.SelectPage(item.SectionId, item.Page.Id);
-                RefreshPagePaneRows();
-                OnPropertyChanged(nameof(ActivePageTitle));
-                OnPropertyChanged(nameof(ActiveSectionTitle));
-                OnPropertyChanged(nameof(BreadcrumbText));
-            }
-        });
-
-        AddPageCommand = new RelayCommand(() =>
-        {
-            if (CanAddPage)
-            {
-                ActiveWorkspace.AddPage("新页面");
-                RefreshPagePaneRows();
-                OnPropertyChanged(nameof(ActivePageTitle));
-            }
-        }, () => CanAddPage);
-
+        ToggleSplitViewCommand = new RelayCommand(ToggleSplitView);
+        SelectNotebookCommand = new RelayCommand<string>(SelectNotebook);
+        AddNotebookCommand = new RelayCommand(() => AddNotebook("新笔记本"));
+        SelectSectionCommand = new RelayCommand<string>(SelectSection);
+        FocusNotebookRootCommand = new RelayCommand(FocusNotebookRoot);
+        AddSectionCommand = new RelayCommand(() => AddSection("新分区"));
+        ToggleSectionExpandCommand = new RelayCommand<string>(ToggleSectionExpanded);
+        SelectPageCommand = new RelayCommand<PagePaneRow>(SelectPage);
+        AddPageCommand = new RelayCommand(() => AddPage("无标题页", _settings.LastPageAppearance), () => CanAddPage);
         SetPagePaneModeCommand = new RelayCommand<PagePaneMode>(mode => PagePaneMode = mode);
-
-        SelectRibbonTabCommand = new RelayCommand<RibbonTab>(tab => ActiveRibbonTab = tab);
-
-        SelectToolCommand = new RelayCommand<string>(id =>
-        {
-            if (id != null)
-            {
-                if (_toolShelf.SelectedId == id)
-                {
-                    IsToolFlyoutOpen = !IsToolFlyoutOpen;
-                }
-                else
-                {
-                    _toolShelf.Select(id);
-                    IsToolFlyoutOpen = false;
-                    SingleFingerPanEnabled = false;
-                    TextModeEnabled = false;
-                    InsertSpaceModeEnabled = false;
-                    OnPropertyChanged(nameof(SelectedTool));
-                }
-            }
-        });
-
-        AddToolCommand = new RelayCommand<DrawingToolKind>(kind =>
-        {
-            _toolShelf.Add(kind);
-            RefreshTools();
-            OnPropertyChanged(nameof(SelectedTool));
-        });
-
-        DeleteSelectedToolCommand = new RelayCommand(() =>
-        {
-            if (_toolShelf.DeleteSelected())
-            {
-                RefreshTools();
-                OnPropertyChanged(nameof(SelectedTool));
-            }
-        });
-
-        TogglePanoramaHandCommand = new RelayCommand(() => SingleFingerPanEnabled = !SingleFingerPanEnabled);
-        ToggleTextModeCommand = new RelayCommand(() => TextModeEnabled = !TextModeEnabled);
-        ToggleInsertSpaceCommand = new RelayCommand(() => InsertSpaceModeEnabled = !InsertSpaceModeEnabled);
-
-        ArmTagPlacementCommand = new RelayCommand<CanvasTagKind>(kind =>
-        {
-            PendingTagKind = kind;
-            RequestPlaceTag?.Invoke(kind);
-        });
-
-        SetBackgroundFormatCommand = new RelayCommand<CanvasBackgroundFormat>(fmt => BackgroundFormat = fmt);
-
+        SelectRibbonTabCommand = new RelayCommand<RibbonTab>(SelectRibbonTab);
+        SelectToolCommand = new RelayCommand<string>(SelectTool);
+        AddToolCommand = new RelayCommand<DrawingToolKind>(AddTool);
+        DeleteSelectedToolCommand = new RelayCommand(DeleteSelectedTool);
+        ArmTagPlacementCommand = new RelayCommand<CanvasTagKind>(kind => PendingTagKind = kind);
+        SetBackgroundFormatCommand = new RelayCommand<CanvasBackgroundFormat>(SetBackgroundFormat);
+        TogglePageThemeCommand = new RelayCommand(TogglePageTheme);
+        SetPaperKindCommand = new RelayCommand<PaperKind>(SetPaperKind);
+        SetImageDisplayModeCommand = new RelayCommand<ImageImportDisplayMode>(mode => ImageDisplayMode = mode);
+        SetPdfDisplayModeCommand = new RelayCommand<ImageImportDisplayMode>(mode => PdfDisplayMode = mode);
         OpenBackstageCommand = new RelayCommand(() => IsBackstageOpen = true);
         CloseBackstageCommand = new RelayCommand(() => IsBackstageOpen = false);
         SelectBackstageTabCommand = new RelayCommand<string>(tab => BackstageTab = tab ?? "Info");
+        UndoCommand = new RelayCommand(() => RequestUndo?.Invoke(), () => HasActivePage);
+        RedoCommand = new RelayCommand(() => RequestRedo?.Invoke(), () => HasActivePage);
+        ClearPageCommand = new RelayCommand(() => RequestClearPage?.Invoke(), () => HasActivePage);
+        ZoomCommand = new RelayCommand<float>(scale => RequestZoom?.Invoke(scale));
+        FitPageWidthCommand = new RelayCommand(() => RequestFitPageWidth?.Invoke());
+        NavigateSearchResultCommand = new RelayCommand<SearchResult>(NavigateToSearchResult);
+        ToggleFullPageToolCommand = new RelayCommand<string>(ToggleFullPageTool);
 
-        UndoCommand = new RelayCommand(() => RequestUndo?.Invoke());
-        ClearPageCommand = new RelayCommand(() => RequestClearPage?.Invoke());
-
+        LoadSelectedIntoFocusedSlot();
         RefreshNavigation();
         RefreshTools();
+    }
+
+    public void AddNotebook(string title)
+    {
+        SaveFocusedDocument();
+        var notebook = _library.AddNotebook(title);
+        notebook.AddSection("未归档");
+        notebook.AddPage("无标题页", _settings.LastPageAppearance);
+        SaveLibrary();
+        LoadSelectedIntoFocusedSlot();
+        RefreshNavigation();
+    }
+
+    public void AddSection(string title)
+    {
+        SaveFocusedDocument();
+        ActiveWorkspace.AddSectionAtFocus(title);
+        SaveLibrary();
+        LoadSelectedIntoFocusedSlot();
+        RefreshNavigation();
+    }
+
+    public void AddPage(string title, PageAppearance appearance)
+    {
+        if (!CanAddPage) return;
+        SaveFocusedDocument();
+        var page = ActiveWorkspace.AddPage(title, appearance);
+        _settings.LastPageAppearance = appearance.Clone();
+        var document = new PageDocument(ActiveWorkspace.Id, page.Id);
+        _store.SavePage(document);
+        AssignFocusedDocument(document);
+        SaveLibrary();
+        SaveSettings();
+        RefreshNavigation();
+    }
+
+    public bool RenameSection(string sectionId, string title)
+    {
+        if (!ActiveWorkspace.RenameSection(sectionId, title)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool DeleteSection(string sectionId)
+    {
+        SaveFocusedDocument();
+        var section = ActiveWorkspace.FindSection(sectionId);
+        if (section == null) return false;
+        var pageIds = PagesInTree(section).Select(page => page.Id).ToList();
+        if (ActiveWorkspace.DeleteSection(sectionId) == null) return false;
+        foreach (var pageId in pageIds) _store.DeletePageData(ActiveWorkspace.Id, pageId);
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool MoveSection(string sectionId, string? targetParentId)
+    {
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.MoveSectionToParent(sectionId, targetParentId)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool CopySection(string sectionId, string? targetParentId)
+    {
+        SaveFocusedDocument();
+        if (ActiveWorkspace.CopySectionToParent(sectionId, targetParentId, out var pageIds) == null) return false;
+        foreach (var (sourcePageId, targetPageId) in pageIds)
+            _store.CopyPageData(ActiveWorkspace.Id, sourcePageId, ActiveWorkspace.Id, targetPageId);
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool MergeSection(string sectionId, string targetSectionId)
+    {
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.MergeSectionInto(sectionId, targetSectionId)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public void AddChildSection(string parentSectionId, string title)
+    {
+        SaveFocusedDocument();
+        ActiveWorkspace.AddSection(title, parentSectionId);
+        FinishNavigationMutation();
+    }
+
+    public bool RenamePage(string sectionId, string pageId, string title)
+    {
+        if (!ActiveWorkspace.RenamePage(sectionId, pageId, title)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool DeletePage(string sectionId, string pageId)
+    {
+        SaveFocusedDocument();
+        if (ActiveWorkspace.DeletePage(sectionId, pageId) == null) return false;
+        _store.DeletePageData(ActiveWorkspace.Id, pageId);
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool MovePage(string sourceSectionId, string pageId, string targetSectionId, int? targetIndex = null)
+    {
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.MovePage(sourceSectionId, pageId, targetSectionId, targetIndex)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public bool MovePageAdjacent(string sourceSectionId, string pageId, string targetSectionId, string targetPageId, bool after)
+    {
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.MovePageAdjacent(sourceSectionId, pageId, targetSectionId, targetPageId, after)) return false;
+        FinishNavigationMutation();
+        return true;
+    }
+
+    public NotePage? CopyPage(string sourceSectionId, string pageId, string targetSectionId, int? targetIndex = null)
+    {
+        SaveFocusedDocument();
+        var copy = ActiveWorkspace.CopyPage(sourceSectionId, pageId, targetSectionId, targetIndex);
+        if (copy == null) return null;
+        _store.CopyPageData(ActiveWorkspace.Id, pageId, ActiveWorkspace.Id, copy.Id);
+        FinishNavigationMutation();
+        return copy;
+    }
+
+    public void FocusCanvas(CanvasSlot slot)
+    {
+        if (slot == CanvasSlot.Right && (!IsSplitView || SecondaryDocument == null)) return;
+        SaveFocusedDocument();
+        FocusedSlot = slot;
+        var doc = FocusedDocument;
+        if (doc != null) SelectLibraryLocation(doc.NotebookId, doc.PageId);
+        RefreshNavigation();
+        RefreshPageAppearance();
+    }
+
+    private void FinishNavigationMutation()
+    {
+        SaveLibrary();
+        LoadSelectedIntoFocusedSlot();
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+    }
+
+    private static IEnumerable<NotePage> PagesInTree(SectionNode section)
+    {
+        foreach (var page in section.Pages) yield return page;
+        foreach (var child in section.Children)
+            foreach (var page in PagesInTree(child))
+                yield return page;
+    }
+
+    public void SaveDocument(PageDocument? document)
+    {
+        if (document == null || string.IsNullOrWhiteSpace(document.PageId)) return;
+        SaveStateText = "正在保存…";
+        _store.SavePage(document);
+        var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
+        var page = notebook?.FindPage(document.PageId, out _);
+        if (page != null) page.UpdatedAt = document.UpdatedAt;
+        _store.SaveLibrary(_library);
+        SaveStateText = "已保存";
+        RefreshPagePaneRows();
+    }
+
+    public void SaveAll()
+    {
+        var documents = new[] { PrimaryDocument, SecondaryDocument }
+            .Where(document => document != null)
+            .GroupBy(document => $"{document!.NotebookId}/{document.PageId}")
+            .Select(group => group.First());
+        foreach (var document in documents) SaveDocument(document);
+        SaveSettings();
+        SaveLibrary();
+        _preferences.WorkspaceRoot = _store.RootDirectory;
+        _preferencesStore.Save(_preferences);
+    }
+
+    public void SaveToolSettings()
+    {
+        SaveSettings();
+        OnPropertyChanged(nameof(SelectedTool));
+        OnPropertyChanged(nameof(SelectedToolIsInk));
+        OnPropertyChanged(nameof(SelectedToolIsPen));
+        OnPropertyChanged(nameof(SelectedToolIsHighlighter));
+        OnPropertyChanged(nameof(SelectedToolIsEraser));
+    }
+
+    public void SwitchWorkspace(string rootDirectory)
+    {
+        SaveAll();
+        _store = new WorkspaceStore(rootDirectory);
+        _library = _store.LoadLibrary();
+        _settings = _store.LoadSettings();
+        _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
+        _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
+        _preferences.WorkspaceRoot = _store.RootDirectory;
+        _preferencesStore.Save(_preferences);
+        FocusedSlot = CanvasSlot.Left;
+        IsSplitView = false;
+        SecondaryDocument = null;
+        LoadSelectedIntoFocusedSlot();
+        RefreshNavigation();
+        RefreshTools();
+        NotifyAllWorkspaceProperties();
+    }
+
+    public string ImportAsset(string sourcePath)
+    {
+        var document = FocusedDocument ?? throw new InvalidOperationException("请先打开一个页面。");
+        return _store.ImportAsset(document.NotebookId, document.PageId, sourcePath);
+    }
+
+    public string WriteAsset(string extension, ReadOnlySpan<byte> bytes)
+    {
+        var document = FocusedDocument ?? throw new InvalidOperationException("请先打开一个页面。");
+        return _store.WriteAsset(document.NotebookId, document.PageId, extension, bytes);
+    }
+
+    public string ResolveAsset(PageDocument document, string assetName) => _store.ResolveAsset(document.NotebookId, document.PageId, assetName);
+    public string ActiveAssetDirectory => FocusedDocument == null ? string.Empty : _store.GetAssetDirectory(FocusedDocument.NotebookId, FocusedDocument.PageId);
+
+    public bool NavigateToPage(string notebookId, string pageId)
+    {
+        SaveFocusedDocument();
+        if (!_library.SelectNotebook(notebookId)) return false;
+        var notebook = _library.ActiveNotebook;
+        var page = notebook.FindPage(pageId, out var owner);
+        if (page == null || owner == null) return false;
+        notebook.FocusedSectionId = owner.Id;
+        notebook.SelectedPageSectionId = owner.Id;
+        notebook.SelectedPageId = page.Id;
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+        return true;
+    }
+
+    public void SetBackgroundFormat(CanvasBackgroundFormat format)
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        if (page == null) return;
+        page.Appearance.Background = format;
+        ActivePageAppearance = page.Appearance.Clone();
+        SaveLibrary();
+        RequestAppearanceRefresh?.Invoke();
+    }
+
+    public void SetPaperKind(PaperKind kind)
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        if (page == null) return;
+        page.Appearance.PaperKind = kind;
+        page.Appearance.SheetCount = Math.Max(1, page.Appearance.SheetCount);
+        ActivePageAppearance = page.Appearance.Clone();
+        SaveLibrary();
+        RequestAppearanceRefresh?.Invoke();
+    }
+
+    public void SetPageColor(string color, PageTheme theme)
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        if (page == null) return;
+        page.Appearance.PageColor = color;
+        page.Appearance.Theme = theme;
+        ActivePageAppearance = page.Appearance.Clone();
+        SaveLibrary();
+        RequestAppearanceRefresh?.Invoke();
+    }
+
+    public void TogglePageTitle()
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        if (page == null) return;
+        page.Appearance.ShowTitle = !page.Appearance.ShowTitle;
+        ActivePageAppearance = page.Appearance.Clone();
+        SaveLibrary();
+        OnPropertyChanged(nameof(IsPageTitleHidden));
+        RequestAppearanceRefresh?.Invoke();
+    }
+
+    private void TogglePageTheme()
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        if (page == null) return;
+        page.Appearance.Theme = page.Appearance.Theme == PageTheme.Dark ? PageTheme.Light : PageTheme.Dark;
+        page.Appearance.PageColor = page.Appearance.Theme == PageTheme.Dark ? "#1B1B1B" : "#FAFAFA";
+        ActivePageAppearance = page.Appearance.Clone();
+        SaveLibrary();
+        OnPropertyChanged(nameof(IsDarkPageBackground));
+        RequestAppearanceRefresh?.Invoke();
+    }
+
+    private void SelectRibbonTab(RibbonTab tab)
+    {
+        ActiveRibbonTab = tab;
+        if (tab == RibbonTab.Home) TextModeEnabled = true;
+        else if (tab == RibbonTab.Insert) TextModeEnabled = false;
+    }
+
+    private void SelectNotebook(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+        SaveFocusedDocument();
+        if (!_library.SelectNotebook(id)) return;
+        ActiveWorkspace.SelectFirstPage(PagePaneMode);
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+    }
+
+    private void SelectSection(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.SelectSection(id, PagePaneMode)) return;
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+    }
+
+    private void FocusNotebookRoot()
+    {
+        SaveFocusedDocument();
+        ActiveWorkspace.FocusNotebook(PagePaneMode);
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+    }
+
+    private void ToggleSectionExpanded(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id) || !ActiveWorkspace.ToggleExpanded(id)) return;
+        SaveLibrary();
+        RefreshSectionRows();
+    }
+
+    private void SelectPage(PagePaneRow? row)
+    {
+        if (row?.Page == null || row.IsHeader) return;
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.SelectPage(row.SectionId, row.Page.Id, PagePaneMode)) return;
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+    }
+
+    private void SelectTool(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+        if (_toolShelf.SelectedId == id) IsToolFlyoutOpen = !IsToolFlyoutOpen;
+        else if (_toolShelf.Select(id))
+        {
+            IsToolFlyoutOpen = false;
+            SingleFingerPanEnabled = false;
+            TextModeEnabled = false;
+            InsertSpaceModeEnabled = false;
+            OnPropertyChanged(nameof(SelectedTool));
+            NotifySelectedToolProperties();
+            SaveSettings();
+        }
+        RefreshTools();
+    }
+
+    private void AddTool(DrawingToolKind kind)
+    {
+        _toolShelf.Add(kind);
+        RefreshTools();
+        OnPropertyChanged(nameof(SelectedTool));
+        NotifySelectedToolProperties();
+        SaveSettings();
+    }
+
+    public void SetSelectedToolColor(InkPalette color)
+    {
+        if (SelectedTool.Kind is not DrawingToolKind.Pen and not DrawingToolKind.Highlighter) return;
+        SelectedTool.Color = color;
+        SaveSettings();
+        RefreshTools();
+        OnPropertyChanged(nameof(SelectedTool));
+    }
+
+    private void DeleteSelectedTool()
+    {
+        var removedId = _toolShelf.SelectedId;
+        if (!_toolShelf.DeleteSelected()) return;
+        _fullPageConfig.Remove($"tool:{removedId}");
+        IsToolFlyoutOpen = false;
+        RefreshTools();
+        OnPropertyChanged(nameof(SelectedTool));
+        NotifySelectedToolProperties();
+        SaveSettings();
+    }
+
+    private void ToggleSplitView()
+    {
+        SaveFocusedDocument();
+        if (!IsSplitView)
+        {
+            var current = PrimaryDocument;
+            if (current == null) return;
+            var pages = ActiveWorkspace.FlattenAllSections().SelectMany(section => section.Pages.Select(page => (section, page))).ToList();
+            var index = pages.FindIndex(entry => entry.page.Id == current.PageId);
+            var next = pages.Count > 1 ? pages[(Math.Max(0, index) + 1) % pages.Count] : default;
+            SecondaryDocument = next.page == null ? _store.LoadPage(current.NotebookId, current.PageId) : _store.LoadPage(ActiveWorkspace.Id, next.page.Id);
+            IsSplitView = true;
+            FocusedSlot = CanvasSlot.Left;
+        }
+        else
+        {
+            if (SecondaryDocument != null)
+            {
+                SaveDocument(SecondaryDocument);
+                PrimaryDocument = SecondaryDocument;
+                SelectLibraryLocation(SecondaryDocument.NotebookId, SecondaryDocument.PageId);
+            }
+            SecondaryDocument = null;
+            IsSplitView = false;
+            FocusedSlot = CanvasSlot.Left;
+            RefreshNavigation();
+            RefreshPageAppearance();
+        }
+    }
+
+    private void NavigateToSearchResult(SearchResult? result)
+    {
+        if (result == null) return;
+        SaveFocusedDocument();
+        if (!_library.SelectNotebook(result.NotebookId)) return;
+        var workspace = _library.ActiveNotebook;
+        workspace.FocusedSectionId = result.SectionId;
+        if (!workspace.SelectPage(result.SectionId, result.PageId, PagePaneMode)) return;
+        LoadSelectedIntoFocusedSlot();
+        SearchQuery = string.Empty;
+        SaveLibrary();
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+    }
+
+    private void RunSearch(string query)
+    {
+        SearchResults.Clear();
+        var normalized = query?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length < 2) return;
+        foreach (var notebook in _library.Notebooks)
+        {
+            foreach (var section in notebook.FlattenAllSections())
+            {
+                foreach (var page in section.Pages)
+                {
+                    var context = string.Empty;
+                    var titleMatch = page.Title.Contains(normalized, StringComparison.CurrentCultureIgnoreCase);
+                    if (!titleMatch)
+                    {
+                        var document = _store.LoadPage(notebook.Id, page.Id);
+                        context = document.TextItems.Select(item => item.Text)
+                            .FirstOrDefault(text => text.Contains(normalized, StringComparison.CurrentCultureIgnoreCase)) ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(context)) continue;
+                        context = context.ReplaceLineEndings(" ").Trim();
+                        if (context.Length > 48) context = context[..48] + "…";
+                    }
+                    SearchResults.Add(new SearchResult
+                    {
+                        NotebookId = notebook.Id,
+                        SectionId = section.Id,
+                        PageId = page.Id,
+                        PageTitle = page.Title,
+                        Context = context,
+                    });
+                    if (SearchResults.Count >= 50) return;
+                }
+            }
+        }
+    }
+
+    private void LoadSelectedIntoFocusedSlot()
+    {
+        var page = ActiveWorkspace.SelectedPage();
+        var document = page == null ? null : _store.LoadPage(ActiveWorkspace.Id, page.Id);
+        AssignFocusedDocument(document);
+        RefreshPageAppearance();
+        OnPropertyChanged(nameof(HasActivePage));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void AssignFocusedDocument(PageDocument? document)
+    {
+        if (FocusedSlot == CanvasSlot.Right && IsSplitView) SecondaryDocument = document;
+        else PrimaryDocument = document;
+        OnPropertyChanged(nameof(FocusedDocument));
+    }
+
+    private void SaveFocusedDocument() => SaveDocument(FocusedDocument);
+
+    private void SelectLibraryLocation(string notebookId, string pageId)
+    {
+        if (!_library.SelectNotebook(notebookId)) return;
+        var notebook = _library.ActiveNotebook;
+        var page = notebook.FindPage(pageId, out var owner);
+        if (page == null || owner == null) return;
+        notebook.FocusedSectionId = owner.Id;
+        notebook.SelectedPageSectionId = owner.Id;
+        notebook.SelectedPageId = page.Id;
+    }
+
+    private void RefreshPageAppearance()
+    {
+        ActivePageAppearance = ActiveWorkspace.SelectedPage()?.Appearance.Clone() ?? new PageAppearance();
+        OnPropertyChanged(nameof(PrimaryPageAppearance));
+        OnPropertyChanged(nameof(SecondaryPageAppearance));
+        OnPropertyChanged(nameof(PrimaryPageTitle));
+        OnPropertyChanged(nameof(SecondaryPageTitle));
+        OnPropertyChanged(nameof(ActivePageTitle));
+        OnPropertyChanged(nameof(ActiveSectionTitle));
+        OnPropertyChanged(nameof(BreadcrumbText));
+        OnPropertyChanged(nameof(IsPageTitleHidden));
+        OnPropertyChanged(nameof(IsDarkPageBackground));
     }
 
     public void RefreshNavigation()
     {
         RefreshSectionRows();
         RefreshPagePaneRows();
+        RefreshPageAppearance();
+        OnPropertyChanged(nameof(ActiveWorkspace));
         OnPropertyChanged(nameof(ActiveNotebookTitle));
-        OnPropertyChanged(nameof(ActiveSectionTitle));
-        OnPropertyChanged(nameof(ActivePageTitle));
-        OnPropertyChanged(nameof(BreadcrumbText));
         OnPropertyChanged(nameof(CanAddPage));
         OnPropertyChanged(nameof(PagePaneMode));
     }
@@ -377,27 +980,129 @@ public class MainViewModel : ObservableObject
     private void RefreshSectionRows()
     {
         SectionRows.Clear();
-        foreach (var row in ActiveWorkspace.FlattenSections())
-        {
-            SectionRows.Add(row);
-        }
+        foreach (var row in ActiveWorkspace.FlattenSections()) SectionRows.Add(row);
     }
 
     private void RefreshPagePaneRows()
     {
         PagePaneRows.Clear();
-        foreach (var row in ActiveWorkspace.GetPagePaneRows())
-        {
-            PagePaneRows.Add(row);
-        }
+        foreach (var row in ActiveWorkspace.GetPagePaneRows(PagePaneMode)) PagePaneRows.Add(row);
     }
 
     private void RefreshTools()
     {
         Tools.Clear();
+        LassoTools.Clear();
+        EraserTools.Clear();
+        HighlighterTools.Clear();
+        PenTools.Clear();
         foreach (var tool in _toolShelf.Tools)
         {
-            Tools.Add(tool);
+            tool.IsSelected = tool.Id == _toolShelf.SelectedId;
+            switch (tool.Kind)
+            {
+                case DrawingToolKind.Lasso: LassoTools.Add(tool); break;
+                case DrawingToolKind.Eraser: EraserTools.Add(tool); break;
+                case DrawingToolKind.Highlighter: HighlighterTools.Add(tool); Tools.Add(tool); break;
+                case DrawingToolKind.Pen: PenTools.Add(tool); Tools.Add(tool); break;
+            }
         }
+        NotifySelectedToolProperties();
+        RefreshFullPageToolbarCatalog();
+    }
+
+    private void ToggleFullPageTool(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+        if (_fullPageConfig.Contains(id)) _fullPageConfig.Remove(id);
+        else _fullPageConfig.Add(id);
+        SaveSettings();
+        RefreshFullPageToolbarCatalog();
+    }
+
+    private void RefreshFullPageToolbarCatalog()
+    {
+        var catalog = new List<FullPageToolDescriptor>
+        {
+            new("draw:undo", "撤销", "arrow_undo"),
+            new("draw:cursor", "键入文本", "cursor"),
+        };
+        catalog.AddRange(_toolShelf.Tools.Select(tool => new FullPageToolDescriptor(
+            $"tool:{tool.Id}", tool.DisplayName,
+            tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", _ => "lasso" },
+            tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4")));
+        catalog.AddRange(new[]
+        {
+            new FullPageToolDescriptor("draw:add", "添加绘图工具", "add"),
+            new FullPageToolDescriptor("draw:pan", "单指平移", "hand_left"),
+            new FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space", PreserveColors: true),
+            new FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines", PreserveColors: true),
+            new FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"),
+        });
+        catalog.AddRange(Enum.GetValues<HomeCommand>().Select(command => new FullPageToolDescriptor(
+            $"home:{command.GetId()}", command.GetLabel(), command.GetIconKey(),
+            command is HomeCommand.Tag or HomeCommand.FindTags ? "#E83139" : "#F4F4F4")));
+
+        FullPageToolbarItems.Clear();
+        foreach (var id in _fullPageConfig.Ids)
+            if (catalog.FirstOrDefault(item => item.Id == id) is { } descriptor) FullPageToolbarItems.Add(descriptor);
+        FullPageToolbarAvailableItems.Clear();
+        foreach (var descriptor in catalog.Where(item => !_fullPageConfig.Contains(item.Id))) FullPageToolbarAvailableItems.Add(descriptor);
+    }
+
+    private void NotifySelectedToolProperties()
+    {
+        OnPropertyChanged(nameof(SelectedTool));
+        OnPropertyChanged(nameof(SelectedToolIsInk));
+        OnPropertyChanged(nameof(SelectedToolIsPen));
+        OnPropertyChanged(nameof(SelectedToolIsHighlighter));
+        OnPropertyChanged(nameof(SelectedToolIsEraser));
+        OnPropertyChanged(nameof(SelectedToolIsLasso));
+    }
+
+    private void SaveLibrary() => _store.SaveLibrary(_library);
+
+    private void SaveSettings()
+    {
+        _settings.ToolShelfJson = _toolShelf.ToJson();
+        _settings.QuickToolbarIds = _fullPageConfig.Ids.ToList();
+        _store.SaveSettings(_settings);
+    }
+
+    private void NotifyAllWorkspaceProperties()
+    {
+        OnPropertyChanged(nameof(Library));
+        OnPropertyChanged(nameof(WorkspaceRoot));
+        OnPropertyChanged(nameof(ActiveWorkspace));
+        OnPropertyChanged(nameof(ActiveNotebookTitle));
+        OnPropertyChanged(nameof(ActiveSectionTitle));
+        OnPropertyChanged(nameof(ActivePageTitle));
+        OnPropertyChanged(nameof(BreadcrumbText));
+        OnPropertyChanged(nameof(PagePaneMode));
+        OnPropertyChanged(nameof(IsSectionPaneVisible));
+        OnPropertyChanged(nameof(IsPagePaneVisible));
+        OnPropertyChanged(nameof(ZoomLocked));
+        OnPropertyChanged(nameof(PredictionEnabled));
+        OnPropertyChanged(nameof(ImageDisplayMode));
+        OnPropertyChanged(nameof(PdfDisplayMode));
+        OnPropertyChanged(nameof(SelectedTool));
+        OnPropertyChanged(nameof(PrimaryPageAppearance));
+        OnPropertyChanged(nameof(SecondaryPageAppearance));
+        OnPropertyChanged(nameof(PrimaryPageTitle));
+        OnPropertyChanged(nameof(SecondaryPageTitle));
+    }
+
+    private PageAppearance AppearanceForDocument(PageDocument? document)
+    {
+        if (document == null) return new PageAppearance();
+        var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
+        return notebook?.FindPage(document.PageId, out _)?.Appearance ?? new PageAppearance();
+    }
+
+    private string TitleForDocument(PageDocument? document)
+    {
+        if (document == null) return "未选择页面";
+        var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
+        return notebook?.FindPage(document.PageId, out _)?.Title ?? "未选择页面";
     }
 }

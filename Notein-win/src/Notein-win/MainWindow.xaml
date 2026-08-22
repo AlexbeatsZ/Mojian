@@ -1,285 +1,247 @@
 <Window x:Class="Notein_win.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="clr-namespace:Notein_win.ViewModels"
         xmlns:models="clr-namespace:Notein_win.Models"
         xmlns:controls="clr-namespace:Notein_win.Controls"
-        mc:Ignorable="d"
-        Title="Notein-win"
-        Height="800" Width="1200"
-        MinHeight="600" MinWidth="900"
-        Background="{StaticResource WindowBackground}">
+        xmlns:vm="clr-namespace:Notein_win.ViewModels"
+        Title="墨笺" Height="820" Width="1280" MinHeight="620" MinWidth="920"
+        WindowStyle="SingleBorderWindow" ResizeMode="CanResize" AllowsTransparency="False"
+        Background="{StaticResource WindowBackground}"
+        FontFamily="Segoe UI Variable, Microsoft YaHei UI"
+        PreviewKeyDown="OnWindowPreviewKeyDown"
+        Closing="OnWindowClosing">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0,34,0,0" UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <vm:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
+        <vm:BooleanToGridLengthConverter x:Key="BoolToGridLength" />
+        <vm:FluentIconConverter x:Key="FluentIcon" />
+        <vm:FluentDrawingIconConverter x:Key="FluentDrawingIcon" />
 
-    <Window.DataContext>
-        <vm:MainViewModel />
-    </Window.DataContext>
+        <Style x:Key="PaneRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Margin" Value="4,1" />
+            <Setter Property="MinHeight" Value="32" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SelectedOverlay}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                    <Setter Property="BorderThickness" Value="1,0,0,0" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HomeDropdownButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
+            <Setter Property="Background" Value="#2A2A2A" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderHairline}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="9,0,5,0" />
+            <Setter Property="Margin" Value="2,0" />
+        </Style>
+
+        <Style x:Key="AndroidCommandToggleButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource RibbonToggleButtonStyle}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="42" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+
+        <Style x:Key="ToolPresetToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="42" />
+            <Setter Property="Margin" Value="0,0,2,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2">
+                            <Grid>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <TextBlock x:Name="chevron" Text="⌄" Foreground="{StaticResource AccentPurple}" FontSize="11"
+                                           Width="14" Height="14" TextAlignment="Center" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                           Margin="0,0,2,1" Visibility="Collapsed" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource HoverOverlay}" /></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" />
+                                <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource BorderStrong}" />
+                                <Setter TargetName="chevron" Property="Visibility" Value="Visible" />
+                                <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </Window.Resources>
 
     <Grid>
-        <!-- PRIMARY WORKSPACE CONTENT -->
-        <DockPanel Visibility="{Binding IsBackstageOpen, Converter={x:Null}}">
-            
-            <!-- TOP TITLE BAR & RIBBON AREA (Normal Chrome) -->
-            <StackPanel DockPanel.Dock="Top" Background="{StaticResource TitleBarBackground}"
-                        Visibility="{Binding IsNormalChromeVisible, Converter={x:Null}}">
-                
-                <!-- Window Title / Ribbon Tabs Row -->
-                <Grid Height="38" Background="{StaticResource TitleBarBackground}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <!-- Backstage File Button -->
-                    <Button Grid.Column="0" Content="文件"
-                            Command="{Binding OpenBackstageCommand}"
-                            Background="{StaticResource AccentPurple}"
-                            Foreground="White"
-                            FontWeight="Bold"
-                            Padding="16,6"
-                            Margin="8,4,12,4"
-                            BorderThickness="0"
-                            Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-
-                    <!-- Ribbon Tabs -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
-                        <RadioButton Content="开始" Style="{StaticResource RibbonTabButtonStyle}"
-                                     IsChecked="{Binding ActiveRibbonTab, ConverterParameter={x:Static models:RibbonTab.Home}, Mode=OneWay}"
-                                     Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Home}" />
-                        <RadioButton Content="插入" Style="{StaticResource RibbonTabButtonStyle}"
-                                     IsChecked="{Binding ActiveRibbonTab, ConverterParameter={x:Static models:RibbonTab.Insert}, Mode=OneWay}"
-                                     Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Insert}" />
-                        <RadioButton Content="绘图" Style="{StaticResource RibbonTabButtonStyle}"
-                                     IsChecked="{Binding ActiveRibbonTab, ConverterParameter={x:Static models:RibbonTab.Draw}, Mode=OneWay}"
-                                     Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Draw}" />
-                        <RadioButton Content="视图" Style="{StaticResource RibbonTabButtonStyle}"
-                                     IsChecked="{Binding ActiveRibbonTab, ConverterParameter={x:Static models:RibbonTab.View}, Mode=OneWay}"
-                                     Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.View}" />
-                    </StackPanel>
-
-                    <!-- Top Right Context Controls: Breadcrumb & FullPage -->
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding BreadcrumbText}" Foreground="{StaticResource TextSecondary}" FontSize="12" VerticalAlignment="Center" Margin="0,0,16,0" />
-                        <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="进入全页模式" Command="{Binding ToggleFullPageCommand}">
-                            <Path Data="{StaticResource IconFullPage}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                        </Button>
+        <DockPanel Visibility="{Binding IsBackstageOpen, Converter={StaticResource InverseBoolToVisibility}}">
+            <StackPanel DockPanel.Dock="Top" Background="{StaticResource RibbonBackground}"
+                        Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}">
+                <Grid Height="34" Background="{StaticResource RibbonBackground}">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="8,0"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button Content="文件" Style="{StaticResource RibbonFileButtonStyle}" Command="{Binding OpenBackstageCommand}" />
+                        <RadioButton Content="开始" Style="{StaticResource RibbonTabButtonStyle}" IsChecked="{Binding IsHomeRibbonVisible, Mode=OneWay}" Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Home}" />
+                        <RadioButton Content="插入" Style="{StaticResource RibbonTabButtonStyle}" IsChecked="{Binding IsInsertRibbonVisible, Mode=OneWay}" Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Insert}" />
+                        <RadioButton Content="绘图" Style="{StaticResource RibbonTabButtonStyle}" IsChecked="{Binding IsDrawRibbonVisible, Mode=OneWay}" Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.Draw}" />
+                        <RadioButton Content="视图" Style="{StaticResource RibbonTabButtonStyle}" IsChecked="{Binding IsViewRibbonVisible, Mode=OneWay}" Command="{Binding SelectRibbonTabCommand}" CommandParameter="{x:Static models:RibbonTab.View}" />
                     </StackPanel>
                 </Grid>
 
-                <!-- RIBBON ACTION PANEL -->
-                <Border Height="52" Background="{StaticResource RibbonBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,1,0,1">
+                <Border Height="50" Background="{StaticResource ToolbarBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,1,0,1">
                     <Grid>
-                        <!-- 1. HOME RIBBON PANEL -->
-                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                            <StackPanel Orientation="Horizontal" Margin="6,4">
-                                
-                                <!-- Clipboard Group -->
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="粘贴">
-                                    <Path Data="{StaticResource IconPaste}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="剪切">
-                                    <Path Data="{StaticResource IconCut}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="复制">
-                                    <Path Data="{StaticResource IconCopy}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Visibility="{Binding IsHomeRibbonVisible, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="粘贴" Tag="Paste" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_clipboard_paste}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="剪切" Tag="Cut" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_cut}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="复制" Tag="Copy" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_copy}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="格式刷" Tag="FormatPainter" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_paint_brush}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-
-                                <!-- Formatting Group -->
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="加粗">
-                                    <Path Data="{StaticResource IconBold}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                                </ToggleButton>
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="倾斜">
-                                    <Path Data="{StaticResource IconItalic}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                                </ToggleButton>
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="下划线">
-                                    <Path Data="{StaticResource IconUnderline}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                                </ToggleButton>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="项目符号">
-                                    <Path Data="{StaticResource IconBullets}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="15" Height="15" />
-                                </Button>
-
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="90" ToolTip="字体" Tag="FontFamily" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="10" Height="10" /><TextBlock Text="无衬线" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="52" ToolTip="字号" Tag="FontSize" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" /><TextBlock Text="16" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="加粗" Tag="Bold" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_bold}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="倾斜" Tag="Italic" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_italic}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="下划线" Tag="Underline" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_underline}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="删除线" Tag="Strikethrough" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_strikethrough}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="字体颜色" Tag="FontColor" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_color}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="文本突出显示" Tag="Highlight" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_highlight_text}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="下标" Tag="Subscript" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_subscript}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="清除所有格式" Tag="ClearFormatting" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_clear_formatting}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-
-                                <!-- Tags Group -->
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="重要标记 (星标)"
-                                        Command="{Binding ArmTagPlacementCommand}" CommandParameter="{x:Static models:CanvasTagKind.Important}">
-                                    <Path Data="{StaticResource IconStar}" Fill="{StaticResource TagRed}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="问题标记 (问号)"
-                                        Command="{Binding ArmTagPlacementCommand}" CommandParameter="{x:Static models:CanvasTagKind.Question}">
-                                    <Path Data="{StaticResource IconQuestion}" Fill="{StaticResource TagRed}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="项目符号" Tag="Bullets" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_bullet_list_ltr}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="编号" Tag="Numbering" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_number_list_ltr}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="减少缩进" Tag="IndentDecrease" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_indent_decrease_ltr}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="增加缩进" Tag="IndentIncrease" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_indent_increase_ltr}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="左对齐" Tag="AlignLeft" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_align_left}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="居中" Tag="AlignCenter" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_align_center}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="右对齐" Tag="AlignRight" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_align_right}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="行距" Tag="LineSpacing" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_line_spacing}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-
-                                <!-- Insert Objects Group -->
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="插入表格" Click="OnInsertTableClick">
-                                    <Path Data="{StaticResource IconTable}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="插入附件" Click="OnInsertAttachmentClick">
-                                    <Path Data="{StaticResource IconAttachment}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="插入图片" Click="OnInsertImageClick">
-                                    <Path Data="{StaticResource IconImage}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="插入电子表格" Click="OnInsertSpreadsheetClick">
-                                    <Path Data="{StaticResource IconSpreadsheet}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="插入笔记链接" Click="OnInsertLinkClick">
-                                    <Path Data="{StaticResource IconLink}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="标记" Tag="Tag" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_tag}" Fill="{StaticResource TagRed}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="查找标记" Tag="FindTags" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_tag_search}" Fill="{StaticResource TagRed}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="样式" Tag="Styles" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="10" Height="10" /><TextBlock Text="样式" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                            </StackPanel>
+                        </ScrollViewer>
 
-                                <!-- Draw Tools Group -->
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="撤销" Command="{Binding UndoCommand}">
-                                    <Path Data="{StaticResource IconUndo}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="文本光标模式"
-                                              IsChecked="{Binding TextModeEnabled, Mode=TwoWay}">
-                                    <Path Data="{StaticResource IconCursor}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </ToggleButton>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="套索选择"
-                                        Command="{Binding SelectToolCommand}" CommandParameter="lasso-freeform">
-                                    <Path Data="{StaticResource IconLasso}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="橡皮擦"
-                                        Command="{Binding SelectToolCommand}" CommandParameter="eraser-stroke">
-                                    <Path Data="{StaticResource IconEraser}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-
-                                <!-- Pen Presets from Shelf -->
-                                <ItemsControl ItemsSource="{Binding Tools}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <StackPanel Orientation="Horizontal" />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Button Style="{StaticResource RibbonIconButtonStyle}"
-                                                    ToolTip="{Binding DisplayName}"
-                                                    Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding Id}">
-                                                <Border Width="18" Height="18" CornerRadius="9" BorderThickness="1" BorderBrush="{StaticResource BorderHairline}">
-                                                    <Border.Background>
-                                                        <SolidColorBrush Color="{Binding Color, Converter={x:Null}}" />
-                                                    </Border.Background>
-                                                    <Path Data="{StaticResource IconPen}" Fill="White" Stretch="Uniform" Width="10" Height="10" />
-                                                </Border>
-                                            </Button>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="添加笔"
-                                        Command="{Binding AddToolCommand}" CommandParameter="{x:Static models:DrawingToolKind.Pen}">
-                                    <Path Data="{StaticResource IconAdd}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                                </Button>
-
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Visibility="{Binding IsInsertRibbonVisible, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Margin="6,2,10,2">
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="表格" Click="OnInsertTableClick"><Path Data="{StaticResource Fluent_table}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="文件附件" Click="OnInsertAttachmentClick"><Path Data="{StaticResource Fluent_attach}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="文件打印样式" Click="OnInsertPdfPrintoutClick"><Path Data="{StaticResource Fluent_document_page}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="电子表格" Click="OnInsertSpreadsheetClick"><Path Data="{StaticResource Fluent_table_simple}" Fill="#49AA6B" Width="22" Height="22" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="图片" Click="OnInsertImageClick"><Path Data="{StaticResource Fluent_image}" Fill="#569CD6" Width="22" Height="22" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="贴纸" Click="OnInsertStickerClick"><Path Data="{StaticResource Fluent_sticker}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="链接" Click="OnInsertLinkClick"><Path Data="{StaticResource Fluent_link}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
+                            </StackPanel>
+                        </ScrollViewer>
 
-                                <!-- Hand & Canvas Utilities -->
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="全景漫游手势"
-                                              IsChecked="{Binding SingleFingerPanEnabled, Mode=TwoWay}">
-                                    <Path Data="{StaticResource IconHand}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </ToggleButton>
-                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="插入垂直空间"
-                                              IsChecked="{Binding InsertSpaceModeEnabled, Mode=TwoWay}">
-                                    <Path Data="{StaticResource IconInsertSpace}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </ToggleButton>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="背景网格格式" Click="OnBackgroundFormatClick">
-                                    <Path Data="{StaticResource IconGrid}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="清除页面" Command="{Binding ClearPageCommand}">
-                                    <Path Data="{StaticResource IconClear}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="16" Height="16" />
-                                </Button>
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Visibility="{Binding IsDrawRibbonVisible, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="撤销" Command="{Binding UndoCommand}"><Path Data="{StaticResource Fluent_arrow_undo}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="键入文本" IsChecked="{Binding TextModeEnabled}"><Path Data="{StaticResource Fluent_cursor}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ItemsControl ItemsSource="{Binding LassoTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_lasso}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <ItemsControl ItemsSource="{Binding EraserTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_eraser}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding HighlighterTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_highlight}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding PenTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_pen}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0,0,3,0" ToolTip="添加" Click="OnAddToolMenuClick"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="单指平移" IsChecked="{Binding SingleFingerPanEnabled}"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入空白空间" IsChecked="{Binding InsertSpaceModeEnabled}"><Image Source="{StaticResource FluentDrawing_insert_space}" Width="21" Height="21" Stretch="Uniform" /></ToggleButton>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="设置背景格式" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="清纸" Click="OnClearPageClick"><Path Data="{StaticResource Fluent_delete_dismiss}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                            </StackPanel>
+                        </ScrollViewer>
 
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Visibility="{Binding IsViewRibbonVisible, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="整页视图" Click="OnEnterFullPageClick"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="普通视图" Click="OnExitFullPageClick"><Path Data="{StaticResource Fluent_panel_left}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="拆分视图" IsChecked="{Binding IsSplitView, Mode=OneWay}" Command="{Binding ToggleSplitViewCommand}"><Path Data="{StaticResource Fluent_split_view}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="锁定显示比例" IsChecked="{Binding ZoomLocked}"><Path Data="{StaticResource Fluent_lock_closed}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></ToggleButton>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="显示比例" Click="OnZoomPercentClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" /><TextBlock x:Name="ZoomStatus" Text="100%" FontFamily="Cascadia Mono" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="放大" Click="OnZoomInClick"><Path Data="{StaticResource Fluent_zoom_in}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="缩小" Click="OnZoomOutClick"><Path Data="{StaticResource Fluent_zoom_out}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="54" Height="34" ToolTip="100%" Click="OnResetZoomClick"><TextBlock Text="100%" Foreground="{StaticResource TextPrimary}" FontFamily="Cascadia Mono" FontSize="10" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="页宽" Command="{Binding FitPageWidthCommand}"><Path Data="{StaticResource Fluent_page_width}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Border Style="{StaticResource HairlineVerticalSeparator}" />
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="基准线" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="页面颜色" Click="OnPageColorClick"><Ellipse Fill="{Binding ActivePageAppearance.PageColor}" Stroke="{StaticResource BorderHairline}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="纸张大小" Click="OnPaperSizeClick"><Path Data="{StaticResource Fluent_document_page}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="隐藏页面标题" IsChecked="{Binding IsPageTitleHidden, Mode=OneWay}" Click="OnTogglePageTitleClick"><Path Data="{StaticResource Fluent_eye_off}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="切换背景" IsChecked="{Binding IsDarkPageBackground, Mode=OneWay}" Click="OnTogglePageThemeClick"><Path Data="{StaticResource Fluent_weather_moon}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
                 </Border>
             </StackPanel>
 
-            <!-- MAIN WORKSPACE ROW -->
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <!-- 1. Vertical 32px Rail -->
                     <ColumnDefinition Width="32" />
-                    <!-- 2. Black Section Pane (196px) -->
                     <ColumnDefinition Width="Auto" />
-                    <!-- 3. Gray Page Pane (196px) -->
                     <ColumnDefinition Width="Auto" />
-                    <!-- 4. Canvas Viewport Area -->
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <!-- 1. VERTICAL NAVIGATION RAIL (32px) -->
-                <Border Grid.Column="0" Background="{StaticResource RailBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0">
-                    <StackPanel Margin="0,8,0,0">
-                        <ToggleButton Style="{StaticResource RailToggleButtonStyle}" ToolTip="切换分区窗格"
-                                      IsChecked="{Binding IsSectionPaneVisible, Mode=TwoWay}">
-                            <Path Data="{StaticResource IconNavigation}" Fill="{StaticResource TextSecondary}" Stretch="Uniform" Width="14" Height="14" />
-                        </ToggleButton>
-                        <ToggleButton Style="{StaticResource RailToggleButtonStyle}" ToolTip="切换页面窗格"
-                                      IsChecked="{Binding IsPagePaneVisible, Mode=TwoWay}">
-                            <Path Data="{StaticResource IconPanelLeft}" Fill="{StaticResource TextSecondary}" Stretch="Uniform" Width="14" Height="14" />
-                        </ToggleButton>
+                <Border Grid.Column="0" Background="{StaticResource RailBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Margin="0,6,0,0">
+                        <ToggleButton Style="{StaticResource RailToggleButtonStyle}" ToolTip="折叠或展开分区栏" IsChecked="{Binding IsSectionPaneVisible}"><Path Data="{StaticResource Fluent_navigation}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="20" Height="20" /></ToggleButton>
+                        <ToggleButton Style="{StaticResource RailToggleButtonStyle}" ToolTip="折叠或展开页面栏" IsChecked="{Binding IsPagePaneVisible}"><Path Data="{StaticResource Fluent_panel_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="20" Height="20" /></ToggleButton>
                     </StackPanel>
                 </Border>
 
-                <!-- 2. BLACK SECTION PANE (196px) -->
-                <Border Grid.Column="1" Width="196" Background="{StaticResource SectionPaneBackground}"
-                        BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
-                        Visibility="{Binding IsSectionPaneVisible, Converter={x:Null}}">
+                <Border Grid.Column="1" Width="196" Background="{StaticResource SectionPaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsSectionPaneVisible, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
-                        <!-- Section Pane Header -->
-                        <Border DockPanel.Dock="Top" Height="36" Background="{StaticResource SectionPaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,0,1">
-                            <DockPanel Margin="8,0,8,0">
-                                <Button DockPanel.Dock="Right" Style="{StaticResource RibbonIconButtonStyle}" Width="28" Height="28" Padding="4"
-                                        ToolTip="新建分区/笔记本" Click="OnAddSectionMenuClick">
-                                    <Path Data="{StaticResource IconAdd}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                                </Button>
-                                <Button DockPanel.Dock="Left" Content="{Binding ActiveNotebookTitle}"
-                                        Command="{Binding FocusNotebookRootCommand}"
-                                        Background="Transparent" BorderThickness="0"
-                                        Foreground="{StaticResource TextPrimary}" FontWeight="Bold" FontSize="14"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" Cursor="Hand" />
-                            </DockPanel>
-                        </Border>
-
-                        <!-- Recursive Section Tree Items -->
+                        <Grid DockPanel.Dock="Top" Height="36">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="{Binding ActiveNotebookTitle}" Command="{Binding FocusNotebookRootCommand}" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" HorizontalContentAlignment="Left" Padding="10,0" />
+                            <Button Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="28" Height="28" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></Button>
+                        </Grid>
+                        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Library.Notebooks}" Margin="4,0,4,4">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding Title}" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"
+                                            Background="#232323" Foreground="{StaticResource TextSecondary}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" Padding="8,4" Margin="0,1" HorizontalContentAlignment="Left" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding SectionRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Height="32" Margin="0,1" CornerRadius="3" Background="Transparent" Cursor="Hand">
-                                            <Grid>
-                                                <Grid.InputBindings>
-                                                    <MouseBinding MouseAction="LeftClick"
-                                                                  Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                  CommandParameter="{Binding Section.Id}" />
-                                                </Grid.InputBindings>
-                                                <DockPanel Margin="{Binding Depth, Converter={x:Null}}">
-                                                    <Button DockPanel.Dock="Left" Width="20" Height="20" Background="Transparent" BorderThickness="0"
-                                                            Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                            CommandParameter="{Binding Section.Id}"
-                                                            Visibility="{Binding Section.Children.Count, Converter={x:Null}}">
-                                                        <Path Data="{StaticResource IconChevronDown}" Fill="{StaticResource TextSecondary}" Stretch="Uniform" Width="10" Height="10" />
+                                        <Border Style="{StaticResource PaneRow}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
+                                            <Grid Background="Transparent">
+                                                <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" /></Grid.InputBindings>
+                                                <DockPanel Margin="{Binding Indent}">
+                                                    <Button DockPanel.Dock="Left" Width="24" Background="Transparent" BorderThickness="0" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
+                                                        <Path Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" Visibility="{Binding HasChildren, Converter={StaticResource BoolToVisibility}}" />
                                                     </Button>
-                                                    <TextBlock Text="{Binding Section.Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" VerticalAlignment="Center" Margin="4,0,0,0" />
+                                                    <TextBlock Text="{Binding Section.Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                 </DockPanel>
                                             </Grid>
                                         </Border>
@@ -290,38 +252,31 @@
                     </DockPanel>
                 </Border>
 
-                <!-- 3. GRAY PAGE PANE (196px) -->
-                <Border Grid.Column="2" Width="196" Background="{StaticResource PagePaneBackground}"
-                        BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
-                        Visibility="{Binding IsPagePaneVisible, Converter={x:Null}}">
+                <Border Grid.Column="2" Width="196" Background="{StaticResource PagePaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsPagePaneVisible, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
-                        <!-- Add Page Button -->
-                        <Border DockPanel.Dock="Top" Height="36" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,0,1">
-                            <Button Content="+ 添加页面"
-                                    Command="{Binding AddPageCommand}"
-                                    IsEnabled="{Binding CanAddPage}"
-                                    Background="Transparent" BorderThickness="0"
-                                    Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold"
-                                    HorizontalAlignment="Left" Margin="12,0,0,0" Cursor="Hand" />
-                        </Border>
-
-                        <!-- Page List -->
+                        <Button DockPanel.Dock="Top" Content="+ 添加页面" Height="36" IsEnabled="{Binding CanAddPage}" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimary}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnAddPageClick" />
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding PagePaneRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Height="44" Padding="12,4" Margin="0,1" CornerRadius="3" Background="Transparent" Cursor="Hand">
-                                            <Grid>
-                                                <Grid.InputBindings>
-                                                    <MouseBinding MouseAction="LeftClick"
-                                                                  Command="{Binding DataContext.SelectPageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                  CommandParameter="{Binding}" />
-                                                </Grid.InputBindings>
+                                        <Border MinHeight="44" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnPageRowRightClick">
+                                            <Grid Background="Transparent">
+                                                <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectPageCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" /></Grid.InputBindings>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Page.Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{Binding Page.Subtitle}" Foreground="{StaticResource TextMuted}" FontSize="10" Margin="0,2,0,0" />
+                                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource TextMuted}" FontSize="10" Margin="0,2,0,0" />
                                                 </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="PDF" Foreground="{StaticResource TextMuted}" FontSize="9" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
                                             </Grid>
+                                            <Border.Style>
+                                                <Style TargetType="Border" BasedOn="{StaticResource PaneRow}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsHeader}" Value="True"><Setter Property="MinHeight" Value="28" /><Setter Property="Background" Value="#232323" /><Setter Property="IsHitTestVisible" Value="False" /></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -330,52 +285,182 @@
                     </DockPanel>
                 </Border>
 
-                <!-- 4. CANVAS VIEWPORT -->
-                <Grid Grid.Column="3">
-                    <controls:NoteCanvas x:Name="CanvasControl"
-                                         BackgroundFormat="{Binding BackgroundFormat}"
-                                         SelectedTool="{Binding SelectedTool}"
-                                         SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}"
-                                         TextModeEnabled="{Binding TextModeEnabled}"
-                                         InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}"
-                                         PendingTagKind="{Binding PendingTagKind}" />
+                <Grid Grid.Column="3" Background="#0A0A0A">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="{Binding IsSplitView, Converter={StaticResource BoolToGridLength}}" />
+                    </Grid.ColumnDefinitions>
 
-                    <!-- FULL-PAGE FLOATING QUICK TOOLBAR -->
-                    <Border Visibility="{Binding IsFullPageMode, Converter={x:Null}}"
-                            HorizontalAlignment="Center" VerticalAlignment="Top"
-                            Margin="0,16,0,0" Background="{StaticResource TitleBarBackground}"
-                            BorderBrush="{StaticResource BorderHairline}" BorderThickness="1"
-                            CornerRadius="6" Padding="8,4">
+                    <Border Grid.Column="0" PreviewMouseDown="OnLeftCanvasFocus">
+                        <controls:NoteCanvas x:Name="LeftCanvas" Document="{Binding PrimaryDocument}" Appearance="{Binding PrimaryPageAppearance}" PageTitle="{Binding PrimaryPageTitle}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextModeEnabled="{Binding TextModeEnabled}"
+                                             InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
+                    </Border>
+                    <Border Grid.Column="1" Width="7" Background="#2A2A2A" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1,0" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}" />
+                    <Border Grid.Column="2" PreviewMouseDown="OnRightCanvasFocus" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}">
+                        <controls:NoteCanvas x:Name="RightCanvas" Document="{Binding SecondaryDocument}" Appearance="{Binding SecondaryPageAppearance}" PageTitle="{Binding SecondaryPageTitle}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextModeEnabled="{Binding TextModeEnabled}"
+                                             InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
+                    </Border>
+
+                    <StackPanel Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
+                                Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}">
+                        <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="折叠或展开分区栏" IsChecked="{Binding IsSectionPaneVisible}"><Path Data="{StaticResource Fluent_navigation}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></ToggleButton>
+                        <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="折叠或展开页面栏" IsChecked="{Binding IsPagePaneVisible}"><Path Data="{StaticResource Fluent_panel_left}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></ToggleButton>
+                    </StackPanel>
+
+                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,14,0,0" Padding="4,2" CornerRadius="3" Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsFullPageMode}" Value="True" />
+                                            <Condition Binding="{Binding IsFloatingToolbarVisible}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <ItemsControl ItemsSource="{Binding FullPageToolbarItems}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="{Binding Label}" Tag="{Binding Id}" Click="OnFullPageToolClick">
+                                        <Grid Width="18" Height="18">
+                                            <Path x:Name="singleColorIcon" Data="{Binding IconKey, Converter={StaticResource FluentIcon}}" Fill="{Binding TintHex}" Stretch="Uniform" />
+                                            <Image x:Name="multiColorIcon" Source="{Binding IconKey, Converter={StaticResource FluentDrawingIcon}}" Stretch="Uniform" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding PreserveColors}" Value="True">
+                                            <Setter TargetName="singleColorIcon" Property="Visibility" Value="Collapsed" />
+                                            <Setter TargetName="multiColorIcon" Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+
+                    <StackPanel Grid.ColumnSpan="3" Panel.ZIndex="50" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Margin" Value="0,6,7,0" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFullPageMode}" Value="True"><Setter Property="Margin" Value="0,6,145,0" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="显示或隐藏绘图工具栏" IsChecked="{Binding IsFloatingToolbarVisible}"
+                                      Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_pen}" Fill="{StaticResource TextPrimary}" Width="17" Height="17" /></ToggleButton>
+                        <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="搜索笔记" Click="OnSearchClick"><Path Data="{StaticResource Fluent_search}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
+                        <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="进入整页视图" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
+                        <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="退出整页视图" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_full_screen_minimize}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
+                    </StackPanel>
+
+                    <Border x:Name="SearchPanel" Grid.ColumnSpan="3" Panel.ZIndex="30" Width="360" MaxHeight="380" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,44,7,0"
+                            Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" CornerRadius="3" Visibility="Collapsed">
+                        <DockPanel>
+                            <Border DockPanel.Dock="Top" Height="36" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,0,1">
+                                <DockPanel>
+                                    <Path DockPanel.Dock="Left" Data="{StaticResource Fluent_search}" Fill="{StaticResource TextSecondary}" Width="15" Height="15" Margin="9,0,6,0" />
+                                    <Button DockPanel.Dock="Right" Content="×" Width="30" Background="Transparent" Foreground="{StaticResource TextSecondary}" BorderThickness="0" Click="OnCloseSearchClick" />
+                                    <TextBox x:Name="SearchBox" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" Foreground="{StaticResource TextPrimary}" BorderThickness="0" Padding="2,6" FontSize="12" VerticalContentAlignment="Center" />
+                                </DockPanel>
+                            </Border>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SearchResults}">
+                                    <ItemsControl.ItemTemplate><DataTemplate><Button Command="{Binding DataContext.NavigateSearchResultCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Click="OnSearchResultClick" Background="Transparent" BorderThickness="0" Padding="10,8" HorizontalContentAlignment="Stretch" Cursor="Hand"><TextBlock Text="{Binding DisplayText}" Foreground="{StaticResource TextPrimary}" TextTrimming="CharacterEllipsis" /></Button></DataTemplate></ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Border>
+
+                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,10" Padding="8,4" CornerRadius="3" Background="#CC232323" IsHitTestVisible="False" Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal">
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="撤销" Command="{Binding UndoCommand}">
-                                <Path Data="{StaticResource IconUndo}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
-                            <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="光标" IsChecked="{Binding TextModeEnabled, Mode=TwoWay}">
-                                <Path Data="{StaticResource IconCursor}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                            </ToggleButton>
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="黑笔" Command="{Binding SelectToolCommand}" CommandParameter="pen-black">
-                                <Path Data="{StaticResource IconPen}" Fill="White" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="蓝笔" Command="{Binding SelectToolCommand}" CommandParameter="pen-blue">
-                                <Path Data="{StaticResource IconPen}" Fill="{StaticResource AccentBlue}" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="红笔" Command="{Binding SelectToolCommand}" CommandParameter="pen-red">
-                                <Path Data="{StaticResource IconPen}" Fill="{StaticResource TagRed}" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="橡皮" Command="{Binding SelectToolCommand}" CommandParameter="eraser-stroke">
-                                <Path Data="{StaticResource IconEraser}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
-                            <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="退出全页模式" Command="{Binding ToggleFullPageCommand}">
-                                <Path Data="{StaticResource IconExitFullPage}" Fill="{StaticResource TextPrimary}" Stretch="Uniform" Width="14" Height="14" />
-                            </Button>
+                            <TextBlock Text="{Binding SaveStateText}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                            <TextBlock Text="  ·  " Foreground="{StaticResource TextMuted}" />
+                            <TextBlock Text="{Binding WorkspaceRoot}" Foreground="{StaticResource TextMuted}" FontSize="10" FontFamily="Cascadia Mono" MaxWidth="360" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
                 </Grid>
             </Grid>
         </DockPanel>
 
-        <!-- FULL-SCREEN BACKSTAGE OVERLAY -->
-        <controls:BackstageView Visibility="{Binding IsBackstageOpen, Converter={x:Null}}" />
+        <Border Panel.ZIndex="40" Width="304" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="365,94,0,0"
+                Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" CornerRadius="3" Padding="14"
+                Visibility="{Binding IsToolFlyoutOpen, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,10">
+                    <Button DockPanel.Dock="Right" Content="×" Width="26" Height="26" Background="Transparent" Foreground="{StaticResource TextSecondary}" BorderThickness="0" Click="OnCloseToolFlyoutClick" />
+                    <StackPanel Orientation="Horizontal">
+                        <Path Data="{StaticResource Fluent_pen}" Fill="{Binding SelectedTool.ColorHex}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsPen, Converter={StaticResource BoolToVisibility}}" />
+                        <Path Data="{StaticResource Fluent_highlight}" Fill="{Binding SelectedTool.ColorHex}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}" />
+                        <Path Data="{StaticResource Fluent_eraser}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsEraser, Converter={StaticResource BoolToVisibility}}" />
+                        <Path Data="{StaticResource Fluent_lasso}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsLasso, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding SelectedTool.DisplayName}" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DockPanel>
+                <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,8" />
+
+                <StackPanel Visibility="{Binding SelectedToolIsPen, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="颜色" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="黑色" Tag="Black" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#1B1B1F" Stroke="White" StrokeThickness="1" /></Button>
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="蓝色" Tag="Blue" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#185ABD" /></Button>
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="红色" Tag="Red" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#C42B1C" /></Button>
+                    </StackPanel>
+                    <DockPanel><TextBlock Text="笔宽" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=WidthSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="WidthSlider" Minimum="0.1" Maximum="2" SmallChange="0.1" LargeChange="0.5" TickFrequency="0.1" Value="{Binding SelectedTool.WidthMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="压感" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PressureSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="PressureSlider" Minimum="0" Maximum="400" TickFrequency="10" Value="{Binding SelectedTool.PressurePercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="出墨" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=FlowSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="FlowSlider" Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding SelectedTool.InkFlowPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <CheckBox Content="压感橡皮" IsChecked="{Binding SelectedTool.PressureEraseEnabled, Mode=TwoWay}" Foreground="{StaticResource TextPrimary}" Margin="0,10,0,2" Click="OnToolSettingChanged" />
+                    <DockPanel><TextBlock Text="按压力度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PenThresholdSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="PenThresholdSlider" Minimum="40" Maximum="100" TickFrequency="2" Value="{Binding SelectedTool.PressureEraseThresholdPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="按压时间" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PenDwellSlider, Path=Value, StringFormat={}{0:F0} ms}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="PenDwellSlider" Minimum="50" Maximum="500" TickFrequency="10" Value="{Binding SelectedTool.PressureEraseDwellMilliseconds, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                </StackPanel>
+
+                <StackPanel Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="颜色" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="黑色" Tag="Black" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#1B1B1F" Stroke="White" StrokeThickness="1" /></Button>
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="蓝色" Tag="Blue" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#185ABD" /></Button>
+                        <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="红色" Tag="Red" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#C42B1C" /></Button>
+                    </StackPanel>
+                    <DockPanel><TextBlock Text="宽度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=HighlighterWidthSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="HighlighterWidthSlider" Minimum="2" Maximum="12" TickFrequency="0.5" Value="{Binding SelectedTool.WidthMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="透明度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=OpacitySlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="OpacitySlider" Minimum="10" Maximum="70" TickFrequency="5" Value="{Binding SelectedTool.OpacityPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                </StackPanel>
+
+                <StackPanel Visibility="{Binding SelectedToolIsEraser, Converter={StaticResource BoolToVisibility}}">
+                    <DockPanel><TextBlock Text="大小" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="EraserSlider" Minimum="2" Maximum="16" TickFrequency="0.5" Value="{Binding SelectedTool.EraserRadiusMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="按压力度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserThresholdSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="EraserThresholdSlider" Minimum="40" Maximum="100" TickFrequency="2" Value="{Binding SelectedTool.PressureEraseThresholdPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="按压时间" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserDwellSlider, Path=Value, StringFormat={}{0:F0} ms}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="EraserDwellSlider" Minimum="50" Maximum="500" TickFrequency="10" Value="{Binding SelectedTool.PressureEraseDwellMilliseconds, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <TextBlock Text="整笔擦除 · 像素擦除稍后接入" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
+                </StackPanel>
+
+                <StackPanel Visibility="{Binding SelectedToolIsLasso, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="闭合套索可同时选择笔迹和标记" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                    <Button Content="删除所选" Style="{StaticResource RibbonIconButtonStyle}" HorizontalContentAlignment="Left" Margin="0,8,0,0" Click="OnDeleteSelectionClick" />
+                    <TextBlock Text="在框内按住拖动；拖动四角缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
+                </StackPanel>
+
+                <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,10,0,6" />
+                <Button Content="删除工具" Style="{StaticResource RibbonIconButtonStyle}" HorizontalContentAlignment="Left" Command="{Binding DeleteSelectedToolCommand}" />
+            </StackPanel>
+        </Border>
+
+        <controls:BackstageView x:Name="Backstage" Visibility="{Binding IsBackstageOpen, Converter={StaticResource BoolToVisibility}}" />
     </Grid>
 </Window>

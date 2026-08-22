@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace Notein_win.Models;
 
@@ -56,6 +57,11 @@ public class ToolPreset
     public int OpacityPercent { get; set; } = 32;
     public float EraserRadiusMm { get; set; } = 4.5f;
     public bool PressureEraseEnabled { get; set; } = true;
+    public int PressureEraseDwellMilliseconds { get; set; } = 140;
+    public int PressureEraseThresholdPercent { get; set; } = 78;
+
+    [JsonIgnore]
+    public bool IsSelected { get; set; }
 
     public ToolPreset(
         string id,
@@ -88,6 +94,11 @@ public class ToolPreset
         _ => "绘图工具"
     };
 
+    public string ColorHex => Color.GetHex();
+
+    // Android's displayColor(): logical black remains black in saved ink, but is light in dark chrome/canvas.
+    public string DisplayColorHex => Color == InkPalette.Black ? "#EFEFEF" : Color.GetHex();
+
     public JsonObject ToJson()
     {
         var obj = new JsonObject
@@ -100,7 +111,9 @@ public class ToolPreset
             ["inkFlowPercent"] = InkFlowPercent,
             ["opacityPercent"] = OpacityPercent,
             ["eraserRadiusMm"] = EraserRadiusMm,
-            ["pressureEraseEnabled"] = PressureEraseEnabled
+            ["pressureEraseEnabled"] = PressureEraseEnabled,
+            ["pressureEraseDwellMilliseconds"] = PressureEraseDwellMilliseconds,
+            ["pressureEraseThresholdPercent"] = PressureEraseThresholdPercent
         };
         return obj;
     }
@@ -122,8 +135,12 @@ public class ToolPreset
             var opacityPercent = json["opacityPercent"]?.GetValue<int>() ?? 32;
             var eraserRadiusMm = json["eraserRadiusMm"]?.GetValue<float>() ?? 4.5f;
             var pressureEraseEnabled = json["pressureEraseEnabled"]?.GetValue<bool>() ?? true;
-
-            return new ToolPreset(id, kind, color, widthMm, pressurePercent, inkFlowPercent, opacityPercent, eraserRadiusMm, pressureEraseEnabled);
+            var preset = new ToolPreset(id, kind, color, widthMm, pressurePercent, inkFlowPercent, opacityPercent, eraserRadiusMm, pressureEraseEnabled)
+            {
+                PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
+                PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
+            };
+            return preset;
         }
         catch
         {
@@ -215,6 +232,7 @@ public class ToolShelf
         _mutableTools.Clear();
         _mutableTools.AddRange(other._mutableTools);
         SelectedId = _mutableTools.Any(t => t.Id == other.SelectedId) ? other.SelectedId : _mutableTools[0].Id;
+        _sequence = _mutableTools.Count + 1;
     }
 
     public string ToJson()

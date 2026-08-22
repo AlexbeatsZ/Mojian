@@ -1,290 +1,292 @@
+using System.Text.Json.Serialization;
+using System.Windows;
+
 namespace Notein_win.Models;
 
-public class NotePage
+public static class IdFactory
 {
-    public string Id { get; set; }
-    public string Title { get; set; }
-    public string Subtitle { get; set; }
-    public DateTime UpdatedAt { get; set; }
+    public static string New(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
+}
+
+public enum PagePaneMode { CurrentSection, Recursive }
+public enum PaperKind { Infinite, A4 }
+public enum PageTheme { Dark, Light }
+
+public enum CanvasBackgroundFormat
+{
+    Blank,
+    RuledNarrow,
+    RuledStandard,
+    RuledWide,
+    GridDense,
+    GridStandard,
+    GridWide,
+    DotsDense,
+    DotsStandard,
+    DotsWide,
+}
+
+public static class CanvasBackgroundFormatExtensions
+{
+    public static string GetLabel(this CanvasBackgroundFormat value) => value switch
+    {
+        CanvasBackgroundFormat.Blank => "空白",
+        CanvasBackgroundFormat.RuledNarrow => "窄横线",
+        CanvasBackgroundFormat.RuledStandard => "标准横线",
+        CanvasBackgroundFormat.RuledWide => "宽横线",
+        CanvasBackgroundFormat.GridDense => "密集网格",
+        CanvasBackgroundFormat.GridStandard => "标准网格",
+        CanvasBackgroundFormat.GridWide => "宽网格",
+        CanvasBackgroundFormat.DotsDense => "密集点阵",
+        CanvasBackgroundFormat.DotsStandard => "标准点阵",
+        CanvasBackgroundFormat.DotsWide => "宽点阵",
+        _ => "空白",
+    };
+}
+
+public sealed class PageAppearance
+{
+    public PaperKind PaperKind { get; set; } = PaperKind.Infinite;
+    public PageTheme Theme { get; set; } = PageTheme.Dark;
+    public CanvasBackgroundFormat Background { get; set; } = CanvasBackgroundFormat.GridStandard;
+    public string PageColor { get; set; } = "#1B1B1B";
+    public bool ShowTitle { get; set; } = true;
+    public int SheetCount { get; set; } = 1;
+    public double Width { get; set; } = 793.7;
+    public double Height { get; set; } = 1122.5;
+
+    public PageAppearance Clone() => new()
+    {
+        PaperKind = PaperKind,
+        Theme = Theme,
+        Background = Background,
+        PageColor = PageColor,
+        ShowTitle = ShowTitle,
+        SheetCount = Math.Max(1, SheetCount),
+        Width = Width,
+        Height = Height,
+    };
+}
+
+public sealed class NotePage
+{
+    public string Id { get; set; } = IdFactory.New("page");
+    public string Title { get; set; } = "无标题页";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public PageAppearance Appearance { get; set; } = new();
+    public bool IsPdfPage { get; set; }
+    public int? PdfPageNumber { get; set; }
+    public int? PdfPageCount { get; set; }
+
+    public NotePage() { }
 
     public NotePage(string id, string title, string subtitle = "刚刚")
     {
         Id = id;
         Title = title;
-        Subtitle = subtitle;
-        UpdatedAt = DateTime.Now;
     }
+
+    [JsonIgnore]
+    public string Subtitle => UpdatedAt.ToLocalTime().Date == DateTime.Today
+        ? UpdatedAt.ToLocalTime().ToString("HH:mm")
+        : UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd");
 }
 
-public class SectionNode
+public sealed class SectionNode
 {
-    public string Id { get; set; }
-    public string Title { get; set; }
+    public string Id { get; set; } = IdFactory.New("section");
+    public string Title { get; set; } = "新分区";
     public List<NotePage> Pages { get; set; } = new();
     public List<SectionNode> Children { get; set; } = new();
     public bool Expanded { get; set; } = true;
 
-    public SectionNode(string id, string title)
-    {
-        Id = id;
-        Title = title;
-    }
+    public SectionNode() { }
+    public SectionNode(string id, string title) { Id = id; Title = title; }
 
     public SectionNode(string id, string title, IEnumerable<NotePage> pages, IEnumerable<SectionNode>? children = null)
     {
         Id = id;
         Title = title;
         Pages = pages.ToList();
-        if (children != null)
-        {
-            Children = children.ToList();
-        }
+        Children = children?.ToList() ?? new List<SectionNode>();
     }
 }
 
-public record SectionRow(SectionNode Section, int Depth);
-
-public enum PagePaneMode
+public sealed class SectionRow
 {
-    CurrentSection,
-    Recursive,
+    public SectionNode Section { get; }
+    public int Depth { get; }
+    public Thickness Indent => new(Depth * 14, 0, 0, 0);
+    public bool HasChildren => Section.Children.Count > 0;
+    public bool IsSelected { get; }
+
+    public SectionRow(SectionNode section, int depth, bool isSelected = false)
+    {
+        Section = section;
+        Depth = depth;
+        IsSelected = isSelected;
+    }
 }
 
-public abstract record PagePaneRow(int Depth)
+public sealed class PagePaneRow
 {
-    public record SectionHeaderRow(SectionNode Section, int Depth) : PagePaneRow(Depth);
-    public record PageItemRow(NotePage Page, string SectionId, int Depth) : PagePaneRow(Depth);
+    public bool IsHeader { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string Subtitle { get; init; } = string.Empty;
+    public string SectionId { get; init; } = string.Empty;
+    public NotePage? Page { get; init; }
+    public int Depth { get; init; }
+    public Thickness Indent => new(12 + Depth * 14, 0, 8, 0);
+    public bool IsSelected { get; init; }
+    public bool IsPdf => Page?.IsPdfPage == true;
 }
 
-public class NotebookWorkspace
+public sealed class NotebookWorkspace
 {
-    private int _sequence = 100;
-
-    public string Id { get; set; }
-    public string Title { get; set; }
+    public string Id { get; set; } = IdFactory.New("notebook");
+    public string Title { get; set; } = "新笔记本";
     public List<SectionNode> Sections { get; set; } = new();
     public bool Expanded { get; set; } = true;
-
-    public string? FocusedSectionId { get; private set; }
+    public string? FocusedSectionId { get; set; }
+    public string SelectedPageSectionId { get; set; } = string.Empty;
+    public string SelectedPageId { get; set; } = string.Empty;
+    [JsonIgnore]
     public string SelectedSectionId => FocusedSectionId ?? string.Empty;
-    public PagePaneMode PagePaneMode { get; private set; } = PagePaneMode.CurrentSection;
-    public string SelectedPageSectionId { get; private set; } = string.Empty;
-    public string SelectedPageId { get; private set; } = string.Empty;
+
+    public NotebookWorkspace() { }
 
     public NotebookWorkspace(string id, string title, IEnumerable<SectionNode>? sections = null)
     {
         Id = id;
         Title = title;
-        if (sections != null)
+        Sections = sections?.ToList() ?? new List<SectionNode>();
+        FocusedSectionId = FlattenAllSections().FirstOrDefault()?.Id;
+        SelectFirstPage(PagePaneMode.CurrentSection);
+    }
+
+    public IEnumerable<SectionNode> FlattenAllSections()
+    {
+        foreach (var root in Sections)
         {
-            Sections = sections.ToList();
+            foreach (var section in Flatten(root)) yield return section;
         }
-        FocusedSectionId = FlattenSections().FirstOrDefault()?.Section.Id;
-        SelectFirstPageForMode();
+
+        static IEnumerable<SectionNode> Flatten(SectionNode node)
+        {
+            yield return node;
+            foreach (var child in node.Children)
+            {
+                foreach (var descendant in Flatten(child)) yield return descendant;
+            }
+        }
     }
 
     public List<SectionRow> FlattenSections()
     {
-        var rows = new List<SectionRow>();
+        var result = new List<SectionRow>();
         void Visit(IEnumerable<SectionNode> nodes, int depth)
         {
             foreach (var node in nodes)
             {
-                rows.Add(new SectionRow(node, depth));
-                if (node.Expanded)
-                {
-                    Visit(node.Children, depth + 1);
-                }
+                result.Add(new SectionRow(node, depth, node.Id == FocusedSectionId));
+                if (node.Expanded) Visit(node.Children, depth + 1);
             }
         }
         Visit(Sections, 0);
-        return rows;
+        return result;
     }
 
-    public SectionNode? SelectedSection() =>
-        FocusedSectionId != null ? FindSection(FocusedSectionId) : null;
+    public SectionNode? FindSection(string? id) => string.IsNullOrWhiteSpace(id)
+        ? null
+        : FlattenAllSections().FirstOrDefault(section => section.Id == id);
 
-    public bool HasSelectedSection() =>
-        FocusedSectionId != null && FindSection(FocusedSectionId) != null;
-
-    public NotePage? SelectedPage() =>
-        FindSection(SelectedPageSectionId)?.Pages.FirstOrDefault(p => p.Id == SelectedPageId);
-
-    public List<PagePaneRow> GetPagePaneRows()
+    public NotePage? FindPage(string? pageId, out SectionNode? owner)
     {
-        if (FocusedSectionId == null)
+        owner = null;
+        if (string.IsNullOrWhiteSpace(pageId)) return null;
+        foreach (var section in FlattenAllSections())
         {
-            if (PagePaneMode == PagePaneMode.CurrentSection)
-            {
-                return new List<PagePaneRow>();
-            }
-
-            var rows = new List<PagePaneRow>();
-            void VisitAll(SectionNode section, int depth)
-            {
-                rows.Add(new PagePaneRow.SectionHeaderRow(section, depth));
-                rows.AddRange(section.Pages.Select(p => new PagePaneRow.PageItemRow(p, section.Id, depth + 1)));
-                foreach (var child in section.Children)
-                {
-                    VisitAll(child, depth + 1);
-                }
-            }
-            foreach (var section in Sections)
-            {
-                VisitAll(section, 0);
-            }
-            return rows;
+            var page = section.Pages.FirstOrDefault(item => item.Id == pageId);
+            if (page == null) continue;
+            owner = section;
+            return page;
         }
-
-        var root = FindSection(FocusedSectionId);
-        if (root == null) return new List<PagePaneRow>();
-
-        if (PagePaneMode == PagePaneMode.CurrentSection)
-        {
-            return root.Pages.Select(p => (PagePaneRow)new PagePaneRow.PageItemRow(p, root.Id, 0)).ToList();
-        }
-
-        var recursiveRows = new List<PagePaneRow>();
-        recursiveRows.AddRange(root.Pages.Select(p => new PagePaneRow.PageItemRow(p, root.Id, 0)));
-
-        void VisitChildren(SectionNode section, int depth)
-        {
-            recursiveRows.Add(new PagePaneRow.SectionHeaderRow(section, depth));
-            recursiveRows.AddRange(section.Pages.Select(p => new PagePaneRow.PageItemRow(p, section.Id, depth + 1)));
-            foreach (var child in section.Children)
-            {
-                VisitChildren(child, depth + 1);
-            }
-        }
-
-        foreach (var child in root.Children)
-        {
-            VisitChildren(child, 0);
-        }
-
-        return recursiveRows;
+        return null;
     }
 
-    public bool SelectSection(string id)
+    public SectionNode? SelectedSection() => FindSection(FocusedSectionId);
+    public bool HasSelectedSection() => SelectedSection() != null;
+    public NotePage? SelectedPage() => FindPage(SelectedPageId, out _);
+
+    public bool SelectSection(string id, PagePaneMode mode = PagePaneMode.CurrentSection)
     {
-        var section = FindSection(id);
-        if (section == null) return false;
-        FocusedSectionId = section.Id;
-        SelectFirstPageForMode();
+        if (FindSection(id) == null) return false;
+        FocusedSectionId = id;
+        SelectFirstPage(mode);
         return true;
     }
 
-    public void ClearSectionFocus()
+    public void FocusNotebook(PagePaneMode mode = PagePaneMode.CurrentSection)
     {
         FocusedSectionId = null;
-        SelectFirstPageForMode();
+        SelectFirstPage(mode);
     }
 
-    public void FocusNotebook()
-    {
-        FocusedSectionId = null;
-        SelectFirstPageForMode();
-    }
-
-    public bool SelectPage(string id) =>
-        SelectPage(string.IsNullOrEmpty(SelectedPageSectionId) ? (FocusedSectionId ?? string.Empty) : SelectedPageSectionId, id);
-
-    public bool SelectPage(string sectionId, string id)
+    public bool SelectPage(string sectionId, string pageId, PagePaneMode mode)
     {
         var section = FindSection(sectionId);
-        if (section == null) return false;
-        var page = section.Pages.FirstOrDefault(p => p.Id == id);
-        if (page == null) return false;
-
-        if (FocusedSectionId == null)
+        if (section?.Pages.All(page => page.Id != pageId) != false) return false;
+        if (FocusedSectionId == null && mode == PagePaneMode.CurrentSection) return false;
+        if (FocusedSectionId != null && mode == PagePaneMode.CurrentSection && section.Id != FocusedSectionId) return false;
+        if (FocusedSectionId != null && mode == PagePaneMode.Recursive)
         {
-            if (PagePaneMode == PagePaneMode.CurrentSection) return false;
+            var root = FindSection(FocusedSectionId);
+            if (root == null || !Contains(root, section.Id)) return false;
         }
-        else
-        {
-            if (PagePaneMode == PagePaneMode.CurrentSection && section.Id != FocusedSectionId) return false;
-            var selectedRoot = FindSection(FocusedSectionId);
-            if (selectedRoot == null) return false;
-            if (PagePaneMode == PagePaneMode.Recursive && !IsDescendantOrSame(selectedRoot, section.Id)) return false;
-        }
-
         SelectedPageSectionId = section.Id;
-        SelectedPageId = page.Id;
+        SelectedPageId = pageId;
         return true;
     }
 
-    public void SetPagePaneMode(PagePaneMode mode)
+    public void SelectFirstPage(PagePaneMode mode)
     {
-        if (PagePaneMode == mode) return;
-        PagePaneMode = mode;
-        if (mode == PagePaneMode.CurrentSection || SelectedPage() == null)
-        {
-            SelectFirstPageForMode();
-        }
-    }
-
-    private void SelectFirstPageForMode()
-    {
+        (SectionNode Section, NotePage Page)? first = null;
         if (FocusedSectionId == null)
         {
-            if (PagePaneMode == PagePaneMode.CurrentSection)
-            {
-                SelectedPageSectionId = string.Empty;
-                SelectedPageId = string.Empty;
-            }
-            else
-            {
-                var first = FirstPageInNotebook();
-                SelectedPageSectionId = first?.SectionId ?? string.Empty;
-                SelectedPageId = first?.Page.Id ?? string.Empty;
-            }
-            return;
+            if (mode == PagePaneMode.Recursive) first = FirstPage(Sections);
         }
-
-        var root = FindSection(FocusedSectionId);
-        if (root == null)
+        else if (FindSection(FocusedSectionId) is { } root)
         {
-            SelectedPageSectionId = string.Empty;
-            SelectedPageId = string.Empty;
-            return;
+            first = mode == PagePaneMode.CurrentSection
+                ? root.Pages.FirstOrDefault() is { } direct ? (root, direct) : null
+                : FirstPage(new[] { root });
         }
-
-        var firstInTree = PagePaneMode == PagePaneMode.CurrentSection
-            ? (root.Pages.FirstOrDefault() is { } p ? (SectionId: FocusedSectionId, Page: p) : null)
-            : FirstPageInTree(root);
-
-        SelectedPageSectionId = firstInTree?.SectionId ?? FocusedSectionId;
-        SelectedPageId = firstInTree?.Page.Id ?? string.Empty;
+        SelectedPageSectionId = first?.Section.Id ?? string.Empty;
+        SelectedPageId = first?.Page.Id ?? string.Empty;
     }
 
-    private (string SectionId, NotePage Page)? FirstPageInNotebook()
+    public List<PagePaneRow> GetPagePaneRows(PagePaneMode mode)
     {
-        foreach (var section in Sections)
+        var result = new List<PagePaneRow>();
+        if (FocusedSectionId == null)
         {
-            var first = FirstPageInTree(section);
-            if (first != null) return first;
+            if (mode == PagePaneMode.CurrentSection) return result;
+            foreach (var root in Sections) AppendSection(result, root, 0, true);
+            return result;
         }
-        return null;
-    }
 
-    private (string SectionId, NotePage Page)? FirstPageInTree(SectionNode section)
-    {
-        if (section.Pages.FirstOrDefault() is { } page)
+        var focused = FindSection(FocusedSectionId);
+        if (focused == null) return result;
+        if (mode == PagePaneMode.CurrentSection)
         {
-            return (section.Id, page);
+            result.AddRange(focused.Pages.Select(page => PageRow(page, focused.Id, 0)));
+            return result;
         }
-        foreach (var child in section.Children)
-        {
-            var first = FirstPageInTree(child);
-            if (first != null) return first;
-        }
-        return null;
-    }
 
-    private bool IsDescendantOrSame(SectionNode root, string candidateId)
-    {
-        if (root.Id == candidateId) return true;
-        return root.Children.Any(c => IsDescendantOrSame(c, candidateId));
+        result.AddRange(focused.Pages.Select(page => PageRow(page, focused.Id, 0)));
+        foreach (var child in focused.Children) AppendSection(result, child, 0, true);
+        return result;
     }
 
     public bool ToggleExpanded(string id)
@@ -295,167 +297,309 @@ public class NotebookWorkspace
         return true;
     }
 
-    public SectionNode AddSection(string? parentId = null)
+    public SectionNode AddSection(string title, string? parentId = null)
     {
-        var node = new SectionNode(NextId("section"), parentId == null ? "新分区" : "新子分区");
-        if (parentId == null)
-        {
-            Sections.Add(node);
-        }
+        var section = new SectionNode(IdFactory.New("section"), string.IsNullOrWhiteSpace(title) ? "新分区" : title.Trim());
+        if (string.IsNullOrWhiteSpace(parentId)) Sections.Add(section);
         else
         {
-            var parent = FindSection(parentId) ?? throw new InvalidOperationException($"Parent section not found: {parentId}");
-            parent.Children.Add(node);
+            var parent = FindSection(parentId) ?? throw new InvalidOperationException("找不到父分区。");
+            parent.Children.Add(section);
             parent.Expanded = true;
         }
-        SelectSection(node.Id);
-        return node;
+        FocusedSectionId = section.Id;
+        SelectedPageId = string.Empty;
+        SelectedPageSectionId = section.Id;
+        return section;
     }
 
-    public SectionNode AddSectionAtFocus() => AddSection(FocusedSectionId);
+    public SectionNode AddSectionAtFocus(string title = "新分区") => AddSection(title, FocusedSectionId);
 
-    public NotePage AddPage(string title = "无标题页")
+    public NotePage AddPage(string title = "无标题页", PageAppearance? appearance = null)
     {
-        var section = SelectedSection() ?? throw new InvalidOperationException("Cannot add page without a selected section");
-        var page = new NotePage(NextId("page"), title);
+        var section = SelectedSection() ?? throw new InvalidOperationException("请先选择一个分区。");
+        var page = new NotePage(IdFactory.New("page"), string.IsNullOrWhiteSpace(title) ? "无标题页" : title.Trim())
+        {
+            Appearance = appearance?.Clone() ?? new PageAppearance(),
+        };
         section.Pages.Add(page);
         SelectedPageSectionId = section.Id;
         SelectedPageId = page.Id;
         return page;
     }
 
+    public bool RenameSection(string sectionId, string title)
+    {
+        var section = FindSection(sectionId);
+        var normalized = title?.Trim();
+        if (section == null || string.IsNullOrWhiteSpace(normalized)) return false;
+        section.Title = normalized;
+        return true;
+    }
+
+    public SectionNode? DeleteSection(string sectionId)
+    {
+        var position = FindSectionPosition(sectionId);
+        if (position == null) return null;
+        var removed = position.Value.Siblings[position.Value.Index];
+        position.Value.Siblings.RemoveAt(position.Value.Index);
+        if (Contains(removed, FocusedSectionId ?? string.Empty))
+        {
+            FocusedSectionId = Sections.FirstOrDefault()?.Id;
+            SelectFirstPage(PagePaneMode.CurrentSection);
+        }
+        return removed;
+    }
+
+    public bool MoveSectionToParent(string sectionId, string? targetParentId)
+    {
+        var source = FindSection(sectionId);
+        if (source == null || source.Id == targetParentId || Contains(source, targetParentId ?? string.Empty)) return false;
+        var sourcePosition = FindSectionPosition(sectionId);
+        if (sourcePosition == null) return false;
+        var destination = string.IsNullOrWhiteSpace(targetParentId) ? Sections : FindSection(targetParentId)?.Children;
+        if (destination == null) return false;
+        sourcePosition.Value.Siblings.RemoveAt(sourcePosition.Value.Index);
+        destination.Add(source);
+        if (!string.IsNullOrWhiteSpace(targetParentId)) FindSection(targetParentId)!.Expanded = true;
+        return true;
+    }
+
+    public bool MoveSectionAdjacent(string sectionId, string targetSectionId, bool after)
+    {
+        if (sectionId == targetSectionId) return false;
+        var source = FindSection(sectionId);
+        var target = FindSection(targetSectionId);
+        if (source == null || target == null || Contains(source, targetSectionId)) return false;
+        var sourcePosition = FindSectionPosition(sectionId);
+        var targetPosition = FindSectionPosition(targetSectionId);
+        if (sourcePosition == null || targetPosition == null) return false;
+        sourcePosition.Value.Siblings.RemoveAt(sourcePosition.Value.Index);
+        targetPosition = FindSectionPosition(targetSectionId);
+        if (targetPosition == null) return false;
+        targetPosition.Value.Siblings.Insert(targetPosition.Value.Index + (after ? 1 : 0), source);
+        return true;
+    }
+
+    public SectionNode? CopySectionToParent(string sectionId, string? targetParentId, out Dictionary<string, string> pageIds)
+    {
+        pageIds = new Dictionary<string, string>();
+        var source = FindSection(sectionId);
+        if (source == null || source.Id == targetParentId || Contains(source, targetParentId ?? string.Empty)) return null;
+        var destination = string.IsNullOrWhiteSpace(targetParentId) ? Sections : FindSection(targetParentId)?.Children;
+        if (destination == null) return null;
+        var copy = CloneSection(source, pageIds);
+        destination.Add(copy);
+        if (!string.IsNullOrWhiteSpace(targetParentId)) FindSection(targetParentId)!.Expanded = true;
+        return copy;
+    }
+
+    public bool MergeSectionInto(string sourceSectionId, string targetSectionId)
+    {
+        if (sourceSectionId == targetSectionId) return false;
+        var source = FindSection(sourceSectionId);
+        var target = FindSection(targetSectionId);
+        var sourcePosition = FindSectionPosition(sourceSectionId);
+        if (source == null || target == null || sourcePosition == null || Contains(source, targetSectionId)) return false;
+        target.Pages.AddRange(source.Pages);
+        target.Children.AddRange(source.Children);
+        target.Expanded = true;
+        sourcePosition.Value.Siblings.RemoveAt(sourcePosition.Value.Index);
+        if (FocusedSectionId == sourceSectionId) FocusedSectionId = targetSectionId;
+        if (SelectedPageSectionId == sourceSectionId) SelectedPageSectionId = targetSectionId;
+        return true;
+    }
+
+    public bool RenamePage(string sectionId, string pageId, string title)
+    {
+        var page = FindSection(sectionId)?.Pages.FirstOrDefault(item => item.Id == pageId);
+        var normalized = title?.Trim();
+        if (page == null || string.IsNullOrWhiteSpace(normalized)) return false;
+        page.Title = normalized;
+        page.UpdatedAt = DateTime.UtcNow;
+        return true;
+    }
+
+    public NotePage? DeletePage(string sectionId, string pageId)
+    {
+        var section = FindSection(sectionId);
+        var index = section?.Pages.FindIndex(page => page.Id == pageId) ?? -1;
+        if (section == null || index < 0) return null;
+        var removed = section.Pages[index];
+        section.Pages.RemoveAt(index);
+        if (SelectedPageId == pageId) SelectFirstPage(PagePaneMode.CurrentSection);
+        return removed;
+    }
+
+    public bool MovePage(string sourceSectionId, string pageId, string targetSectionId, int? targetIndex = null)
+    {
+        var source = FindSection(sourceSectionId);
+        var target = FindSection(targetSectionId);
+        var index = source?.Pages.FindIndex(page => page.Id == pageId) ?? -1;
+        if (source == null || target == null || index < 0) return false;
+        var page = source.Pages[index];
+        source.Pages.RemoveAt(index);
+        var destinationIndex = Math.Clamp(targetIndex ?? target.Pages.Count, 0, target.Pages.Count);
+        target.Pages.Insert(destinationIndex, page);
+        SelectedPageSectionId = target.Id;
+        SelectedPageId = page.Id;
+        return true;
+    }
+
+    public bool MovePageAdjacent(string sourceSectionId, string pageId, string targetSectionId, string targetPageId, bool after)
+    {
+        var target = FindSection(targetSectionId);
+        var targetIndex = target?.Pages.FindIndex(page => page.Id == targetPageId) ?? -1;
+        if (target == null || targetIndex < 0) return false;
+        if (sourceSectionId == targetSectionId)
+        {
+            var sourceIndex = target.Pages.FindIndex(page => page.Id == pageId);
+            if (sourceIndex < 0 || sourceIndex == targetIndex) return false;
+            var page = target.Pages[sourceIndex];
+            target.Pages.RemoveAt(sourceIndex);
+            targetIndex = target.Pages.FindIndex(item => item.Id == targetPageId);
+            target.Pages.Insert(targetIndex + (after ? 1 : 0), page);
+            SelectedPageSectionId = targetSectionId;
+            SelectedPageId = pageId;
+            return true;
+        }
+        return MovePage(sourceSectionId, pageId, targetSectionId, targetIndex + (after ? 1 : 0));
+    }
+
+    public NotePage? CopyPage(string sourceSectionId, string pageId, string targetSectionId, int? targetIndex = null)
+    {
+        var source = FindSection(sourceSectionId)?.Pages.FirstOrDefault(page => page.Id == pageId);
+        var target = FindSection(targetSectionId);
+        if (source == null || target == null) return null;
+        var copy = ClonePage(source);
+        target.Pages.Insert(Math.Clamp(targetIndex ?? target.Pages.Count, 0, target.Pages.Count), copy);
+        SelectedPageSectionId = target.Id;
+        SelectedPageId = copy.Id;
+        return copy;
+    }
+
     public List<SectionNode> Breadcrumb(string? sectionId = null)
     {
-        var targetId = sectionId ?? FocusedSectionId;
-        if (targetId == null) return new List<SectionNode>();
-
-        List<SectionNode>? Descend(IEnumerable<SectionNode> nodes, List<SectionNode> path)
+        var target = sectionId ?? SelectedPageSectionId;
+        var path = new List<SectionNode>();
+        bool Visit(IEnumerable<SectionNode> nodes)
         {
             foreach (var node in nodes)
             {
                 path.Add(node);
-                if (node.Id == targetId) return new List<SectionNode>(path);
-                var result = Descend(node.Children, path);
-                if (result != null) return result;
+                if (node.Id == target || Visit(node.Children)) return true;
                 path.RemoveAt(path.Count - 1);
             }
-            return null;
+            return false;
         }
-
-        return Descend(Sections, new List<SectionNode>()) ?? new List<SectionNode>();
+        return Visit(Sections) ? path : new List<SectionNode>();
     }
 
-    public SectionNode? FindSection(string id)
+    private static bool Contains(SectionNode root, string id) => root.Id == id || root.Children.Any(child => Contains(child, id));
+
+    private (List<SectionNode> Siblings, int Index)? FindSectionPosition(string id)
     {
-        SectionNode? Search(IEnumerable<SectionNode> nodes)
+        (List<SectionNode>, int)? Visit(List<SectionNode> nodes)
         {
-            foreach (var node in nodes)
+            for (var index = 0; index < nodes.Count; index++)
             {
-                if (node.Id == id) return node;
-                var found = Search(node.Children);
-                if (found != null) return found;
+                if (nodes[index].Id == id) return (nodes, index);
+                if (Visit(nodes[index].Children) is { } nested) return nested;
             }
             return null;
         }
-        return Search(Sections);
+        return Visit(Sections);
     }
 
-    private string NextId(string prefix) => $"{prefix}-{_sequence++}";
+    private static SectionNode CloneSection(SectionNode source, Dictionary<string, string> pageIds)
+    {
+        var copy = new SectionNode(IdFactory.New("section"), $"{source.Title} - 副本") { Expanded = source.Expanded };
+        foreach (var page in source.Pages)
+        {
+            var pageCopy = ClonePage(page);
+            copy.Pages.Add(pageCopy);
+            pageIds[page.Id] = pageCopy.Id;
+        }
+        foreach (var child in source.Children) copy.Children.Add(CloneSection(child, pageIds));
+        return copy;
+    }
 
-    public static NotebookWorkspace Sample() =>
-        new(
-            id: "notebook-personal",
-            title: "我的笔记本",
-            sections: new List<SectionNode>
-            {
-                new(
-                    id: "section-product",
-                    title: "产品设计",
-                    pages: new List<NotePage>
-                    {
-                        new("page-overview", "界面与交互"),
-                        new("page-flow", "操作流程")
-                    },
-                    children: new List<SectionNode>
-                    {
-                        new(
-                            id: "section-notein",
-                            title: "Notein 兼容",
-                            pages: new List<NotePage> { new("page-format", "格式研究") },
-                            children: new List<SectionNode>
-                            {
-                                new(
-                                    id: "section-ink",
-                                    title: "笔迹引擎",
-                                    pages: new List<NotePage>
-                                    {
-                                        new("page-brush", "钢笔手感"),
-                                        new("page-latency", "延迟观察")
-                                    }
-                                )
-                            }
-                        ),
-                        new(
-                            id: "section-ideas",
-                            title: "灵感",
-                            pages: new List<NotePage> { new("page-ideas", "随手记录") }
-                        )
-                    }
-                ),
-                new(
-                    id: "section-study",
-                    title: "学习",
-                    pages: new List<NotePage> { new("page-reading", "阅读笔记") }
-                )
-            }
-        );
+    private static NotePage ClonePage(NotePage source) => new(IdFactory.New("page"), $"{source.Title} - 副本")
+    {
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow,
+        Appearance = source.Appearance.Clone(),
+        IsPdfPage = source.IsPdfPage,
+        PdfPageNumber = source.PdfPageNumber,
+        PdfPageCount = source.PdfPageCount,
+    };
+
+    private static (SectionNode Section, NotePage Page)? FirstPage(IEnumerable<SectionNode> roots)
+    {
+        foreach (var root in roots)
+        {
+            if (root.Pages.FirstOrDefault() is { } page) return (root, page);
+            if (FirstPage(root.Children) is { } childPage) return childPage;
+        }
+        return null;
+    }
+
+    private PagePaneRow PageRow(NotePage page, string sectionId, int depth) => new()
+    {
+        Page = page,
+        SectionId = sectionId,
+        Title = page.Title,
+        Subtitle = page.Subtitle,
+        Depth = depth,
+        IsSelected = page.Id == SelectedPageId,
+    };
+
+    private void AppendSection(List<PagePaneRow> rows, SectionNode section, int depth, bool includeHeader)
+    {
+        if (includeHeader) rows.Add(new PagePaneRow { IsHeader = true, Title = section.Title, SectionId = section.Id, Depth = depth });
+        rows.AddRange(section.Pages.Select(page => PageRow(page, section.Id, depth + 1)));
+        foreach (var child in section.Children) AppendSection(rows, child, depth + 1, true);
+    }
+
+    public static NotebookWorkspace Sample()
+    {
+        var page = new NotePage("page-welcome", "欢迎使用");
+        var section = new SectionNode("section-inbox", "未归档", new[] { page });
+        return new NotebookWorkspace("notebook-personal", "我的笔记本", new[] { section });
+    }
 }
 
-public class NotebookLibrary
+public sealed class NotebookLibrary
 {
-    private int _sequence;
-
+    public int Version { get; set; } = 2;
     public List<NotebookWorkspace> Notebooks { get; set; } = new();
-    public string ActiveNotebookId { get; private set; }
+    public string ActiveNotebookId { get; set; } = string.Empty;
+
+    public NotebookLibrary() { }
 
     public NotebookLibrary(IEnumerable<NotebookWorkspace> notebooks)
     {
         Notebooks = notebooks.ToList();
-        if (Notebooks.Count == 0)
-        {
-            throw new InvalidOperationException("Notebook library cannot be empty");
-        }
-        _sequence = Notebooks.Count + 1;
+        if (Notebooks.Count == 0) throw new InvalidOperationException("笔记库不能为空。");
         ActiveNotebookId = Notebooks[0].Id;
     }
 
-    public NotebookWorkspace ActiveNotebook =>
-        Notebooks.FirstOrDefault(n => n.Id == ActiveNotebookId) ?? Notebooks[0];
+    [JsonIgnore]
+    public NotebookWorkspace ActiveNotebook => Notebooks.FirstOrDefault(notebook => notebook.Id == ActiveNotebookId) ?? Notebooks[0];
 
     public bool SelectNotebook(string id)
     {
-        if (Notebooks.All(n => n.Id != id)) return false;
+        if (Notebooks.All(notebook => notebook.Id != id)) return false;
         ActiveNotebookId = id;
         return true;
     }
 
     public NotebookWorkspace AddNotebook(string title = "新笔记本")
     {
-        var inheritedMode = ActiveNotebook.PagePaneMode;
-        var notebook = new NotebookWorkspace($"notebook-{_sequence++}", title, new List<SectionNode>());
-        notebook.SetPagePaneMode(inheritedMode);
+        var notebook = new NotebookWorkspace(IdFactory.New("notebook"), string.IsNullOrWhiteSpace(title) ? "新笔记本" : title.Trim());
         Notebooks.Add(notebook);
         ActiveNotebookId = notebook.Id;
-        notebook.FocusNotebook();
         return notebook;
-    }
-
-    public void SetPagePaneMode(PagePaneMode mode)
-    {
-        foreach (var notebook in Notebooks)
-        {
-            notebook.SetPagePaneMode(mode);
-        }
     }
 
     public static NotebookLibrary Sample() => new(new[] { NotebookWorkspace.Sample() });

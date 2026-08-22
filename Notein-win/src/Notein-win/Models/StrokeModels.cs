@@ -1,102 +1,137 @@
+using System.Text.Json.Serialization;
 using System.Windows;
-using System.Windows.Media;
 
 namespace Notein_win.Models;
 
-public record struct DocumentPoint(float X, float Y)
-{
-    public static implicit operator Point(DocumentPoint p) => new(p.X, p.Y);
-    public static implicit operator DocumentPoint(Point p) => new((float)p.X, (float)p.Y);
-}
-
-public class InkPoint
+public sealed class InkPoint
 {
     public float X { get; set; }
     public float Y { get; set; }
     public float Pressure { get; set; } = 0.5f;
     public float TiltX { get; set; }
     public float TiltY { get; set; }
-    public long TimestampMs { get; set; }
+    public long ElapsedMilliseconds { get; set; }
 
-    public InkPoint(float x, float y, float pressure = 0.5f, float tiltX = 0f, float tiltY = 0f, long timestampMs = 0L)
+    public InkPoint() { }
+
+    public InkPoint(float x, float y, float pressure = 0.5f, float tiltX = 0, float tiltY = 0, long elapsedMilliseconds = 0)
     {
         X = x;
         Y = y;
-        Pressure = pressure;
+        Pressure = Math.Clamp(pressure, 0.01f, 1f);
         TiltX = tiltX;
         TiltY = tiltY;
-        TimestampMs = timestampMs;
+        ElapsedMilliseconds = elapsedMilliseconds;
     }
 
     public Point ToPoint() => new(X, Y);
-    public static implicit operator Point(InkPoint pt) => new(pt.X, pt.Y);
 }
 
-public class CanvasTag
+public sealed class StrokeRecord
 {
-    public CanvasTagKind Kind { get; set; }
-    public float DocumentX { get; set; }
-    public float DocumentY { get; set; }
-
-    public CanvasTag(CanvasTagKind kind, float documentX, float documentY)
-    {
-        Kind = kind;
-        DocumentX = documentX;
-        DocumentY = documentY;
-    }
-}
-
-public class StrokeRecord
-{
-    public string Id { get; set; }
-    public DrawingToolKind Kind { get; set; }
-    public InkPalette Color { get; set; }
-    public float WidthMm { get; set; }
-    public int OpacityPercent { get; set; }
+    public string Id { get; set; } = IdFactory.New("stroke");
+    public DrawingToolKind Kind { get; set; } = DrawingToolKind.Pen;
+    public InkPalette Color { get; set; } = InkPalette.Black;
+    public float WidthMm { get; set; } = 0.4f;
+    public int PressurePercent { get; set; } = 200;
+    public int InkFlowPercent { get; set; } = 100;
+    public int OpacityPercent { get; set; } = 100;
+    public string BrushProfile { get; set; } = "fountain-v1";
     public List<InkPoint> Points { get; set; } = new();
-    public Rect Bounds { get; set; }
-    public bool IsDeleted { get; set; }
 
-    public StrokeRecord(
-        string id,
-        DrawingToolKind kind,
-        InkPalette color,
-        float widthMm,
-        int opacityPercent = 100,
-        IEnumerable<InkPoint>? points = null)
+    [JsonIgnore]
+    public Rect Bounds
+    {
+        get
+        {
+            if (Points.Count == 0) return Rect.Empty;
+            var minX = Points.Min(point => point.X);
+            var minY = Points.Min(point => point.Y);
+            var maxX = Points.Max(point => point.X);
+            var maxY = Points.Max(point => point.Y);
+            var margin = Math.Max(1, WidthMm * 3.78);
+            return new Rect(minX - margin, minY - margin, Math.Max(1, maxX - minX + margin * 2), Math.Max(1, maxY - minY + margin * 2));
+        }
+    }
+
+    public StrokeRecord() { }
+
+    public StrokeRecord(string id, DrawingToolKind kind, InkPalette color, float widthMm, int opacityPercent = 100, IEnumerable<InkPoint>? points = null)
     {
         Id = id;
         Kind = kind;
         Color = color;
         WidthMm = widthMm;
         OpacityPercent = opacityPercent;
-        if (points != null)
-        {
-            Points = points.ToList();
-            ComputeBounds();
-        }
+        Points = points?.ToList() ?? new List<InkPoint>();
     }
 
-    public void ComputeBounds()
-    {
-        if (Points.Count == 0)
-        {
-            Bounds = Rect.Empty;
-            return;
-        }
+    public void ComputeBounds() => _ = Bounds;
+}
 
-        float minX = float.MaxValue, minY = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue;
+public enum CanvasTagKind { Important, Question }
 
-        foreach (var pt in Points)
-        {
-            if (pt.X < minX) minX = pt.X;
-            if (pt.Y < minY) minY = pt.Y;
-            if (pt.X > maxX) maxX = pt.X;
-            if (pt.Y > maxY) maxY = pt.Y;
-        }
+public static class CanvasTagKindExtensions
+{
+    public static string GetLabel(this CanvasTagKind kind) => kind == CanvasTagKind.Important ? "重要" : "问题";
+}
 
-        var margin = WidthMm * 2f;
-        Bounds = new Rect(minX - margin, minY - margin, Math.Max(1f, maxX - minX + margin * 2), Math.Max(1f, maxY - minY + margin * 2));
-    }
+public sealed class CanvasTag
+{
+    public string Id { get; set; } = IdFactory.New("tag");
+    public CanvasTagKind Kind { get; set; }
+    public float DocumentX { get; set; }
+    public float DocumentY { get; set; }
+    public float Scale { get; set; } = 1f;
+
+    public CanvasTag() { }
+    public CanvasTag(CanvasTagKind kind, float documentX, float documentY) { Kind = kind; DocumentX = documentX; DocumentY = documentY; }
+}
+
+public sealed class TextItem
+{
+    public string Id { get; set; } = IdFactory.New("text");
+    public float X { get; set; }
+    public float Y { get; set; }
+    public float Width { get; set; } = 320;
+    public float Height { get; set; } = 60;
+    public string Text { get; set; } = string.Empty;
+    public string FontFamily { get; set; } = "Segoe UI Variable, Microsoft YaHei UI";
+    public double FontSize { get; set; } = 16;
+    public bool Bold { get; set; }
+    public bool Italic { get; set; }
+    public bool Underline { get; set; }
+    public bool Strikethrough { get; set; }
+    public bool Subscript { get; set; }
+    public InkPalette Color { get; set; } = InkPalette.Black;
+    public string ForegroundHex { get; set; } = string.Empty;
+    public string BackgroundHex { get; set; } = "Transparent";
+    public int IndentLevel { get; set; }
+    public string Alignment { get; set; } = "Left";
+    public double LineSpacing { get; set; } = 1.0;
+    public string StyleName { get; set; } = "正文";
+}
+
+public sealed class PageViewport
+{
+    public float Scale { get; set; } = 1f;
+    public float TranslationX { get; set; }
+    public float TranslationY { get; set; }
+}
+
+public sealed class PageDocument
+{
+    public int Version { get; set; } = 2;
+    public string NotebookId { get; set; } = string.Empty;
+    public string PageId { get; set; } = string.Empty;
+    public long Revision { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public PageViewport Viewport { get; set; } = new();
+    public List<StrokeRecord> Strokes { get; set; } = new();
+    public List<CanvasTag> Tags { get; set; } = new();
+    public List<TextItem> TextItems { get; set; } = new();
+    public List<PageObject> Objects { get; set; } = new();
+
+    public PageDocument() { }
+    public PageDocument(string notebookId, string pageId) { NotebookId = notebookId; PageId = pageId; }
 }

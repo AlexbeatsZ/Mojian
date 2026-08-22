@@ -16,8 +16,11 @@
 - A user-authorized full local backup was created through Android's save picker as `/sdcard/Download/backup.zip` (1,579,602,577 bytes). Keep the tablet copy; the analysis copy is temporary and must not be committed.
 - The backup is an unencrypted ZIP containing 167 per-note `.in` nested ZIPs, two `.template` entries, and one `.tree`; per-note containers include a Room/SQLite v25 database and metadata, plus source PDFs when applicable.
 - Notein uses AndroidX Ink 1.0.0 exactly: its arm64 `libink.so` matches the Google Maven artifact in size and ELF Build ID.
-- Windows desktop port project `Notein-win` was initialized as a .NET 10 WPF desktop application (`Notein-win/src/Notein-win/`) with matching xUnit test suite (`Notein-win/tests/Notein-win.Tests/`). 15/15 unit tests pass and the solution builds cleanly with 0 warnings.
-- The `Notein-win` frontend ports the complete dark OneNote-desktop workspace: 32px vertical rail, black multi-notebook section pane with arbitrary recursive nesting, dual-mode gray page pane (`本层` and `递归`), full ribbon tabs (`开始`, `插入`, `绘图`, `视图`), full-screen Backstage (`文件`), interactive multi-layer canvas (background grids/dots/rules, insert objects with dark inversion, rich text boxes, red tags, ink strokes with pressure taper, whole-stroke eraser, and lasso transform handles), tool flyouts, and full-page mode floating toolbar.
+- The first `Notein-win` WPF attempt compiled and its 15 model tests passed, but real-window inspection on 2026-08-23 proved it was a non-functional prototype: invalid XAML conversions made Backstage/full-page/pane visibility fail, ribbon tabs did not own separate panels, inserted objects replaced page state, and workspace/ink/text/export were not connected to durable storage. Do not treat that build as a product baseline.
+- `Notein-win` is now the persistent Windows edition of the project's own Android app, `墨笺` (`com.meta.inklab`), around `docs/design/windows-desktop.md`: atomic folder-based persistence, real per-page documents/assets, independent desktop navigation state, stylus-aware canvas input, working import/export, a user-selectable Syncthing workspace, and Android-compatible `.mjn` exchange. It is not a Notein Windows client.
+- Android `app/src/main` vectors, colors, ribbon order, dimensions, selection states, and preserved multi-color paths are the Windows UI source of truth. ADB screenshots of the installed tablet build were compared against the real WPF window; 57 Android vectors are deterministically converted into `Themes/IconResources.xaml` by `tools/Generate-FluentIconResources.ps1`, so the Windows port no longer substitutes generic icons or clipped fragments.
+- The Windows title row uses `WindowChrome` with DWM-owned minimize/maximize/close controls integrated into the 34 px app header. No character-glyph caption buttons or custom drag/double-click handlers remain. Release-window `WM_NCHITTEST` returned `HTMINBUTTON=8`, `HTMAXBUTTON=9`, and `HTCLOSE=20`; native minimize/maximize/restore actions all changed actual window state successfully.
+- The current Windows solution builds with zero warnings and passes 27/27 tests. A self-contained win-x64 Release EXE is published at `Notein-win/artifacts/release/Mojian.exe`; a real Release process was launched, captured, and remained responsive. Section/page management menus now expose the Android operations, including rename/delete, move/copy, merge/section export, links, page cut/copy/paste, copied assets, and page-owned-data deletion.
 - Android workspace prototype v0.5.0 passes unit tests, debug build, and lint as `com.meta.inklab.debug`. It has no Internet/broad storage permission and remains separate from the untouched Notein package. The final build installed successfully and cold-launched in 833 ms; device screenshots verified the icon-only Insert ribbon, split/full-page composition, transient focus frame, center rule, and two-page PDF import. Physical stylus-hover tooltip and subjective pinch feel still require manual feedback.
 - The installed lab uses AndroidX Ink wet/dry authoring, motion prediction, one adjustable fountain-pen stroke, prediction toggle, undo, and clear. Controls are width 0.1–2.0 mm, pressure 0–400%, and ink flow 0–200%, with Notein-observed defaults 0.4 mm / 200% / 100%.
 - The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Completed ink applies the viewport inside `ViewStrokeRenderer` so screen-space antialiasing remains sharp while zoomed. Tests, build, and lint pass; the corrected APK was installed and cold-launched in 503 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
@@ -46,6 +49,7 @@
 - The Insert ribbon now implements editable tables, embedded attachments, PDF printouts rendered as one image per page, first-sheet spreadsheet previews with external Excel editing, batch image insertion, built-in/user sticker presets, and note-only links. Inserted objects and original assets persist per page in app-private storage.
 - Image and PDF-printout imports have independent `询问 / 自动反色 / 保持原图` options. The view-only filter follows `invert(89.4118%) hue-rotate(180deg)` so white maps exactly to the `#1b1b1b` paper; export always uses original image pixels.
 - Export now provides a current-page PDF with Optional Content Group layers (`页面背景`, `插入内容`, `墨迹与文字`) and an active-notebook `.mjn` ZIP containing the manifest, page JSON, original embedded assets, and current-page light-theme layer snapshots. Export uses white paper and restores logical black ink/text to black while keeping colored ink unchanged.
+- Android canvas background patterns now render in a dedicated layer below inserted images/PDF printouts/stickers/tables/attachments, while dry and wet ink remain above inserted content. The fix passed unit tests, debug assembly, and lint; an installed tablet screenshot with two existing imported images verified that the grid remains visible around them without crossing their opaque pixels.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -53,6 +57,7 @@
   - `docs/design/input-gestures.md` (read before shortcut, gesture arbitration, viewport, or pressure-eraser work).
   - `docs/design/workspace-ui.md` (read before notebook/section/page navigation, tool configuration, or workspace styling).
   - `docs/design/insert-and-export.md` (read before insert objects/assets, image/PDF view filters, note links, or export formats).
+  - `docs/design/windows-desktop.md` (read before Notein-win storage, navigation, canvas, desktop UI, import/export, or release work).
 
 # Active Work
 
@@ -92,7 +97,9 @@
 - [x] Add the page-pane creation dialog with remembered unbounded/A4, baseline, and page-color configuration; A4 pages append Word-style sheets as content approaches the bottom.
 - [x] Implement the working Insert ribbon, persistent embedded asset boundary, independent image/PDF view filters, layered light-theme PDF export, and private notebook package export.
 - [x] Merge View/page-template work with Insert/export, add PDF-per-page import/export, independent focused split views, visible paper overflow, and adaptive full-page controls.
+- [x] Split rule/grid/dot rendering out of the dry-ink view so page patterns stay beneath imported images and other inserted content.
 - [x] Initialize and port Notein-win Windows desktop frontend (.NET 10 WPF MVVM) with OneNote-style dark workspace, ribbons, recursive section navigation, dual-mode page pane, multi-layer canvas, and full xUnit test suite.
+- [x] Replace the rejected Notein-win prototype with the persistent Windows desktop product defined in `docs/design/windows-desktop.md`, then publish and exercise its actual self-contained Release EXE.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
@@ -103,6 +110,8 @@
   - Build solution: `dotnet build Notein-win\Notein-win.slnx` or `cd Notein-win; dotnet build`.
   - Run unit tests: `cd Notein-win; dotnet test`.
   - Launch desktop app: `cd Notein-win\src\Notein-win; dotnet run`.
+  - Publish the delivered EXE: `dotnet publish Notein-win\src\Notein-win\Notein-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o Notein-win\artifacts\release`.
+  - Release executable: `Notein-win\artifacts\release\Mojian.exe` (publish output is intentionally gitignored).
 - ADB binary: `C:\Users\Meta\AppData\Local\Android\Sdk\platform-tools\adb.exe`.
 - Verify device: `adb devices -l`.
 - Installed package path: `adb shell pm path com.orion.notein`.
@@ -139,3 +148,6 @@
 - Render and hit-test a mixed ink/tag selection through one top-level overlay, but keep the underlying content transforms in their owning layers so selection chrome never becomes document content.
 - Preferences load before the view hierarchy exists. Restore canvas-affecting values into ordinary state fields, then apply them while building the corresponding view; never dereference a `lateinit` canvas view from `loadPreferences()`.
 - Treat A4 as a paginated document policy, not one fixed canvas rectangle. Grow the stored sheet count before content reaches the last sheet's bottom, keep explicit inter-sheet gaps, and never shrink automatically while editing.
+- WPF `Path` defaults can clip Android 24x24 vector data when a control supplies only width/height. Set `Stretch=Uniform`, preserve per-path literal colors through `DrawingImage`, and regenerate icon resources from Android XML rather than hand-flattening geometry.
+- Setting `GlassFrameThickness=0` disables the standard caption controls even when `UseAeroCaptionButtons=true`. Keep a non-zero top glass frame with `SingleBorderWindow`, reserve the right caption hit zone, and verify DWM `WM_NCHITTEST` results because `PrintWindow` does not capture compositor-drawn caption glyphs.
+- Keep semantic canvas layers in distinct top-level views: paper and rule/grid/dot patterns below inserted content, then dry/wet ink, text, and tags above it. Combining page patterns with dry ink forces the patterns above otherwise opaque images even when the pattern is drawn first inside that view.

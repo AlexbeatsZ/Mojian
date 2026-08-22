@@ -5,75 +5,104 @@ namespace Notein_win.Tests;
 
 public class WorkspaceModelsTests
 {
+    private static NotebookWorkspace NestedWorkspace()
+    {
+        var engine = new SectionNode("section-engine", "笔迹引擎", new[] { new NotePage("page-engine", "压感曲线") });
+        var compatibility = new SectionNode("section-compat", "跨端兼容", new[] { new NotePage("page-format", "格式研究") }, new[] { engine });
+        var product = new SectionNode("section-product", "产品设计", new[] { new NotePage("page-ui", "界面"), new NotePage("page-input", "交互") }, new[] { compatibility });
+        return new NotebookWorkspace("notebook", "墨笺", new[] { product });
+    }
+
     [Fact]
     public void FlattenSections_TraversesArbitraryDepthTree()
     {
-        var workspace = NotebookWorkspace.Sample();
-        var flattened = workspace.FlattenSections();
-
-        Assert.NotEmpty(flattened);
-        Assert.Contains(flattened, r => r.Section.Title == "产品设计" && r.Depth == 0);
-        Assert.Contains(flattened, r => r.Section.Title == "Notein 兼容" && r.Depth == 1);
-        Assert.Contains(flattened, r => r.Section.Title == "笔迹引擎" && r.Depth == 2);
+        var flattened = NestedWorkspace().FlattenSections();
+        Assert.Contains(flattened, row => row.Section.Title == "产品设计" && row.Depth == 0);
+        Assert.Contains(flattened, row => row.Section.Title == "跨端兼容" && row.Depth == 1);
+        Assert.Contains(flattened, row => row.Section.Title == "笔迹引擎" && row.Depth == 2);
     }
 
     [Fact]
     public void PagePaneRows_CurrentSectionMode_ReturnsOnlyDirectPages()
     {
-        var workspace = NotebookWorkspace.Sample();
-        workspace.SetPagePaneMode(PagePaneMode.CurrentSection);
-        workspace.SelectSection("section-product");
-
-        var rows = workspace.GetPagePaneRows();
+        var workspace = NestedWorkspace();
+        workspace.SelectSection("section-product", PagePaneMode.CurrentSection);
+        var rows = workspace.GetPagePaneRows(PagePaneMode.CurrentSection);
         Assert.Equal(2, rows.Count);
-        Assert.All(rows, r => Assert.IsType<PagePaneRow.PageItemRow>(r));
+        Assert.All(rows, row => Assert.False(row.IsHeader));
     }
 
     [Fact]
     public void PagePaneRows_RecursiveMode_IncludesChildSectionsAndPages()
     {
-        var workspace = NotebookWorkspace.Sample();
-        workspace.SetPagePaneMode(PagePaneMode.Recursive);
-        workspace.SelectSection("section-product");
-
-        var rows = workspace.GetPagePaneRows();
-        Assert.True(rows.Count >= 5);
-        Assert.Contains(rows, r => r is PagePaneRow.SectionHeaderRow sh && sh.Section.Title == "Notein 兼容");
-        Assert.Contains(rows, r => r is PagePaneRow.PageItemRow pi && pi.Page.Title == "格式研究");
+        var workspace = NestedWorkspace();
+        workspace.SelectSection("section-product", PagePaneMode.Recursive);
+        var rows = workspace.GetPagePaneRows(PagePaneMode.Recursive);
+        Assert.Contains(rows, row => row.IsHeader && row.Title == "跨端兼容");
+        Assert.Contains(rows, row => !row.IsHeader && row.Page?.Title == "格式研究");
+        Assert.Contains(rows, row => row.IsHeader && row.Title == "笔迹引擎");
     }
 
     [Fact]
     public void Breadcrumb_ReturnsCorrectHierarchyPath()
     {
-        var workspace = NotebookWorkspace.Sample();
-        var breadcrumb = workspace.Breadcrumb("section-ink");
-
-        Assert.Equal(3, breadcrumb.Count);
-        Assert.Equal("产品设计", breadcrumb[0].Title);
-        Assert.Equal("Notein 兼容", breadcrumb[1].Title);
-        Assert.Equal("笔迹引擎", breadcrumb[2].Title);
+        var breadcrumb = NestedWorkspace().Breadcrumb("section-engine");
+        Assert.Equal(new[] { "产品设计", "跨端兼容", "笔迹引擎" }, breadcrumb.Select(section => section.Title));
     }
 
     [Fact]
     public void AddSection_UnderFocusedSection_CreatesChildSection()
     {
-        var workspace = NotebookWorkspace.Sample();
+        var workspace = NestedWorkspace();
         workspace.SelectSection("section-product");
         var child = workspace.AddSectionAtFocus();
-
-        var product = workspace.FindSection("section-product");
-        Assert.NotNull(product);
-        Assert.Contains(child, product.Children);
-        Assert.Equal(workspace.FocusedSectionId, child.Id);
+        Assert.Contains(child, workspace.FindSection("section-product")!.Children);
+        Assert.Equal(child.Id, workspace.FocusedSectionId);
     }
 
     [Fact]
-    public void AddNotebook_AddsToLibraryAndFocuses()
+    public void NotebookRoot_RecursiveMode_ShowsWholeNotebook_ButDirectModeIsEmpty()
     {
-        var library = NotebookLibrary.Sample();
-        var newNb = library.AddNotebook("测试笔记本");
+        var workspace = NestedWorkspace();
+        workspace.FocusNotebook(PagePaneMode.CurrentSection);
+        Assert.Empty(workspace.GetPagePaneRows(PagePaneMode.CurrentSection));
+        workspace.FocusNotebook(PagePaneMode.Recursive);
+        Assert.Contains(workspace.GetPagePaneRows(PagePaneMode.Recursive), row => row.Page?.Id == "page-engine");
+    }
 
-        Assert.Equal(library.ActiveNotebookId, newNb.Id);
-        Assert.Equal("测试笔记本", library.ActiveNotebook.Title);
+    [Fact]
+    public void SectionCopyAndMerge_PreserveHierarchyAndSelectedPageOwner()
+    {
+        var workspace = NestedWorkspace();
+        var target = workspace.AddSection("目标");
+
+        var copy = workspace.CopySectionToParent("section-compat", target.Id, out var copiedPages);
+        Assert.NotNull(copy);
+        Assert.Equal("格式研究 - 副本", Assert.Single(copy!.Pages).Title);
+        Assert.True(copiedPages.ContainsKey("page-format"));
+        Assert.Equal("笔迹引擎 - 副本", Assert.Single(copy.Children).Title);
+
+        workspace.SelectPage("section-product", "page-ui", PagePaneMode.CurrentSection);
+        Assert.True(workspace.MergeSectionInto("section-product", target.Id));
+        Assert.Equal(target.Id, workspace.SelectedPageSectionId);
+        Assert.Contains(target.Pages, page => page.Id == "page-ui");
+        Assert.Null(workspace.FindSection("section-product"));
+    }
+
+    [Fact]
+    public void PageMoveCopyAndDelete_UpdateOrderAndSelection()
+    {
+        var workspace = NestedWorkspace();
+        var target = workspace.AddSection("目标");
+
+        var copy = workspace.CopyPage("section-product", "page-ui", target.Id);
+        Assert.NotNull(copy);
+        Assert.Equal(target.Id, workspace.SelectedPageSectionId);
+        Assert.Equal(copy!.Id, workspace.SelectedPageId);
+
+        Assert.True(workspace.MovePageAdjacent("section-product", "page-input", target.Id, copy.Id, after: false));
+        Assert.Equal(new[] { "page-input", copy.Id }, target.Pages.Select(page => page.Id));
+        Assert.NotNull(workspace.DeletePage(target.Id, copy.Id));
+        Assert.DoesNotContain(target.Pages, page => page.Id == copy.Id);
     }
 }

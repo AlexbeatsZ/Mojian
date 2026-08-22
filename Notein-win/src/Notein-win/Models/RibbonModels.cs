@@ -99,21 +99,35 @@ public static class HomeCommandExtensions
         HomeCommand.Styles => "样式",
         _ => cmd.ToString()
     };
-}
 
-public enum CanvasTagKind
-{
-    Important,
-    Question,
-}
-
-public static class CanvasTagKindExtensions
-{
-    public static string GetLabel(this CanvasTagKind kind) => kind switch
+    public static string GetIconKey(this HomeCommand cmd) => cmd switch
     {
-        CanvasTagKind.Important => "重要",
-        CanvasTagKind.Question => "问题",
-        _ => "标记"
+        HomeCommand.Paste => "clipboard_paste",
+        HomeCommand.Cut => "cut",
+        HomeCommand.Copy => "copy",
+        HomeCommand.FormatPainter => "paint_brush",
+        HomeCommand.FontFamily => "text_font",
+        HomeCommand.FontSize => "text_font_size",
+        HomeCommand.Bold => "text_bold",
+        HomeCommand.Italic => "text_italic",
+        HomeCommand.Underline => "text_underline",
+        HomeCommand.Strikethrough => "text_strikethrough",
+        HomeCommand.FontColor => "text_color",
+        HomeCommand.Highlight => "highlight_text",
+        HomeCommand.Subscript => "text_subscript",
+        HomeCommand.ClearFormatting => "text_clear_formatting",
+        HomeCommand.Bullets => "text_bullet_list_ltr",
+        HomeCommand.Numbering => "text_number_list_ltr",
+        HomeCommand.IndentDecrease => "text_indent_decrease_ltr",
+        HomeCommand.IndentIncrease => "text_indent_increase_ltr",
+        HomeCommand.AlignLeft => "text_align_left",
+        HomeCommand.AlignCenter => "text_align_center",
+        HomeCommand.AlignRight => "text_align_right",
+        HomeCommand.LineSpacing => "text_line_spacing",
+        HomeCommand.Tag => "tag",
+        HomeCommand.FindTags => "tag_search",
+        HomeCommand.Styles => "style_guide",
+        _ => "cursor",
     };
 }
 
@@ -155,4 +169,4 @@ public class FullPageToolbarConfig
     };
 }
 
-public record FullPageToolDescriptor(string Id, string Label, string IconKey, bool RedAccent = false);
+public record FullPageToolDescriptor(string Id, string Label, string IconKey, string TintHex = "#F4F4F4", bool PreserveColors = false);
