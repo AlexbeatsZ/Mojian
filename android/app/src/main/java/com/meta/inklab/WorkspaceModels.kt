@@ -264,23 +264,6 @@ class NotebookLibrary(
             NotebookLibrary(
                 mutableListOf(
                     NotebookWorkspace.sample(),
-                    NotebookWorkspace(
-                        id = "notebook-quick",
-                        title = "随手笔记",
-                        sections =
-                            mutableListOf(
-                                SectionNode(
-                                    id = "section-inbox",
-                                    title = "收件箱",
-                                    pages = mutableListOf(NotePage("page-capture", "快速记录")),
-                                ),
-                                SectionNode(
-                                    id = "section-archive",
-                                    title = "归档",
-                                    pages = mutableListOf(NotePage("page-archive", "已整理")),
-                                ),
-                            ),
-                    ),
                 ),
             )
     }

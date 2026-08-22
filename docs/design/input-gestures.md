@@ -87,7 +87,7 @@ is a safe prototype limit, not a claim about Notein's full runtime range.
    140 ms). Continuing to write outside that radius restarts the timer even at high pressure.
 3. Activation cancels the provisional wet pen stroke and enters temporary erase mode.
 4. Movement erases complete strokes intersecting the visible eraser circle.
-5. Stylus lift always exits erase mode and restores the pen.
+5. Stylus lift always exits erase mode, clears the visible eraser circle, and restores the pen.
 
 The first implementation is a whole-stroke eraser. Pixel splitting, eraser-size controls, undo of
 erasures, and persistence are separate future features.

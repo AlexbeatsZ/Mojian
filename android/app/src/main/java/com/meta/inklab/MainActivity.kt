@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private lateinit var predictor: MotionEventPredictor
     private lateinit var currentBrush: Brush
     private lateinit var toolShelfRow: LinearLayout
+    private lateinit var floatingToolShelfRow: LinearLayout
     private lateinit var toolDetailRow: LinearLayout
     private var toolDetailPopup: PopupWindow? = null
     private var backstageDialog: Dialog? = null
@@ -67,6 +68,17 @@ class MainActivity : Activity() {
     private lateinit var pageList: LinearLayout
     private lateinit var navigationPane: View
     private lateinit var pagePane: View
+    private lateinit var rootLayout: LinearLayout
+    private lateinit var ribbonTabs: View
+    private lateinit var drawingRibbon: View
+    private lateinit var navigationRail: View
+    private lateinit var floatingToolbox: View
+    private lateinit var textInputLayer: CanvasTextInputLayer
+    private lateinit var sectionPaneToggle: View
+    private lateinit var pagePaneToggle: View
+    private lateinit var toolbarToggle: View
+    private lateinit var fullPageToggle: View
+    private lateinit var fullPageToggleIcon: ImageView
 
     private var predictionEnabled = true
     private var transformGestureActive = false
@@ -78,8 +90,11 @@ class MainActivity : Activity() {
     private var lastPressurePoint = PointF()
     private var activeDirectTool: DrawingToolKind? = null
     private var singleFingerPanEnabled = false
+    private var textModeEnabled = false
     private var sectionPaneVisible = true
     private var pagePaneVisible = true
+    private var drawingToolbarVisible = true
+    private var fullPageMode = false
 
     private val activatePressureEraser =
         Runnable {
@@ -120,18 +135,20 @@ class MainActivity : Activity() {
         transformGestureActive = false
         dryInkView.setEraserCursor(null)
         dryInkView.clearSelection()
+        textModeEnabled = false
+        if (::textInputLayer.isInitialized) textInputLayer.setTextMode(false)
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
         super.onPause()
     }
 
     private fun buildInterface(): View {
-        val root =
+        rootLayout =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(PAPER_COLOR)
             }
-        root.setOnApplyWindowInsetsListener { view, insets ->
+        rootLayout.setOnApplyWindowInsetsListener { view, insets ->
             val (top, bottom) =
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -144,8 +161,10 @@ class MainActivity : Activity() {
             insets
         }
 
-        root.addView(buildRibbonTabs(), LinearLayout.LayoutParams(MATCH, dp(34)))
-        root.addView(buildDrawingRibbon(), LinearLayout.LayoutParams(MATCH, dp(50)))
+        ribbonTabs = buildRibbonTabs()
+        drawingRibbon = buildDrawingRibbon()
+        rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(34)))
+        rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(50)))
 
         val workArea =
             LinearLayout(this).apply {
@@ -154,13 +173,15 @@ class MainActivity : Activity() {
             }
         navigationPane = buildNavigationPane()
         pagePane = buildPagePane()
-        workArea.addView(buildNavigationRail(), LinearLayout.LayoutParams(dp(36), MATCH))
+        navigationRail = buildNavigationRail()
+        workArea.addView(navigationRail, LinearLayout.LayoutParams(dp(32), MATCH))
         workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(pagePane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(buildPaper(), LinearLayout.LayoutParams(0, MATCH, 1f))
-        root.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        rootLayout.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-        return root
+        applyChromeVisibility()
+        return rootLayout
     }
 
     private fun showBackstage() {
@@ -454,10 +475,6 @@ class MainActivity : Activity() {
             addView(ribbonTab("绘图", true) { })
             addView(ribbonTab("视图", false) { showShell("视图工具") })
             addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(
-                titleIconButton("search", "搜索") { showShell("全文搜索") },
-                LinearLayout.LayoutParams(dp(38), dp(34)),
-            )
         }
 
     private fun buildNavigationRail(): View =
@@ -465,14 +482,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             setBackgroundColor(TITLE_PURPLE)
-            addView(
-                titleIconButton("navigation", "折叠或展开分区栏") { toggleSectionPane() },
-                LinearLayout.LayoutParams(dp(36), dp(40)),
-            )
-            addView(
-                titleIconButton("panel_left", "折叠或展开页面栏") { togglePagePane() },
-                LinearLayout.LayoutParams(dp(36), dp(40)),
-            )
+            sectionPaneToggle = railToggleButton("navigation", "折叠或展开分区栏") { toggleSectionPane() }
+            pagePaneToggle = railToggleButton("panel_left", "折叠或展开页面栏") { togglePagePane() }
+            addView(sectionPaneToggle)
+            addView(pagePaneToggle)
         }.also { it.background = bordered(TITLE_PURPLE, BORDER_COLOR, 0f) }
 
     private fun buildDrawingRibbon(): View =
@@ -597,11 +610,64 @@ class MainActivity : Activity() {
         val paper = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
         dryInkView = DryInkView(this)
         wetInkView = InProgressStrokesView(this)
+        textInputLayer = CanvasTextInputLayer(this)
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        paper.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        floatingToolbox = buildFloatingToolbox()
+        paper.addView(
+            floatingToolbox,
+            FrameLayout.LayoutParams(WRAP, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = dp(7)
+            },
+        )
+        paper.addView(
+            buildCanvasActions(),
+            FrameLayout.LayoutParams(WRAP, dp(36), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(6)
+                rightMargin = dp(7)
+            },
+        )
         return paper
     }
+
+    private fun buildFloatingToolbox(): View =
+        FrameLayout(this).apply {
+            elevation = dp(7).toFloat()
+            background = rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG)
+            floatingToolShelfRow =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(4), dp(2), dp(4), dp(2))
+                }
+            addView(floatingToolShelfRow, FrameLayout.LayoutParams(WRAP, MATCH, Gravity.CENTER))
+        }
+
+    private fun buildCanvasActions(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            elevation = dp(8).toFloat()
+
+            toolbarToggle = canvasActionButton("pen", "显示或隐藏绘图工具栏", selected = true) {
+                drawingToolbarVisible = !drawingToolbarVisible
+                applyChromeVisibility()
+            }
+            addView(toolbarToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(4) })
+            addView(
+                canvasActionButton("search", "搜索笔记", selected = false) { showShell("全文搜索") },
+                LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(4) },
+            )
+            fullPageToggle = canvasActionButton("full_screen_maximize", "进入整页视图", selected = false) {
+                fullPageMode = !fullPageMode
+                applyChromeVisibility()
+            }
+            fullPageToggleIcon = (fullPageToggle as ViewGroup).getChildAt(0) as ImageView
+            addView(fullPageToggle, LinearLayout.LayoutParams(dp(34), dp(34)))
+        }
 
     private fun renderWorkspace() {
         renderSections()
@@ -808,27 +874,39 @@ class MainActivity : Activity() {
     }
 
     private fun renderToolShelf() {
-        toolShelfRow.removeAllViews()
-        toolShelfRow.addView(
+        populateToolShelf(toolShelfRow)
+        populateToolShelf(floatingToolShelfRow)
+    }
+
+    private fun populateToolShelf(row: LinearLayout) {
+        row.removeAllViews()
+        row.addView(
             commandButton("arrow_undo", "撤销", selected = false) {
                 dryInkView.clearSelection()
                 dryInkView.undo()
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
-        toolShelfRow.addView(verticalDivider())
-        toolShelf.tools.filter { it.kind == DrawingToolKind.LASSO }.forEach { toolShelfRow.addView(toolButton(it)) }
-        toolShelfRow.addView(verticalDivider())
-        toolShelf.tools.filter { it.kind == DrawingToolKind.ERASER }.forEach { toolShelfRow.addView(toolButton(it)) }
-        toolShelf.tools.filter { it.kind == DrawingToolKind.HIGHLIGHTER }.forEach { toolShelfRow.addView(toolButton(it)) }
-        toolShelf.tools.filter { it.kind == DrawingToolKind.PEN }.forEach { toolShelfRow.addView(toolButton(it)) }
-        toolShelfRow.addView(
+        row.addView(verticalDivider())
+        row.addView(
+            commandButton("cursor", "键入文本", selected = textModeEnabled) {
+                setTextMode(!textModeEnabled)
+            },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        toolShelf.tools.filter { it.kind == DrawingToolKind.LASSO }.forEach { row.addView(toolButton(it)) }
+        row.addView(verticalDivider())
+        toolShelf.tools.filter { it.kind == DrawingToolKind.ERASER }.forEach { row.addView(toolButton(it)) }
+        toolShelf.tools.filter { it.kind == DrawingToolKind.HIGHLIGHTER }.forEach { row.addView(toolButton(it)) }
+        toolShelf.tools.filter { it.kind == DrawingToolKind.PEN }.forEach { row.addView(toolButton(it)) }
+        row.addView(
             commandButton("add", "添加", selected = false) { anchor -> showAddToolMenu(anchor) },
             LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(3) },
         )
-        toolShelfRow.addView(verticalDivider())
-        toolShelfRow.addView(
+        row.addView(verticalDivider())
+        row.addView(
             commandButton("hand_left", "单指平移", selected = singleFingerPanEnabled) {
+                setTextMode(false, rerender = false)
                 singleFingerPanEnabled = !singleFingerPanEnabled
                 transformGestureActive = false
                 toolDetailPopup?.dismiss()
@@ -837,8 +915,8 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
-        toolShelfRow.addView(verticalDivider())
-        toolShelfRow.addView(
+        row.addView(verticalDivider())
+        row.addView(
             commandButton("delete_dismiss", "清纸", selected = false) { confirmClearPage() },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
@@ -1141,6 +1219,7 @@ class MainActivity : Activity() {
                 if (!wasErasing && strokeId != null) wetInkView.finishStroke(event, pointerId, strokeId)
                 mainHandler.removeCallbacks(activatePressureEraser)
                 pressureEraser.onStylusLift(completedInk = !wasErasing && strokeId != null)
+                dryInkView.setEraserCursor(null)
             }
 
             DrawingToolKind.LASSO -> {
@@ -1172,6 +1251,7 @@ class MainActivity : Activity() {
 
     private fun selectTool(id: String) {
         if (!toolShelf.select(id)) return
+        setTextMode(false, rerender = false)
         singleFingerPanEnabled = false
         transformGestureActive = false
         toolDetailPopup?.dismiss()
@@ -1183,6 +1263,27 @@ class MainActivity : Activity() {
         rebuildBrush()
         renderToolShelf()
         renderToolDetails()
+    }
+
+    private fun setTextMode(enabled: Boolean, rerender: Boolean = true) {
+        if (textModeEnabled == enabled && ::textInputLayer.isInitialized) {
+            textInputLayer.setTextMode(enabled)
+            if (rerender) renderToolShelf()
+            return
+        }
+        textModeEnabled = enabled
+        if (enabled) {
+            singleFingerPanEnabled = false
+            transformGestureActive = false
+            toolDetailPopup?.dismiss()
+            toolDetailPopup = null
+            mainHandler.removeCallbacks(activatePressureEraser)
+            pressureEraser.cancelCandidate()
+            dryInkView.setEraserCursor(null)
+            dryInkView.clearSelection()
+        }
+        if (::textInputLayer.isInitialized) textInputLayer.setTextMode(enabled)
+        if (rerender) renderToolShelf()
     }
 
     private fun rebuildBrush() {
@@ -1326,12 +1427,34 @@ class MainActivity : Activity() {
 
     private fun toggleSectionPane() {
         sectionPaneVisible = !sectionPaneVisible
-        navigationPane.visibility = if (sectionPaneVisible) View.VISIBLE else View.GONE
+        applyChromeVisibility()
     }
 
     private fun togglePagePane() {
         pagePaneVisible = !pagePaneVisible
-        pagePane.visibility = if (pagePaneVisible) View.VISIBLE else View.GONE
+        applyChromeVisibility()
+    }
+
+    private fun applyChromeVisibility() {
+        if (!::ribbonTabs.isInitialized) return
+        if (!fullPageMode) drawingToolbarVisible = true
+        ribbonTabs.visibility = if (fullPageMode) View.GONE else View.VISIBLE
+        drawingRibbon.visibility = if (fullPageMode) View.GONE else View.VISIBLE
+        floatingToolbox.visibility = if (fullPageMode && drawingToolbarVisible) View.VISIBLE else View.GONE
+        toolbarToggle.visibility = if (fullPageMode) View.VISIBLE else View.GONE
+        navigationRail.visibility = if (fullPageMode) View.GONE else View.VISIBLE
+        navigationPane.visibility = if (!fullPageMode && sectionPaneVisible) View.VISIBLE else View.GONE
+        pagePane.visibility = if (!fullPageMode && pagePaneVisible) View.VISIBLE else View.GONE
+        updateToggleVisual(toolbarToggle, drawingToolbarVisible)
+        updateToggleVisual(sectionPaneToggle, sectionPaneVisible)
+        updateToggleVisual(pagePaneToggle, pagePaneVisible)
+        fullPageToggleIcon.setImageDrawable(
+            fluentIcon(if (fullPageMode) "full_screen_minimize" else "full_screen_maximize"),
+        )
+        fullPageToggleIcon.imageTintList = ColorStateList.valueOf(TEXT_PRIMARY)
+        val fullPageDescription = if (fullPageMode) "退出整页视图" else "进入整页视图"
+        fullPageToggle.contentDescription = fullPageDescription
+        fullPageToggle.tooltipText = fullPageDescription
     }
 
     private fun showAddToolMenu(anchor: View) {
@@ -1378,7 +1501,7 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = !singleFingerPanEnabled && tool.id == toolShelf.selectedId
+        val selected = !singleFingerPanEnabled && !textModeEnabled && tool.id == toolShelf.selectedId
         return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
@@ -1432,20 +1555,67 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun commandButton(icon: String, label: String, selected: Boolean, action: (View) -> Unit): TextView =
-        TextView(this).apply {
-            text = ""
-            gravity = Gravity.CENTER
-            setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon), null, null, null)
-            compoundDrawableTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-            background =
-                if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
-                else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+    private fun commandButton(icon: String, label: String, selected: Boolean, action: (View) -> Unit): View =
+        FrameLayout(this).apply {
+            background = toggleBackground(selected)
+            val iconView =
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(icon))
+                    imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                    if (icon == "hand_left") translationX = dp(1).toFloat()
+                }
+            addView(iconView, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
             setOnClickListener { action(this) }
             contentDescription = label
             tooltipText = label
+        }
+
+    private fun railToggleButton(icon: String, label: String, action: () -> Unit): View =
+        FrameLayout(this).apply {
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(icon))
+                    imageTintList = ColorStateList.valueOf(TEXT_PRIMARY)
+                },
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
+            )
+            setOnClickListener { action() }
+            contentDescription = label
+            tooltipText = label
+            layoutParams =
+                LinearLayout.LayoutParams(dp(28), dp(34)).apply {
+                    topMargin = dp(2)
+                    gravity = Gravity.CENTER_HORIZONTAL
+                }
+        }
+
+    private fun canvasActionButton(icon: String, label: String, selected: Boolean, action: () -> Unit): FrameLayout =
+        FrameLayout(this).apply {
+            background = toggleBackground(selected, opaqueWhenIdle = true)
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(icon))
+                    imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                },
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER),
+            )
+            setOnClickListener { action() }
+            contentDescription = label
+            tooltipText = label
+        }
+
+    private fun updateToggleVisual(view: View, selected: Boolean) {
+        view.background = toggleBackground(selected, opaqueWhenIdle = view === toolbarToggle)
+        (view as? ViewGroup)?.getChildAt(0)?.let { icon ->
+            if (icon is ImageView) icon.imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+        }
+    }
+
+    private fun toggleBackground(selected: Boolean, opaqueWhenIdle: Boolean = false): Drawable =
+        when {
+            selected -> rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
+            opaqueWhenIdle -> rounded(TOOLBAR_BACKGROUND, dp(2).toFloat(), BORDER_STRONG)
+            else -> rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
         }
 
     private fun parameterControl(

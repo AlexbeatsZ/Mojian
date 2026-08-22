@@ -6,13 +6,24 @@ import org.junit.Test
 
 class WorkspaceModelsTest {
     @Test
+    fun sampleLibraryDoesNotInventQuickNotesEntries() {
+        assertEquals(listOf("我的笔记本"), NotebookLibrary.sample().notebooks.map { it.title })
+    }
+
+    @Test
     fun notebookLibrarySwitchesTheActiveWorkspace() {
-        val library = NotebookLibrary.sample()
+        val second =
+            NotebookWorkspace(
+                id = "notebook-two",
+                title = "第二本笔记",
+                sections = mutableListOf(SectionNode("section-two", "第二分区", mutableListOf(NotePage("page-two", "第二页")))),
+            )
+        val library = NotebookLibrary(mutableListOf(NotebookWorkspace.sample(), second))
 
-        assertTrue(library.selectNotebook("notebook-quick"))
+        assertTrue(library.selectNotebook("notebook-two"))
 
-        assertEquals("随手笔记", library.activeNotebook().title)
-        assertEquals("快速记录", library.activeNotebook().selectedPage()?.title)
+        assertEquals("第二本笔记", library.activeNotebook().title)
+        assertEquals("第二页", library.activeNotebook().selectedPage()?.title)
     }
 
     @Test

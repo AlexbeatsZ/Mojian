@@ -42,6 +42,8 @@ The two left panes have deliberately non-overlapping responsibilities.
 - Display notebook nodes in the black tree; expanding a notebook reveals only its section tree.
 - Selecting a notebook switches the active workspace and therefore the gray page pane and canvas
   header. Do not copy OneNote's repeated per-notebook `新建分区` row.
+- Do not copy the desktop notebook picker footer entries `更多笔记本` or `快速笔记`. The prototype
+  sample contains one ordinary notebook; the model may still support additional real notebooks.
 - Recursively display sections nested inside sections with no fixed depth.
 - Never display a page, even when pages and child sections share the same parent section.
 - Expanding/collapsing a branch changes only section visibility in this pane.
@@ -88,11 +90,17 @@ tapping the already selected tool opens its own flyout. The flyout shows only pa
 to that tool. Pixel erasing and lasso move/resize are labeled shells; they must not masquerade as
 completed functions.
 
-Follow the desktop OneNote grouping rhythm: undo, a hairline divider, selection/lasso, another
-hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, then low-frequency page
-clearing after a final divider. Dividers are one physical pixel on the tested tablet rather than
-one density-independent pixel. Keep icons and selected frames compact and do not restore permanent
-tool labels.
+Follow the desktop OneNote grouping rhythm: undo, a hairline divider, text cursor and lasso,
+another hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, then
+low-frequency page clearing after a final divider. Dividers are one physical pixel on the tested
+tablet rather than one density-independent pixel. Keep icons and selected frames compact and do
+not restore permanent tool labels.
+
+The cursor is a working session-only text mode. Selecting it suppresses drawing-tool selection;
+tapping the paper creates a transparent multi-line editor at that point, shows a visible caret, and
+requests the Android keyboard. Choosing a drawing tool or the panorama hand exits text mode. Text
+persistence and document-coordinate pan/zoom are later storage/rendering work, not implied by this
+interaction prototype.
 
 The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
 allows one-finger panning while preserving two-finger pinch; deselecting it restores two-finger-only
@@ -133,8 +141,9 @@ The workspace does not reserve a separate application-brand/title row or a botto
 bar. The drawing tabs and ribbon should hand the remaining vertical area directly to navigation and
 the page canvas.
 
-A persistent 36 dp near-black vertical rail sits beside a 196 dp black section pane, keeping the
-combined section-navigation width at the earlier 232 dp. Its two controls are independent:
+A persistent 32 dp near-black vertical rail sits beside a 196 dp black section pane. Its two
+controls are independently centered and show the same compact selected frame as the drawing ribbon
+while their pane is expanded:
 
 - the navigation icon hides or reveals only the black section pane, matching desktop OneNote;
 - the Fluent `panel_left` icon hides or reveals only the 196 dp gray page pane.
@@ -142,3 +151,9 @@ combined section-navigation width at the earlier 232 dp. Its two controls are in
 The rail never disappears, so either pane can be restored after both are hidden. Independent pane
 visibility allows a user to keep pages visible while reclaiming the section width, or return almost
 the full width to handwriting without sacrificing a recovery control.
+
+The paper's top-right controls are context-sensitive. Normal view shows search and enter-full-page;
+the regular drawing ribbon cannot be hidden there. Full-page view hides tabs, the regular ribbon,
+rail, and both panes, then shows a centered floating copy of the drawing toolbox plus pen, search,
+and exit-full-page controls. Only the full-page pen control toggles the floating toolbox. Search
+remains directly to the right of that pen control.
