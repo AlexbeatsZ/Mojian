@@ -66,6 +66,18 @@ class DryInkView(context: Context) : View(context) {
             color = Color.rgb(160, 50, 50)
             strokeWidth = 1.2f * resources.displayMetrics.density
         }
+    private val exportThinGridPaint = Paint().apply { color = Color.rgb(220, 229, 235) }
+    private val exportMajorGridPaint = Paint().apply { color = Color.rgb(198, 215, 224) }
+    private val exportDotPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(190, 207, 216)
+            style = Paint.Style.FILL
+        }
+    private val exportMarginLinePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(213, 125, 125)
+            strokeWidth = 1.2f * resources.displayMetrics.density
+        }
     private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
     private val gridStep = 28f * resources.displayMetrics.density
     private val documentToView = Matrix()
@@ -132,7 +144,7 @@ class DryInkView(context: Context) : View(context) {
         }
 
     init {
-        setBackgroundColor(Color.rgb(27, 27, 27))
+        setBackgroundColor(Color.rgb(ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY))
     }
 
     fun addStrokes(newStrokes: Collection<Stroke>) {
@@ -305,6 +317,23 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
+    fun renderBackgroundForExport(canvas: Canvas) {
+        canvas.drawColor(Color.WHITE)
+        canvas.save()
+        canvas.concat(documentToView)
+        drawGrid(canvas, exportTheme = true)
+        canvas.restore()
+    }
+
+    fun renderInkForExport(canvas: Canvas) {
+        strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
+            transformedCanvas.save()
+            transformedCanvas.concat(documentToView)
+            strokes.forEach(scope::drawStroke)
+            transformedCanvas.restore()
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
@@ -403,7 +432,7 @@ class DryInkView(context: Context) : View(context) {
         canvas.drawPath(path, lassoPaint)
     }
 
-    private fun drawGrid(canvas: Canvas) {
+    private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false) {
         if (backgroundFormat.category == BackgroundCategory.BLANK) return
         val visible = visibleDocumentBounds()
         val step = gridStep * backgroundFormat.stepMultiplier
@@ -415,13 +444,16 @@ class DryInkView(context: Context) : View(context) {
                 if (backgroundFormat.showMarginLine) {
                     val marginX = 64f * resources.displayMetrics.density
                     if (visible.left <= marginX && visible.right >= marginX) {
-                        canvas.drawLine(marginX, visible.top, marginX, visible.bottom, marginLinePaint)
+                        canvas.drawLine(marginX, visible.top, marginX, visible.bottom, if (exportTheme) exportMarginLinePaint else marginLinePaint)
                     }
                 }
                 var y = floor(visible.top / step) * step
                 while (y <= visible.bottom) {
                     val index = floor(y / step).toInt()
-                    val paint = if (index % 4 == 0) majorGridPaint else thinGridPaint
+                    val paint =
+                        if (exportTheme) {
+                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
+                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
                     canvas.drawLine(visible.left, y, visible.right, y, paint)
                     y += step
                 }
@@ -431,13 +463,21 @@ class DryInkView(context: Context) : View(context) {
                 var x = floor(visible.left / step) * step
                 while (x <= visible.right) {
                     val index = floor(x / step).toInt()
-                    canvas.drawLine(x, visible.top, x, visible.bottom, if (index % 4 == 0) majorGridPaint else thinGridPaint)
+                    val paint =
+                        if (exportTheme) {
+                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
+                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
+                    canvas.drawLine(x, visible.top, x, visible.bottom, paint)
                     x += step
                 }
                 var y = floor(visible.top / step) * step
                 while (y <= visible.bottom) {
                     val index = floor(y / step).toInt()
-                    canvas.drawLine(visible.left, y, visible.right, y, if (index % 4 == 0) majorGridPaint else thinGridPaint)
+                    val paint =
+                        if (exportTheme) {
+                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
+                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
+                    canvas.drawLine(visible.left, y, visible.right, y, paint)
                     y += step
                 }
             }
@@ -448,7 +488,7 @@ class DryInkView(context: Context) : View(context) {
                 while (x <= visible.right) {
                     var y = floor(visible.top / step) * step
                     while (y <= visible.bottom) {
-                        canvas.drawCircle(x, y, dotRadius, dotPaint)
+                        canvas.drawCircle(x, y, dotRadius, if (exportTheme) exportDotPaint else dotPaint)
                         y += step
                     }
                     x += step

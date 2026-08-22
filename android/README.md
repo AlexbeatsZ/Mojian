@@ -24,17 +24,24 @@ model of a future independent notebook application. It does not read or modify N
 - a File/Backstage notebook information page with a bottom Options entry; prediction and page-pane
   range live in that settings panel instead of the workspace;
 - preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, and clear.
+- a working Insert ribbon with editable tables, embedded attachments, PDF-as-pages, first-sheet
+  spreadsheet previews, batch images, reusable stickers, and note-only links;
+- independent image/PDF-printout view-filter preferences calibrated so source white maps to the
+  `#1b1b1b` canvas, while original assets and exports remain unfiltered;
+- light-theme export (white background and logical black ink restored to black) as a three-layer
+  PDF, or a `.mjn` ZIP container carrying page JSON, embedded assets, and layer snapshots.
 
-Notebook hierarchy, pages, text boxes, and strokes are still session-only. Search, non-drawing ribbon tabs,
-pixel erasing, and lasso move/resize are explicit later-feature shells.
+Notebook hierarchy, text boxes, and strokes are still session-only. Inserted page objects and their
+assets persist in app-private storage. Search, View, pixel erasing, and several Backstage operations
+remain explicit later-feature shells.
 
 ## Safety boundary
 
 - release application ID: `com.meta.inklab`;
 - debug package installed by this project: `com.meta.inklab.debug`;
 - no Internet permission;
-- no external-storage permission;
-- session-only strokes;
+- no broad external-storage permission; import/export uses Android's system document picker;
+- session-only strokes, with persistent inserted page objects and embedded private assets;
 - stylus/eraser input draws, while finger/palm input on the paper is consumed without creating ink.
 
 ## Build and lint

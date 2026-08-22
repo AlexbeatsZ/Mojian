@@ -4,7 +4,11 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
@@ -13,10 +17,13 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.text.Layout
 import android.util.TypedValue
@@ -28,9 +35,11 @@ import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
 import android.widget.FrameLayout
+import android.widget.GridLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.PopupMenu
 import android.widget.PopupWindow
 import android.widget.ScrollView
@@ -43,13 +52,31 @@ import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.brush.Brush
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
+import androidx.core.content.FileProvider
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 private enum class RibbonPage {
     HOME,
+    INSERT,
     DRAW,
 }
+
+private enum class PendingExport {
+    PDF,
+    PRIVATE_PACKAGE,
+}
+
+private data class InsertTarget(
+    val notebookId: String,
+    val pageId: String,
+    val startX: Float,
+    val startY: Float,
+)
 
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
@@ -60,6 +87,7 @@ class MainActivity : Activity() {
     private val toolShelf = ToolShelf()
     private val notebookLibrary = NotebookLibrary.sample()
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
+    private val ioExecutor = Executors.newSingleThreadExecutor()
     private val workspace: NotebookWorkspace
         get() = notebookLibrary.activeNotebook()
 
@@ -84,6 +112,9 @@ class MainActivity : Activity() {
     private lateinit var floatingToolbox: View
     private lateinit var textInputLayer: CanvasTextInputLayer
     private lateinit var tagLayer: CanvasTagLayer
+    private lateinit var insertContentLayer: InsertContentLayer
+    private lateinit var pageContentRepository: PageContentRepository
+    private lateinit var assetStore: AssetStore
     private lateinit var selectionOverlay: SelectionOverlayView
     private lateinit var sectionPaneToggle: View
     private lateinit var pagePaneToggle: View
@@ -113,6 +144,10 @@ class MainActivity : Activity() {
     private var fullPageMode = false
     private var activeRibbonPage = RibbonPage.DRAW
     private var restoreTextModeAfterTagPlacement = false
+    private var imageImportDisplayMode = ImageImportDisplayMode.ASK
+    private var pdfPrintoutDisplayMode = ImageImportDisplayMode.ASK
+    private var backgroundFormatPreference = CanvasBackgroundFormat.GRID_STANDARD
+    private var pendingExport: PendingExport? = null
 
     private val activatePressureEraser =
         Runnable {
@@ -128,8 +163,11 @@ class MainActivity : Activity() {
         window.statusBarColor = TITLE_PURPLE
         window.navigationBarColor = NAV_BACKGROUND
         loadPreferences()
+        pageContentRepository = PageContentRepository(filesDir)
+        assetStore = AssetStore(this, pageContentRepository)
         currentBrush = brushFor(toolShelf.selected)
         setContentView(buildInterface())
+        dryInkView.backgroundFormat = backgroundFormatPreference
         pressureEraser.stationarySlop = dp(2).toFloat()
         syncPressureEraserWithTool()
         bindInkPipeline()
@@ -137,6 +175,30 @@ class MainActivity : Activity() {
         renderToolShelf()
         renderToolDetails()
         wetInkView.post { wetInkView.eagerInit() }
+    }
+
+    override fun onDestroy() {
+        ioExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data == null) return
+        val uris = selectedUris(data)
+        when (requestCode) {
+            REQUEST_ATTACHMENT -> uris.firstOrNull()?.let(::importAttachment)
+            REQUEST_PDF_PRINTOUT -> uris.firstOrNull()?.let { uri ->
+                chooseDisplayFilter(pdfPrintoutDisplayMode, "PDF 打印样式如何显示？") { inverted -> importPdfPrintout(uri, inverted) }
+            }
+            REQUEST_SPREADSHEET -> uris.firstOrNull()?.let(::importSpreadsheet)
+            REQUEST_IMAGES -> if (uris.isNotEmpty()) {
+                chooseDisplayFilter(imageImportDisplayMode, "这批图片如何显示？") { inverted -> importImages(uris, inverted) }
+            }
+            REQUEST_STICKER_IMPORT -> if (uris.isNotEmpty()) importStickerPresets(uris)
+            REQUEST_EXPORT -> pendingExport?.let { type -> exportToUri(data.data ?: return, type) }.also { pendingExport = null }
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -246,7 +308,7 @@ class MainActivity : Activity() {
                     addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("打印", false) { showShell("打印") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("共享", false) { showShell("共享") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("导出", false) { showShell("导出") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("导出", false) { dialog.dismiss(); showExportDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
                     addView(backstageNavItem("帐户", false) { showShell("帐户") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("选项", false) { showOptionsDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
@@ -422,6 +484,36 @@ class MainActivity : Activity() {
                     }
                     addView(settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
 
+                    val imageFilterValue = settingsValueButton(imageImportDisplayMode.label)
+                    imageFilterValue.setOnClickListener {
+                        imageImportDisplayMode = nextImportDisplayMode(imageImportDisplayMode)
+                        imageFilterValue.text = imageImportDisplayMode.label
+                        persistWorkspacePreferences()
+                    }
+                    addView(
+                        settingsRow(
+                            "图片导入显示",
+                            "只改变画布查看效果；原图与导出始终保持不变。",
+                            imageFilterValue,
+                        ),
+                        LinearLayout.LayoutParams(MATCH, dp(72)),
+                    )
+
+                    val pdfFilterValue = settingsValueButton(pdfPrintoutDisplayMode.label)
+                    pdfFilterValue.setOnClickListener {
+                        pdfPrintoutDisplayMode = nextImportDisplayMode(pdfPrintoutDisplayMode)
+                        pdfFilterValue.text = pdfPrintoutDisplayMode.label
+                        persistWorkspacePreferences()
+                    }
+                    addView(
+                        settingsRow(
+                            "PDF 打印样式显示",
+                            "逐页导入时使用查看滤镜；原 PDF 与导出页面不反色。",
+                            pdfFilterValue,
+                        ),
+                        LinearLayout.LayoutParams(MATCH, dp(72)),
+                    )
+
                     addView(optionsSectionTitle("整页视图"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
                     val toolbarValue = settingsValueButton("配置")
@@ -562,6 +654,12 @@ class MainActivity : Activity() {
     private fun loadPreferences() {
         val prefs = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
         predictionEnabled = prefs.getBoolean(KEY_PREDICTION_ENABLED, true)
+        imageImportDisplayMode =
+            runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_IMAGE_IMPORT_DISPLAY_MODE, "") ?: "") }
+                .getOrDefault(ImageImportDisplayMode.ASK)
+        pdfPrintoutDisplayMode =
+            runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_PDF_PRINTOUT_DISPLAY_MODE, "") ?: "") }
+                .getOrDefault(ImageImportDisplayMode.ASK)
         sectionPaneVisible = prefs.getBoolean(KEY_SECTION_PANE_VISIBLE, true)
         pagePaneVisible = prefs.getBoolean(KEY_PAGE_PANE_VISIBLE, true)
         pressureEraser.pressureThreshold = prefs.getFloat(KEY_PRESSURE_THRESHOLD, 0.78f)
@@ -605,9 +703,15 @@ class MainActivity : Activity() {
         }
 
         val savedBg = prefs.getString(KEY_BACKGROUND_FORMAT, CanvasBackgroundFormat.GRID_STANDARD.name)
-        val bgFormat = runCatching { CanvasBackgroundFormat.valueOf(savedBg ?: "") }.getOrDefault(CanvasBackgroundFormat.GRID_STANDARD)
-        dryInkView.backgroundFormat = bgFormat
+        backgroundFormatPreference = runCatching { CanvasBackgroundFormat.valueOf(savedBg ?: "") }.getOrDefault(CanvasBackgroundFormat.GRID_STANDARD)
     }
+
+    private fun nextImportDisplayMode(mode: ImageImportDisplayMode): ImageImportDisplayMode =
+        when (mode) {
+            ImageImportDisplayMode.ASK -> ImageImportDisplayMode.INVERT
+            ImageImportDisplayMode.INVERT -> ImageImportDisplayMode.ORIGINAL
+            ImageImportDisplayMode.ORIGINAL -> ImageImportDisplayMode.ASK
+        }
 
     private fun persistToolShelf() {
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
@@ -621,6 +725,8 @@ class MainActivity : Activity() {
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PREDICTION_ENABLED, predictionEnabled)
+            .putString(KEY_IMAGE_IMPORT_DISPLAY_MODE, imageImportDisplayMode.name)
+            .putString(KEY_PDF_PRINTOUT_DISPLAY_MODE, pdfPrintoutDisplayMode.name)
             .putBoolean(KEY_SECTION_PANE_VISIBLE, sectionPaneVisible)
             .putBoolean(KEY_PAGE_PANE_VISIBLE, pagePaneVisible)
             .putString(KEY_PAGE_PANE_MODE, workspace.pagePaneMode.name)
@@ -718,7 +824,7 @@ class MainActivity : Activity() {
         row.removeAllViews()
         row.addView(ribbonTab("文件", false) { showBackstage() })
         row.addView(ribbonTab("开始", activeRibbonPage == RibbonPage.HOME) { selectRibbonPage(RibbonPage.HOME) })
-        row.addView(ribbonTab("插入", false) { showShell("插入工具") })
+        row.addView(ribbonTab("插入", activeRibbonPage == RibbonPage.INSERT) { selectRibbonPage(RibbonPage.INSERT) })
         row.addView(ribbonTab("绘图", activeRibbonPage == RibbonPage.DRAW) { selectRibbonPage(RibbonPage.DRAW) })
         row.addView(ribbonTab("视图", false) { showShell("视图工具") })
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
@@ -734,16 +840,77 @@ class MainActivity : Activity() {
         val host = drawingRibbon as FrameLayout
         host.removeAllViews()
         host.addView(
-            if (page == RibbonPage.HOME) buildHomeRibbon() else buildDrawingRibbon(),
+            when (page) {
+                RibbonPage.HOME -> buildHomeRibbon()
+                RibbonPage.INSERT -> buildInsertRibbon()
+                RibbonPage.DRAW -> buildDrawingRibbon()
+            },
             FrameLayout.LayoutParams(MATCH, MATCH),
         )
-        if (page == RibbonPage.HOME) {
-            setTextMode(true, rerender = false)
-        } else {
-            renderToolShelf()
-            renderToolDetails()
+        when (page) {
+            RibbonPage.HOME -> setTextMode(true, rerender = false)
+            RibbonPage.INSERT -> setTextMode(false, rerender = false)
+            RibbonPage.DRAW -> {
+                renderToolShelf()
+                renderToolDetails()
+            }
         }
     }
+
+    private fun buildInsertRibbon(): View =
+        HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(TOOLBAR_BACKGROUND)
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(2), dp(10), dp(2))
+                    addView(insertCommandButton("▦", "表格", ::showTablePicker))
+                    addView(verticalDivider())
+                    addView(insertCommandButton("⌕", "文件附件") { launchDocumentPicker(REQUEST_ATTACHMENT, "*/*") })
+                    addView(insertCommandButton("▤", "文件打印样式") { launchDocumentPicker(REQUEST_PDF_PRINTOUT, "application/pdf") })
+                    addView(insertCommandButton("X", "电子表格") { launchSpreadsheetPicker() }, LinearLayout.LayoutParams(dp(92), MATCH))
+                    addView(verticalDivider())
+                    addView(insertCommandButton("▧", "图片") { launchImagePicker(REQUEST_IMAGES) })
+                    addView(insertCommandButton("★", "贴纸") { showStickerPicker() })
+                    addView(verticalDivider())
+                    addView(insertCommandButton("⌁", "链接") { showNoteLinkPicker() })
+                },
+                ViewGroup.LayoutParams(WRAP, MATCH),
+            )
+        }
+
+    private fun insertCommandButton(glyph: String, label: String, action: (View) -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            background = rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = glyph
+                    gravity = Gravity.CENTER
+                    setTextColor(if (glyph == "X") Color.rgb(73, 170, 107) else TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, if (glyph == "X") 15f else 19f)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                },
+                LinearLayout.LayoutParams(dp(25), MATCH).apply { marginEnd = dp(5) },
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = label
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    maxLines = 1
+                },
+                LinearLayout.LayoutParams(WRAP, MATCH),
+            )
+            setOnClickListener { action(this) }
+            tooltipText = label
+            layoutParams = LinearLayout.LayoutParams(WRAP, MATCH)
+        }
 
     private fun buildNavigationRail(): View =
         LinearLayout(this).apply {
@@ -991,6 +1158,7 @@ class MainActivity : Activity() {
                 menu.add("${index + 1}. ${tag.kind.label}").setOnMenuItemClickListener {
                     viewport.centerDocumentPoint(tag.documentX, tag.documentY, tagLayer.width * 0.5f, tagLayer.height * 0.5f)
                     dryInkView.setViewport(viewport.documentToViewMatrix())
+                    insertContentLayer.invalidate()
                     tagLayer.invalidate()
                     selectionOverlay.invalidate()
                     tagLayer.focusTag(index)
@@ -1057,6 +1225,7 @@ class MainActivity : Activity() {
                     if (kotlin.math.abs(deltaY) >= 2f) {
                         dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                        insertContentLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                     }
                     insertSpaceActive = false
                     dryInkView.setInsertSpaceGuide(null, null)
@@ -1161,6 +1330,7 @@ class MainActivity : Activity() {
         val paper = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
         dryInkView = DryInkView(this)
         wetInkView = InProgressStrokesView(this)
+        insertContentLayer = InsertContentLayer(this, viewport, pageContentRepository)
         tagLayer = CanvasTagLayer(this, viewport)
         textInputLayer = CanvasTextInputLayer(this)
         selectionOverlay =
@@ -1188,9 +1358,12 @@ class MainActivity : Activity() {
             selectionOverlay.invalidate()
             renderToolDetails()
         }
+        insertContentLayer.onDocumentChanged = pageContentRepository::save
+        insertContentLayer.onObjectActivated = ::activateInsertObject
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        paper.addView(insertContentLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(selectionOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -1375,6 +1548,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderPages() {
+        bindSelectedPageContent()
         val canAdd = workspace.hasSelectedSection()
         if (::addPageButton.isInitialized) {
             addPageButton.isEnabled = canAdd
@@ -1472,6 +1646,12 @@ class MainActivity : Activity() {
                 }
             }
         pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(58)).apply { setMargins(dp(6), dp(1), dp(6), dp(1)) })
+    }
+
+    private fun bindSelectedPageContent() {
+        val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
+        val document = pageId?.let { pageContentRepository.load(workspace.id, it) }
+        insertContentLayer.bind(document)
     }
 
     private fun renderToolShelf() {
@@ -2179,6 +2359,7 @@ class MainActivity : Activity() {
         lastGestureFocusY = focusY
         lastGestureSpan = nextSpan
         dryInkView.setViewport(viewport.documentToViewMatrix())
+        insertContentLayer.invalidate()
         tagLayer.invalidate()
         selectionOverlay.invalidate()
     }
@@ -2332,12 +2513,14 @@ class MainActivity : Activity() {
     private fun confirmClearPage() {
         AlertDialog.Builder(this)
             .setTitle("清空当前页面？")
-            .setMessage("本原型的笔迹、文本和标记只保存在当前会话，清空后无法恢复。")
+            .setMessage("将清空当前页面的笔迹、文本、标记和所有插入内容；嵌入文件也会从本页资产中删除，无法恢复。")
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
                 dryInkView.clear()
                 textInputLayer.clearAll()
                 tagLayer.clear()
+                insertContentLayer.currentDocument()?.let { assetStore.clearPageAssets(it.notebookId, it.pageId) }
+                insertContentLayer.clearObjects()
                 renderToolDetails()
             }
             .show()
@@ -2561,6 +2744,620 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(WRAP, MATCH)
         }
 
+    private fun showTablePicker(anchor: View) {
+        if (insertTarget() == null) {
+            Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val popupContent =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(7), dp(8), dp(8))
+                setBackgroundColor(TOOLBAR_BACKGROUND)
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "插入表格"
+                        setTextColor(TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        gravity = Gravity.CENTER_VERTICAL
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(26)),
+                )
+            }
+        val popup = PopupWindow(popupContent, WRAP, WRAP, true).apply {
+            isOutsideTouchable = true
+            setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+            elevation = dp(10).toFloat()
+        }
+        val grid = GridLayout(this).apply { columnCount = 8; rowCount = 6 }
+        for (row in 1..6) {
+            for (column in 1..8) {
+                grid.addView(
+                    TextView(this).apply {
+                        text = ""
+                        contentDescription = "$row 行 $column 列"
+                        background = rounded(Color.rgb(248, 248, 248), 0f, Color.rgb(69, 69, 69))
+                        setOnClickListener {
+                            insertTable(row, column)
+                            popup.dismiss()
+                        }
+                    },
+                    GridLayout.LayoutParams().apply {
+                        width = dp(28)
+                        height = dp(28)
+                        setMargins(dp(1), dp(1), dp(1), dp(1))
+                    },
+                )
+            }
+        }
+        popupContent.addView(grid)
+        val location = IntArray(2)
+        anchor.getLocationOnScreen(location)
+        popup.showAtLocation(anchor, Gravity.TOP or Gravity.START, location[0], location[1] + anchor.height + dp(2))
+    }
+
+    private fun insertTable(rows: Int, columns: Int) {
+        val target = insertTarget() ?: return
+        val cellWidth = dp(82).toFloat()
+        val width = (columns * cellWidth).coerceAtMost(dp(650).toFloat())
+        val table =
+            InsertObject.Table(
+                id = "table-${UUID.randomUUID()}",
+                documentX = target.startX,
+                documentY = target.startY,
+                width = width,
+                height = rows * dp(40).toFloat(),
+                rows = rows,
+                columns = columns,
+            )
+        insertContentLayer.addObject(table)
+        showTableEditor(table)
+    }
+
+    private fun showTableEditor(table: InsertObject.Table) {
+        val editors = mutableListOf<EditText>()
+        val rows =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                for (rowIndex in 0 until table.rows) {
+                    addView(
+                        LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            for (columnIndex in 0 until table.columns) {
+                                val cellIndex = rowIndex * table.columns + columnIndex
+                                val editor =
+                                    EditText(this@MainActivity).apply {
+                                        setText(table.cells.getOrElse(cellIndex) { "" })
+                                        setTextColor(TEXT_PRIMARY)
+                                        setHintTextColor(TEXT_SECONDARY)
+                                        hint = "${rowIndex + 1},${columnIndex + 1}"
+                                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                                        setSingleLine(true)
+                                        background = rounded(Color.rgb(31, 31, 31), 0f, BORDER_STRONG)
+                                        setPadding(dp(7), 0, dp(7), 0)
+                                    }
+                                editors += editor
+                                addView(editor, LinearLayout.LayoutParams(dp(112), dp(42)).apply { setMargins(dp(1), dp(1), dp(1), dp(1)) })
+                            }
+                        },
+                        LinearLayout.LayoutParams(WRAP, dp(44)),
+                    )
+                }
+            }
+        AlertDialog.Builder(this)
+            .setTitle("编辑 ${table.rows} × ${table.columns} 表格")
+            .setView(HorizontalScrollView(this).apply { addView(ScrollView(this@MainActivity).apply { addView(rows) }) })
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                editors.forEachIndexed { index, editor -> table.cells[index] = editor.text.toString() }
+                insertContentLayer.notifyObjectChanged()
+            }
+            .show()
+    }
+
+    private fun launchDocumentPicker(requestCode: Int, mimeType: String, allowMultiple: Boolean = false, extraMimeTypes: Array<String>? = null) {
+        if (insertTarget() == null) {
+            Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = mimeType
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+                extraMimeTypes?.let { putExtra(Intent.EXTRA_MIME_TYPES, it) }
+            },
+            requestCode,
+        )
+    }
+
+    private fun launchSpreadsheetPicker() {
+        launchDocumentPicker(
+            REQUEST_SPREADSHEET,
+            "*/*",
+            extraMimeTypes =
+                arrayOf(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                    "text/csv",
+                    "text/tab-separated-values",
+                ),
+        )
+    }
+
+    private fun launchImagePicker(requestCode: Int) {
+        launchDocumentPicker(requestCode, "image/*", allowMultiple = true)
+    }
+
+    private fun selectedUris(data: Intent): List<Uri> =
+        buildList {
+            data.clipData?.let { clip -> for (index in 0 until clip.itemCount) add(clip.getItemAt(index).uri) }
+            data.data?.let { if (it !in this) add(it) }
+        }
+
+    private fun chooseDisplayFilter(mode: ImageImportDisplayMode, title: String, action: (Boolean) -> Unit) {
+        when (mode) {
+            ImageImportDisplayMode.INVERT -> action(true)
+            ImageImportDisplayMode.ORIGINAL -> action(false)
+            ImageImportDisplayMode.ASK ->
+                AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setItems(arrayOf("反色保色显示", "保持原图显示")) { _, which -> action(which == 0) }
+                    .setNegativeButton("取消", null)
+                    .show()
+        }
+    }
+
+    private fun importAttachment(uri: Uri) {
+        val target = insertTarget() ?: return
+        Toast.makeText(this, "正在嵌入附件…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching {
+                val asset = assetStore.importUri(target.notebookId, target.pageId, uri)
+                InsertObject.Attachment(
+                    id = "attachment-${UUID.randomUUID()}",
+                    documentX = target.startX,
+                    documentY = target.startY,
+                    width = dp(430).toFloat(),
+                    height = dp(68).toFloat(),
+                    assetName = asset.storedName,
+                    displayName = asset.displayName,
+                    mimeType = asset.mimeType,
+                    sizeBytes = asset.sizeBytes,
+                )
+            }.onSuccess { appendImportedObjects(target, listOf(it), "附件已嵌入") }
+                .onFailure { reportBackgroundFailure("附件导入失败", it) }
+        }
+    }
+
+    private fun importImages(uris: List<Uri>, inverted: Boolean) {
+        val target = insertTarget() ?: return
+        val maxWidth = dp(620).toFloat()
+        Toast.makeText(this, "正在导入 ${uris.size} 张图片…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching {
+                var y = target.startY
+                uris.map { uri ->
+                    val asset = assetStore.importUri(target.notebookId, target.pageId, uri)
+                    val (width, height) = fittedImageSize(asset.file, maxWidth)
+                    InsertObject.Image(
+                        id = "image-${UUID.randomUUID()}",
+                        documentX = target.startX,
+                        documentY = y,
+                        width = width,
+                        height = height,
+                        assetName = asset.storedName,
+                        displayName = asset.displayName,
+                        mimeType = asset.mimeType,
+                        sourceKind = ImageSourceKind.IMAGE,
+                        viewInverted = inverted,
+                    ).also { y += height + dp(18) }
+                }
+            }.onSuccess { appendImportedObjects(target, it, "已导入 ${it.size} 张图片") }
+                .onFailure { reportBackgroundFailure("图片导入失败", it) }
+        }
+    }
+
+    private fun importPdfPrintout(uri: Uri, inverted: Boolean) {
+        val target = insertTarget() ?: return
+        val displayWidth = dp(640).toFloat()
+        Toast.makeText(this, "正在逐页导入 PDF…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching {
+                val source = assetStore.importUri(target.notebookId, target.pageId, uri)
+                val outputDirectory = pageContentRepository.assetDirectory(target.notebookId, target.pageId)
+                val objects = mutableListOf<InsertObject>()
+                var y = target.startY
+                ParcelFileDescriptor.open(source.file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer ->
+                        for (index in 0 until renderer.pageCount) {
+                            renderer.openPage(index).use { page ->
+                                val renderWidth = (page.width * 2).coerceAtMost(1800).coerceAtLeast(1)
+                                val renderHeight = (page.height * renderWidth.toFloat() / page.width).roundToInt().coerceAtLeast(1)
+                                val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+                                Canvas(bitmap).drawColor(Color.WHITE)
+                                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                val storedName = "${UUID.randomUUID()}-pdf-page-${index + 1}.png"
+                                val file = File(outputDirectory, storedName)
+                                file.outputStream().buffered().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                                bitmap.recycle()
+                                val height = displayWidth * renderHeight / renderWidth
+                                objects +=
+                                    InsertObject.Image(
+                                        id = "printout-${UUID.randomUUID()}",
+                                        documentX = target.startX,
+                                        documentY = y,
+                                        width = displayWidth,
+                                        height = height,
+                                        assetName = storedName,
+                                        displayName = "${source.displayName} · ${index + 1}",
+                                        mimeType = "image/png",
+                                        sourceKind = ImageSourceKind.PDF_PAGE,
+                                        viewInverted = inverted,
+                                        sourceAssetName = source.storedName,
+                                        sourcePageNumber = index + 1,
+                                    )
+                                y += height + dp(18)
+                            }
+                        }
+                    }
+                }
+                objects
+            }.onSuccess { appendImportedObjects(target, it, "已导入 ${it.size} 页 PDF") }
+                .onFailure { reportBackgroundFailure("PDF 导入失败", it) }
+        }
+    }
+
+    private fun importSpreadsheet(uri: Uri) {
+        val target = insertTarget() ?: return
+        Toast.makeText(this, "正在生成电子表格预览…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching {
+                val asset = assetStore.importUri(target.notebookId, target.pageId, uri)
+                val preview = XlsxPreviewParser.preview(asset.file)
+                val columns = preview.maxOfOrNull(List<String>::size)?.coerceAtLeast(1) ?: 1
+                InsertObject.Spreadsheet(
+                    id = "spreadsheet-${UUID.randomUUID()}",
+                    documentX = target.startX,
+                    documentY = target.startY,
+                    width = (columns * dp(105)).coerceAtMost(dp(720)).toFloat(),
+                    height = (dp(48) + preview.size.coerceAtLeast(1) * dp(34)).toFloat(),
+                    assetName = asset.storedName,
+                    displayName = asset.displayName,
+                    mimeType = asset.mimeType,
+                    previewRows = preview,
+                )
+            }.onSuccess { appendImportedObjects(target, listOf(it), "电子表格已嵌入，可点击打开编辑") }
+                .onFailure { reportBackgroundFailure("电子表格导入失败", it) }
+        }
+    }
+
+    private fun fittedImageSize(file: File, maximumWidth: Float): Pair<Float, Float> {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        val rawWidth = options.outWidth.coerceAtLeast(1).toFloat()
+        val rawHeight = options.outHeight.coerceAtLeast(1).toFloat()
+        val scale = minOf(1f, maximumWidth / rawWidth)
+        return rawWidth * scale to rawHeight * scale
+    }
+
+    private fun appendImportedObjects(target: InsertTarget, objects: List<InsertObject>, message: String) {
+        runOnUiThread {
+            val current = insertContentLayer.currentDocument()
+            if (current?.notebookId == target.notebookId && current.pageId == target.pageId) {
+                insertContentLayer.addObjects(objects)
+            } else {
+                pageContentRepository.load(target.notebookId, target.pageId).also { document ->
+                    document.objects += objects
+                    pageContentRepository.save(document)
+                }
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun reportBackgroundFailure(prefix: String, error: Throwable) {
+        runOnUiThread { Toast.makeText(this, "$prefix：${error.message ?: "未知错误"}", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun showStickerPicker() {
+        if (insertTarget() == null) {
+            Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val body =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(14), dp(18), dp(18))
+                setBackgroundColor(TOOLBAR_BACKGROUND)
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "贴纸"
+                        setTextColor(TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(38)),
+                )
+            }
+        val grid = GridLayout(this).apply { columnCount = 4 }
+        BuiltInSticker.entries.forEach { kind ->
+            grid.addView(stickerTile(kind.label, StickerFactory.render(kind)) { dialog.dismiss(); insertBuiltInSticker(kind) })
+        }
+        assetStore.customStickerFiles().forEach { file ->
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+            if (bitmap != null) grid.addView(stickerTile(file.nameWithoutExtension.take(10), bitmap) { dialog.dismiss(); insertStickerFile(file, file.name) })
+        }
+        grid.addView(
+            TextView(this).apply {
+                text = "+\n导入预设"
+                gravity = Gravity.CENTER
+                setTextColor(ACCENT_PURPLE)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                background = rounded(Color.rgb(31, 31, 31), dp(3).toFloat(), BORDER_STRONG)
+                setOnClickListener { dialog.dismiss(); launchImagePicker(REQUEST_STICKER_IMPORT) }
+            },
+            GridLayout.LayoutParams().apply { width = dp(92); height = dp(104); setMargins(dp(5), dp(5), dp(5), dp(5)) },
+        )
+        body.addView(grid)
+        dialog.setContentView(body)
+        dialog.show()
+        dialog.window?.apply { setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT)); setLayout(WRAP, WRAP) }
+    }
+
+    private fun stickerTile(label: String, bitmap: Bitmap, action: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = rounded(Color.rgb(31, 31, 31), dp(3).toFloat(), BORDER_STRONG)
+            addView(ImageView(this@MainActivity).apply { setImageBitmap(bitmap); scaleType = ImageView.ScaleType.CENTER_INSIDE }, LinearLayout.LayoutParams(dp(66), dp(70)))
+            addView(TextView(this@MainActivity).apply { text = label; gravity = Gravity.CENTER; setTextColor(TEXT_PRIMARY); setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f) }, LinearLayout.LayoutParams(MATCH, dp(26)))
+            setOnClickListener { action() }
+            layoutParams = GridLayout.LayoutParams().apply { width = dp(92); height = dp(104); setMargins(dp(5), dp(5), dp(5), dp(5)) }
+        }
+
+    private fun insertBuiltInSticker(kind: BuiltInSticker) {
+        val temporary = File.createTempFile("sticker-", ".png", cacheDir)
+        try {
+            StickerFactory.write(kind, temporary)
+            insertStickerFile(temporary, "${kind.label}.png")
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    private fun insertStickerFile(file: File, displayName: String) {
+        val target = insertTarget() ?: return
+        runCatching {
+            val asset = assetStore.copyFile(target.notebookId, target.pageId, file, displayName, "image/png")
+            val (width, height) = fittedImageSize(asset.file, dp(180).toFloat())
+            InsertObject.Image(
+                id = "sticker-${UUID.randomUUID()}",
+                documentX = target.startX,
+                documentY = target.startY,
+                width = width,
+                height = height,
+                assetName = asset.storedName,
+                displayName = displayName,
+                mimeType = "image/png",
+                sourceKind = ImageSourceKind.STICKER,
+            )
+        }.onSuccess { insertContentLayer.addObject(it) }
+            .onFailure { Toast.makeText(this, "贴纸插入失败：${it.message}", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun importStickerPresets(uris: List<Uri>) {
+        val target = insertTarget() ?: return
+        Toast.makeText(this, "正在导入贴纸预设…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching { uris.map(assetStore::importStickerPreset) }
+                .onSuccess { presets ->
+                    var y = target.startY
+                    val objects = presets.map { preset ->
+                        val asset = assetStore.copyFile(target.notebookId, target.pageId, preset.file, preset.displayName, preset.mimeType)
+                        val (width, height) = fittedImageSize(asset.file, dp(180).toFloat())
+                        InsertObject.Image(
+                            id = "sticker-${UUID.randomUUID()}", target.startX, y, width, height,
+                            asset.storedName, preset.displayName, preset.mimeType, ImageSourceKind.STICKER,
+                        ).also { y += height + dp(14) }
+                    }
+                    appendImportedObjects(target, objects, "已加入 ${objects.size} 个贴纸预设并插入页面")
+                }
+                .onFailure { reportBackgroundFailure("贴纸预设导入失败", it) }
+        }
+    }
+
+    private fun showNoteLinkPicker() {
+        val target = insertTarget() ?: run { Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show(); return }
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(16)) }
+        rows.addView(TextView(this).apply { text = "链接到笔记"; setTextColor(TEXT_PRIMARY); setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f); typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(MATCH, dp(42)))
+        notebookLibrary.notebooks.forEach { notebook ->
+            fun visit(sections: List<SectionNode>, path: List<String>) {
+                sections.forEach { section ->
+                    val nextPath = path + section.title
+                    section.pages.forEach { page ->
+                        rows.addView(
+                            TextView(this).apply {
+                                text = "${notebook.title}  ›  ${nextPath.joinToString("  ›  ")}  ›  ${page.title}"
+                                gravity = Gravity.CENTER_VERTICAL
+                                setPadding(dp(10), 0, dp(10), 0)
+                                setTextColor(Color.rgb(70, 153, 255))
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                                background = rounded(Color.TRANSPARENT, dp(2).toFloat(), BORDER_COLOR)
+                                setOnClickListener {
+                                    insertContentLayer.addObject(
+                                        InsertObject.NoteLink(
+                                            id = "link-${UUID.randomUUID()}",
+                                            documentX = target.startX,
+                                            documentY = target.startY,
+                                            width = dp(480).toFloat(),
+                                            height = dp(38).toFloat(),
+                                            targetNotebookId = notebook.id,
+                                            targetSectionId = section.id,
+                                            targetPageId = page.id,
+                                            targetTitle = page.title,
+                                        ),
+                                    )
+                                    dialog.dismiss()
+                                }
+                            },
+                            LinearLayout.LayoutParams(MATCH, dp(42)).apply { bottomMargin = dp(3) },
+                        )
+                    }
+                    visit(section.children, nextPath)
+                }
+            }
+            visit(notebook.sections, emptyList())
+        }
+        dialog.setContentView(ScrollView(this).apply { setBackgroundColor(TOOLBAR_BACKGROUND); addView(rows) })
+        dialog.show()
+        dialog.window?.apply { setBackgroundDrawable(ColorDrawable(TOOLBAR_BACKGROUND)); setLayout(dp(620), dp(520)) }
+    }
+
+    private fun activateInsertObject(item: InsertObject) {
+        when (item) {
+            is InsertObject.Table -> showTableEditor(item)
+            is InsertObject.Attachment -> openEmbeddedAsset(item.assetName, item.mimeType)
+            is InsertObject.Spreadsheet -> openEmbeddedAsset(item.assetName, item.mimeType)
+            is InsertObject.NoteLink -> openNoteLink(item)
+            is InsertObject.Image -> Unit
+        }
+    }
+
+    private fun openEmbeddedAsset(assetName: String, mimeType: String) {
+        val document = insertContentLayer.currentDocument() ?: return
+        val file = assetStore.assetFile(document.notebookId, document.pageId, assetName)
+        if (!file.isFile) {
+            Toast.makeText(this, "嵌入文件已丢失", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val contentUri = FileProvider.getUriForFile(this, "$packageName.files", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(contentUri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { Toast.makeText(this, "没有可打开此文件的应用", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun openNoteLink(link: InsertObject.NoteLink) {
+        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == link.targetNotebookId }
+        if (notebook == null || !notebookLibrary.selectNotebook(notebook.id) || !notebook.selectSection(link.targetSectionId) || !notebook.selectPage(link.targetSectionId, link.targetPageId)) {
+            Toast.makeText(this, "链接的笔记已不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        persistWorkspacePreferences()
+        renderWorkspace()
+    }
+
+    private fun insertTarget(): InsertTarget? {
+        if (!::insertContentLayer.isInitialized) return null
+        val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty) ?: return null
+        val point = insertContentLayer.nextInsertionPoint()
+        return InsertTarget(workspace.id, pageId, point.x, point.y)
+    }
+
+    private fun showExportDialog() {
+        if (workspace.selectedPageId.isEmpty()) {
+            Toast.makeText(this, "请先选择要导出的页面", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("导出")
+            .setItems(arrayOf("分层 PDF（当前页面）", "墨笺私有格式 .mjn（当前笔记本）")) { _, which ->
+                startExport(if (which == 0) PendingExport.PDF else PendingExport.PRIVATE_PACKAGE)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun startExport(type: PendingExport) {
+        pendingExport = type
+        val pageTitle = workspace.selectedPage()?.title ?: "页面"
+        val fileName =
+            if (type == PendingExport.PDF) "${safeFileName(pageTitle)}.pdf"
+            else "${safeFileName(workspace.title)}.mjn"
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                this.type = if (type == PendingExport.PDF) "application/pdf" else "application/zip"
+                putExtra(Intent.EXTRA_TITLE, fileName)
+            },
+            REQUEST_EXPORT,
+        )
+    }
+
+    private fun exportToUri(uri: Uri, type: PendingExport) {
+        val layers = captureExportLayers() ?: return
+        val pageId = workspace.selectedPageId
+        val notebook = workspace
+        Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching {
+                contentResolver.openOutputStream(uri, "w").use { output ->
+                    requireNotNull(output) { "无法写入目标文件" }
+                    if (type == PendingExport.PDF) {
+                        val rasterLayers = layers.map { (name, bitmap) -> bitmapToPdfLayer(name, bitmap) }
+                        LayeredPdfWriter.write(output, rasterLayers)
+                    } else {
+                        val pngLayers = layers.entries.associate { (name, bitmap) -> name to bitmapToPng(bitmap) }
+                        NotebookPackageExporter(pageContentRepository).write(output, notebook, pageId, pngLayers)
+                    }
+                }
+            }.onSuccess { runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() } }
+                .onFailure { reportBackgroundFailure("导出失败", it) }
+            layers.values.forEach(Bitmap::recycle)
+        }
+    }
+
+    private fun captureExportLayers(): LinkedHashMap<String, Bitmap>? {
+        val width = dryInkView.width
+        val height = dryInkView.height
+        if (width <= 0 || height <= 0) {
+            Toast.makeText(this, "页面尚未完成布局", Toast.LENGTH_SHORT).show()
+            return null
+        }
+        val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        dryInkView.renderBackgroundForExport(Canvas(background))
+        val inserted = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        insertContentLayer.renderForExport(Canvas(inserted))
+        val inkAndText = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        Canvas(inkAndText).also { canvas ->
+            dryInkView.renderInkForExport(canvas)
+            tagLayer.draw(canvas)
+            textInputLayer.draw(canvas)
+        }
+        ExportColorTransform.applyTo(inkAndText)
+        return linkedMapOf("页面背景" to background, "插入内容" to inserted, "墨迹与文字" to inkAndText)
+    }
+
+    private fun bitmapToPdfLayer(name: String, bitmap: Bitmap): PdfRasterLayer {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        val rgb = ByteArray(pixels.size * 3)
+        val alpha = ByteArray(pixels.size)
+        var hasTransparency = false
+        pixels.forEachIndexed { index, color ->
+            rgb[index * 3] = Color.red(color).toByte()
+            rgb[index * 3 + 1] = Color.green(color).toByte()
+            rgb[index * 3 + 2] = Color.blue(color).toByte()
+            alpha[index] = Color.alpha(color).toByte()
+            if (Color.alpha(color) != 255) hasTransparency = true
+        }
+        return PdfRasterLayer(name, bitmap.width, bitmap.height, rgb, alpha.takeIf { hasTransparency })
+    }
+
+    private fun bitmapToPng(bitmap: Bitmap): ByteArray =
+        ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+
+    private fun safeFileName(value: String): String =
+        value.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80).ifBlank { "导出" }
+
     private fun sectionCaption(label: String): TextView =
         TextView(this).apply {
             text = label
@@ -2669,6 +3466,14 @@ class MainActivity : Activity() {
         private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
         private const val KEY_SELECTED_PAGE_ID = "selected-page-id"
         private const val KEY_BACKGROUND_FORMAT = "background-format"
+        private const val KEY_IMAGE_IMPORT_DISPLAY_MODE = "image-import-display-mode"
+        private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"
+        private const val REQUEST_ATTACHMENT = 4101
+        private const val REQUEST_PDF_PRINTOUT = 4102
+        private const val REQUEST_SPREADSHEET = 4103
+        private const val REQUEST_IMAGES = 4104
+        private const val REQUEST_STICKER_IMPORT = 4105
+        private const val REQUEST_EXPORT = 4106
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
@@ -2677,7 +3482,7 @@ class MainActivity : Activity() {
         private val TOOLBAR_BACKGROUND = Color.rgb(35, 35, 35)
         private val NAV_BACKGROUND = Color.rgb(15, 15, 15)
         private val PAGE_LIST_BACKGROUND = Color.rgb(42, 42, 42)
-        private val PAPER_COLOR = Color.rgb(27, 27, 27)
+        private val PAPER_COLOR = Color.rgb(ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY)
         private val BORDER_COLOR = Color.rgb(61, 61, 61)
         private val BORDER_STRONG = Color.rgb(87, 87, 87)
         private val TEXT_PRIMARY = Color.rgb(244, 244, 244)

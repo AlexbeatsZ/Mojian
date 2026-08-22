@@ -11,8 +11,8 @@ android {
         applicationId = "com.meta.inklab"
         minSdk = 29
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4.0"
     }
 
     compileOptions {
@@ -45,6 +45,7 @@ dependencies {
     implementation("androidx.ink:ink-rendering:$inkVersion")
     implementation("androidx.ink:ink-authoring:$inkVersion")
     implementation("androidx.input:input-motionprediction:1.0.0")
+    implementation("androidx.core:core-ktx:1.13.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

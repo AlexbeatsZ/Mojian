@@ -12,9 +12,10 @@ Windows client. The interaction language is inspired by the user's installed des
 the product remains an independent clean-room application with its own recursively nestable section
 model.
 
-The current notebook data and tool presets are session-only prototypes. Persistence, multi-notebook
-storage, import, and sync remain later product layers; their visible entry points may be shells, but
-drawing and hierarchy selection must be real.
+The notebook hierarchy and ink/text/tag layers remain prototype state, while inserted page objects
+and their embedded assets now persist in the product-owned private store. Full notebook import and
+sync remain later product layers; their visible entry points may be shells, but drawing, hierarchy
+selection, insertion, and export must be real.
 
 ## Visual evidence and asset boundary
 
@@ -140,6 +141,13 @@ included in a lasso selection, moved or scaled with that selection, and removed 
 whole-stroke eraser or selection deletion. Tags are session-only until the document storage model
 is implemented.
 
+## Insert ribbon
+
+The working Insert ribbon contains table, embedded file attachment, PDF printout, spreadsheet,
+multi-image, sticker, and note-link commands. Image and sticker remain adjacent. Screen clipping,
+page template, and the Draw ribbon's insert-space command do not appear here. Detailed object,
+asset, filter, and export behavior is owned by `docs/design/insert-and-export.md`.
+
 ## Preserved input behavior
 
 - Stylus input authors the selected pen or highlighter; while finger text mode is active it authors
@@ -155,8 +163,9 @@ is implemented.
 ## File and options surface
 
 `文件` opens a full-screen Backstage-style surface rather than a small popup. Its default information
-view lists every notebook and can switch the active notebook. New/open, backup, print, share, export,
-and account entries are explicit shells until their underlying product layers exist.
+view lists every notebook and can switch the active notebook. New/open, backup, print, share, and
+account entries remain explicit shells until their underlying product layers exist. Export is
+working and offers layered PDF for the current page plus the private notebook package.
 
 `选项` stays at the bottom of the Backstage navigation and opens as a full-screen settings surface,
 not a floating dialog. The working general-options panel owns the
