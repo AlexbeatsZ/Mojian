@@ -6,6 +6,25 @@ import org.junit.Test
 
 class WorkspaceModelsTest {
     @Test
+    fun notebookLibrarySwitchesTheActiveWorkspace() {
+        val library = NotebookLibrary.sample()
+
+        assertTrue(library.selectNotebook("notebook-quick"))
+
+        assertEquals("随手笔记", library.activeNotebook().title)
+        assertEquals("快速记录", library.activeNotebook().selectedPage()?.title)
+    }
+
+    @Test
+    fun notebookLibraryAppliesPagePanePreferenceGlobally() {
+        val library = NotebookLibrary.sample()
+
+        library.setPagePaneMode(PagePaneMode.RECURSIVE)
+
+        assertTrue(library.notebooks.all { it.pagePaneMode == PagePaneMode.RECURSIVE })
+    }
+
+    @Test
     fun sectionsCanNestWithoutAFixedDepth() {
         val workspace = NotebookWorkspace.sample()
         workspace.selectSection("section-ink")
@@ -27,6 +46,19 @@ class WorkspaceModelsTest {
 
         assertEquals(page.id, workspace.selectedPageId)
         assertEquals("课程整理", workspace.selectedPage()?.title)
+    }
+
+    @Test
+    fun sectionAddUsesFocusedSectionAndBlankFocusCreatesAtRoot() {
+        val workspace = NotebookWorkspace.sample()
+
+        workspace.selectSection("section-notein")
+        val child = workspace.addSectionAtFocus()
+        assertEquals("section-notein", workspace.breadcrumb(child.id).dropLast(1).last().id)
+
+        workspace.clearSectionFocus()
+        val root = workspace.addSectionAtFocus()
+        assertEquals(listOf(root.id), workspace.breadcrumb(root.id).map { it.id })
     }
 
     @Test

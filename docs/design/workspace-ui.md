@@ -39,15 +39,23 @@ The two left panes have deliberately non-overlapping responsibilities.
 
 ### Black pane: sections only
 
+- Display notebook nodes in the black tree; expanding a notebook reveals only its section tree.
+- Selecting a notebook switches the active workspace and therefore the gray page pane and canvas
+  header. Do not copy OneNote's repeated per-notebook `新建分区` row.
 - Recursively display sections nested inside sections with no fixed depth.
 - Never display a page, even when pages and child sections share the same parent section.
 - Expanding/collapsing a branch changes only section visibility in this pane.
 - Selecting a section establishes the root for the gray page pane.
-- `新分区` adds at notebook root; `子分区` adds beneath the selected section.
+- The black-pane header has one `+` control, aligned with the gray pane's add-page control. It adds
+  beneath the focused section; clicking blank space in the black pane clears that focus, after which
+  `+` adds a notebook-root section. Do not expose separate root/child add buttons.
+- The black pane has no local search box. Full-notebook search belongs to the single top-right search
+  entry point.
 
 ### Gray pane: selectable page modes
 
-The page-pane header exposes two modes. The default is `本层`.
+The page pane supports two modes. The default is `本层`; the mode selector belongs in
+`文件 > 选项`, not in the page-pane header.
 
 1. **本层 / Current section**
    - Display only pages directly owned by the selected black-pane section.
@@ -75,13 +83,29 @@ Required working tools:
 - whole-stroke eraser with its own radius;
 - freeform lasso that selects intersecting complete strokes and can delete the selection.
 
-Tap a tool to select it and open its own flyout. The flyout shows only parameters meaningful to that
-tool. Pixel erasing and lasso move/resize are labeled shells; they must not masquerade as completed
-functions.
+The drawing ribbon is icon-only. A first tap on an unselected tool selects it without interruption;
+tapping the already selected tool opens its own flyout. The flyout shows only parameters meaningful
+to that tool. Pixel erasing and lasso move/resize are labeled shells; they must not masquerade as
+completed functions.
+
+Follow the desktop OneNote grouping rhythm: undo, a hairline divider, selection/lasso, another
+hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, then low-frequency page
+clearing after a final divider. Dividers are one physical pixel on the tested tablet rather than
+one density-independent pixel. Keep icons and selected frames compact and do not restore permanent
+tool labels.
+
+The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
+allows one-finger panning while preserving two-finger pinch; deselecting it restores two-finger-only
+navigation. Choosing any drawing tool also exits panorama-hand mode. A ruler is intentionally not
+shown until its behavior is implemented.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
 dark note theme. A future persisted document must store the logical palette value and theme-map it
 at render time rather than serializing the temporary display color.
+
+The canvas has no permanent page-title/breadcrumb card and no permanent current-tool/zoom card.
+The gray page pane already identifies the selected page, and tool details belong to the second-tap
+flyout; duplicating either on the paper obstructs handwriting.
 
 ## Preserved input behavior
 
@@ -91,11 +115,30 @@ at render time rather than serializing the temporary display color.
 - One finger does not write or move the page; two fingers pan/zoom only when no stylus stroke is
   active.
 - Prediction, undo, clear-with-confirmation, pressure erasing, viewport transforms, Xiaomi shortcut
-  filtering, telemetry, and wet/dry coordinate parity remain available.
+  filtering, and wet/dry coordinate parity remain available.
+
+## File and options surface
+
+`文件` opens a full-screen Backstage-style surface rather than a small popup. Its default information
+view lists every notebook and can switch the active notebook. New/open, backup, print, share, export,
+and account entries are explicit shells until their underlying product layers exist.
+
+`选项` stays at the bottom of the Backstage navigation. The working general-options panel owns the
+global motion-prediction toggle and the global page-pane mode (`本层` or `递归`); neither preference is
+shown as a permanent workspace control.
 
 ## Adaptive behavior
 
-The default workspace shows a 232 dp black section pane and a 196 dp gray page pane. The title-bar
-navigation button collapses both to return the full width to the canvas. This keeps the desktop
-information architecture available on a tablet without permanently shrinking portrait writing
-space.
+The workspace does not reserve a separate application-brand/title row or a bottom debug telemetry
+bar. The drawing tabs and ribbon should hand the remaining vertical area directly to navigation and
+the page canvas.
+
+A persistent 36 dp near-black vertical rail sits beside a 196 dp black section pane, keeping the
+combined section-navigation width at the earlier 232 dp. Its two controls are independent:
+
+- the navigation icon hides or reveals only the black section pane, matching desktop OneNote;
+- the Fluent `panel_left` icon hides or reveals only the 196 dp gray page pane.
+
+The rail never disappears, so either pane can be restored after both are hidden. Independent pane
+visibility allows a user to keep pages visible while reclaiming the section width, or return almost
+the full width to handwriting without sacrificing a recovery control.

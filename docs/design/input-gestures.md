@@ -57,7 +57,9 @@ explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered
 ### Touch arbitration
 
 - Stylus/eraser tool types author ink and take priority while a stroke is active.
-- One finger is consumed but does not write, pan, or zoom.
+- With the panorama-hand control off, one finger is consumed but does not write, pan, or zoom.
+- With the panorama hand selected, one finger pans at 1x scale; tapping the selected hand again or
+  choosing a drawing tool restores the default two-finger-only mode.
 - Two finger pointers begin a combined pan/zoom gesture only when no stylus stroke is active.
 - Adding, removing, or reindexing pointers rebases the gesture centroid and span to avoid jumps.
 - A viewport transform never changes during an active stylus stroke.
@@ -96,6 +98,7 @@ Automated tests cover viewport anchoring/clamping, pressure-erasing arming/dwell
 Xiaomi device/key filtering. Real-device acceptance still requires:
 
 - two-finger pan without scale drift;
+- hand-selected one-finger pan, followed by hand deselection restoring inert one-finger input;
 - pinch zoom without a centroid jump when a finger lifts;
 - completed ink remaining sharp at 50–800% instead of scaling its 1x antialias fringe;
 - wet and dry ink remaining under the nib after zooming;

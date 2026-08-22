@@ -5,14 +5,21 @@ model of a future independent notebook application. It does not read or modify N
 
 ## Current workspace
 
-- desktop-OneNote-inspired dark chrome with a collapsible section/page navigation area;
-- a black pane containing recursively nestable sections only;
+- desktop-OneNote-inspired dark chrome with a compact header and a persistent navigation rail;
+- a black pane containing multiple collapsible notebooks and their recursively nestable sections;
 - a gray page pane switchable between direct pages (`本层`) and recursive descendant sections plus
   their pages (`递归`);
+- independent rail buttons for hiding the black section pane or the gray page pane;
+- one section `+` in the black-pane header: it adds beneath the focused section, or at notebook root
+  after blank-space focus clearing;
 - per-tool flyouts and add/delete for black, blue, and red fountain pens, highlighter, whole-stroke
   eraser, and freeform lasso selection;
-- preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, clear, and
-  telemetry.
+- an icon-only drawing ribbon where the first tap selects a tool and a second tap opens its options;
+- a clean writing canvas without duplicate page-title or current-tool status overlays;
+- a panorama-hand toggle for one-finger panning; off restores the default two-finger-only gestures;
+- a File/Backstage notebook information page with a bottom Options entry; prediction and page-pane
+  range live in that settings panel instead of the workspace;
+- preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, and clear.
 
 Notebook hierarchy, pages, and strokes are still session-only. Search, non-drawing ribbon tabs,
 pixel erasing, and lasso move/resize are explicit later-feature shells.
@@ -71,8 +78,6 @@ Write the same short Chinese phrase while changing one parameter at a time. Repe
 
 Test unplugged. This tablet has shown charging-related touch/stylus noise, which is raw input noise
 rather than evidence about the brush model.
-
-The amber `input age` value measures how old the delivered input event is when handled. It is not an end-to-end pen latency measurement.
 
 ## Gesture and pressure-eraser test
 

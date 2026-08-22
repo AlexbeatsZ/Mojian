@@ -40,10 +40,14 @@ class NotebookWorkspace(
     val id: String,
     var title: String,
     val sections: MutableList<SectionNode>,
+    var expanded: Boolean = true,
 ) {
     private var sequence = 100
 
     var selectedSectionId: String = flattenSections().first().section.id
+        private set
+
+    var focusedSectionId: String? = selectedSectionId
         private set
 
     var pagePaneMode: PagePaneMode = PagePaneMode.CURRENT_SECTION
@@ -93,8 +97,13 @@ class NotebookWorkspace(
     fun selectSection(id: String): Boolean {
         val section = findSection(id) ?: return false
         selectedSectionId = section.id
+        focusedSectionId = section.id
         selectFirstPageForMode()
         return true
+    }
+
+    fun clearSectionFocus() {
+        focusedSectionId = null
     }
 
     fun selectPage(id: String): Boolean {
@@ -159,6 +168,8 @@ class NotebookWorkspace(
         selectSection(node.id)
         return node
     }
+
+    fun addSectionAtFocus(): SectionNode = addSection(focusedSectionId)
 
     fun addPage(title: String = "无标题页"): NotePage {
         val page = NotePage(nextId("page"), title)
@@ -225,6 +236,52 @@ class NotebookWorkspace(
                         ),
                         SectionNode("section-study", "学习", mutableListOf(NotePage("page-reading", "阅读笔记"))),
                     ),
+            )
+    }
+}
+
+class NotebookLibrary(
+    val notebooks: MutableList<NotebookWorkspace>,
+) {
+    var activeNotebookId: String = notebooks.firstOrNull()?.id ?: error("Notebook library cannot be empty")
+        private set
+
+    fun activeNotebook(): NotebookWorkspace =
+        notebooks.firstOrNull { it.id == activeNotebookId } ?: error("Active notebook is missing")
+
+    fun selectNotebook(id: String): Boolean {
+        if (notebooks.none { it.id == id }) return false
+        activeNotebookId = id
+        return true
+    }
+
+    fun setPagePaneMode(mode: PagePaneMode) {
+        notebooks.forEach { it.setPagePaneMode(mode) }
+    }
+
+    companion object {
+        fun sample(): NotebookLibrary =
+            NotebookLibrary(
+                mutableListOf(
+                    NotebookWorkspace.sample(),
+                    NotebookWorkspace(
+                        id = "notebook-quick",
+                        title = "随手笔记",
+                        sections =
+                            mutableListOf(
+                                SectionNode(
+                                    id = "section-inbox",
+                                    title = "收件箱",
+                                    pages = mutableListOf(NotePage("page-capture", "快速记录")),
+                                ),
+                                SectionNode(
+                                    id = "section-archive",
+                                    title = "归档",
+                                    pages = mutableListOf(NotePage("page-archive", "已整理")),
+                                ),
+                            ),
+                    ),
+                ),
             )
     }
 }

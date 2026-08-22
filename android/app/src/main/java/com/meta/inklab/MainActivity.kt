@@ -2,12 +2,14 @@ package com.meta.inklab
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.annotation.SuppressLint
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -39,7 +41,6 @@ import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.brush.Brush
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -50,31 +51,24 @@ class MainActivity : Activity() {
     private val shortcutDispatcher = XiaomiStylusShortcutDispatcher()
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val toolShelf = ToolShelf()
-    private val workspace = NotebookWorkspace.sample()
+    private val notebookLibrary = NotebookLibrary.sample()
+    private val workspace: NotebookWorkspace
+        get() = notebookLibrary.activeNotebook()
 
     private lateinit var wetInkView: InProgressStrokesView
     private lateinit var dryInkView: DryInkView
     private lateinit var predictor: MotionEventPredictor
     private lateinit var currentBrush: Brush
-    private lateinit var statusText: TextView
-    private lateinit var profileText: TextView
-    private lateinit var predictionButton: TextView
     private lateinit var toolShelfRow: LinearLayout
     private lateinit var toolDetailRow: LinearLayout
     private var toolDetailPopup: PopupWindow? = null
+    private var backstageDialog: Dialog? = null
     private lateinit var sectionList: LinearLayout
     private lateinit var pageList: LinearLayout
-    private lateinit var pageModeButton: TextView
     private lateinit var navigationPane: View
     private lateinit var pagePane: View
-    private lateinit var pageTitleText: TextView
-    private lateinit var breadcrumbText: TextView
 
     private var predictionEnabled = true
-    private var predictedEventSeen = false
-    private var movingInputAgeMs = 0f
-    private var lastHistorySize = 0
-    private var lastStatusUpdateMs = 0L
     private var transformGestureActive = false
     private var lastGestureFocusX = 0f
     private var lastGestureFocusY = 0f
@@ -83,7 +77,9 @@ class MainActivity : Activity() {
     private var lastPressure = 0f
     private var lastPressurePoint = PointF()
     private var activeDirectTool: DrawingToolKind? = null
-    private var navigationVisible = true
+    private var singleFingerPanEnabled = false
+    private var sectionPaneVisible = true
+    private var pagePaneVisible = true
 
     private val activatePressureEraser =
         Runnable {
@@ -91,8 +87,6 @@ class MainActivity : Activity() {
             if (!pressureEraser.activate(SystemClock.uptimeMillis())) return@Runnable
             activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
             eraseAt(lastPressurePoint, dp(18) / viewport.scale)
-            updateProfileText()
-            updateStatus(force = true)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,8 +102,6 @@ class MainActivity : Activity() {
         renderWorkspace()
         renderToolShelf()
         renderToolDetails()
-        updateProfileText()
-        updateStatus(force = true)
         wetInkView.post { wetInkView.eagerInit() }
     }
 
@@ -152,9 +144,8 @@ class MainActivity : Activity() {
             insets
         }
 
-        root.addView(buildTitleBar(), LinearLayout.LayoutParams(MATCH, dp(40)))
         root.addView(buildRibbonTabs(), LinearLayout.LayoutParams(MATCH, dp(34)))
-        root.addView(buildDrawingRibbon(), LinearLayout.LayoutParams(MATCH, dp(66)))
+        root.addView(buildDrawingRibbon(), LinearLayout.LayoutParams(MATCH, dp(50)))
 
         val workArea =
             LinearLayout(this).apply {
@@ -163,66 +154,292 @@ class MainActivity : Activity() {
             }
         navigationPane = buildNavigationPane()
         pagePane = buildPagePane()
-        workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(232), MATCH))
+        workArea.addView(buildNavigationRail(), LinearLayout.LayoutParams(dp(36), MATCH))
+        workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(pagePane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(buildPaper(), LinearLayout.LayoutParams(0, MATCH, 1f))
         root.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-        statusText =
-            TextView(this).apply {
-                setBackgroundColor(TITLE_PURPLE)
-                setTextColor(TEXT_SECONDARY)
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), 0, dp(12), 0)
-                typeface = Typeface.create("monospace", Typeface.NORMAL)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            }
-        root.addView(statusText, LinearLayout.LayoutParams(MATCH, dp(27)))
         return root
     }
 
-    private fun buildTitleBar(): View =
+    private fun showBackstage() {
+        toolDetailPopup?.dismiss()
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(buildBackstage(dialog))
+        dialog.setOnDismissListener {
+            if (backstageDialog === dialog) backstageDialog = null
+        }
+        backstageDialog = dialog
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(TITLE_PURPLE))
+            setLayout(MATCH, MATCH)
+        }
+    }
+
+    private fun buildBackstage(dialog: Dialog): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(TITLE_PURPLE)
+
+            val navigation =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(8), dp(8), dp(8), dp(10))
+                    setBackgroundColor(NAV_BACKGROUND)
+                    addView(
+                        backstageNavItem("←", false) { dialog.dismiss() },
+                        LinearLayout.LayoutParams(MATCH, dp(42)),
+                    )
+                    addView(backstageNavItem("信息", true) {}, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("新建", false) { showShell("新建笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("打开", false) { showShell("打开笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(8), dp(4), dp(8)) })
+                    addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("打印", false) { showShell("打印") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("共享", false) { showShell("共享") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("导出", false) { showShell("导出") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
+                    addView(backstageNavItem("帐户", false) { showShell("帐户") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("选项", false) { showOptionsDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                }
+            addView(navigation, LinearLayout.LayoutParams(dp(124), MATCH))
+
+            val notebookList =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(30), dp(22), dp(30), dp(30))
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "笔记本信息"
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(46)),
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "选择要在工作区中打开的笔记本。备份、同步和共享将在后续版本接入。"
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(40)),
+                    )
+                    for ((index, notebook) in notebookLibrary.notebooks.withIndex()) {
+                        addView(notebookInfoCard(notebook, index, dialog), LinearLayout.LayoutParams(MATCH, dp(92)).apply { bottomMargin = dp(12) })
+                    }
+                }
+            addView(
+                ScrollView(this@MainActivity).apply { addView(notebookList, ViewGroup.LayoutParams(MATCH, WRAP)) },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
+            )
+        }
+
+    private fun backstageNavItem(label: String, selected: Boolean, action: () -> Unit): TextView =
+        TextView(this).apply {
+            text = label
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(8), 0)
+            setTextColor(if (selected) TEXT_PRIMARY else TEXT_SECONDARY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
+            background =
+                if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), ACCENT_PURPLE)
+                else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+            setOnClickListener { action() }
+        }
+
+    private fun notebookInfoCard(notebook: NotebookWorkspace, index: Int, dialog: Dialog): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), 0, dp(12), 0)
-            setBackgroundColor(TITLE_PURPLE)
-
+            setPadding(dp(14), dp(10), dp(12), dp(10))
+            background = rounded(Color.rgb(31, 31, 31), dp(2).toFloat(), BORDER_COLOR)
             addView(
-                titleIconButton("navigation", "导航") { toggleNavigation() },
-                LinearLayout.LayoutParams(dp(40), dp(40)),
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon("notebook"))
+                    imageTintList = ColorStateList.valueOf(sectionAccent(index))
+                    background = rounded(Color.rgb(43, 43, 43), dp(2).toFloat(), BORDER_STRONG)
+                    setPadding(dp(11), dp(11), dp(11), dp(11))
+                },
+                LinearLayout.LayoutParams(dp(52), dp(52)).apply { marginEnd = dp(14) },
+            )
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = notebook.title
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(30)),
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = if (notebook.id == notebookLibrary.activeNotebookId) "当前打开 · 本地工作区" else "本地工作区"
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(24)),
+                    )
+                },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
             )
             addView(
                 TextView(this@MainActivity).apply {
-                    text = "M"
+                    text = if (notebook.id == notebookLibrary.activeNotebookId) "已打开" else "打开"
                     gravity = Gravity.CENTER
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    background = rounded(Color.rgb(119, 25, 170), dp(3).toFloat(), Color.rgb(119, 25, 170))
+                    setTextColor(if (notebook.id == notebookLibrary.activeNotebookId) TEXT_SECONDARY else ACCENT_PURPLE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    background = rounded(Color.rgb(35, 35, 35), dp(2).toFloat(), BORDER_STRONG)
+                    isEnabled = notebook.id != notebookLibrary.activeNotebookId
+                    setOnClickListener {
+                        notebookLibrary.selectNotebook(notebook.id)
+                        dryInkView.clearSelection()
+                        renderWorkspace()
+                        dialog.dismiss()
+                    }
                 },
-                LinearLayout.LayoutParams(dp(25), dp(25)).apply { marginEnd = dp(9) },
+                LinearLayout.LayoutParams(dp(72), dp(36)),
             )
+        }
+
+    private fun showOptionsDialog() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val content =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(Color.rgb(37, 37, 37))
+
+                addView(
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(8), dp(14), dp(8), dp(14))
+                        setBackgroundColor(NAV_BACKGROUND)
+                        addView(backstageNavItem("常规", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
+                        for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
+                            addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
+                        }
+                    },
+                    LinearLayout.LayoutParams(dp(132), MATCH),
+                )
+
+                addView(
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(24), dp(20), dp(24), dp(16))
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "墨笺 常规选项"
+                                setTextColor(TEXT_PRIMARY)
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            },
+                            LinearLayout.LayoutParams(MATCH, dp(44)),
+                        )
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "绘图与页面"
+                                setTextColor(TEXT_PRIMARY)
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            },
+                            LinearLayout.LayoutParams(MATCH, dp(34)),
+                        )
+                        addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
+
+                        val predictionValue = settingsValueButton(if (predictionEnabled) "开启" else "关闭")
+                        predictionValue.setOnClickListener {
+                            predictionEnabled = !predictionEnabled
+                            predictionValue.text = if (predictionEnabled) "开启" else "关闭"
+                        }
+                        addView(
+                            settingsRow("笔迹预测", "使用预测触点降低快速书写时的视觉延迟。", predictionValue),
+                            LinearLayout.LayoutParams(MATCH, dp(72)),
+                        )
+
+                        val pageModeValue =
+                            settingsValueButton(if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "本层" else "递归")
+                        pageModeValue.setOnClickListener {
+                            val mode =
+                                if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) PagePaneMode.RECURSIVE
+                                else PagePaneMode.CURRENT_SECTION
+                            notebookLibrary.setPagePaneMode(mode)
+                            pageModeValue.text = if (mode == PagePaneMode.CURRENT_SECTION) "本层" else "递归"
+                            renderPages()
+                        }
+                        addView(
+                            settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue),
+                            LinearLayout.LayoutParams(MATCH, dp(72)),
+                        )
+                        addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = "关闭"
+                                gravity = Gravity.CENTER
+                                setTextColor(TEXT_PRIMARY)
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                                background = rounded(Color.rgb(48, 48, 48), dp(2).toFloat(), TEXT_SECONDARY)
+                                setOnClickListener { dialog.dismiss() }
+                            },
+                            LinearLayout.LayoutParams(dp(80), dp(36)).apply { gravity = Gravity.END },
+                        )
+                    },
+                    LinearLayout.LayoutParams(0, MATCH, 1f),
+                )
+            }
+        dialog.setContentView(content)
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(dp(650), dp(470))
+        }
+    }
+
+    private fun settingsRow(title: String, description: String, valueView: View): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             addView(
-                TextView(this@MainActivity).apply {
-                    text = "墨笺"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER_VERTICAL
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = title
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(28)),
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = description
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(26)),
+                    )
                 },
-                LinearLayout.LayoutParams(WRAP, MATCH),
+                LinearLayout.LayoutParams(0, MATCH, 1f),
             )
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(
-                TextView(this@MainActivity).apply {
-                    text = "${workspace.title}  ·  本地工作区"
-                    setTextColor(Color.rgb(238, 226, 242))
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                    gravity = Gravity.CENTER_VERTICAL
-                },
-                LinearLayout.LayoutParams(WRAP, MATCH),
-            )
+            addView(valueView, LinearLayout.LayoutParams(dp(82), dp(36)))
+        }
+
+    private fun settingsValueButton(value: String): TextView =
+        TextView(this).apply {
+            text = value
+            gravity = Gravity.CENTER
+            setTextColor(ACCENT_PURPLE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            background = rounded(Color.rgb(47, 47, 47), dp(2).toFloat(), BORDER_STRONG)
         }
 
     private fun buildRibbonTabs(): View =
@@ -231,7 +448,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), 0, dp(8), 0)
             setBackgroundColor(RIBBON_BACKGROUND)
-            addView(ribbonTab("文件", false) { showShell("文件管理") })
+            addView(ribbonTab("文件", false) { showBackstage() })
             addView(ribbonTab("主页", false) { showShell("主页工具") })
             addView(ribbonTab("插入", false) { showShell("插入工具") })
             addView(ribbonTab("绘图", true) { })
@@ -243,6 +460,21 @@ class MainActivity : Activity() {
             )
         }
 
+    private fun buildNavigationRail(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(TITLE_PURPLE)
+            addView(
+                titleIconButton("navigation", "折叠或展开分区栏") { toggleSectionPane() },
+                LinearLayout.LayoutParams(dp(36), dp(40)),
+            )
+            addView(
+                titleIconButton("panel_left", "折叠或展开页面栏") { togglePagePane() },
+                LinearLayout.LayoutParams(dp(36), dp(40)),
+            )
+        }.also { it.background = bordered(TITLE_PURPLE, BORDER_COLOR, 0f) }
+
     private fun buildDrawingRibbon(): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -252,14 +484,14 @@ class MainActivity : Activity() {
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(10), dp(4), dp(10), dp(2))
+                    setPadding(dp(6), dp(2), dp(8), dp(2))
                 }
             addView(
                 HorizontalScrollView(this@MainActivity).apply {
                     isHorizontalScrollBarEnabled = false
                     addView(toolShelfRow, ViewGroup.LayoutParams(WRAP, MATCH))
                 },
-                LinearLayout.LayoutParams(MATCH, dp(62)),
+                LinearLayout.LayoutParams(MATCH, dp(48)),
             )
 
             toolDetailRow =
@@ -288,7 +520,7 @@ class MainActivity : Activity() {
                     )
                     addView(
                         TextView(this@MainActivity).apply {
-                            text = workspace.title
+                            text = "笔记本"
                             setTextColor(TEXT_PRIMARY)
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -296,10 +528,16 @@ class MainActivity : Activity() {
                         },
                         LinearLayout.LayoutParams(0, dp(34), 1f),
                     )
+                    addView(
+                        titleIconButton("add", "按当前分区焦点新建分区") {
+                            workspace.addSectionAtFocus()
+                            renderWorkspace()
+                        },
+                        LinearLayout.LayoutParams(dp(38), dp(38)),
+                    )
                 },
                 LinearLayout.LayoutParams(MATCH, dp(52)),
             )
-            addView(searchBox(), LinearLayout.LayoutParams(MATCH, dp(42)).apply { setMargins(dp(10), 0, dp(10), dp(7)) })
             addView(sectionCaption("分区"), LinearLayout.LayoutParams(MATCH, dp(28)))
 
             sectionList = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
@@ -307,30 +545,12 @@ class MainActivity : Activity() {
                 ScrollView(this@MainActivity).apply {
                     isFillViewport = true
                     addView(sectionList, ViewGroup.LayoutParams(MATCH, WRAP))
+                    setOnClickListener {
+                        workspace.clearSectionFocus()
+                        renderSections()
+                    }
                 },
                 LinearLayout.LayoutParams(MATCH, 0, 1f),
-            )
-
-            addView(
-                LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(dp(8), dp(5), dp(8), dp(7))
-                    addView(
-                        smallAction("add", "分区") {
-                            workspace.addSection()
-                            renderWorkspace()
-                        },
-                        LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginEnd = dp(5) },
-                    )
-                    addView(
-                        smallAction("branch", "子分区") {
-                            workspace.addSection(workspace.selectedSectionId)
-                            renderWorkspace()
-                        },
-                        LinearLayout.LayoutParams(0, dp(40), 1f),
-                    )
-                },
-                LinearLayout.LayoutParams(MATCH, dp(52)),
             )
         }.also { it.background = bordered(NAV_BACKGROUND, BORDER_COLOR, 0f) }
 
@@ -353,24 +573,10 @@ class MainActivity : Activity() {
                         },
                         LinearLayout.LayoutParams(0, MATCH, 1f),
                     )
-                    pageModeButton =
-                        TextView(this@MainActivity).apply {
-                            gravity = Gravity.CENTER
-                            setTextColor(TEXT_SECONDARY)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-                            background = rounded(Color.rgb(31, 31, 31), dp(2).toFloat(), BORDER_STRONG)
-                            setOnClickListener { showPageModeMenu(this) }
-                            tooltipText = "切换本层页面或递归页面"
-                        }
-                    addView(
-                        pageModeButton,
-                        LinearLayout.LayoutParams(dp(50), dp(30)).apply { marginEnd = dp(4) },
-                    )
                     addView(
                         titleIconButton("add", "新建页面") {
                             workspace.addPage()
                             renderPages()
-                            updatePageHeader()
                         },
                         LinearLayout.LayoutParams(dp(38), dp(38)),
                     )
@@ -394,124 +600,126 @@ class MainActivity : Activity() {
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
-
-        val pageHeader =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(22), dp(16), dp(22), dp(12))
-                background = rounded(Color.argb(238, 31, 31, 31), dp(2).toFloat(), BORDER_COLOR)
-            }
-        breadcrumbText =
-            TextView(this).apply {
-                setTextColor(ACCENT_PURPLE)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            }
-        pageTitleText =
-            TextView(this).apply {
-                setTextColor(TEXT_PRIMARY)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-                typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-                setPadding(0, dp(3), 0, 0)
-            }
-        pageHeader.addView(breadcrumbText, LinearLayout.LayoutParams(MATCH, WRAP))
-        pageHeader.addView(pageTitleText, LinearLayout.LayoutParams(MATCH, WRAP))
-        paper.addView(
-            pageHeader,
-            FrameLayout.LayoutParams(dp(360), WRAP).apply {
-                gravity = Gravity.TOP or Gravity.START
-                leftMargin = dp(18)
-                topMargin = dp(15)
-            },
-        )
-
-        profileText =
-            TextView(this).apply {
-                setTextColor(TEXT_SECONDARY)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-                typeface = Typeface.create("monospace", Typeface.NORMAL)
-                setPadding(dp(10), dp(6), dp(10), dp(6))
-                background = rounded(Color.argb(232, 35, 35, 35), dp(2).toFloat(), BORDER_COLOR)
-                isClickable = false
-            }
-        paper.addView(
-            profileText,
-            FrameLayout.LayoutParams(WRAP, WRAP).apply {
-                gravity = Gravity.TOP or Gravity.END
-                rightMargin = dp(14)
-                topMargin = dp(15)
-            },
-        )
         return paper
     }
 
     private fun renderWorkspace() {
         renderSections()
         renderPages()
-        updatePageHeader()
     }
 
     private fun renderSections() {
         sectionList.removeAllViews()
-        for (row in workspace.flattenSections()) {
-            val section = row.section
-            val selected = section.id == workspace.selectedSectionId
-            val item =
+        for ((notebookIndex, notebook) in notebookLibrary.notebooks.withIndex()) {
+            val activeNotebook = notebook.id == notebookLibrary.activeNotebookId
+            val notebookFocused = activeNotebook && notebook.focusedSectionId == null
+            val notebookRow =
                 LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(8 + row.depth * 15), 0, dp(7), 0)
+                    setPadding(dp(5), 0, dp(7), 0)
                     background =
-                        if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
+                        if (notebookFocused) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
                         else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
                     setOnClickListener {
-                        workspace.selectSection(section.id)
+                        notebookLibrary.selectNotebook(notebook.id)
                         dryInkView.clearSelection()
                         renderWorkspace()
-                        updateStatus(force = true)
                     }
                 }
-            val chevron =
+            notebookRow.addView(
                 TextView(this).apply {
-                    text =
-                        when {
-                            section.children.isEmpty() -> ""
-                            section.expanded -> "⌄"
-                            else -> "›"
-                        }
+                    text = if (notebook.expanded) "⌄" else "›"
                     gravity = Gravity.CENTER
-                    setTextColor(TEXT_SECONDARY)
+                    setTextColor(TEXT_PRIMARY)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
                     setOnClickListener {
-                        workspace.toggleExpanded(section.id)
+                        notebook.expanded = !notebook.expanded
                         renderSections()
                     }
-                }
-            item.addView(chevron, LinearLayout.LayoutParams(dp(24), MATCH))
-            item.addView(
-                View(this).apply {
-                    background = rounded(sectionAccent(row.depth), dp(2).toFloat(), sectionAccent(row.depth))
                 },
-                LinearLayout.LayoutParams(dp(4), dp(22)).apply { marginEnd = dp(8) },
+                LinearLayout.LayoutParams(dp(24), MATCH),
             )
-            item.addView(
+            notebookRow.addView(
+                ImageView(this).apply {
+                    setImageDrawable(fluentIcon("notebook"))
+                    imageTintList = ColorStateList.valueOf(sectionAccent(notebookIndex))
+                },
+                LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(8) },
+            )
+            notebookRow.addView(
                 TextView(this).apply {
-                    text = section.title
+                    text = notebook.title
                     gravity = Gravity.CENTER_VERTICAL
-                    setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                    setTextColor(if (activeNotebook) TEXT_PRIMARY else TEXT_SECONDARY)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
+                    typeface = if (activeNotebook) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
                     maxLines = 1
                 },
                 LinearLayout.LayoutParams(0, MATCH, 1f),
             )
-            sectionList.addView(item, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+            sectionList.addView(notebookRow, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+
+            if (!notebook.expanded) continue
+            for (row in notebook.flattenSections()) {
+                val section = row.section
+                val selected = activeNotebook && section.id == notebook.focusedSectionId
+                val item =
+                    LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(14 + row.depth * 15), 0, dp(7), 0)
+                        background =
+                            if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
+                            else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+                        setOnClickListener {
+                            notebookLibrary.selectNotebook(notebook.id)
+                            notebook.selectSection(section.id)
+                            dryInkView.clearSelection()
+                            renderWorkspace()
+                        }
+                    }
+                val chevron =
+                    TextView(this).apply {
+                        text =
+                            when {
+                                section.children.isEmpty() -> ""
+                                section.expanded -> "⌄"
+                                else -> "›"
+                            }
+                        gravity = Gravity.CENTER
+                        setTextColor(TEXT_SECONDARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+                        setOnClickListener {
+                            notebook.toggleExpanded(section.id)
+                            renderSections()
+                        }
+                    }
+                item.addView(chevron, LinearLayout.LayoutParams(dp(24), MATCH))
+                item.addView(
+                    View(this).apply {
+                        background = rounded(sectionAccent(row.depth + notebookIndex + 1), dp(2).toFloat(), sectionAccent(row.depth + notebookIndex + 1))
+                    },
+                    LinearLayout.LayoutParams(dp(4), dp(22)).apply { marginEnd = dp(8) },
+                )
+                item.addView(
+                    TextView(this).apply {
+                        text = section.title
+                        gravity = Gravity.CENTER_VERTICAL
+                        setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                        typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
+                        maxLines = 1
+                    },
+                    LinearLayout.LayoutParams(0, MATCH, 1f),
+                )
+                sectionList.addView(item, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+            }
         }
     }
 
     private fun renderPages() {
         pageList.removeAllViews()
-        pageModeButton.text = if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "本层" else "递归"
         val rows = workspace.pagePaneRows()
         if (rows.isEmpty()) {
             pageList.addView(
@@ -594,49 +802,45 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     workspace.selectPage(row.sectionId, page.id)
                     renderPages()
-                    updatePageHeader()
                 }
             }
         pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(58)).apply { setMargins(dp(6), dp(1), dp(6), dp(1)) })
     }
 
-    private fun updatePageHeader() {
-        breadcrumbText.text =
-            buildList {
-                add(workspace.title)
-                addAll(workspace.breadcrumb(workspace.selectedPageSectionId).map { it.title })
-            }.joinToString("  /  ")
-        pageTitleText.text = workspace.selectedPage()?.title ?: "新页面"
-    }
-
     private fun renderToolShelf() {
         toolShelfRow.removeAllViews()
-        toolShelfRow.addView(sectionLabel("工具"), LinearLayout.LayoutParams(WRAP, MATCH))
-        for (tool in toolShelf.tools) toolShelfRow.addView(toolButton(tool))
-        toolShelfRow.addView(
-            commandButton("add", "添加", selected = false) { anchor -> showAddToolMenu(anchor) },
-            LinearLayout.LayoutParams(dp(66), dp(54)).apply { marginEnd = dp(8) },
-        )
-        toolShelfRow.addView(verticalDivider(), LinearLayout.LayoutParams(dp(18), dp(36)))
-        predictionButton =
-            commandButton("sparkle", if (predictionEnabled) "预测开" else "预测关", predictionEnabled) {
-                predictionEnabled = !predictionEnabled
-                predictedEventSeen = false
-                renderToolShelf()
-                updateStatus(force = true)
-            }
-        toolShelfRow.addView(predictionButton, LinearLayout.LayoutParams(dp(66), dp(54)).apply { marginEnd = dp(5) })
         toolShelfRow.addView(
             commandButton("arrow_undo", "撤销", selected = false) {
                 dryInkView.clearSelection()
                 dryInkView.undo()
-                updateStatus(force = true)
             },
-            LinearLayout.LayoutParams(dp(60), dp(54)).apply { marginEnd = dp(5) },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
         )
+        toolShelfRow.addView(verticalDivider())
+        toolShelf.tools.filter { it.kind == DrawingToolKind.LASSO }.forEach { toolShelfRow.addView(toolButton(it)) }
+        toolShelfRow.addView(verticalDivider())
+        toolShelf.tools.filter { it.kind == DrawingToolKind.ERASER }.forEach { toolShelfRow.addView(toolButton(it)) }
+        toolShelf.tools.filter { it.kind == DrawingToolKind.HIGHLIGHTER }.forEach { toolShelfRow.addView(toolButton(it)) }
+        toolShelf.tools.filter { it.kind == DrawingToolKind.PEN }.forEach { toolShelfRow.addView(toolButton(it)) }
+        toolShelfRow.addView(
+            commandButton("add", "添加", selected = false) { anchor -> showAddToolMenu(anchor) },
+            LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(3) },
+        )
+        toolShelfRow.addView(verticalDivider())
+        toolShelfRow.addView(
+            commandButton("hand_left", "单指平移", selected = singleFingerPanEnabled) {
+                singleFingerPanEnabled = !singleFingerPanEnabled
+                transformGestureActive = false
+                toolDetailPopup?.dismiss()
+                toolDetailPopup = null
+                renderToolShelf()
+            },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        toolShelfRow.addView(verticalDivider())
         toolShelfRow.addView(
             commandButton("delete_dismiss", "清纸", selected = false) { confirmClearPage() },
-            LinearLayout.LayoutParams(dp(60), dp(54)),
+            LinearLayout.LayoutParams(dp(40), dp(42)),
         )
     }
 
@@ -705,7 +909,6 @@ class MainActivity : Activity() {
                         tool.pressureEraseEnabled = !tool.pressureEraseEnabled
                         syncPressureEraserWithTool()
                         renderToolDetails()
-                        updateStatus(force = true)
                     },
                 )
                 toolDetailRow.addView(
@@ -738,7 +941,6 @@ class MainActivity : Activity() {
                 toolDetailRow.addView(
                     parameterControl("大小", ((tool.eraserRadiusMm - 2f) * 2f).roundToInt().coerceIn(0, 28), 28, { "${2f + it / 2f} mm" }) {
                         tool.eraserRadiusMm = 2f + it / 2f
-                        updateProfileText()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
@@ -751,8 +953,6 @@ class MainActivity : Activity() {
                     detailChip("删除所选 ${dryInkView.selectedCount()}", dryInkView.selectedCount() > 0) {
                         val removed = dryInkView.deleteSelection()
                         if (removed == 0) Toast.makeText(this, "请先圈选笔迹", Toast.LENGTH_SHORT).show()
-                        updateProfileText()
-                        updateStatus(force = true)
                         renderToolDetails()
                     },
                 )
@@ -839,7 +1039,6 @@ class MainActivity : Activity() {
                     dryInkView.addStrokes(strokes.values)
                     dryInkView.invalidate()
                     wetInkView.removeFinishedStrokes(strokes.keys)
-                    updateStatus(force = true)
                 }
             },
         )
@@ -850,14 +1049,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
-        lastHistorySize = event.historySize
-        val eventAge = (SystemClock.uptimeMillis() - event.eventTime).coerceAtLeast(0L).toFloat()
-        movingInputAgeMs = if (movingInputAgeMs == 0f) eventAge else movingInputAgeMs * 0.86f + eventAge * 0.14f
-
-        if (handleFingerGesture(event)) {
-            updateStatus(force = false)
-            return
-        }
+        if (handleFingerGesture(event)) return
         if (!hasStylusPointer(event) && activeStrokes.isEmpty()) return
         predictor.record(event)
 
@@ -869,7 +1061,6 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_POINTER_UP -> finishStylusAction(event)
             MotionEvent.ACTION_CANCEL -> cancelStylusAction()
         }
-        updateStatus(force = false)
     }
 
     private fun beginStylusAction(event: MotionEvent) {
@@ -925,7 +1116,6 @@ class MainActivity : Activity() {
                     eraseAt(lastPressurePoint, dp(18) / viewport.scale)
                 } else {
                     val prediction = if (predictionEnabled) predictor.predict() else null
-                    predictedEventSeen = prediction != null
                     for ((pointerId, strokeId) in activeStrokes) {
                         if (event.findPointerIndex(pointerId) >= 0) wetInkView.addToStroke(event, pointerId, strokeId, prediction)
                     }
@@ -956,7 +1146,6 @@ class MainActivity : Activity() {
             DrawingToolKind.LASSO -> {
                 dryInkView.finishLasso()
                 renderToolDetails()
-                updateProfileText()
             }
 
             DrawingToolKind.ERASER -> {
@@ -983,6 +1172,8 @@ class MainActivity : Activity() {
 
     private fun selectTool(id: String) {
         if (!toolShelf.select(id)) return
+        singleFingerPanEnabled = false
+        transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         mainHandler.removeCallbacks(activatePressureEraser)
@@ -999,8 +1190,6 @@ class MainActivity : Activity() {
             currentBrush = brushFor(toolShelf.selected)
         }
         syncPressureEraserWithTool()
-        updateProfileText()
-        updateStatus(force = true)
     }
 
     private fun brushFor(tool: ToolPreset): Brush =
@@ -1028,59 +1217,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateProfileText() {
-        if (!::profileText.isInitialized) return
-        val tool = toolShelf.selected
-        profileText.text =
-            when (tool.kind) {
-                DrawingToolKind.PEN ->
-                    String.format(
-                        Locale.US,
-                        "%s · %.1f mm · 压感 %d%% · 出墨 %d%% · 画布 %.0f%%",
-                        tool.displayName,
-                        tool.widthMm,
-                        tool.pressurePercent,
-                        tool.inkFlowPercent,
-                        viewport.scale * 100f,
-                    )
-                DrawingToolKind.HIGHLIGHTER ->
-                    String.format(Locale.US, "%s · %.1f mm · 透明度 %d%% · 画布 %.0f%%", tool.displayName, tool.widthMm, tool.opacityPercent, viewport.scale * 100f)
-                DrawingToolKind.ERASER ->
-                    String.format(Locale.US, "整笔橡皮 · %.1f mm · 画布 %.0f%%", tool.eraserRadiusMm * 2f, viewport.scale * 100f)
-                DrawingToolKind.LASSO -> "框选 · 已选 ${dryInkView.selectedCount()} 条笔迹 · 画布 ${(viewport.scale * 100).roundToInt()}%"
-            }
-    }
-
-    private fun updateStatus(force: Boolean) {
-        if (!::statusText.isInitialized) return
-        val now = SystemClock.uptimeMillis()
-        if (!force && now - lastStatusUpdateMs < 100L) return
-        lastStatusUpdateMs = now
-        @Suppress("DEPRECATION")
-        val refreshRate =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display?.refreshRate ?: 0f
-            else windowManager.defaultDisplay.refreshRate
-        val predictionState =
-            when {
-                !predictionEnabled -> "OFF"
-                predictedEventSeen -> "ACTIVE"
-                else -> "WAIT"
-            }
-        statusText.text =
-            String.format(
-                Locale.US,
-                "%s  ·  zoom %3.0f%%  ·  prediction %-6s  ·  input age %4.1f ms  ·  history %2d  ·  %5.1f Hz  ·  strokes %d  ·  selected %d",
-                toolShelf.selected.displayName,
-                viewport.scale * 100f,
-                predictionState,
-                movingInputAgeMs,
-                lastHistorySize,
-                refreshRate,
-                dryInkView.strokeCount(),
-                dryInkView.selectedCount(),
-            )
-    }
-
     private fun isStylus(toolType: Int): Boolean =
         toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
 
@@ -1093,32 +1229,62 @@ class MainActivity : Activity() {
         if (fingerIndices.isEmpty()) return false
 
         when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (singleFingerPanEnabled && fingerIndices.size == 1) beginSingleFingerPan(event, fingerIndices[0])
+            }
             MotionEvent.ACTION_POINTER_DOWN -> if (fingerIndices.size >= 2) beginTransformGesture(event, fingerIndices)
             MotionEvent.ACTION_MOVE -> {
-                if (transformGestureActive && fingerIndices.size >= 2) {
+                if (fingerIndices.size >= 2) {
                     val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
-                    viewport.applyGesture(
-                        previousFocusX = lastGestureFocusX,
-                        previousFocusY = lastGestureFocusY,
-                        focusX = focusX,
-                        focusY = focusY,
-                        requestedScaleFactor = if (lastGestureSpan > 0f) span / lastGestureSpan else 1f,
-                    )
-                    lastGestureFocusX = focusX
-                    lastGestureFocusY = focusY
-                    lastGestureSpan = span
-                    dryInkView.setViewport(viewport.documentToViewMatrix())
-                    updateProfileText()
+                    if (!transformGestureActive || lastGestureSpan <= 0f) {
+                        beginTransformGesture(event, fingerIndices)
+                    } else {
+                        applyViewportGesture(focusX, focusY, span / lastGestureSpan, span)
+                    }
+                } else if (singleFingerPanEnabled) {
+                    val index = fingerIndices[0]
+                    val focusX = event.getX(index)
+                    val focusY = event.getY(index)
+                    if (!transformGestureActive) {
+                        beginSingleFingerPan(event, index)
+                    } else {
+                        applyViewportGesture(focusX, focusY, 1f, 0f)
+                    }
                 }
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 val remaining = fingerIndices.filter { it != event.actionIndex }
-                if (remaining.size >= 2) beginTransformGesture(event, remaining) else transformGestureActive = false
+                when {
+                    remaining.size >= 2 -> beginTransformGesture(event, remaining)
+                    singleFingerPanEnabled && remaining.size == 1 -> beginSingleFingerPan(event, remaining[0])
+                    else -> transformGestureActive = false
+                }
             }
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> transformGestureActive = false
         }
         return true
+    }
+
+    private fun beginSingleFingerPan(event: MotionEvent, fingerIndex: Int) {
+        transformGestureActive = true
+        lastGestureFocusX = event.getX(fingerIndex)
+        lastGestureFocusY = event.getY(fingerIndex)
+        lastGestureSpan = 0f
+    }
+
+    private fun applyViewportGesture(focusX: Float, focusY: Float, scaleFactor: Float, nextSpan: Float) {
+        viewport.applyGesture(
+            previousFocusX = lastGestureFocusX,
+            previousFocusY = lastGestureFocusY,
+            focusX = focusX,
+            focusY = focusY,
+            requestedScaleFactor = scaleFactor,
+        )
+        lastGestureFocusX = focusX
+        lastGestureFocusY = focusY
+        lastGestureSpan = nextSpan
+        dryInkView.setViewport(viewport.documentToViewMatrix())
     }
 
     private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
@@ -1158,10 +1324,14 @@ class MainActivity : Activity() {
         dryInkView.eraseAtDocument(point.x, point.y, radius)
     }
 
-    private fun toggleNavigation() {
-        navigationVisible = !navigationVisible
-        navigationPane.visibility = if (navigationVisible) View.VISIBLE else View.GONE
-        pagePane.visibility = if (navigationVisible) View.VISIBLE else View.GONE
+    private fun toggleSectionPane() {
+        sectionPaneVisible = !sectionPaneVisible
+        navigationPane.visibility = if (sectionPaneVisible) View.VISIBLE else View.GONE
+    }
+
+    private fun togglePagePane() {
+        pagePaneVisible = !pagePaneVisible
+        pagePane.visibility = if (pagePaneVisible) View.VISIBLE else View.GONE
     }
 
     private fun showAddToolMenu(anchor: View) {
@@ -1170,26 +1340,6 @@ class MainActivity : Activity() {
             menu.add("添加荧光笔").setOnMenuItemClickListener { addTool(DrawingToolKind.HIGHLIGHTER); true }
             menu.add("添加橡皮").setOnMenuItemClickListener { addTool(DrawingToolKind.ERASER); true }
             menu.add("添加框选").setOnMenuItemClickListener { addTool(DrawingToolKind.LASSO); true }
-            show()
-        }
-    }
-
-    private fun showPageModeMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            menu.add(if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "✓ 只显示当前分区的页" else "只显示当前分区的页")
-                .setOnMenuItemClickListener {
-                    workspace.setPagePaneMode(PagePaneMode.CURRENT_SECTION)
-                    renderPages()
-                    updatePageHeader()
-                    true
-                }
-            menu.add(if (workspace.pagePaneMode == PagePaneMode.RECURSIVE) "✓ 递归显示子分区和页" else "递归显示子分区和页")
-                .setOnMenuItemClickListener {
-                    workspace.setPagePaneMode(PagePaneMode.RECURSIVE)
-                    renderPages()
-                    updatePageHeader()
-                    true
-                }
             show()
         }
     }
@@ -1208,8 +1358,6 @@ class MainActivity : Activity() {
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
                 dryInkView.clear()
-                updateProfileText()
-                updateStatus(force = true)
                 renderToolDetails()
             }
             .show()
@@ -1230,10 +1378,8 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = tool.id == toolShelf.selectedId
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+        val selected = !singleFingerPanEnabled && tool.id == toolShelf.selectedId
+        return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
                 else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
@@ -1256,47 +1402,50 @@ class MainActivity : Activity() {
                             },
                         )
                 },
-                LinearLayout.LayoutParams(dp(24), dp(24)),
+                FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER),
             )
-            addView(
-                TextView(this@MainActivity).apply {
-                    text = "${tool.displayName} ⌄"
-                    gravity = Gravity.CENTER
-                    setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
-                    maxLines = 1
-                },
-                LinearLayout.LayoutParams(MATCH, dp(20)),
-            )
+            if (selected) {
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "⌄"
+                        gravity = Gravity.CENTER
+                        setTextColor(ACCENT_PURPLE)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    },
+                    FrameLayout.LayoutParams(dp(14), dp(14), Gravity.END or Gravity.BOTTOM).apply {
+                        rightMargin = dp(2)
+                        bottomMargin = dp(1)
+                    },
+                )
+            }
             tag = tool.id
             setOnClickListener { clicked ->
                 if (selected) {
                     showToolDetails(clicked)
                 } else {
                     selectTool(tool.id)
-                    toolShelfRow.post {
-                        toolShelfRow.findViewWithTag<View>(tool.id)?.let(::showToolDetails)
-                    }
                 }
             }
-            tooltipText = "选择并调整这件工具"
-            layoutParams = LinearLayout.LayoutParams(dp(68), dp(54)).apply { marginEnd = dp(4) }
+            contentDescription = tool.displayName
+            tooltipText = "点击选择；再次点击打开参数"
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(2) }
         }
     }
 
     private fun commandButton(icon: String, label: String, selected: Boolean, action: (View) -> Unit): TextView =
         TextView(this).apply {
-            text = label
+            text = ""
             gravity = Gravity.CENTER
             setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(null, fluentIcon(icon), null, null)
-            compoundDrawablePadding = dp(2)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon), null, null, null)
             compoundDrawableTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
                 else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
             setOnClickListener { action(this) }
+            contentDescription = label
+            tooltipText = label
         }
 
     private fun parameterControl(
@@ -1377,20 +1526,6 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(WRAP, MATCH)
         }
 
-    private fun searchBox(): View =
-        TextView(this).apply {
-            text = "搜索笔记"
-            gravity = Gravity.CENTER_VERTICAL
-            setTextColor(TEXT_SECONDARY)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            setPadding(dp(10), 0, dp(10), 0)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon("search"), null, null, null)
-            compoundDrawableTintList = ColorStateList.valueOf(TEXT_SECONDARY)
-            compoundDrawablePadding = dp(7)
-            background = rounded(Color.rgb(30, 30, 30), dp(2).toFloat(), BORDER_STRONG)
-            setOnClickListener { showShell("全文搜索") }
-        }
-
     private fun sectionCaption(label: String): TextView =
         TextView(this).apply {
             text = label
@@ -1399,19 +1534,6 @@ class MainActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setPadding(dp(14), 0, dp(10), 0)
-        }
-
-    private fun smallAction(icon: String, label: String, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            gravity = Gravity.CENTER
-            setTextColor(ACCENT_PURPLE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon, "add"), null, null, null)
-            compoundDrawableTintList = ColorStateList.valueOf(ACCENT_PURPLE)
-            compoundDrawablePadding = dp(5)
-            background = rounded(Color.rgb(30, 30, 30), dp(2).toFloat(), BORDER_STRONG)
-            setOnClickListener { action() }
         }
 
     private fun titleIconButton(icon: String, description: String, action: () -> Unit): TextView =
@@ -1425,22 +1547,12 @@ class MainActivity : Activity() {
             tooltipText = description
         }
 
-    private fun sectionLabel(label: String): TextView =
-        TextView(this).apply {
-            text = label
-            setTextColor(TEXT_SECONDARY)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setPadding(0, 0, dp(9), 0)
-        }
-
     private fun verticalDivider(): View =
         View(this).apply {
             setBackgroundColor(BORDER_COLOR)
-            layoutParams = LinearLayout.LayoutParams(dp(1), dp(30)).apply {
-                marginStart = dp(8)
-                marginEnd = dp(9)
+            layoutParams = LinearLayout.LayoutParams(1, dp(26)).apply {
+                marginStart = dp(6)
+                marginEnd = dp(6)
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
