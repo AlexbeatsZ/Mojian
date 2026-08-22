@@ -41,6 +41,11 @@ class ViewportState(
             (viewY - translationY) / scale,
         )
 
+    fun centerDocumentPoint(documentX: Float, documentY: Float, viewCenterX: Float, viewCenterY: Float) {
+        translationX = viewCenterX - documentX * scale
+        translationY = viewCenterY - documentY * scale
+    }
+
     fun documentToViewMatrix(): Matrix =
         Matrix().apply {
             setValues(

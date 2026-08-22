@@ -48,9 +48,13 @@ The two left panes have deliberately non-overlapping responsibilities.
 - Never display a page, even when pages and child sections share the same parent section.
 - Expanding/collapsing a branch changes only section visibility in this pane.
 - Selecting a section establishes the root for the gray page pane.
-- The black-pane header has one `+` control, aligned with the gray pane's add-page control. It adds
-  beneath the focused section; clicking blank space in the black pane clears that focus, after which
-  `+` adds a notebook-root section. Do not expose separate root/child add buttons.
+- The black-pane header has one `+` control, aligned with the gray pane's add-page control. It opens
+  a compact menu with exactly `新建笔记本` and `新建分区`. A notebook is always created at library
+  root and can never nest. A section is created beneath the focused section; focusing a notebook
+  row or clicking black-pane blank space makes the notebook itself the focus, so the next section is
+  created at that notebook's root.
+- Do not render `笔记本`, `分区`, or `页面` as pane-header titles. The panes' content already conveys
+  its type; keep only the black-pane add menu and gray-pane add-page action in compact headers.
 - The black pane has no local search box. Full-notebook search belongs to the single top-right search
   entry point.
 
@@ -115,6 +119,19 @@ The canvas has no permanent page-title/breadcrumb card and no permanent current-
 The gray page pane already identifies the selected page, and tool details belong to the second-tap
 flyout; duplicating either on the paper obstructs handwriting.
 
+## Start ribbon and page tags
+
+The desktop-style `主页` tab is named `开始`. It contains working clipboard, character-format,
+paragraph-format, tag-search, and style controls. Paste is a single direct action with no split or
+drop-down affordance. Font families use Android's available sans, serif, and monospace families;
+do not claim that desktop Calibri is installed on the tablet.
+
+The tag menu contains exactly `重要` and `问题`. Choosing one arms a one-shot placement mode; the
+next tap on the paper places a minimal pure-red tag in document coordinates. The toolbar `标记` and
+`查找标记` icons use the same red with no decorative frame. Tag search lists placed tags, recenters
+the page on the chosen result, and briefly identifies it. Tags are session-only until the document
+storage model is implemented.
+
 ## Preserved input behavior
 
 - Stylus input authors the selected pen or highlighter.
@@ -131,9 +148,16 @@ flyout; duplicating either on the paper obstructs handwriting.
 view lists every notebook and can switch the active notebook. New/open, backup, print, share, export,
 and account entries are explicit shells until their underlying product layers exist.
 
-`选项` stays at the bottom of the Backstage navigation. The working general-options panel owns the
+`选项` stays at the bottom of the Backstage navigation and opens as a full-screen settings surface,
+not a floating dialog. The working general-options panel owns the
 global motion-prediction toggle and the global page-pane mode (`本层` or `递归`); neither preference is
 shown as a permanent workspace control.
+
+The full-page quick toolbar has its own full-screen settings subpage. Every implemented Start
+command and every current drawing command/preset appears in one catalog and can be added or
+removed. Added commands are appended in selection order. The full-page toolbar scrolls horizontally
+so a large custom set remains usable on narrow screens. The ordered command IDs are stored in local
+workspace preferences; unsupported stale IDs are ignored when rendering.
 
 ## Adaptive behavior
 
@@ -154,6 +178,6 @@ the full width to handwriting without sacrificing a recovery control.
 
 The paper's top-right controls are context-sensitive. Normal view shows search and enter-full-page;
 the regular drawing ribbon cannot be hidden there. Full-page view hides tabs, the regular ribbon,
-rail, and both panes, then shows a centered floating copy of the drawing toolbox plus pen, search,
-and exit-full-page controls. Only the full-page pen control toggles the floating toolbox. Search
+rail, and both panes, then shows the configurable, horizontally scrollable quick toolbar plus pen,
+search, and exit-full-page controls. Only the full-page pen control toggles that toolbar. Search
 remains directly to the right of that pen control.

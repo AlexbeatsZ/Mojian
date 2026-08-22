@@ -44,10 +44,10 @@ class NotebookWorkspace(
 ) {
     private var sequence = 100
 
-    var selectedSectionId: String = flattenSections().first().section.id
+    var selectedSectionId: String = flattenSections().firstOrNull()?.section?.id.orEmpty()
         private set
 
-    var focusedSectionId: String? = selectedSectionId
+    var focusedSectionId: String? = selectedSectionId.takeIf { it.isNotEmpty() }
         private set
 
     var pagePaneMode: PagePaneMode = PagePaneMode.CURRENT_SECTION
@@ -56,7 +56,7 @@ class NotebookWorkspace(
     var selectedPageSectionId: String = selectedSectionId
         private set
 
-    var selectedPageId: String = selectedSection().pages.firstOrNull()?.id.orEmpty()
+    var selectedPageId: String = findSection(selectedSectionId)?.pages?.firstOrNull()?.id.orEmpty()
         private set
 
     fun flattenSections(): List<SectionRow> {
@@ -74,11 +74,13 @@ class NotebookWorkspace(
     fun selectedSection(): SectionNode =
         findSection(selectedSectionId) ?: error("Selected section is missing")
 
+    fun hasSelectedSection(): Boolean = findSection(selectedSectionId) != null
+
     fun selectedPage(): NotePage? =
         findSection(selectedPageSectionId)?.pages?.firstOrNull { it.id == selectedPageId }
 
     fun pagePaneRows(): List<PagePaneRow> {
-        val root = selectedSection()
+        val root = findSection(selectedSectionId) ?: return emptyList()
         if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
             return root.pages.map { PagePaneRow.PageItem(it, root.id, 0) }
         }
@@ -106,6 +108,10 @@ class NotebookWorkspace(
         focusedSectionId = null
     }
 
+    fun focusNotebook() {
+        focusedSectionId = null
+    }
+
     fun selectPage(id: String): Boolean {
         return selectPage(selectedSectionId, id)
     }
@@ -114,7 +120,8 @@ class NotebookWorkspace(
         val section = findSection(sectionId) ?: return false
         val page = section.pages.firstOrNull { it.id == id } ?: return false
         if (pagePaneMode == PagePaneMode.CURRENT_SECTION && section.id != selectedSectionId) return false
-        if (pagePaneMode == PagePaneMode.RECURSIVE && !isDescendantOrSame(selectedSection(), section.id)) return false
+        val selectedRoot = findSection(selectedSectionId) ?: return false
+        if (pagePaneMode == PagePaneMode.RECURSIVE && !isDescendantOrSame(selectedRoot, section.id)) return false
         selectedPageSectionId = section.id
         selectedPageId = page.id
         return true
@@ -129,11 +136,17 @@ class NotebookWorkspace(
     }
 
     private fun selectFirstPageForMode() {
+        val root = findSection(selectedSectionId)
+        if (root == null) {
+            selectedPageSectionId = ""
+            selectedPageId = ""
+            return
+        }
         val first =
             if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
-                selectedSection().pages.firstOrNull()?.let { selectedSectionId to it }
+                root.pages.firstOrNull()?.let { selectedSectionId to it }
             } else {
-                firstPageInTree(selectedSection())
+                firstPageInTree(root)
             }
         selectedPageSectionId = first?.first ?: selectedSectionId
         selectedPageId = first?.second?.id.orEmpty()
@@ -243,6 +256,8 @@ class NotebookWorkspace(
 class NotebookLibrary(
     val notebooks: MutableList<NotebookWorkspace>,
 ) {
+    private var sequence = notebooks.size + 1
+
     var activeNotebookId: String = notebooks.firstOrNull()?.id ?: error("Notebook library cannot be empty")
         private set
 
@@ -253,6 +268,20 @@ class NotebookLibrary(
         if (notebooks.none { it.id == id }) return false
         activeNotebookId = id
         return true
+    }
+
+    fun addNotebook(title: String = "新笔记本"): NotebookWorkspace {
+        val inheritedMode = activeNotebook().pagePaneMode
+        val notebook =
+            NotebookWorkspace(
+                id = "notebook-${sequence++}",
+                title = title,
+                sections = mutableListOf(),
+            ).also { it.setPagePaneMode(inheritedMode) }
+        notebooks += notebook
+        activeNotebookId = notebook.id
+        notebook.focusNotebook()
+        return notebook
     }
 
     fun setPagePaneMode(mode: PagePaneMode) {

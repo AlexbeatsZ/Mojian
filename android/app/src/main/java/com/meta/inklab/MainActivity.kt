@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Layout
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -44,6 +45,11 @@ import androidx.input.motionprediction.MotionEventPredictor
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
+private enum class RibbonPage {
+    HOME,
+    DRAW,
+}
+
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
     private val viewport = ViewportState()
@@ -52,6 +58,7 @@ class MainActivity : Activity() {
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val toolShelf = ToolShelf()
     private val notebookLibrary = NotebookLibrary.sample()
+    private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
     private val workspace: NotebookWorkspace
         get() = notebookLibrary.activeNotebook()
 
@@ -74,6 +81,7 @@ class MainActivity : Activity() {
     private lateinit var navigationRail: View
     private lateinit var floatingToolbox: View
     private lateinit var textInputLayer: CanvasTextInputLayer
+    private lateinit var tagLayer: CanvasTagLayer
     private lateinit var sectionPaneToggle: View
     private lateinit var pagePaneToggle: View
     private lateinit var toolbarToggle: View
@@ -95,6 +103,8 @@ class MainActivity : Activity() {
     private var pagePaneVisible = true
     private var drawingToolbarVisible = true
     private var fullPageMode = false
+    private var activeRibbonPage = RibbonPage.DRAW
+    private var restoreTextModeAfterTagPlacement = false
 
     private val activatePressureEraser =
         Runnable {
@@ -136,7 +146,9 @@ class MainActivity : Activity() {
         dryInkView.setEraserCursor(null)
         dryInkView.clearSelection()
         textModeEnabled = false
+        restoreTextModeAfterTagPlacement = false
         if (::textInputLayer.isInitialized) textInputLayer.setTextMode(false)
+        if (::tagLayer.isInitialized) tagLayer.cancelPlacement()
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
         super.onPause()
@@ -162,7 +174,11 @@ class MainActivity : Activity() {
         }
 
         ribbonTabs = buildRibbonTabs()
-        drawingRibbon = buildDrawingRibbon()
+        drawingRibbon =
+            FrameLayout(this).apply {
+                setBackgroundColor(TOOLBAR_BACKGROUND)
+                addView(buildDrawingRibbon(), FrameLayout.LayoutParams(MATCH, MATCH))
+            }
         rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(34)))
         rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(50)))
 
@@ -332,97 +348,237 @@ class MainActivity : Activity() {
         }
 
     private fun showOptionsDialog() {
+        backstageDialog?.dismiss()
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val content =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setBackgroundColor(Color.rgb(37, 37, 37))
-
-                addView(
-                    LinearLayout(this@MainActivity).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(8), dp(14), dp(8), dp(14))
-                        setBackgroundColor(NAV_BACKGROUND)
-                        addView(backstageNavItem("常规", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
-                        for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
-                            addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
-                        }
-                    },
-                    LinearLayout.LayoutParams(dp(132), MATCH),
-                )
-
-                addView(
-                    LinearLayout(this@MainActivity).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(dp(24), dp(20), dp(24), dp(16))
-                        addView(
-                            TextView(this@MainActivity).apply {
-                                text = "墨笺 常规选项"
-                                setTextColor(TEXT_PRIMARY)
-                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            },
-                            LinearLayout.LayoutParams(MATCH, dp(44)),
-                        )
-                        addView(
-                            TextView(this@MainActivity).apply {
-                                text = "绘图与页面"
-                                setTextColor(TEXT_PRIMARY)
-                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            },
-                            LinearLayout.LayoutParams(MATCH, dp(34)),
-                        )
-                        addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
-
-                        val predictionValue = settingsValueButton(if (predictionEnabled) "开启" else "关闭")
-                        predictionValue.setOnClickListener {
-                            predictionEnabled = !predictionEnabled
-                            predictionValue.text = if (predictionEnabled) "开启" else "关闭"
-                        }
-                        addView(
-                            settingsRow("笔迹预测", "使用预测触点降低快速书写时的视觉延迟。", predictionValue),
-                            LinearLayout.LayoutParams(MATCH, dp(72)),
-                        )
-
-                        val pageModeValue =
-                            settingsValueButton(if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "本层" else "递归")
-                        pageModeValue.setOnClickListener {
-                            val mode =
-                                if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) PagePaneMode.RECURSIVE
-                                else PagePaneMode.CURRENT_SECTION
-                            notebookLibrary.setPagePaneMode(mode)
-                            pageModeValue.text = if (mode == PagePaneMode.CURRENT_SECTION) "本层" else "递归"
-                            renderPages()
-                        }
-                        addView(
-                            settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue),
-                            LinearLayout.LayoutParams(MATCH, dp(72)),
-                        )
-                        addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
-                        addView(
-                            TextView(this@MainActivity).apply {
-                                text = "关闭"
-                                gravity = Gravity.CENTER
-                                setTextColor(TEXT_PRIMARY)
-                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                                background = rounded(Color.rgb(48, 48, 48), dp(2).toFloat(), TEXT_SECONDARY)
-                                setOnClickListener { dialog.dismiss() }
-                            },
-                            LinearLayout.LayoutParams(dp(80), dp(36)).apply { gravity = Gravity.END },
-                        )
-                    },
-                    LinearLayout.LayoutParams(0, MATCH, 1f),
-                )
-            }
-        dialog.setContentView(content)
+        dialog.setContentView(buildOptionsPage(dialog))
         dialog.show()
         dialog.window?.apply {
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setLayout(dp(650), dp(470))
+            setBackgroundDrawable(ColorDrawable(Color.rgb(37, 37, 37)))
+            setLayout(MATCH, MATCH)
         }
     }
+
+    private fun buildOptionsPage(dialog: Dialog): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.rgb(37, 37, 37))
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(8), dp(8), dp(8), dp(14))
+                    setBackgroundColor(NAV_BACKGROUND)
+                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(44)))
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
+                    addView(backstageNavItem("常规", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
+                        addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    }
+                },
+                LinearLayout.LayoutParams(dp(150), MATCH),
+            )
+
+            val settings =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(30), dp(22), dp(34), dp(28))
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "墨笺选项"
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(54)),
+                    )
+                    addView(optionsSectionTitle("绘图与页面"), LinearLayout.LayoutParams(MATCH, dp(36)))
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
+
+                    val predictionValue = settingsValueButton(if (predictionEnabled) "开启" else "关闭")
+                    predictionValue.setOnClickListener {
+                        predictionEnabled = !predictionEnabled
+                        predictionValue.text = if (predictionEnabled) "开启" else "关闭"
+                    }
+                    addView(settingsRow("笔迹预测", "使用预测触点降低快速书写时的视觉延迟。", predictionValue), LinearLayout.LayoutParams(MATCH, dp(72)))
+
+                    val pageModeValue = settingsValueButton(if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "本层" else "递归")
+                    pageModeValue.setOnClickListener {
+                        val mode = if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) PagePaneMode.RECURSIVE else PagePaneMode.CURRENT_SECTION
+                        notebookLibrary.setPagePaneMode(mode)
+                        pageModeValue.text = if (mode == PagePaneMode.CURRENT_SECTION) "本层" else "递归"
+                        renderPages()
+                    }
+                    addView(settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
+
+                    addView(optionsSectionTitle("整页视图"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
+                    val toolbarValue = settingsValueButton("配置")
+                    toolbarValue.setOnClickListener { showFullPageToolbarOptions() }
+                    addView(
+                        settingsRow(
+                            "快捷工具栏",
+                            "添加或移除任意开始、绘图按钮；整页视图中可横向滑动使用。",
+                            toolbarValue,
+                        ),
+                        LinearLayout.LayoutParams(MATCH, dp(76)),
+                    )
+                }
+            addView(
+                ScrollView(this@MainActivity).apply {
+                    isFillViewport = true
+                    addView(settings, ViewGroup.LayoutParams(MATCH, WRAP))
+                },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
+            )
+        }
+
+    private fun showFullPageToolbarOptions() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        fun refresh() {
+            dialog.setContentView(buildFullPageToolbarOptionsPage(dialog) { refresh() })
+        }
+        refresh()
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.rgb(37, 37, 37)))
+            setLayout(MATCH, MATCH)
+        }
+    }
+
+    private fun buildFullPageToolbarOptionsPage(dialog: Dialog, refresh: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(37, 37, 37))
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), 0, dp(18), 0)
+                    setBackgroundColor(NAV_BACKGROUND)
+                    addView(backstageNavItem("←  返回选项", false) { dialog.dismiss() }, LinearLayout.LayoutParams(dp(150), dp(48)))
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "整页视图快捷工具栏"
+                            gravity = Gravity.CENTER_VERTICAL
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        },
+                        LinearLayout.LayoutParams(0, MATCH, 1f),
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "${fullPageToolbarConfig.ids.size} 个按钮"
+                            gravity = Gravity.CENTER
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        },
+                        LinearLayout.LayoutParams(dp(86), MATCH),
+                    )
+                },
+                LinearLayout.LayoutParams(MATCH, dp(52)),
+            )
+
+            val catalog = fullPageToolCatalog()
+            val body =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(26), dp(18), dp(26), dp(28))
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "点击“添加”会把按钮放到快捷栏末尾；点击“移除”会立即从整页视图隐藏。"
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(36)),
+                    )
+                    addView(optionsSectionTitle("当前按钮"), LinearLayout.LayoutParams(MATCH, dp(38)))
+                    fullPageToolbarConfig.ids.mapNotNull { id -> catalog.firstOrNull { it.id == id } }.forEach { descriptor ->
+                        addView(fullPageToolbarOptionRow(descriptor, selected = true, refresh), LinearLayout.LayoutParams(MATCH, dp(48)))
+                    }
+                    addView(optionsSectionTitle("可添加按钮"), LinearLayout.LayoutParams(MATCH, dp(52)).apply { topMargin = dp(10) })
+                    catalog.filterNot { fullPageToolbarConfig.contains(it.id) }.forEach { descriptor ->
+                        addView(fullPageToolbarOptionRow(descriptor, selected = false, refresh), LinearLayout.LayoutParams(MATCH, dp(48)))
+                    }
+                }
+            addView(
+                ScrollView(this@MainActivity).apply { addView(body, ViewGroup.LayoutParams(MATCH, WRAP)) },
+                LinearLayout.LayoutParams(MATCH, 0, 1f),
+            )
+        }
+
+    private fun fullPageToolbarOptionRow(descriptor: FullPageToolDescriptor, selected: Boolean, refresh: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(8), 0)
+            background = rounded(if (selected) Color.rgb(43, 43, 43) else Color.TRANSPARENT, dp(2).toFloat(), BORDER_COLOR)
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(descriptor.icon))
+                    imageTintList = ColorStateList.valueOf(if (descriptor.redAccent) CanvasTagLayer.TAG_RED else TEXT_PRIMARY)
+                },
+                LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) },
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = descriptor.label
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = if (selected) "移除" else "添加"
+                    gravity = Gravity.CENTER
+                    setTextColor(if (selected) TEXT_SECONDARY else ACCENT_PURPLE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    setOnClickListener {
+                        if (selected) fullPageToolbarConfig.remove(descriptor.id) else fullPageToolbarConfig.add(descriptor.id)
+                        persistFullPageToolbarIds()
+                        renderFullPageToolbar()
+                        refresh()
+                    }
+                },
+                LinearLayout.LayoutParams(dp(64), dp(36)),
+            )
+        }
+
+    private fun loadFullPageToolbarIds(): List<String> {
+        val preferences = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+        if (!preferences.contains(FULL_PAGE_TOOLBAR_KEY)) return FullPageToolbarConfig.DEFAULT_IDS
+        return preferences.getString(FULL_PAGE_TOOLBAR_KEY, "")
+            .orEmpty()
+            .split(TOOLBAR_ID_SEPARATOR)
+            .filter(::isKnownFullPageToolId)
+    }
+
+    private fun isKnownFullPageToolId(id: String): Boolean =
+        when {
+            id in setOf("draw:undo", "draw:cursor", "draw:add", "draw:pan", "draw:clear") -> true
+            id.startsWith("home:") -> HomeCommand.fromId(id.removePrefix("home:")) != null
+            id.startsWith("tool:") -> toolShelf.tools.any { it.id == id.removePrefix("tool:") }
+            else -> false
+        }
+
+    private fun persistFullPageToolbarIds() {
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .putString(FULL_PAGE_TOOLBAR_KEY, fullPageToolbarConfig.ids.joinToString(TOOLBAR_ID_SEPARATOR))
+            .apply()
+    }
+
+    private fun optionsSectionTitle(label: String): TextView =
+        TextView(this).apply {
+            text = label
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(TEXT_PRIMARY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }
 
     private fun settingsRow(title: String, description: String, valueView: View): View =
         LinearLayout(this).apply {
@@ -469,13 +625,39 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), 0, dp(8), 0)
             setBackgroundColor(RIBBON_BACKGROUND)
-            addView(ribbonTab("文件", false) { showBackstage() })
-            addView(ribbonTab("主页", false) { showShell("主页工具") })
-            addView(ribbonTab("插入", false) { showShell("插入工具") })
-            addView(ribbonTab("绘图", true) { })
-            addView(ribbonTab("视图", false) { showShell("视图工具") })
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+            populateRibbonTabs(this)
         }
+
+    private fun populateRibbonTabs(row: LinearLayout) {
+        row.removeAllViews()
+        row.addView(ribbonTab("文件", false) { showBackstage() })
+        row.addView(ribbonTab("开始", activeRibbonPage == RibbonPage.HOME) { selectRibbonPage(RibbonPage.HOME) })
+        row.addView(ribbonTab("插入", false) { showShell("插入工具") })
+        row.addView(ribbonTab("绘图", activeRibbonPage == RibbonPage.DRAW) { selectRibbonPage(RibbonPage.DRAW) })
+        row.addView(ribbonTab("视图", false) { showShell("视图工具") })
+        row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+    }
+
+    private fun selectRibbonPage(page: RibbonPage) {
+        if (activeRibbonPage == page) {
+            if (page == RibbonPage.HOME) setTextMode(true)
+            return
+        }
+        activeRibbonPage = page
+        populateRibbonTabs(ribbonTabs as LinearLayout)
+        val host = drawingRibbon as FrameLayout
+        host.removeAllViews()
+        host.addView(
+            if (page == RibbonPage.HOME) buildHomeRibbon() else buildDrawingRibbon(),
+            FrameLayout.LayoutParams(MATCH, MATCH),
+        )
+        if (page == RibbonPage.HOME) {
+            setTextMode(true, rerender = false)
+        } else {
+            renderToolShelf()
+            renderToolDetails()
+        }
+    }
 
     private fun buildNavigationRail(): View =
         LinearLayout(this).apply {
@@ -515,6 +697,220 @@ class MainActivity : Activity() {
                 }
         }
 
+    private fun buildHomeRibbon(): View =
+        HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(TOOLBAR_BACKGROUND)
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(2), dp(8), dp(2))
+
+                    addHomeCommand(HomeCommand.PASTE)
+                    addHomeCommand(HomeCommand.CUT)
+                    addHomeCommand(HomeCommand.COPY)
+                    addHomeCommand(HomeCommand.FORMAT_PAINTER)
+                    addView(verticalDivider())
+
+                    addView(homeDropdownButton("无衬线", HomeCommand.FONT_FAMILY), LinearLayout.LayoutParams(dp(90), dp(38)))
+                    addView(homeDropdownButton("16", HomeCommand.FONT_SIZE), LinearLayout.LayoutParams(dp(52), dp(38)).apply { marginStart = dp(4) })
+                    for (
+                        command in
+                            listOf(
+                                HomeCommand.BOLD,
+                                HomeCommand.ITALIC,
+                                HomeCommand.UNDERLINE,
+                                HomeCommand.STRIKETHROUGH,
+                                HomeCommand.FONT_COLOR,
+                                HomeCommand.HIGHLIGHT,
+                                HomeCommand.SUBSCRIPT,
+                                HomeCommand.CLEAR_FORMATTING,
+                            )
+                    ) addHomeCommand(command)
+                    addView(verticalDivider())
+
+                    for (
+                        command in
+                            listOf(
+                                HomeCommand.BULLETS,
+                                HomeCommand.NUMBERING,
+                                HomeCommand.INDENT_DECREASE,
+                                HomeCommand.INDENT_INCREASE,
+                                HomeCommand.ALIGN_LEFT,
+                                HomeCommand.ALIGN_CENTER,
+                                HomeCommand.ALIGN_RIGHT,
+                                HomeCommand.LINE_SPACING,
+                            )
+                    ) addHomeCommand(command)
+                    addView(verticalDivider())
+
+                    addHomeCommand(HomeCommand.TAG, redAccent = true)
+                    addHomeCommand(HomeCommand.FIND_TAGS, redAccent = true)
+                    addView(verticalDivider())
+                    addView(homeDropdownButton("样式", HomeCommand.STYLES), LinearLayout.LayoutParams(dp(70), dp(38)))
+                },
+                ViewGroup.LayoutParams(WRAP, MATCH),
+            )
+        }
+
+    private fun LinearLayout.addHomeCommand(command: HomeCommand, redAccent: Boolean = false) {
+        addView(homeCommandButton(command, redAccent), LinearLayout.LayoutParams(dp(36), dp(42)))
+    }
+
+    private fun homeCommandButton(command: HomeCommand, redAccent: Boolean = command == HomeCommand.TAG || command == HomeCommand.FIND_TAGS): View =
+        FrameLayout(this).apply {
+            background = rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT)
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(command.icon))
+                    imageTintList = ColorStateList.valueOf(if (redAccent) CanvasTagLayer.TAG_RED else TEXT_PRIMARY)
+                },
+                FrameLayout.LayoutParams(dp(21), dp(21), Gravity.CENTER),
+            )
+            setOnClickListener { performHomeCommand(command, this) }
+            contentDescription = command.label
+            tooltipText = command.label
+        }
+
+    private fun homeDropdownButton(label: String, command: HomeCommand): TextView =
+        TextView(this).apply {
+            text = "$label  ⌄"
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(9), 0, dp(5), 0)
+            setTextColor(TEXT_PRIMARY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            maxLines = 1
+            background = rounded(Color.rgb(42, 42, 42), dp(2).toFloat(), BORDER_STRONG)
+            setOnClickListener { performHomeCommand(command, this) }
+            contentDescription = command.label
+            tooltipText = command.label
+        }
+
+    private fun performHomeCommand(command: HomeCommand, anchor: View) {
+        if (command != HomeCommand.TAG && command != HomeCommand.FIND_TAGS) {
+            setTextMode(true, rerender = false)
+            renderFullPageToolbar()
+        }
+        when (command) {
+            HomeCommand.PASTE -> runTextCommand("粘贴") { textInputLayer.paste() }
+            HomeCommand.CUT -> runTextCommand("剪切") { textInputLayer.cut() }
+            HomeCommand.COPY -> runTextCommand("复制") { textInputLayer.copy() }
+            HomeCommand.FORMAT_PAINTER ->
+                when (textInputLayer.formatPainter()) {
+                    FormatPainterResult.CAPTURED -> Toast.makeText(this, "已复制格式；选择目标文字后再次点击格式刷", Toast.LENGTH_SHORT).show()
+                    FormatPainterResult.APPLIED -> Toast.makeText(this, "已应用格式", Toast.LENGTH_SHORT).show()
+                    FormatPainterResult.UNAVAILABLE -> showTextSelectionHint()
+                }
+            HomeCommand.FONT_FAMILY ->
+                showTextChoiceMenu(
+                    anchor,
+                    listOf("无衬线" to { textInputLayer.applyFontFamily("sans-serif") }, "衬线" to { textInputLayer.applyFontFamily("serif") }, "等宽" to { textInputLayer.applyFontFamily("monospace") }),
+                )
+            HomeCommand.FONT_SIZE ->
+                showTextChoiceMenu(anchor, listOf(10, 12, 14, 16, 18, 24, 32).map { size -> "$size" to { textInputLayer.applyFontSize(size) } })
+            HomeCommand.BOLD -> runTextCommand("加粗") { textInputLayer.toggleBold() }
+            HomeCommand.ITALIC -> runTextCommand("倾斜") { textInputLayer.toggleItalic() }
+            HomeCommand.UNDERLINE -> runTextCommand("下划线") { textInputLayer.toggleUnderline() }
+            HomeCommand.STRIKETHROUGH -> runTextCommand("删除线") { textInputLayer.toggleStrikethrough() }
+            HomeCommand.FONT_COLOR ->
+                showTextChoiceMenu(
+                    anchor,
+                    listOf(
+                        "白色" to { textInputLayer.applyForegroundColor(TEXT_PRIMARY) },
+                        "红色" to { textInputLayer.applyForegroundColor(CanvasTagLayer.TAG_RED) },
+                        "蓝色" to { textInputLayer.applyForegroundColor(Color.rgb(86, 156, 214)) },
+                        "黄色" to { textInputLayer.applyForegroundColor(Color.rgb(255, 214, 10)) },
+                    ),
+                )
+            HomeCommand.HIGHLIGHT ->
+                showTextChoiceMenu(
+                    anchor,
+                    listOf(
+                        "黄色" to { textInputLayer.applyBackgroundColor(Color.rgb(104, 88, 0)) },
+                        "绿色" to { textInputLayer.applyBackgroundColor(Color.rgb(24, 92, 54)) },
+                        "红色" to { textInputLayer.applyBackgroundColor(Color.rgb(111, 37, 42)) },
+                        "无" to { textInputLayer.applyBackgroundColor(Color.TRANSPARENT) },
+                    ),
+                )
+            HomeCommand.SUBSCRIPT -> runTextCommand("下标") { textInputLayer.toggleSubscript() }
+            HomeCommand.CLEAR_FORMATTING -> runTextCommand("清除格式") { textInputLayer.clearFormatting() }
+            HomeCommand.BULLETS -> runTextCommand("项目符号") { textInputLayer.applyBullets() }
+            HomeCommand.NUMBERING -> runTextCommand("编号") { textInputLayer.applyNumbering() }
+            HomeCommand.INDENT_DECREASE -> runTextCommand("减少缩进") { textInputLayer.changeIndent(false) }
+            HomeCommand.INDENT_INCREASE -> runTextCommand("增加缩进") { textInputLayer.changeIndent(true) }
+            HomeCommand.ALIGN_LEFT -> runTextCommand("左对齐") { textInputLayer.align(Layout.Alignment.ALIGN_NORMAL) }
+            HomeCommand.ALIGN_CENTER -> runTextCommand("居中") { textInputLayer.align(Layout.Alignment.ALIGN_CENTER) }
+            HomeCommand.ALIGN_RIGHT -> runTextCommand("右对齐") { textInputLayer.align(Layout.Alignment.ALIGN_OPPOSITE) }
+            HomeCommand.LINE_SPACING ->
+                showTextChoiceMenu(anchor, listOf(1f, 1.15f, 1.5f, 2f).map { spacing -> "${spacing} 倍" to { textInputLayer.setLineSpacing(spacing) } })
+            HomeCommand.TAG -> showTagMenu(anchor)
+            HomeCommand.FIND_TAGS -> showFindTags(anchor)
+            HomeCommand.STYLES ->
+                showTextChoiceMenu(anchor, listOf("正文", "标题", "标题 1", "标题 2").map { style -> style to { textInputLayer.applyNamedStyle(style) } })
+        }
+    }
+
+    private fun runTextCommand(label: String, action: () -> Boolean) {
+        if (!action()) showTextSelectionHint() else Toast.makeText(this, "已$label", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showTextSelectionHint() {
+        Toast.makeText(this, "请先点击页面创建文本框，并选择文字", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showTextChoiceMenu(anchor: View, choices: List<Pair<String, () -> Boolean>>) {
+        PopupMenu(this, anchor).apply {
+            choices.forEach { (label, action) ->
+                menu.add(label).setOnMenuItemClickListener {
+                    if (!action()) showTextSelectionHint()
+                    true
+                }
+            }
+            show()
+        }
+    }
+
+    private fun showTagMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            CanvasTagKind.entries.forEach { kind ->
+                menu.add(kind.label).setOnMenuItemClickListener {
+                    beginTagPlacement(kind)
+                    true
+                }
+            }
+            show()
+        }
+    }
+
+    private fun beginTagPlacement(kind: CanvasTagKind) {
+        restoreTextModeAfterTagPlacement = textModeEnabled
+        setTextMode(false, rerender = false)
+        singleFingerPanEnabled = false
+        transformGestureActive = false
+        tagLayer.beginPlacement(kind)
+        Toast.makeText(this, "点击页面放置${kind.label}标记", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showFindTags(anchor: View) {
+        val tags = tagLayer.allTags()
+        if (tags.isEmpty()) {
+            Toast.makeText(this, "当前页面还没有标记", Toast.LENGTH_SHORT).show()
+            return
+        }
+        PopupMenu(this, anchor).apply {
+            tags.forEachIndexed { index, tag ->
+                menu.add("${index + 1}. ${tag.kind.label}").setOnMenuItemClickListener {
+                    viewport.centerDocumentPoint(tag.documentX, tag.documentY, tagLayer.width * 0.5f, tagLayer.height * 0.5f)
+                    dryInkView.setViewport(viewport.documentToViewMatrix())
+                    tagLayer.focusTag(index)
+                    true
+                }
+            }
+            show()
+        }
+    }
+
     private fun buildNavigationPane(): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -523,35 +919,15 @@ class MainActivity : Activity() {
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(14), dp(10), dp(10), dp(8))
+                    setPadding(dp(8), dp(4), dp(7), dp(4))
+                    addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
                     addView(
-                        ImageView(this@MainActivity).apply {
-                            setImageDrawable(fluentIcon("notebook", "book"))
-                            imageTintList = ColorStateList.valueOf(ACCENT_PURPLE)
-                        },
-                        LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(9) },
-                    )
-                    addView(
-                        TextView(this@MainActivity).apply {
-                            text = "笔记本"
-                            setTextColor(TEXT_PRIMARY)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            gravity = Gravity.CENTER_VERTICAL
-                        },
-                        LinearLayout.LayoutParams(0, dp(34), 1f),
-                    )
-                    addView(
-                        titleIconButton("add", "按当前分区焦点新建分区") {
-                            workspace.addSectionAtFocus()
-                            renderWorkspace()
-                        },
+                        titleIconButton("add", "新建笔记本或分区") { anchor -> showNavigationAddMenu(anchor) },
                         LinearLayout.LayoutParams(dp(38), dp(38)),
                     )
                 },
-                LinearLayout.LayoutParams(MATCH, dp(52)),
+                LinearLayout.LayoutParams(MATCH, dp(44)),
             )
-            addView(sectionCaption("分区"), LinearLayout.LayoutParams(MATCH, dp(28)))
 
             sectionList = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
             addView(
@@ -575,21 +951,16 @@ class MainActivity : Activity() {
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), 0, dp(6), 0)
+                    setPadding(dp(8), 0, dp(6), 0)
+                    addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
                     addView(
-                        TextView(this@MainActivity).apply {
-                            text = "页面"
-                            setTextColor(TEXT_PRIMARY)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                            gravity = Gravity.CENTER_VERTICAL
-                        },
-                        LinearLayout.LayoutParams(0, MATCH, 1f),
-                    )
-                    addView(
-                        titleIconButton("add", "新建页面") {
-                            workspace.addPage()
-                            renderPages()
+                        titleIconButton("add", "新建页面") { _ ->
+                            if (workspace.hasSelectedSection()) {
+                                workspace.addPage()
+                                renderPages()
+                            } else {
+                                Toast.makeText(this@MainActivity, "请先在左侧新建分区", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         LinearLayout.LayoutParams(dp(38), dp(38)),
                     )
@@ -610,17 +981,27 @@ class MainActivity : Activity() {
         val paper = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
         dryInkView = DryInkView(this)
         wetInkView = InProgressStrokesView(this)
+        tagLayer = CanvasTagLayer(this, viewport)
         textInputLayer = CanvasTextInputLayer(this)
+        tagLayer.onPlacementFinished = { tag ->
+            if (restoreTextModeAfterTagPlacement) setTextMode(true)
+            restoreTextModeAfterTagPlacement = false
+            Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
+            renderFullPageToolbar()
+        }
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        paper.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
 
         floatingToolbox = buildFloatingToolbox()
         paper.addView(
             floatingToolbox,
-            FrameLayout.LayoutParams(WRAP, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            FrameLayout.LayoutParams(MATCH, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(7)
+                leftMargin = dp(116)
+                rightMargin = dp(116)
             },
         )
         paper.addView(
@@ -643,7 +1024,13 @@ class MainActivity : Activity() {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(4), dp(2), dp(4), dp(2))
                 }
-            addView(floatingToolShelfRow, FrameLayout.LayoutParams(WRAP, MATCH, Gravity.CENTER))
+            addView(
+                HorizontalScrollView(this@MainActivity).apply {
+                    isHorizontalScrollBarEnabled = false
+                    addView(floatingToolShelfRow, ViewGroup.LayoutParams(WRAP, MATCH))
+                },
+                FrameLayout.LayoutParams(MATCH, MATCH),
+            )
         }
 
     private fun buildCanvasActions(): View =
@@ -689,6 +1076,7 @@ class MainActivity : Activity() {
                         else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
+                        notebook.focusNotebook()
                         dryInkView.clearSelection()
                         renderWorkspace()
                     }
@@ -790,7 +1178,9 @@ class MainActivity : Activity() {
         if (rows.isEmpty()) {
             pageList.addView(
                 TextView(this).apply {
-                    text = "这里还没有页面\n点击右上角 + 新建"
+                    text =
+                        if (workspace.hasSelectedSection()) "这里还没有页面\n点击右上角 + 新建"
+                        else "这个笔记本还没有分区\n请从左侧 + 新建分区"
                     setTextColor(TEXT_SECONDARY)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                     gravity = Gravity.CENTER
@@ -875,7 +1265,76 @@ class MainActivity : Activity() {
 
     private fun renderToolShelf() {
         populateToolShelf(toolShelfRow)
-        populateToolShelf(floatingToolShelfRow)
+        renderFullPageToolbar()
+    }
+
+    private fun renderFullPageToolbar() {
+        if (!::floatingToolShelfRow.isInitialized) return
+        floatingToolShelfRow.removeAllViews()
+        fullPageToolbarConfig.ids.forEach { id ->
+            fullPageToolView(id)?.let { floatingToolShelfRow.addView(it) }
+        }
+    }
+
+    private fun fullPageToolCatalog(): List<FullPageToolDescriptor> =
+        buildList {
+            add(FullPageToolDescriptor("draw:undo", "撤销", "arrow_undo"))
+            add(FullPageToolDescriptor("draw:cursor", "键入文本", "cursor"))
+            toolShelf.tools.forEach { tool ->
+                val icon =
+                    when (tool.kind) {
+                        DrawingToolKind.PEN -> "pen"
+                        DrawingToolKind.HIGHLIGHTER -> "highlight"
+                        DrawingToolKind.ERASER -> "eraser"
+                        DrawingToolKind.LASSO -> "lasso"
+                    }
+                add(FullPageToolDescriptor("tool:${tool.id}", tool.displayName, icon))
+            }
+            add(FullPageToolDescriptor("draw:add", "添加绘图工具", "add"))
+            add(FullPageToolDescriptor("draw:pan", "单指平移", "hand_left"))
+            add(FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"))
+            HomeCommand.entries.forEach { command ->
+                add(
+                    FullPageToolDescriptor(
+                        id = "home:${command.id}",
+                        label = command.label,
+                        icon = command.icon,
+                        redAccent = command == HomeCommand.TAG || command == HomeCommand.FIND_TAGS,
+                    ),
+                )
+            }
+        }
+
+    private fun fullPageToolView(id: String): View? {
+        if (id.startsWith("home:")) {
+            val command = HomeCommand.fromId(id.removePrefix("home:")) ?: return null
+            return homeCommandButton(command).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(42))
+            }
+        }
+        if (id.startsWith("tool:")) {
+            val tool = toolShelf.tools.firstOrNull { it.id == id.removePrefix("tool:") } ?: return null
+            return toolButton(tool)
+        }
+        return when (id) {
+            "draw:undo" ->
+                commandButton("arrow_undo", "撤销", false) {
+                    dryInkView.clearSelection()
+                    dryInkView.undo()
+                }
+            "draw:cursor" -> commandButton("cursor", "键入文本", textModeEnabled) { setTextMode(!textModeEnabled) }
+            "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
+            "draw:pan" ->
+                commandButton("hand_left", "单指平移", singleFingerPanEnabled) {
+                    setTextMode(false, rerender = false)
+                    tagLayer.cancelPlacement()
+                    singleFingerPanEnabled = !singleFingerPanEnabled
+                    transformGestureActive = false
+                    renderToolShelf()
+                }
+            "draw:clear" -> commandButton("delete_dismiss", "清纸", false) { confirmClearPage() }
+            else -> null
+        }?.apply { layoutParams = LinearLayout.LayoutParams(dp(40), dp(42)) }
     }
 
     private fun populateToolShelf(row: LinearLayout) {
@@ -907,6 +1366,7 @@ class MainActivity : Activity() {
         row.addView(
             commandButton("hand_left", "单指平移", selected = singleFingerPanEnabled) {
                 setTextMode(false, rerender = false)
+                tagLayer.cancelPlacement()
                 singleFingerPanEnabled = !singleFingerPanEnabled
                 transformGestureActive = false
                 toolDetailPopup?.dismiss()
@@ -1041,10 +1501,13 @@ class MainActivity : Activity() {
         toolDetailRow.addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { topMargin = dp(4) })
         addToolDetailLine(
             detailChip("删除工具", false) {
+                val removedToolId = toolShelf.selectedId
                 if (!toolShelf.deleteSelected()) {
                     Toast.makeText(this, "至少保留一个工具", Toast.LENGTH_SHORT).show()
                     return@detailChip
                 }
+                fullPageToolbarConfig.remove("tool:$removedToolId")
+                persistFullPageToolbarIds()
                 dryInkView.clearSelection()
                 toolDetailPopup?.dismiss()
                 toolDetailPopup = null
@@ -1251,6 +1714,7 @@ class MainActivity : Activity() {
 
     private fun selectTool(id: String) {
         if (!toolShelf.select(id)) return
+        tagLayer.cancelPlacement()
         setTextMode(false, rerender = false)
         singleFingerPanEnabled = false
         transformGestureActive = false
@@ -1273,6 +1737,7 @@ class MainActivity : Activity() {
         }
         textModeEnabled = enabled
         if (enabled) {
+            tagLayer.cancelPlacement()
             singleFingerPanEnabled = false
             transformGestureActive = false
             toolDetailPopup?.dismiss()
@@ -1386,6 +1851,7 @@ class MainActivity : Activity() {
         lastGestureFocusY = focusY
         lastGestureSpan = nextSpan
         dryInkView.setViewport(viewport.documentToViewMatrix())
+        tagLayer.invalidate()
     }
 
     private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
@@ -1467,6 +1933,23 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showNavigationAddMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("新建笔记本").setOnMenuItemClickListener {
+                notebookLibrary.addNotebook()
+                dryInkView.clearSelection()
+                renderWorkspace()
+                true
+            }
+            menu.add("新建分区").setOnMenuItemClickListener {
+                workspace.addSectionAtFocus()
+                renderWorkspace()
+                true
+            }
+            show()
+        }
+    }
+
     private fun addTool(kind: DrawingToolKind) {
         toolShelf.add(kind)
         rebuildBrush()
@@ -1477,10 +1960,12 @@ class MainActivity : Activity() {
     private fun confirmClearPage() {
         AlertDialog.Builder(this)
             .setTitle("清空当前页面？")
-            .setMessage("本原型的笔迹只保存在当前会话，清空后无法恢复。")
+            .setMessage("本原型的笔迹、文本和标记只保存在当前会话，清空后无法恢复。")
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
                 dryInkView.clear()
+                textInputLayer.clearAll()
+                tagLayer.clear()
                 renderToolDetails()
             }
             .show()
@@ -1706,14 +2191,14 @@ class MainActivity : Activity() {
             setPadding(dp(14), 0, dp(10), 0)
         }
 
-    private fun titleIconButton(icon: String, description: String, action: () -> Unit): TextView =
+    private fun titleIconButton(icon: String, description: String, action: (View) -> Unit): TextView =
         TextView(this).apply {
             contentDescription = description
             gravity = Gravity.CENTER
             setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon), null, null, null)
             compoundDrawableTintList = ColorStateList.valueOf(if (description == "导航") Color.WHITE else TEXT_PRIMARY)
             background = rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT)
-            setOnClickListener { action() }
+            setOnClickListener { action(this) }
             tooltipText = description
         }
 
@@ -1790,6 +2275,9 @@ class MainActivity : Activity() {
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val INTERNAL_UNITS_PER_MM = 12.16225f
+        private const val OPTIONS_PREFERENCES = "workspace-options"
+        private const val FULL_PAGE_TOOLBAR_KEY = "full-page-toolbar"
+        private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
         private val ACCENT_PURPLE = Color.rgb(218, 178, 233)

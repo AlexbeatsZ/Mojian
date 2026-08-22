@@ -5,6 +5,16 @@ import org.junit.Test
 
 class ViewportStateTest {
     @Test
+    fun centerDocumentPointMovesTheRequestedPointToTheViewCenter() {
+        val viewport = ViewportState()
+
+        viewport.centerDocumentPoint(120f, 80f, 500f, 300f)
+
+        assertEquals(380f, viewport.translationX, 0.001f)
+        assertEquals(220f, viewport.translationY, 0.001f)
+    }
+
+    @Test
     fun twoFingerTranslationMovesViewportWithoutScaling() {
         val viewport = ViewportState()
 

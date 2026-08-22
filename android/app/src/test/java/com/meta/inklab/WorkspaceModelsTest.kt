@@ -36,6 +36,29 @@ class WorkspaceModelsTest {
     }
 
     @Test
+    fun newNotebookIsAddedAtTheTopLevelWithoutInventingASection() {
+        val library = NotebookLibrary.sample()
+
+        val added = library.addNotebook("项目笔记")
+
+        assertEquals(listOf("我的笔记本", "项目笔记"), library.notebooks.map { it.title })
+        assertEquals(added.id, library.activeNotebookId)
+        assertTrue(added.sections.isEmpty())
+        assertTrue(added.pagePaneRows().isEmpty())
+    }
+
+    @Test
+    fun focusingNotebookMakesTheNextSectionATopLevelSection() {
+        val workspace = NotebookWorkspace.sample()
+        workspace.selectSection("section-notein")
+        workspace.focusNotebook()
+
+        val added = workspace.addSectionAtFocus()
+
+        assertEquals(listOf(added.id), workspace.breadcrumb(added.id).map { it.id })
+    }
+
+    @Test
     fun sectionsCanNestWithoutAFixedDepth() {
         val workspace = NotebookWorkspace.sample()
         workspace.selectSection("section-ink")
