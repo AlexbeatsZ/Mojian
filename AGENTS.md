@@ -7,7 +7,7 @@
 # Current State
 
 - Repository was initialized with feasibility commit `817787a`; it has no remote.
-- Tablet is reachable through wireless ADB at `192.168.31.243:33039` (Xiaomi `23046RP50C`, Android 15 / API 35, arm64). The wireless-debugging port changes across sessions; rediscover or ask for the current port instead of assuming the old endpoint.
+- Tablet is reachable through wireless ADB at `192.168.31.243:41931` (Xiaomi `23046RP50C`, Android 15 / API 35, arm64). The wireless-debugging port changes across sessions; rediscover it with `adb mdns services` instead of assuming the old endpoint.
 - Installed China package: `com.orion.notein`, `v2.0.10.0` (`versionCode=343`, `minSdk=26`, `targetSdk=35`), single 114,190,617-byte APK, installed from Xiaomi Market.
 - APK is non-debuggable and app-private `/data/user/0/com.orion.notein` cannot be read with `run-as`.
 - App-specific external files are readable at `/sdcard/Android/data/com.orion.notein/files`; current snapshot is about 256 MiB / 5,638 files, mainly UUID-named blobs and PNGs.
@@ -18,7 +18,7 @@
 - Notein uses AndroidX Ink 1.0.0 exactly: its arm64 `libink.so` matches the Google Maven artifact in size and ELF Build ID.
 - Android lab v0.1.0 is built and installed as `com.meta.inklab.debug`. It has no Internet/storage permission and runs alongside the untouched Notein package.
 - The installed lab uses AndroidX Ink wet/dry authoring, motion prediction, one adjustable fountain-pen stroke, prediction toggle, undo, and clear. Controls are width 0.1–2.0 mm, pressure 0–400%, and ink flow 0–200%, with Notein-observed defaults 0.4 mm / 200% / 100%.
-- The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Ten tests plus build/lint pass; the corrected APK was installed and cold-launched in 408 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
+- The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Completed ink applies the viewport inside `ViewStrokeRenderer` so screen-space antialiasing remains sharp while zoomed. Tests, build, and lint pass; the corrected APK was installed and cold-launched in 503 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -40,6 +40,7 @@
 - [x] Capture the Xiaomi pen's actual input devices/keycodes and implement the unbound shortcut protocol boundary.
 - [x] Implement and unit-test shared-coordinate two-finger pan/zoom and a stationary-dwell temporary pressure eraser.
 - [x] Install the corrected pressure-eraser build after wireless ADB moved to port 33039.
+- [x] Correct completed-stroke transform ordering so zoom no longer enlarges the 1x antialias fringe.
 - [x] Prove that the isolated Xiaomi prediction facade/model initializes and emits a two-float raw inference result.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
@@ -71,3 +72,6 @@
 - The Xiaomi pen buttons are Bluetooth keyboard PageUp/PageDown events from the exact device name `Xiaomi Smart Pen Keyboard`; never globally intercept those keycodes from ordinary keyboards.
 - Notein resources prove that hold-to-erase is default-enabled and the visible default sensitivity is 20%, but protected code hides how that value maps to normalized pressure plus its exact dwell/slop constants. Keep the lab threshold explicit and tunable rather than presenting 78% / 140 ms / 2 dp as recovered constants.
 - Android 15 edge-to-edge enforcement can put a custom rail under system bars. Apply actual system-bar insets and verify on the real portrait tablet, not only with a successful build.
+- `ViewStrokeRenderer` captures the canvas transform when `drawWithStrokes` starts. Apply viewport
+  transforms inside its drawing block; applying zoom before entry makes its screen-space
+  antialiasing omit the zoom even though Canvas still scales the geometry, producing soft edges.

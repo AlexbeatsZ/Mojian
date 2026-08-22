@@ -68,6 +68,8 @@ Finished strokes live in document coordinates. `ViewportState` owns the only doc
 scale and translation:
 
 - dry ink and the grid render through the document-to-view matrix;
+- apply that matrix inside `ViewStrokeRenderer.drawWithStrokes`, after the renderer captures its
+  baseline canvas transform, so its screen-space antialiasing receives the actual zoom;
 - stylus MotionEvents enter AndroidX Ink through the inverse view-to-document matrix;
 - wet ink uses AndroidX Ink's world/stroke transforms so it matches the dry renderer;
 - eraser hit testing converts the pointer through the same inverse matrix.
@@ -95,6 +97,7 @@ Xiaomi device/key filtering. Real-device acceptance still requires:
 
 - two-finger pan without scale drift;
 - pinch zoom without a centroid jump when a finger lifts;
+- completed ink remaining sharp at 50–800% instead of scaling its 1x antialias fringe;
 - wet and dry ink remaining under the nib after zooming;
 - pressure erase not triggering on the first stroke or ordinary heavy writing;
 - eraser activation after dwell and pen restoration on lift;

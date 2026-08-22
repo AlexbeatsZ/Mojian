@@ -80,16 +80,19 @@ class DryInkView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.save()
-        canvas.concat(documentToView)
-        drawGrid(canvas)
-        strokeRenderer.drawWithStrokes(canvas) { scope ->
+        strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
+            transformedCanvas.save()
+            // Apply the viewport after ViewStrokeRenderer captures its baseline canvas matrix.
+            // Otherwise its screen-space antialiasing misses the zoom and the edge feathering is
+            // enlarged together with the stroke.
+            transformedCanvas.concat(documentToView)
+            drawGrid(transformedCanvas)
             for (stroke in strokes) scope.drawStroke(stroke)
+            eraserCursor?.let { cursor ->
+                transformedCanvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)
+            }
+            transformedCanvas.restore()
         }
-        eraserCursor?.let { cursor ->
-            canvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)
-        }
-        canvas.restore()
     }
 
     private fun drawGrid(canvas: Canvas) {
