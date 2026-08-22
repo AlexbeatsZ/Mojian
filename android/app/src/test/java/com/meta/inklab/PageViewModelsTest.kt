@@ -7,11 +7,30 @@ import org.junit.Test
 class PageViewModelsTest {
     @Test
     fun paperSizesExposeDocumentDimensions() {
-        assertEquals(listOf(PaperSize.BOUNDLESS, PaperSize.A4), PaperSize.entries.toList())
+        assertEquals(listOf(PaperSize.BOUNDLESS, PaperSize.A4), PageAppearanceCatalog.paperTemplates)
         assertEquals(210f * DOCUMENT_UNITS_PER_MM, PaperSize.A4.documentWidth ?: 0f, 0.001f)
         assertEquals(297f * DOCUMENT_UNITS_PER_MM, PaperSize.A4.documentHeight ?: 0f, 0.001f)
         assertEquals(null, PaperSize.BOUNDLESS.documentWidth)
         assertEquals(null, PaperSize.BOUNDLESS.documentHeight)
+    }
+
+    @Test
+    fun importedPdfUsesItsOwnPointDimensionsWithoutBecomingAUserTemplate() {
+        val widthPoints = 612f
+        val heightPoints = 792f
+        val original =
+            PageViewSettings(
+                paperSize = PaperSize.PDF,
+                customDocumentWidth = widthPoints * DOCUMENT_UNITS_PER_PDF_POINT,
+                customDocumentHeight = heightPoints * DOCUMENT_UNITS_PER_PDF_POINT,
+            )
+
+        val restored = PageViewSettings.fromJson(original.toJson())
+
+        assertEquals(PaperSize.PDF, restored.paperSize)
+        assertEquals(original.documentWidth ?: 0f, restored.documentWidth ?: 0f, 0.001f)
+        assertEquals(original.documentHeight ?: 0f, restored.documentHeight ?: 0f, 0.001f)
+        assertFalse(PageAppearanceCatalog.paperTemplates.contains(PaperSize.PDF))
     }
 
     @Test

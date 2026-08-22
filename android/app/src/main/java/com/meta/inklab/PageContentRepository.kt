@@ -31,6 +31,11 @@ class PageContentRepository(private val root: File) {
     fun notebookDirectory(notebookId: String): File =
         File(File(root, "notebooks"), safeId(notebookId))
 
+    fun deletePageData(notebookId: String, pageId: String) {
+        pageFile(notebookId, pageId).delete()
+        assetDirectory(notebookId, pageId).deleteRecursively()
+    }
+
     companion object {
         fun safeId(value: String): String = value.replace(Regex("[^A-Za-z0-9._-]"), "_")
     }

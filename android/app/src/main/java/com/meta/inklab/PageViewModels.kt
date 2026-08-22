@@ -3,6 +3,9 @@ package com.meta.inklab
 import org.json.JSONObject
 
 const val DOCUMENT_UNITS_PER_MM = 12.16225f
+const val PDF_POINTS_PER_INCH = 72f
+const val MILLIMETERS_PER_INCH = 25.4f
+const val DOCUMENT_UNITS_PER_PDF_POINT = DOCUMENT_UNITS_PER_MM * MILLIMETERS_PER_INCH / PDF_POINTS_PER_INCH
 
 enum class PaperSize(
     val menuLabel: String,
@@ -11,6 +14,7 @@ enum class PaperSize(
 ) {
     BOUNDLESS("无界页面", null, null),
     A4("A4", 210f, 297f),
+    PDF("PDF", null, null),
     ;
 
     val documentWidth: Float?
@@ -18,6 +22,10 @@ enum class PaperSize(
 
     val documentHeight: Float?
         get() = heightMm?.times(DOCUMENT_UNITS_PER_MM)
+
+    companion object {
+        val creationChoices: List<PaperSize> = listOf(BOUNDLESS, A4)
+    }
 }
 
 object A4PageLayout {
@@ -58,6 +66,12 @@ enum class PageColor(
     fun displayArgb(darkBackground: Boolean): Int = if (darkBackground) darkArgb else lightArgb
 }
 
+object PageAppearanceCatalog {
+    val paperTemplates: List<PaperSize> = PaperSize.creationChoices
+    val pageColors: List<PageColor> = PageColor.entries.toList()
+    val backgroundFormats: List<CanvasBackgroundFormat> = CanvasBackgroundFormat.entries.toList()
+}
+
 data class PageViewSettings(
     var paperSize: PaperSize = PaperSize.BOUNDLESS,
     var pageColor: PageColor = PageColor.WHITE,
@@ -65,7 +79,15 @@ data class PageViewSettings(
     var pageTitleVisible: Boolean = true,
     var darkBackground: Boolean = true,
     var a4PageCount: Int = 1,
+    var customDocumentWidth: Float? = null,
+    var customDocumentHeight: Float? = null,
 ) {
+    val documentWidth: Float?
+        get() = customDocumentWidth ?: paperSize.documentWidth
+
+    val documentHeight: Float?
+        get() = customDocumentHeight ?: paperSize.documentHeight
+
     fun toJson(): JSONObject =
         JSONObject().apply {
             put("paperSize", paperSize.name)
@@ -74,6 +96,8 @@ data class PageViewSettings(
             put("pageTitleVisible", pageTitleVisible)
             put("darkBackground", darkBackground)
             put("a4PageCount", a4PageCount.coerceAtLeast(1))
+            customDocumentWidth?.let { put("customDocumentWidth", it.toDouble()) }
+            customDocumentHeight?.let { put("customDocumentHeight", it.toDouble()) }
         }
 
     companion object {
@@ -92,6 +116,8 @@ data class PageViewSettings(
                 pageTitleVisible = json.optBoolean("pageTitleVisible", true),
                 darkBackground = json.optBoolean("darkBackground", true),
                 a4PageCount = json.optInt("a4PageCount", 1).coerceAtLeast(1),
+                customDocumentWidth = json.optDouble("customDocumentWidth", Double.NaN).takeIf(Double::isFinite)?.toFloat(),
+                customDocumentHeight = json.optDouble("customDocumentHeight", Double.NaN).takeIf(Double::isFinite)?.toFloat(),
             )
 
         private fun restorePaperSize(saved: String): PaperSize =
@@ -101,7 +127,9 @@ data class PageViewSettings(
                 "A4_LANDSCAPE",
                 "LETTER_PORTRAIT",
                 "LETTER_LANDSCAPE" -> PaperSize.A4
+                "PDF" -> PaperSize.PDF
                 else -> PaperSize.BOUNDLESS
             }
+
     }
 }

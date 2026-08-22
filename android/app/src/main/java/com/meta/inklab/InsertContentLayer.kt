@@ -91,16 +91,32 @@ class InsertContentLayer(
         document?.let(::changed)
     }
 
-    fun clearObjects() {
+    fun clearObjects(preservePageBackgrounds: Boolean = true) {
         val target = document ?: return
-        target.objects.clear()
+        if (preservePageBackgrounds) {
+            target.objects.removeAll { item -> item !is InsertObject.Image || !item.pageBackground }
+        } else {
+            target.objects.clear()
+        }
         bitmapCache.evictAll()
         changed(target)
     }
 
+    fun retainedPageAssetNames(): Set<String> =
+        document?.objects
+            ?.filterIsInstance<InsertObject.Image>()
+            ?.filter(InsertObject.Image::pageBackground)
+            ?.flatMap { image -> listOfNotNull(image.assetName, image.sourceAssetName) }
+            ?.toSet()
+            .orEmpty()
+
     fun nextInsertionPoint(): DocumentPoint {
         val visibleTopLeft = viewport.viewToDocument(dp(34f), dp(68f))
-        val baseline = document?.objects?.maxOfOrNull { it.documentY + it.height + dp(18f) } ?: visibleTopLeft.y
+        val baseline =
+            document?.objects
+                ?.filterNot { item -> item is InsertObject.Image && item.pageBackground }
+                ?.maxOfOrNull { it.documentY + it.height + dp(18f) }
+                ?: visibleTopLeft.y
         return DocumentPoint(visibleTopLeft.x, max(visibleTopLeft.y, baseline))
     }
 
@@ -109,7 +125,8 @@ class InsertContentLayer(
         if (deltaY == 0f) return
         var changed = false
         target.objects.forEach { item ->
-            if (item.documentY >= startY) {
+            if (item !is InsertObject.Image || !item.pageBackground) {
+                if (item.documentY < startY) return@forEach
                 item.documentY += deltaY
                 changed = true
             }
@@ -117,19 +134,19 @@ class InsertContentLayer(
         if (changed) changed(target)
     }
 
-    fun renderForExport(canvas: Canvas) {
-        drawObjects(canvas, forExport = true)
+    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix = viewport.documentToViewMatrix()) {
+        drawObjects(canvas, forExport = true, documentMatrix = documentMatrix)
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        drawObjects(canvas, forExport = false)
+        drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
     }
 
-    private fun drawObjects(canvas: Canvas, forExport: Boolean) {
+    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix) {
         val target = document ?: return
         canvas.save()
-        canvas.concat(viewport.documentToViewMatrix())
+        canvas.concat(documentMatrix)
         target.objects.forEach { item ->
             when (item) {
                 is InsertObject.Table -> drawTable(canvas, item, forExport)
@@ -196,11 +213,11 @@ class InsertContentLayer(
             canvas.drawRect(destination, fillPaint)
             canvas.drawText("图片不可用", destination.left + dp(12f), destination.centerY(), smallTextPaint)
         }
-        if (image.sourceKind != ImageSourceKind.STICKER) {
+        if (image.sourceKind != ImageSourceKind.STICKER && !image.pageBackground) {
             strokePaint.color = Color.rgb(78, 78, 78)
             canvas.drawRect(destination, strokePaint)
         }
-        if (image.sourceKind == ImageSourceKind.PDF_PAGE) {
+        if (image.sourceKind == ImageSourceKind.PDF_PAGE && !image.pageBackground) {
             fillPaint.color = Color.argb(205, 28, 28, 28)
             val labelBounds = RectF(destination.left + dp(8f), destination.top + dp(8f), destination.left + dp(72f), destination.top + dp(30f))
             canvas.drawRoundRect(labelBounds, dp(2f), dp(2f), fillPaint)

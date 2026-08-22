@@ -72,6 +72,7 @@ sealed class InsertObject(
         val viewInverted: Boolean = false,
         val sourceAssetName: String? = null,
         val sourcePageNumber: Int? = null,
+        val pageBackground: Boolean = false,
     ) : InsertObject(id, documentX, documentY, width, height) {
         override val type = InsertObjectType.IMAGE
     }
@@ -132,6 +133,7 @@ sealed class InsertObject(
                     put("viewInverted", viewInverted)
                     sourceAssetName?.let { put("sourceAssetName", it) }
                     sourcePageNumber?.let { put("sourcePageNumber", it) }
+                    put("pageBackground", pageBackground)
                 }
                 is Spreadsheet -> {
                     put("assetName", assetName)
@@ -182,6 +184,7 @@ sealed class InsertObject(
                         json.optBoolean("viewInverted", false),
                         json.optString("sourceAssetName").takeIf { it.isNotEmpty() },
                         if (json.has("sourcePageNumber")) json.getInt("sourcePageNumber") else null,
+                        json.optBoolean("pageBackground", false),
                     )
                 InsertObjectType.SPREADSHEET -> {
                     val rows = mutableListOf<MutableList<String>>()

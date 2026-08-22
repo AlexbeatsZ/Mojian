@@ -75,6 +75,15 @@ class AssetStore(
         repository.assetDirectory(notebookId, pageId).listFiles()?.filter(File::isFile)?.forEach(File::delete)
     }
 
+    fun clearPageAssetsExcept(notebookId: String, pageId: String, retainedNames: Set<String>) {
+        val safeRetained = retainedNames.map(PageContentRepository::safeId).toSet()
+        repository.assetDirectory(notebookId, pageId)
+            .listFiles()
+            ?.filter(File::isFile)
+            ?.filterNot { it.name in safeRetained }
+            ?.forEach(File::delete)
+    }
+
     private fun queryMetadata(uri: Uri): AssetMetadata {
         var displayName: String? = null
         var size = -1L

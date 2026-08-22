@@ -168,6 +168,16 @@ class DryInkView(context: Context) : View(context) {
 
     fun strokeCount(): Int = strokes.size
 
+    fun snapshotStrokes(): List<Stroke> = strokes.toList()
+
+    fun replaceStrokes(replacement: List<Stroke>) {
+        strokes.clear()
+        strokes.addAll(replacement)
+        selectedStrokes.clear()
+        lassoPoints.clear()
+        invalidate()
+    }
+
     fun contentBottom(): Float {
         var bottom = 0f
         for (stroke in strokes) {
@@ -352,18 +362,18 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun renderBackgroundForExport(canvas: Canvas) {
+    fun renderBackgroundForExport(canvas: Canvas, documentMatrix: Matrix = documentToView) {
         canvas.drawColor(Color.WHITE)
         canvas.save()
-        canvas.concat(documentToView)
+        canvas.concat(documentMatrix)
         drawGrid(canvas, exportTheme = true)
         canvas.restore()
     }
 
-    fun renderInkForExport(canvas: Canvas) {
+    fun renderInkForExport(canvas: Canvas, documentMatrix: Matrix = documentToView) {
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
-            transformedCanvas.concat(documentToView)
+            transformedCanvas.concat(documentMatrix)
             strokes.forEach(scope::drawStroke)
             transformedCanvas.restore()
         }

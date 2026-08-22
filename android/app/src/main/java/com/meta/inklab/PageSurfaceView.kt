@@ -13,7 +13,7 @@ enum class PageSurfaceLayer {
     FOREGROUND,
 }
 
-/** Draws an unbounded canvas or a Word-like stack of automatically growing A4 sheets. */
+/** Draws an unbounded canvas, a Word-like A4 stack, or one fixed-size imported PDF page. */
 @SuppressLint("ViewConstructor")
 class PageSurfaceView(
     context: Context,
@@ -32,9 +32,6 @@ class PageSurfaceView(
             typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
         }
     private val documentPageRect = RectF()
-    private val firstMappedPageRect = RectF()
-    private val lastMappedPageRect = RectF()
-    private val previousMappedPageRect = RectF()
     private val nextMappedPageRect = RectF()
     private var settings = PageViewSettings()
     private var pageTitle = ""
@@ -69,7 +66,7 @@ class PageSurfaceView(
             return
         }
 
-        val pageCount = settings.a4PageCount.coerceAtLeast(1)
+        val pageCount = if (settings.paperSize == PaperSize.A4) settings.a4PageCount.coerceAtLeast(1) else 1
         val documentToView = viewport.documentToViewMatrix()
         if (layer == PageSurfaceLayer.BACKGROUND) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), workspacePaint)
@@ -83,9 +80,6 @@ class PageSurfaceView(
             return
         }
 
-        mapPageRect(0, documentToView, firstMappedPageRect)
-        mapPageRect(pageCount - 1, documentToView, lastMappedPageRect)
-        maskOutsidePages(canvas, pageCount, documentToView)
         for (index in 0 until pageCount) {
             mapPageRect(index, documentToView, nextMappedPageRect)
             canvas.drawRect(nextMappedPageRect, borderPaint)
@@ -128,7 +122,16 @@ class PageSurfaceView(
         index: Int,
         output: RectF,
     ) {
-        output.set(0f, A4PageLayout.pageTop(index), A4PageLayout.pageWidth, A4PageLayout.pageBottom(index))
+        if (settings.paperSize == PaperSize.A4) {
+            output.set(0f, A4PageLayout.pageTop(index), A4PageLayout.pageWidth, A4PageLayout.pageBottom(index))
+        } else {
+            output.set(
+                0f,
+                0f,
+                settings.documentWidth?.coerceAtLeast(1f) ?: A4PageLayout.pageWidth,
+                settings.documentHeight?.coerceAtLeast(1f) ?: A4PageLayout.pageHeight,
+            )
+        }
     }
 
     private fun mapPageRect(
@@ -140,48 +143,8 @@ class PageSurfaceView(
         documentToView.mapRect(output)
     }
 
-    private fun maskOutsidePages(
-        canvas: Canvas,
-        pageCount: Int,
-        documentToView: android.graphics.Matrix,
-    ) {
-        canvas.drawRect(0f, 0f, firstMappedPageRect.left.coerceAtLeast(0f), height.toFloat(), workspacePaint)
-        canvas.drawRect(
-            firstMappedPageRect.right.coerceAtMost(width.toFloat()),
-            0f,
-            width.toFloat(),
-            height.toFloat(),
-            workspacePaint,
-        )
-        canvas.drawRect(
-            firstMappedPageRect.left,
-            0f,
-            firstMappedPageRect.right,
-            firstMappedPageRect.top.coerceAtLeast(0f),
-            workspacePaint,
-        )
-        for (index in 0 until pageCount - 1) {
-            mapPageRect(index, documentToView, previousMappedPageRect)
-            mapPageRect(index + 1, documentToView, nextMappedPageRect)
-            canvas.drawRect(
-                firstMappedPageRect.left,
-                previousMappedPageRect.bottom,
-                firstMappedPageRect.right,
-                nextMappedPageRect.top,
-                workspacePaint,
-            )
-        }
-        canvas.drawRect(
-            firstMappedPageRect.left,
-            lastMappedPageRect.bottom.coerceAtMost(height.toFloat()),
-            firstMappedPageRect.right,
-            height.toFloat(),
-            workspacePaint,
-        )
-    }
-
     companion object {
-        private const val WORKSPACE_COLOR = 0xFF111111.toInt()
+        private const val WORKSPACE_COLOR = 0xFF0A0A0A.toInt()
         private const val TITLE_LEFT_MM = 18f
         private const val TITLE_BASELINE_MM = 22f
         private const val TITLE_SIZE_MM = 5.2f

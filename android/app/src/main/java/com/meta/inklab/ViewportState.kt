@@ -5,6 +5,12 @@ import android.graphics.PointF
 import kotlin.math.max
 import kotlin.math.min
 
+data class ViewportSnapshot(
+    val scale: Float,
+    val translationX: Float,
+    val translationY: Float,
+)
+
 /**
  * Document-to-view transform shared by dry ink, wet ink authoring, gestures, and hit testing.
  * Keeping this as explicit scale/translation values avoids accumulating Matrix rounding error.
@@ -65,6 +71,20 @@ class ViewportState(
         val availableWidth = (viewWidth - horizontalPadding * 2f).coerceAtLeast(1f)
         scale = (availableWidth / documentWidth).coerceIn(minScale, maxScale)
         translationX = horizontalPadding - documentLeft * scale
+    }
+
+    fun snapshot(): ViewportSnapshot = ViewportSnapshot(scale, translationX, translationY)
+
+    fun restore(snapshot: ViewportSnapshot) {
+        scale = snapshot.scale.coerceIn(minScale, maxScale)
+        translationX = snapshot.translationX
+        translationY = snapshot.translationY
+    }
+
+    fun reset() {
+        scale = 1f.coerceIn(minScale, maxScale)
+        translationX = 0f
+        translationY = 0f
     }
 
     fun documentToViewMatrix(): Matrix =

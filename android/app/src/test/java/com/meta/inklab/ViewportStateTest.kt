@@ -67,4 +67,18 @@ class ViewportStateTest {
         assertEquals(0.72f, viewport.scale, 0.0001f)
         assertEquals(32.8f, viewport.translationX, 0.0001f)
     }
+
+    @Test
+    fun snapshotRestoresAnIndependentPaneViewport() {
+        val viewport = ViewportState()
+        viewport.applyGesture(0f, 0f, 45f, 70f, 2f)
+        val snapshot = viewport.snapshot()
+        viewport.reset()
+
+        viewport.restore(snapshot)
+
+        assertEquals(2f, viewport.scale, 0.0001f)
+        assertEquals(45f, viewport.translationX, 0.0001f)
+        assertEquals(70f, viewport.translationY, 0.0001f)
+    }
 }

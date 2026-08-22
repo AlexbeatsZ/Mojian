@@ -31,6 +31,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
@@ -73,11 +74,39 @@ private enum class PendingExport {
     PRIVATE_PACKAGE,
 }
 
+private enum class PageCreationTab {
+    PAGE,
+    PDF,
+}
+
 private data class InsertTarget(
     val notebookId: String,
     val pageId: String,
     val startX: Float,
     val startY: Float,
+)
+
+private data class PdfPageTarget(
+    val notebookId: String,
+    val sectionId: String,
+    val splitSide: SplitPaneSide?,
+)
+
+private data class PageSessionKey(
+    val notebookId: String,
+    val pageId: String,
+)
+
+private data class PageSessionState(
+    val strokes: List<Stroke>,
+    val tags: List<CanvasTagSnapshot>,
+    val textBoxes: List<CanvasTextSnapshot>,
+    val viewport: ViewportSnapshot,
+)
+
+private data class ExportSnapshot(
+    val layers: LinkedHashMap<String, Bitmap>,
+    val pageSize: PdfOutputPageSize?,
 )
 
 class MainActivity : Activity() {
@@ -86,8 +115,14 @@ class MainActivity : Activity() {
     private val pressureEraser = PressureEraserController()
     private val shortcutDispatcher = XiaomiStylusShortcutDispatcher()
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val transformGestureArbiter by lazy {
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
+        TransformGestureArbiter(panSlop = touchSlop, scaleSlop = touchSlop * 2f)
+    }
     private val toolShelf = ToolShelf()
     private val notebookLibrary = NotebookLibrary.sample()
+    private val splitViewState = SplitViewState()
+    private val pageSessions = mutableMapOf<PageSessionKey, PageSessionState>()
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val workspace: NotebookWorkspace
@@ -101,6 +136,9 @@ class MainActivity : Activity() {
     private lateinit var floatingToolShelfRow: LinearLayout
     private lateinit var toolDetailRow: LinearLayout
     private var toolDetailPopup: PopupWindow? = null
+    private var darkTooltipPopup: PopupWindow? = null
+    private var darkTooltipAnchor: View? = null
+    private var darkTooltipLabel: CharSequence = ""
     private var backstageDialog: Dialog? = null
     private lateinit var sectionList: LinearLayout
     private lateinit var pageList: LinearLayout
@@ -117,8 +155,13 @@ class MainActivity : Activity() {
     private lateinit var insertContentLayer: InsertContentLayer
     private lateinit var pageContentRepository: PageContentRepository
     private lateinit var assetStore: AssetStore
+    private lateinit var pdfPageImporter: PdfPageImporter
     private lateinit var selectionOverlay: SelectionOverlayView
     private lateinit var paperContainer: FrameLayout
+    private lateinit var splitCanvasHost: LinearLayout
+    private lateinit var leftPageHost: FrameLayout
+    private lateinit var rightPageHost: FrameLayout
+    private lateinit var splitDivider: View
     private lateinit var pageSurfaceBackground: PageSurfaceView
     private lateinit var pageSurfaceForeground: PageSurfaceView
     private lateinit var sectionPaneToggle: View
@@ -126,6 +169,9 @@ class MainActivity : Activity() {
     private lateinit var toolbarToggle: View
     private lateinit var fullPageToggle: View
     private lateinit var fullPageToggleIcon: ImageView
+    private lateinit var fullPagePaneButtons: View
+    private lateinit var fullPageSectionPaneToggle: View
+    private lateinit var fullPagePagePaneToggle: View
     private var fullViewButton: View? = null
     private var normalViewButton: View? = null
     private var pageTitleViewButton: View? = null
@@ -137,12 +183,12 @@ class MainActivity : Activity() {
     private var zoomOutButton: View? = null
     private var zoomResetViewButton: View? = null
     private var pageWidthViewButton: View? = null
+    private var splitViewButton: View? = null
 
     private var predictionEnabled = true
     private var transformGestureActive = false
     private var lastGestureFocusX = 0f
     private var lastGestureFocusY = 0f
-    private var lastGestureSpan = 0f
     private var pressurePointerId: Int? = null
     private var lastPressure = 0f
     private var lastPressurePoint = PointF()
@@ -158,6 +204,8 @@ class MainActivity : Activity() {
     private var pagePaneVisible = true
     private var drawingToolbarVisible = true
     private var fullPageMode = false
+    private var fullPageSectionPaneOpen = false
+    private var fullPagePagePaneOpen = false
     private var activeRibbonPage = RibbonPage.DRAW
     private var restoreTextModeAfterTagPlacement = false
     private var darkCanvasActive = true
@@ -167,6 +215,38 @@ class MainActivity : Activity() {
     private var imageImportDisplayMode = ImageImportDisplayMode.ASK
     private var pdfPrintoutDisplayMode = ImageImportDisplayMode.ASK
     private var pendingExport: PendingExport? = null
+    private var pendingPdfPageTarget: PdfPageTarget? = null
+    private var boundPageKey: PageSessionKey? = null
+    private var splitFocusVisible = false
+
+    private val hideSplitFocus =
+        Runnable {
+            splitFocusVisible = false
+            updateSplitFocusVisuals()
+        }
+
+    private val showDarkTooltip =
+        Runnable {
+            val anchor = darkTooltipAnchor ?: return@Runnable
+            if (!anchor.isShown || !anchor.isHovered || darkTooltipLabel.isEmpty()) return@Runnable
+            val label =
+                TextView(this).apply {
+                    text = darkTooltipLabel
+                    gravity = Gravity.CENTER
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    background = rounded(DARK_TOOLTIP_BACKGROUND, dp(4).toFloat(), DARK_TOOLTIP_BACKGROUND)
+                }
+            darkTooltipPopup =
+                PopupWindow(label, WRAP, WRAP, false).apply {
+                    isOutsideTouchable = false
+                    isClippingEnabled = true
+                    elevation = dp(8).toFloat()
+                    setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                    showAsDropDown(anchor, 0, dp(2))
+                }
+        }
 
     private val activatePressureEraser =
         Runnable {
@@ -184,6 +264,7 @@ class MainActivity : Activity() {
         loadPreferences()
         pageContentRepository = PageContentRepository(filesDir)
         assetStore = AssetStore(this, pageContentRepository)
+        pdfPageImporter = PdfPageImporter(pageContentRepository, assetStore)
         currentBrush = brushFor(toolShelf.selected)
         setContentView(buildInterface())
         pressureEraser.stationarySlop = dp(2).toFloat()
@@ -196,6 +277,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        dismissDarkTooltip()
         ioExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -203,7 +285,10 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK || data == null) return
+        if (resultCode != RESULT_OK || data == null) {
+            if (requestCode == REQUEST_PDF_PAGES) pendingPdfPageTarget = null
+            return
+        }
         val uris = selectedUris(data)
         when (requestCode) {
             REQUEST_ATTACHMENT -> uris.firstOrNull()?.let(::importAttachment)
@@ -216,6 +301,7 @@ class MainActivity : Activity() {
             }
             REQUEST_STICKER_IMPORT -> if (uris.isNotEmpty()) importStickerPresets(uris)
             REQUEST_EXPORT -> pendingExport?.let { type -> exportToUri(data.data ?: return, type) }.also { pendingExport = null }
+            REQUEST_PDF_PAGES -> uris.firstOrNull()?.let(::importPdfPages)
         }
     }
 
@@ -225,9 +311,11 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        dismissDarkTooltip()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         mainHandler.removeCallbacks(activatePressureEraser)
+        mainHandler.removeCallbacks(hideSplitFocus)
         pressureEraser.cancelCandidate()
         pressurePointerId = null
         activeDirectTool = null
@@ -282,7 +370,7 @@ class MainActivity : Activity() {
         workArea.addView(navigationRail, LinearLayout.LayoutParams(dp(32), MATCH))
         workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(pagePane, LinearLayout.LayoutParams(dp(196), MATCH))
-        workArea.addView(buildPaper(), LinearLayout.LayoutParams(0, MATCH, 1f))
+        workArea.addView(buildSplitCanvasHost(), LinearLayout.LayoutParams(0, MATCH, 1f))
         rootLayout.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         applyChromeVisibility()
@@ -940,50 +1028,43 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(6), dp(2), dp(10), dp(2))
-                    addView(insertCommandButton("▦", "表格", ::showTablePicker))
+                    addView(insertCommandButton("table", "表格", action = ::showTablePicker))
                     addView(verticalDivider())
-                    addView(insertCommandButton("⌕", "文件附件") { launchDocumentPicker(REQUEST_ATTACHMENT, "*/*") })
-                    addView(insertCommandButton("▤", "文件打印样式") { launchDocumentPicker(REQUEST_PDF_PRINTOUT, "application/pdf") })
-                    addView(insertCommandButton("X", "电子表格") { launchSpreadsheetPicker() }, LinearLayout.LayoutParams(dp(92), MATCH))
+                    addView(insertCommandButton("attach", "文件附件") { launchDocumentPicker(REQUEST_ATTACHMENT, "*/*") })
+                    addView(insertCommandButton("document_page", "文件打印样式") { launchDocumentPicker(REQUEST_PDF_PRINTOUT, "application/pdf") })
+                    addView(insertCommandButton("table_simple", "电子表格", iconTint = Color.rgb(73, 170, 107)) { launchSpreadsheetPicker() })
                     addView(verticalDivider())
-                    addView(insertCommandButton("▧", "图片") { launchImagePicker(REQUEST_IMAGES) })
-                    addView(insertCommandButton("★", "贴纸") { showStickerPicker() })
+                    addView(insertCommandButton("image", "图片", iconTint = Color.rgb(86, 156, 214)) { launchImagePicker(REQUEST_IMAGES) })
+                    addView(insertCommandButton("sticker", "贴纸") { showStickerPicker() })
                     addView(verticalDivider())
-                    addView(insertCommandButton("⌁", "链接") { showNoteLinkPicker() })
+                    addView(insertCommandButton("link", "链接") { showNoteLinkPicker() })
                 },
                 ViewGroup.LayoutParams(WRAP, MATCH),
             )
         }
 
-    private fun insertCommandButton(glyph: String, label: String, action: (View) -> Unit): View =
+    private fun insertCommandButton(
+        icon: String,
+        label: String,
+        iconTint: Int = TEXT_PRIMARY,
+        action: (View) -> Unit,
+    ): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(dp(8), 0, dp(8), 0)
+            setPadding(dp(7), 0, dp(7), 0)
             background = rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
             addView(
-                TextView(this@MainActivity).apply {
-                    text = glyph
-                    gravity = Gravity.CENTER
-                    setTextColor(if (glyph == "X") Color.rgb(73, 170, 107) else TEXT_PRIMARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, if (glyph == "X") 15f else 19f)
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon(icon))
+                    imageTintList = ColorStateList.valueOf(iconTint)
                 },
-                LinearLayout.LayoutParams(dp(25), MATCH).apply { marginEnd = dp(5) },
-            )
-            addView(
-                TextView(this@MainActivity).apply {
-                    text = label
-                    gravity = Gravity.CENTER_VERTICAL
-                    setTextColor(TEXT_PRIMARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                    maxLines = 1
-                },
-                LinearLayout.LayoutParams(WRAP, MATCH),
+                LinearLayout.LayoutParams(dp(22), dp(22)),
             )
             setOnClickListener { action(this) }
-            tooltipText = label
-            layoutParams = LinearLayout.LayoutParams(WRAP, MATCH)
+            contentDescription = label
+            setDarkTooltip(this, label)
+            layoutParams = LinearLayout.LayoutParams(dp(40), MATCH)
         }
 
     private fun buildNavigationRail(): View =
@@ -1097,6 +1178,9 @@ class MainActivity : Activity() {
                     normalViewButton =
                         commandButton("panel_left", "普通视图", !fullPageMode) { setFullPageMode(false) }
                     addView(normalViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    splitViewButton =
+                        commandButton("split_view", "拆分视图", splitViewState.enabled) { toggleSplitView() }
+                    addView(splitViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
                     addView(verticalDivider())
 
                     zoomLockButton =
@@ -1166,7 +1250,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { performHomeCommand(command, this) }
             contentDescription = command.label
-            tooltipText = command.label
+            setDarkTooltip(this, command.label)
         }
 
     private fun homeDropdownButton(label: String, command: HomeCommand): TextView =
@@ -1180,7 +1264,7 @@ class MainActivity : Activity() {
             background = rounded(Color.rgb(42, 42, 42), dp(2).toFloat(), BORDER_STRONG)
             setOnClickListener { performHomeCommand(command, this) }
             contentDescription = command.label
-            tooltipText = command.label
+            setDarkTooltip(this, command.label)
         }
 
     private fun performHomeCommand(command: HomeCommand, anchor: View) {
@@ -1400,7 +1484,7 @@ class MainActivity : Activity() {
         onSelected: (CanvasBackgroundFormat) -> Unit,
     ) {
         PopupMenu(this, anchor).apply {
-            CanvasBackgroundFormat.entries.forEach { format ->
+            PageAppearanceCatalog.backgroundFormats.forEach { format ->
                 val prefix = if (current == format) "✓ " else "   "
                 menu.add("$prefix${format.label}").setOnMenuItemClickListener {
                     onSelected(format)
@@ -1415,68 +1499,121 @@ class MainActivity : Activity() {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val draft = lastPageTemplateSettings.copy(a4PageCount = 1)
+        var activeTab = PageCreationTab.PAGE
+        val tabHost = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val optionsHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val actionHost = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        lateinit var renderDialog: () -> Unit
 
-        fun renderOptions() {
+        renderDialog = {
+            tabHost.removeAllViews()
+            PageCreationTab.entries.forEach { tab ->
+                val selected = tab == activeTab
+                tabHost.addView(
+                    TextView(this).apply {
+                        text = if (tab == PageCreationTab.PAGE) "页" else "PDF"
+                        gravity = Gravity.CENTER
+                        setTextColor(if (selected) ACCENT_PURPLE else TEXT_SECONDARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                        typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                        background = if (selected) bottomBorderDrawable(Color.TRANSPARENT, ACCENT_PURPLE) else rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT)
+                        setOnClickListener {
+                            activeTab = tab
+                            renderDialog()
+                        }
+                    },
+                    LinearLayout.LayoutParams(0, dp(38), 1f),
+                )
+            }
             optionsHost.removeAllViews()
-            optionsHost.addView(
-                LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER
-                    addView(
-                        pageTemplateCard(PaperSize.BOUNDLESS, draft.paperSize == PaperSize.BOUNDLESS) {
-                            draft.paperSize = PaperSize.BOUNDLESS
-                            draft.a4PageCount = 1
-                            renderOptions()
-                        },
-                        LinearLayout.LayoutParams(0, dp(82), 1f).apply { marginEnd = dp(5) },
-                    )
-                    addView(
-                        pageTemplateCard(PaperSize.A4, draft.paperSize == PaperSize.A4) {
-                            draft.paperSize = PaperSize.A4
-                            draft.a4PageCount = 1
-                            renderOptions()
-                        },
-                        LinearLayout.LayoutParams(0, dp(82), 1f).apply { marginStart = dp(5) },
-                    )
-                },
-                LinearLayout.LayoutParams(MATCH, dp(82)),
-            )
-            optionsHost.addView(
-                templateSettingButton("rule_lines", draft.backgroundFormat.label) { anchor ->
-                    showBackgroundFormatChooser(anchor, draft.backgroundFormat) { format ->
-                        draft.backgroundFormat = format
-                        renderOptions()
-                    }
-                },
-                LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(10) },
-            )
-            optionsHost.addView(
-                LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(
-                        ImageView(this@MainActivity).apply {
-                            setImageDrawable(fluentIcon("paint_brush"))
-                            imageTintList = ColorStateList.valueOf(TEXT_SECONDARY)
-                        },
-                        LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(10) },
-                    )
-                    for (color in PageColor.entries) {
+            if (activeTab == PageCreationTab.PAGE) {
+                optionsHost.addView(
+                    LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER
+                        PageAppearanceCatalog.paperTemplates.forEachIndexed { index, paperSize ->
+                            addView(
+                                pageTemplateCard(paperSize, draft.paperSize == paperSize) {
+                                    draft.paperSize = paperSize
+                                    draft.customDocumentWidth = null
+                                    draft.customDocumentHeight = null
+                                    draft.a4PageCount = 1
+                                    renderDialog()
+                                },
+                                LinearLayout.LayoutParams(0, dp(82), 1f).apply {
+                                    marginStart = if (index == 0) 0 else dp(5)
+                                    marginEnd = if (index == PageAppearanceCatalog.paperTemplates.lastIndex) 0 else dp(5)
+                                },
+                            )
+                        }
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(82)),
+                )
+                optionsHost.addView(
+                    templateSettingButton("rule_lines", draft.backgroundFormat.label) { anchor ->
+                        showBackgroundFormatChooser(anchor, draft.backgroundFormat) { format ->
+                            draft.backgroundFormat = format
+                            renderDialog()
+                        }
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(10) },
+                )
+                optionsHost.addView(
+                    LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
                         addView(
-                            templateColorButton(
-                                color = color,
-                                darkBackground = draft.darkBackground,
-                                selected = color == draft.pageColor,
-                            ) {
-                                draft.pageColor = color
-                                renderOptions()
+                            ImageView(this@MainActivity).apply {
+                                setImageDrawable(fluentIcon("paint_brush"))
+                                imageTintList = ColorStateList.valueOf(TEXT_SECONDARY)
                             },
-                            LinearLayout.LayoutParams(dp(42), dp(38)).apply { marginEnd = dp(4) },
+                            LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(10) },
                         )
+                        PageAppearanceCatalog.pageColors.forEach { color ->
+                            addView(
+                                templateColorButton(color, draft.darkBackground, color == draft.pageColor) {
+                                    draft.pageColor = color
+                                    renderDialog()
+                                },
+                                LinearLayout.LayoutParams(dp(42), dp(38)).apply { marginEnd = dp(4) },
+                            )
+                        }
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(46)).apply { topMargin = dp(4) },
+                )
+            } else {
+                optionsHost.addView(
+                    pageTemplateCard(PaperSize.PDF, selected = true, showLabel = false) {},
+                    LinearLayout.LayoutParams(MATCH, dp(82)),
+                )
+            }
+            actionHost.removeAllViews()
+            actionHost.addView(
+                dialogActionButton("取消", primary = false) { dialog.dismiss() },
+                LinearLayout.LayoutParams(dp(72), dp(36)).apply { marginEnd = dp(8) },
+            )
+            actionHost.addView(
+                dialogActionButton(if (activeTab == PageCreationTab.PAGE) "创建" else "选择", primary = true) {
+                    if (activeTab == PageCreationTab.PDF) {
+                        pendingPdfPageTarget = PdfPageTarget(workspace.id, workspace.selectedSectionId, splitViewState.focusedSide.takeIf { splitViewState.enabled })
+                        dialog.dismiss()
+                        launchDocumentPicker(REQUEST_PDF_PAGES, "application/pdf", requireSelectedPage = false)
+                    } else {
+                        val settings = draft.copy(a4PageCount = 1)
+                        val page = workspace.addPage(viewSettings = settings)
+                        ensureA4Capacity(page)
+                        lastPageTemplateSettings = settings.copy(a4PageCount = 1)
+                        persistLastPageTemplate()
+                        persistPageViewSettings()
+                        dialog.dismiss()
+                        renderPages()
+                        persistWorkspacePreferences()
                     }
                 },
-                LinearLayout.LayoutParams(MATCH, dp(46)).apply { topMargin = dp(4) },
+                LinearLayout.LayoutParams(dp(72), dp(36)),
             )
         }
 
@@ -1495,34 +1632,11 @@ class MainActivity : Activity() {
                     },
                     LinearLayout.LayoutParams(MATCH, dp(34)),
                 )
+                addView(tabHost, LinearLayout.LayoutParams(MATCH, dp(38)))
                 addView(optionsHost, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
-                addView(
-                    LinearLayout(this@MainActivity).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                        addView(
-                            dialogActionButton("取消", primary = false) { dialog.dismiss() },
-                            LinearLayout.LayoutParams(dp(72), dp(36)).apply { marginEnd = dp(8) },
-                        )
-                        addView(
-                            dialogActionButton("创建", primary = true) {
-                                val settings = draft.copy(a4PageCount = 1)
-                                val page = workspace.addPage(viewSettings = settings)
-                                ensureA4Capacity(page)
-                                lastPageTemplateSettings = settings.copy(a4PageCount = 1)
-                                persistLastPageTemplate()
-                                persistPageViewSettings()
-                                dialog.dismiss()
-                                renderPages()
-                                persistWorkspacePreferences()
-                            },
-                            LinearLayout.LayoutParams(dp(72), dp(36)),
-                        )
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) },
-                )
+                addView(actionHost, LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
             }
-        renderOptions()
+        renderDialog()
         dialog.setContentView(root)
         dialog.show()
         dialog.window?.apply {
@@ -1534,6 +1648,7 @@ class MainActivity : Activity() {
     private fun pageTemplateCard(
         paperSize: PaperSize,
         selected: Boolean,
+        showLabel: Boolean = true,
         action: () -> Unit,
     ): View =
         LinearLayout(this).apply {
@@ -1543,23 +1658,30 @@ class MainActivity : Activity() {
             addView(
                 ImageView(this@MainActivity).apply {
                     setImageDrawable(
-                        fluentIcon(if (paperSize == PaperSize.A4) "document_page" else "full_screen_maximize"),
+                        when (paperSize) {
+                            PaperSize.A4 -> fluentIcon("document_page")
+                            PaperSize.PDF -> fluentIcon("document_pdf", "document_page")
+                            PaperSize.BOUNDLESS -> fluentIcon("full_screen_maximize")
+                        },
                     )
                     imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
                 },
-                LinearLayout.LayoutParams(dp(28), dp(28)).apply { bottomMargin = dp(5) },
+                LinearLayout.LayoutParams(dp(28), dp(28)).apply { bottomMargin = if (showLabel) dp(5) else 0 },
             )
-            addView(
-                TextView(this@MainActivity).apply {
-                    text = paperSize.menuLabel
-                    gravity = Gravity.CENTER
-                    setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                },
-                LinearLayout.LayoutParams(MATCH, dp(20)),
-            )
+            if (showLabel) {
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = paperSize.menuLabel
+                        gravity = Gravity.CENTER
+                        setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(20)),
+                )
+            }
             setOnClickListener { action() }
             contentDescription = paperSize.menuLabel
+            setDarkTooltip(this, paperSize.menuLabel)
         }
 
     private fun templateSettingButton(
@@ -1599,6 +1721,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { action(this) }
             contentDescription = value
+            setDarkTooltip(this, value)
         }
 
     private fun templateColorButton(
@@ -1622,6 +1745,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { action() }
             contentDescription = color.description
+            setDarkTooltip(this, color.description)
         }
 
     private fun dialogActionButton(
@@ -1711,6 +1835,39 @@ class MainActivity : Activity() {
             )
         }.also { it.background = bordered(PAGE_LIST_BACKGROUND, BORDER_COLOR, 0f) }
 
+    private fun buildSplitCanvasHost(): View {
+        splitCanvasHost =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(PAPER_COLOR)
+            }
+        leftPageHost = splitPaneHost(SplitPaneSide.LEFT)
+        rightPageHost = splitPaneHost(SplitPaneSide.RIGHT).apply { visibility = View.GONE }
+        splitDivider = FrameLayout(this).apply {
+            setBackgroundColor(PAPER_COLOR)
+            visibility = View.GONE
+            addView(
+                View(this@MainActivity).apply { setBackgroundColor(BORDER_COLOR) },
+                FrameLayout.LayoutParams(1, MATCH, Gravity.CENTER_HORIZONTAL),
+            )
+        }
+        splitCanvasHost.addView(leftPageHost, LinearLayout.LayoutParams(0, MATCH, 1f))
+        splitCanvasHost.addView(splitDivider, LinearLayout.LayoutParams(dp(5), MATCH))
+        splitCanvasHost.addView(rightPageHost, LinearLayout.LayoutParams(0, MATCH, 1f))
+        leftPageHost.addView(buildPaper(), FrameLayout.LayoutParams(MATCH, MATCH))
+        updateSplitFocusVisuals()
+        return splitCanvasHost
+    }
+
+    private fun splitPaneHost(side: SplitPaneSide): FrameLayout =
+        FrameLayout(this).apply {
+            setBackgroundColor(PAPER_COLOR)
+            clipChildren = false
+            clipToPadding = false
+            setOnClickListener { focusSplitPane(side) }
+            contentDescription = if (side == SplitPaneSide.LEFT) "左侧页面" else "右侧页面"
+        }
+
     private fun buildPaper(): View {
         paperContainer = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
         pageSurfaceBackground = PageSurfaceView(this, viewport, PageSurfaceLayer.BACKGROUND)
@@ -1765,10 +1922,16 @@ class MainActivity : Activity() {
         floatingToolbox = buildFloatingToolbox()
         paperContainer.addView(
             floatingToolbox,
-            FrameLayout.LayoutParams(MATCH, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            FrameLayout.LayoutParams(WRAP, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(7)
-                leftMargin = dp(116)
-                rightMargin = dp(116)
+            },
+        )
+        fullPagePaneButtons = buildFullPagePaneButtons()
+        paperContainer.addView(
+            fullPagePaneButtons,
+            FrameLayout.LayoutParams(dp(36), WRAP, Gravity.TOP or Gravity.START).apply {
+                topMargin = dp(7)
+                leftMargin = dp(7)
             },
         )
         paperContainer.addView(
@@ -1781,8 +1944,136 @@ class MainActivity : Activity() {
         return paperContainer
     }
 
+    private fun toggleSplitView() {
+        if (activeStrokes.isNotEmpty() || workspace.selectedPage() == null) return
+        if (splitViewState.enabled) exitSplitView() else enterSplitView()
+    }
+
+    private fun enterSplitView() {
+        val current = notebookLibrary.captureLocation()
+        if (!splitViewState.enter(current)) return
+        saveBoundPageSession()
+        rightPageHost.visibility = View.VISIBLE
+        splitDivider.visibility = View.VISIBLE
+        showSplitFocusPulse()
+        splitCanvasHost.post {
+            if (!splitViewState.enabled) return@post
+            captureLivePagePreview()?.let { installPreview(rightPageHost, it) }
+        }
+        refreshViewRibbonState()
+    }
+
+    private fun exitSplitView() {
+        if (!splitViewState.enabled) return
+        if (splitViewState.focusedSide != SplitPaneSide.RIGHT) focusSplitPane(SplitPaneSide.RIGHT)
+        saveBoundPageSession()
+        val kept = splitViewState.exitKeepingRight() ?: return
+        mainHandler.removeCallbacks(hideSplitFocus)
+        splitFocusVisible = false
+        notebookLibrary.restoreLocation(kept)
+        moveLivePaperTo(leftPageHost)
+        clearPreview(rightPageHost)
+        rightPageHost.visibility = View.GONE
+        splitDivider.visibility = View.GONE
+        renderWorkspace()
+        updateSplitFocusVisuals()
+        refreshViewRibbonState()
+    }
+
+    private fun focusSplitPane(side: SplitPaneSide) {
+        if (!splitViewState.enabled || side == splitViewState.focusedSide) return
+        val destination = splitViewState.location(side) ?: return
+        captureLivePagePreview()?.let { preview ->
+            installPreview(hostFor(splitViewState.focusedSide), preview)
+        }
+        saveBoundPageSession()
+        if (!splitViewState.focus(side) || !notebookLibrary.restoreLocation(destination)) return
+        moveLivePaperTo(hostFor(side))
+        renderWorkspace()
+        showSplitFocusPulse()
+    }
+
+    private fun hostFor(side: SplitPaneSide): FrameLayout =
+        if (side == SplitPaneSide.LEFT) leftPageHost else rightPageHost
+
+    private fun moveLivePaperTo(host: FrameLayout) {
+        (paperContainer.parent as? ViewGroup)?.removeView(paperContainer)
+        clearPreview(host)
+        host.addView(paperContainer, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    private fun captureLivePagePreview(): Bitmap? {
+        val width = paperContainer.width
+        val height = paperContainer.height
+        if (width <= 0 || height <= 0) return null
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(PAPER_COLOR)
+            pageSurfaceBackground.draw(canvas)
+            insertContentLayer.draw(canvas)
+            dryInkView.draw(canvas)
+            wetInkView.draw(canvas)
+            textInputLayer.draw(canvas)
+            tagLayer.draw(canvas)
+            pageSurfaceForeground.draw(canvas)
+        }
+    }
+
+    private fun installPreview(host: FrameLayout, bitmap: Bitmap) {
+        clearPreview(host)
+        host.addView(
+            ImageView(this).apply {
+                setImageBitmap(bitmap)
+                scaleType = ImageView.ScaleType.FIT_XY
+                tag = bitmap
+                contentDescription = host.contentDescription
+            },
+            FrameLayout.LayoutParams(MATCH, MATCH),
+        )
+    }
+
+    private fun clearPreview(host: FrameLayout) {
+        for (index in 0 until host.childCount) {
+            val child = host.getChildAt(index)
+            if (child !== paperContainer) (child.tag as? Bitmap)?.takeUnless(Bitmap::isRecycled)?.recycle()
+        }
+        host.removeViews(0, host.childCount)
+    }
+
+    private fun updateSplitFocusVisuals() {
+        if (!::leftPageHost.isInitialized) return
+        for (side in SplitPaneSide.entries) {
+            val focused = !splitViewState.enabled || splitViewState.focusedSide == side
+            hostFor(side).foreground =
+                rounded(
+                    Color.TRANSPARENT,
+                    0f,
+                    if (focused && splitViewState.enabled && splitFocusVisible) ACCENT_PURPLE else Color.TRANSPARENT,
+                )
+        }
+    }
+
+    private fun showSplitFocusPulse() {
+        mainHandler.removeCallbacks(hideSplitFocus)
+        splitFocusVisible = true
+        updateSplitFocusVisuals()
+        mainHandler.postDelayed(hideSplitFocus, SPLIT_FOCUS_PULSE_MILLIS)
+    }
+
+    private fun saveBoundPageSession() {
+        val key = boundPageKey ?: return
+        pageSessions[key] =
+            PageSessionState(
+                strokes = dryInkView.snapshotStrokes(),
+                tags = tagLayer.snapshotTags(),
+                textBoxes = textInputLayer.snapshotEditors(),
+                viewport = viewport.snapshot(),
+            )
+    }
+
     private fun buildFloatingToolbox(): View =
-        FrameLayout(this).apply {
+        HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
             elevation = dp(7).toFloat()
             background = rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG)
             floatingToolShelfRow =
@@ -1791,13 +2082,19 @@ class MainActivity : Activity() {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(4), dp(2), dp(4), dp(2))
                 }
-            addView(
-                HorizontalScrollView(this@MainActivity).apply {
-                    isHorizontalScrollBarEnabled = false
-                    addView(floatingToolShelfRow, ViewGroup.LayoutParams(WRAP, MATCH))
-                },
-                FrameLayout.LayoutParams(MATCH, MATCH),
-            )
+            addView(floatingToolShelfRow, ViewGroup.LayoutParams(WRAP, MATCH))
+        }
+
+    private fun buildFullPagePaneButtons(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            fullPageSectionPaneToggle =
+                canvasActionButton("navigation", "折叠或展开分区栏", sectionPaneVisible) { toggleSectionPane() }
+            fullPagePagePaneToggle =
+                canvasActionButton("panel_left", "折叠或展开页面栏", pagePaneVisible) { togglePagePane() }
+            addView(fullPageSectionPaneToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { bottomMargin = dp(4) })
+            addView(fullPagePagePaneToggle, LinearLayout.LayoutParams(dp(34), dp(34)))
         }
 
     private fun buildCanvasActions(): View =
@@ -2017,12 +2314,31 @@ class MainActivity : Activity() {
                     if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
                     else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
                 addView(
-                    TextView(this@MainActivity).apply {
-                        text = page.title
-                        setTextColor(TEXT_PRIMARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                        typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
-                        maxLines = 1
+                    LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            TextView(this@MainActivity).apply {
+                                text = page.title
+                                setTextColor(TEXT_PRIMARY)
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                                typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
+                                maxLines = 1
+                            },
+                            LinearLayout.LayoutParams(0, MATCH, 1f),
+                        )
+                        if (page.pdfPage != null) {
+                            addView(
+                                TextView(this@MainActivity).apply {
+                                    text = "PDF"
+                                    gravity = Gravity.CENTER
+                                    setTextColor(Color.rgb(130, 130, 130))
+                                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f)
+                                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                                },
+                                LinearLayout.LayoutParams(dp(30), MATCH),
+                            )
+                        }
                     },
                     LinearLayout.LayoutParams(MATCH, dp(22)),
                 )
@@ -2045,8 +2361,20 @@ class MainActivity : Activity() {
 
     private fun bindSelectedPageContent() {
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
+        val nextKey = pageId?.let { PageSessionKey(workspace.id, it) }
+        if (nextKey != boundPageKey) {
+            saveBoundPageSession()
+            boundPageKey = nextKey
+            val session = nextKey?.let(pageSessions::get)
+            dryInkView.replaceStrokes(session?.strokes.orEmpty())
+            tagLayer.replaceTags(session?.tags.orEmpty())
+            textInputLayer.replaceEditors(session?.textBoxes.orEmpty())
+            if (session == null) viewport.reset() else viewport.restore(session.viewport)
+            applyViewportToLayers()
+        }
         val document = pageId?.let { pageContentRepository.load(workspace.id, it) }
         insertContentLayer.bind(document)
+        if (splitViewState.enabled) splitViewState.updateFocused(notebookLibrary.captureLocation())
     }
 
     private fun renderToolShelf() {
@@ -2706,10 +3034,21 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_MOVE -> {
                 if (fingerIndices.size >= 2) {
                     val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
-                    if (!transformGestureActive || lastGestureSpan <= 0f) {
+                    if (!transformGestureActive) {
                         beginTransformGesture(event, fingerIndices)
                     } else {
-                        applyViewportGesture(focusX, focusY, span / lastGestureSpan, span)
+                        transformGestureArbiter
+                            .update(focusX, focusY, span, allowScale = !zoomLocked)
+                            ?.let { update ->
+                                viewport.applyGesture(
+                                    previousFocusX = update.previousFocusX,
+                                    previousFocusY = update.previousFocusY,
+                                    focusX = update.focusX,
+                                    focusY = update.focusY,
+                                    requestedScaleFactor = update.scaleFactor,
+                                )
+                                applyViewportToLayers()
+                            }
                     }
                 } else if (singleFingerPanEnabled) {
                     val index = fingerIndices[0]
@@ -2718,7 +3057,7 @@ class MainActivity : Activity() {
                     if (!transformGestureActive) {
                         beginSingleFingerPan(event, index)
                     } else {
-                        applyViewportGesture(focusX, focusY, 1f, 0f)
+                        applySingleFingerPan(focusX, focusY)
                     }
                 }
             }
@@ -2727,33 +3066,32 @@ class MainActivity : Activity() {
                 when {
                     remaining.size >= 2 -> beginTransformGesture(event, remaining)
                     singleFingerPanEnabled && remaining.size == 1 -> beginSingleFingerPan(event, remaining[0])
-                    else -> transformGestureActive = false
+                    else -> endTransformGesture()
                 }
             }
             MotionEvent.ACTION_UP,
-            MotionEvent.ACTION_CANCEL -> transformGestureActive = false
+            MotionEvent.ACTION_CANCEL -> endTransformGesture()
         }
         return true
     }
 
     private fun beginSingleFingerPan(event: MotionEvent, fingerIndex: Int) {
         transformGestureActive = true
+        transformGestureArbiter.cancel()
         lastGestureFocusX = event.getX(fingerIndex)
         lastGestureFocusY = event.getY(fingerIndex)
-        lastGestureSpan = 0f
     }
 
-    private fun applyViewportGesture(focusX: Float, focusY: Float, scaleFactor: Float, nextSpan: Float) {
+    private fun applySingleFingerPan(focusX: Float, focusY: Float) {
         viewport.applyGesture(
             previousFocusX = lastGestureFocusX,
             previousFocusY = lastGestureFocusY,
             focusX = focusX,
             focusY = focusY,
-            requestedScaleFactor = if (zoomLocked) 1f else scaleFactor,
+            requestedScaleFactor = 1f,
         )
         lastGestureFocusX = focusX
         lastGestureFocusY = focusY
-        lastGestureSpan = nextSpan
         applyViewportToLayers()
     }
 
@@ -2772,7 +3110,12 @@ class MainActivity : Activity() {
         transformGestureActive = true
         lastGestureFocusX = focusX
         lastGestureFocusY = focusY
-        lastGestureSpan = span
+        transformGestureArbiter.begin(focusX, focusY, span)
+    }
+
+    private fun endTransformGesture() {
+        endTransformGesture()
+        transformGestureArbiter.cancel()
     }
 
     private fun gestureGeometry(event: MotionEvent, fingerIndices: List<Int>): Triple<Float, Float, Float> {
@@ -2841,20 +3184,30 @@ class MainActivity : Activity() {
     }
 
     private fun toggleSectionPane() {
-        sectionPaneVisible = !sectionPaneVisible
-        persistWorkspacePreferences()
+        if (fullPageMode) fullPageSectionPaneOpen = !fullPageSectionPaneOpen
+        else {
+            sectionPaneVisible = !sectionPaneVisible
+            persistWorkspacePreferences()
+        }
         applyChromeVisibility()
     }
 
     private fun togglePagePane() {
-        pagePaneVisible = !pagePaneVisible
-        persistWorkspacePreferences()
+        if (fullPageMode) fullPagePagePaneOpen = !fullPagePagePaneOpen
+        else {
+            pagePaneVisible = !pagePaneVisible
+            persistWorkspacePreferences()
+        }
         applyChromeVisibility()
     }
 
     private fun setFullPageMode(enabled: Boolean) {
         if (fullPageMode == enabled) return
         fullPageMode = enabled
+        if (enabled) {
+            fullPageSectionPaneOpen = false
+            fullPagePagePaneOpen = false
+        }
         applyChromeVisibility()
         refreshViewRibbonState()
     }
@@ -2867,18 +3220,21 @@ class MainActivity : Activity() {
         floatingToolbox.visibility = if (fullPageMode && drawingToolbarVisible) View.VISIBLE else View.GONE
         toolbarToggle.visibility = if (fullPageMode) View.VISIBLE else View.GONE
         navigationRail.visibility = if (fullPageMode) View.GONE else View.VISIBLE
-        navigationPane.visibility = if (!fullPageMode && sectionPaneVisible) View.VISIBLE else View.GONE
-        pagePane.visibility = if (!fullPageMode && pagePaneVisible) View.VISIBLE else View.GONE
+        fullPagePaneButtons.visibility = if (fullPageMode) View.VISIBLE else View.GONE
+        navigationPane.visibility = if (if (fullPageMode) fullPageSectionPaneOpen else sectionPaneVisible) View.VISIBLE else View.GONE
+        pagePane.visibility = if (if (fullPageMode) fullPagePagePaneOpen else pagePaneVisible) View.VISIBLE else View.GONE
         updateToggleVisual(toolbarToggle, drawingToolbarVisible)
         updateToggleVisual(sectionPaneToggle, sectionPaneVisible)
         updateToggleVisual(pagePaneToggle, pagePaneVisible)
+        updateToggleVisual(fullPageSectionPaneToggle, fullPageSectionPaneOpen)
+        updateToggleVisual(fullPagePagePaneToggle, fullPagePagePaneOpen)
         fullPageToggleIcon.setImageDrawable(
             fluentIcon(if (fullPageMode) "full_screen_minimize" else "full_screen_maximize"),
         )
         fullPageToggleIcon.imageTintList = ColorStateList.valueOf(TEXT_PRIMARY)
         val fullPageDescription = if (fullPageMode) "退出整页视图" else "进入整页视图"
         fullPageToggle.contentDescription = fullPageDescription
-        fullPageToggle.tooltipText = fullPageDescription
+        setDarkTooltip(fullPageToggle, fullPageDescription)
     }
 
     private fun applySelectedPageAppearance() {
@@ -2929,6 +3285,7 @@ class MainActivity : Activity() {
         zoomLockButton?.let { updateToggleVisual(it, zoomLocked) }
         fullViewButton?.let { updateToggleVisual(it, fullPageMode) }
         normalViewButton?.let { updateToggleVisual(it, !fullPageMode) }
+        splitViewButton?.let { updateToggleVisual(it, splitViewState.enabled) }
         val settings = workspace.selectedPage()?.viewSettings
         pageTitleViewButton?.let { updateToggleVisual(it, settings?.pageTitleVisible == false) }
         backgroundViewButton?.let { updateToggleVisual(it, settings?.darkBackground == true) }
@@ -2948,7 +3305,7 @@ class MainActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             background = rounded(Color.rgb(42, 42, 42), dp(2).toFloat(), BORDER_STRONG)
             contentDescription = "显示比例"
-            tooltipText = "显示比例"
+            setDarkTooltip(this, "显示比例")
             setOnClickListener { showZoomPresetMenu(this) }
         }
 
@@ -2960,7 +3317,7 @@ class MainActivity : Activity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             background = toggleBackground(false)
             contentDescription = "恢复 100%"
-            tooltipText = "恢复 100%"
+            setDarkTooltip(this, "恢复 100%")
             setOnClickListener { setZoomScale(1f) }
         }
 
@@ -3033,7 +3390,7 @@ class MainActivity : Activity() {
             paperContainer.post(::fitPageWidth)
             return
         }
-        val documentWidth = page.viewSettings.paperSize.documentWidth ?: return
+        val documentWidth = page.viewSettings.documentWidth ?: return
         viewport.fitDocumentWidth(
             documentLeft = 0f,
             documentWidth = documentWidth,
@@ -3046,10 +3403,18 @@ class MainActivity : Activity() {
     private fun showPaperSizeMenu(anchor: View) {
         val page = workspace.selectedPage() ?: return
         PopupMenu(this, anchor).apply {
-            for (size in PaperSize.entries) {
+            val sizes = if (page.viewSettings.paperSize == PaperSize.PDF) listOf(PaperSize.PDF) else PageAppearanceCatalog.paperTemplates
+            for (size in sizes) {
                 menu.add(size.menuLabel).apply { isChecked = size == page.viewSettings.paperSize }
                     .setOnMenuItemClickListener {
-                        updateCurrentPageView { it.paperSize = size }
+                        if (size != PaperSize.PDF) {
+                            updateCurrentPageView {
+                                it.paperSize = size
+                                it.customDocumentWidth = null
+                                it.customDocumentHeight = null
+                                it.a4PageCount = 1
+                            }
+                        }
                         true
                     }
             }
@@ -3068,11 +3433,11 @@ class MainActivity : Activity() {
                 setPadding(dp(8), dp(6), dp(8), dp(6))
             }
         lateinit var popup: PopupWindow
-        for (color in PageColor.entries) {
+        for (color in PageAppearanceCatalog.pageColors) {
             row.addView(
                 FrameLayout(this).apply {
                     contentDescription = color.description
-                    tooltipText = color.description
+                    setDarkTooltip(this, color.description)
                     addView(
                         View(this@MainActivity).apply {
                             background =
@@ -3143,16 +3508,27 @@ class MainActivity : Activity() {
     }
 
     private fun confirmClearPage() {
+        val isPdfPage = workspace.selectedPage()?.pdfPage != null
         AlertDialog.Builder(this)
             .setTitle("清空当前页面？")
-            .setMessage("将清空当前页面的笔迹、文本、标记和所有插入内容；嵌入文件也会从本页资产中删除，无法恢复。")
+            .setMessage(
+                if (isPdfPage) "将清空批注、文本、标记和后来插入的内容；PDF 页面保留。"
+                else "将清空当前页面的笔迹、文本、标记和所有插入内容；嵌入文件也会从本页资产中删除，无法恢复。",
+            )
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
                 dryInkView.clear()
                 textInputLayer.clearAll()
                 tagLayer.clear()
-                insertContentLayer.currentDocument()?.let { assetStore.clearPageAssets(it.notebookId, it.pageId) }
-                insertContentLayer.clearObjects()
+                insertContentLayer.currentDocument()?.let { document ->
+                    assetStore.clearPageAssetsExcept(
+                        document.notebookId,
+                        document.pageId,
+                        insertContentLayer.retainedPageAssetNames(),
+                    )
+                }
+                insertContentLayer.clearObjects(preservePageBackgrounds = true)
+                saveBoundPageSession()
                 renderToolDetails()
             }
             .show()
@@ -3222,7 +3598,7 @@ class MainActivity : Activity() {
                 }
             }
             contentDescription = tool.displayName
-            tooltipText = "点击选择；再次点击打开参数"
+            setDarkTooltip(this, "点击选择；再次点击打开参数")
             layoutParams = LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(2) }
         }
     }
@@ -3247,7 +3623,7 @@ class MainActivity : Activity() {
             addView(iconView, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
             setOnClickListener { action(this) }
             contentDescription = label
-            tooltipText = label
+            setDarkTooltip(this, label)
         }
 
     private fun railToggleButton(icon: String, label: String, action: () -> Unit): View =
@@ -3261,7 +3637,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { action() }
             contentDescription = label
-            tooltipText = label
+            setDarkTooltip(this, label)
             layoutParams =
                 LinearLayout.LayoutParams(dp(28), dp(34)).apply {
                     topMargin = dp(2)
@@ -3281,7 +3657,7 @@ class MainActivity : Activity() {
             )
             setOnClickListener { action() }
             contentDescription = label
-            tooltipText = label
+            setDarkTooltip(this, label)
         }
 
     private fun updateToggleVisual(view: View, selected: Boolean) {
@@ -3341,6 +3717,7 @@ class MainActivity : Activity() {
     private fun colorButton(color: InkPalette, selected: Boolean, action: () -> Unit): View =
         View(this).apply {
             contentDescription = "${color.label}色"
+            setDarkTooltip(this, "${color.label}色")
             background = oval(color.argb, if (selected) ACCENT_PURPLE else BORDER_STRONG, if (selected) 3 else 1)
             setOnClickListener { action() }
             layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
@@ -3488,8 +3865,14 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun launchDocumentPicker(requestCode: Int, mimeType: String, allowMultiple: Boolean = false, extraMimeTypes: Array<String>? = null) {
-        if (insertTarget() == null) {
+    private fun launchDocumentPicker(
+        requestCode: Int,
+        mimeType: String,
+        allowMultiple: Boolean = false,
+        extraMimeTypes: Array<String>? = null,
+        requireSelectedPage: Boolean = true,
+    ) {
+        if (requireSelectedPage && insertTarget() == null) {
             Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
             return
         }
@@ -3588,6 +3971,34 @@ class MainActivity : Activity() {
                 }
             }.onSuccess { appendImportedObjects(target, it, "已导入 ${it.size} 张图片") }
                 .onFailure { reportBackgroundFailure("图片导入失败", it) }
+        }
+    }
+
+    private fun importPdfPages(uri: Uri) {
+        val target = pendingPdfPageTarget.also { pendingPdfPageTarget = null } ?: return
+        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == target.notebookId } ?: return
+        Toast.makeText(this, "正在导入 PDF…", Toast.LENGTH_SHORT).show()
+        ioExecutor.execute {
+            runCatching { pdfPageImporter.importPages(target.notebookId, uri) }
+                .onSuccess { result ->
+                    runOnUiThread {
+                        if (!notebook.addPages(target.sectionId, result.pages)) {
+                            result.pages.forEach { page -> pageContentRepository.deletePageData(target.notebookId, page.id) }
+                            Toast.makeText(this, "PDF 导入位置已不存在", Toast.LENGTH_LONG).show()
+                            return@runOnUiThread
+                        }
+                        notebookLibrary.selectNotebook(target.notebookId)
+                        val location = notebook.captureLocation()
+                        target.splitSide?.takeIf { splitViewState.enabled }?.let { side ->
+                            splitViewState.setLocation(side, location)
+                        }
+                        persistPageViewSettings()
+                        persistWorkspacePreferences()
+                        renderWorkspace()
+                        Toast.makeText(this, "已导入 ${result.pages.size} 页 PDF", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .onFailure { reportBackgroundFailure("PDF 导入失败", it) }
         }
     }
 
@@ -3925,7 +4336,8 @@ class MainActivity : Activity() {
     }
 
     private fun exportToUri(uri: Uri, type: PendingExport) {
-        val layers = captureExportLayers() ?: return
+        val snapshot = captureExportLayers() ?: return
+        val layers = snapshot.layers
         val pageId = workspace.selectedPageId
         val notebook = workspace
         Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
@@ -3935,7 +4347,7 @@ class MainActivity : Activity() {
                     requireNotNull(output) { "无法写入目标文件" }
                     if (type == PendingExport.PDF) {
                         val rasterLayers = layers.map { (name, bitmap) -> bitmapToPdfLayer(name, bitmap) }
-                        LayeredPdfWriter.write(output, rasterLayers)
+                        LayeredPdfWriter.write(output, rasterLayers, snapshot.pageSize)
                     } else {
                         val pngLayers = layers.entries.associate { (name, bitmap) -> name to bitmapToPng(bitmap) }
                         NotebookPackageExporter(pageContentRepository).write(output, notebook, pageId, pngLayers)
@@ -3947,25 +4359,54 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun captureExportLayers(): LinkedHashMap<String, Bitmap>? {
-        val width = dryInkView.width
-        val height = dryInkView.height
+    private fun captureExportLayers(): ExportSnapshot? {
+        val page = workspace.selectedPage() ?: return null
+        val pdfInfo = page.pdfPage
+        val documentWidth = page.viewSettings.documentWidth
+        val documentHeight = page.viewSettings.documentHeight
+        val fixedDocumentExport = pdfInfo != null && documentWidth != null && documentHeight != null
+        val (width, height) =
+            if (fixedDocumentExport) {
+                val longest = maxOf(documentWidth, documentHeight).coerceAtLeast(1f)
+                val scale = PDF_EXPORT_LONGEST_SIDE_PX / longest
+                (documentWidth * scale).roundToInt().coerceAtLeast(1) to
+                    (documentHeight * scale).roundToInt().coerceAtLeast(1)
+            } else {
+                dryInkView.width to dryInkView.height
+            }
         if (width <= 0 || height <= 0) {
             Toast.makeText(this, "页面尚未完成布局", Toast.LENGTH_SHORT).show()
             return null
         }
+        val documentMatrix =
+            if (fixedDocumentExport) {
+                Matrix().apply { setScale(width / documentWidth, height / documentHeight) }
+            } else {
+                viewport.documentToViewMatrix()
+            }
         val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        dryInkView.renderBackgroundForExport(Canvas(background))
+        dryInkView.renderBackgroundForExport(Canvas(background), documentMatrix)
         val inserted = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        insertContentLayer.renderForExport(Canvas(inserted))
+        insertContentLayer.renderForExport(Canvas(inserted), documentMatrix)
         val inkAndText = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         Canvas(inkAndText).also { canvas ->
-            dryInkView.renderInkForExport(canvas)
-            tagLayer.draw(canvas)
-            textInputLayer.draw(canvas)
+            dryInkView.renderInkForExport(canvas, documentMatrix)
+            tagLayer.renderForExport(canvas, documentMatrix)
+            if (fixedDocumentExport) {
+                val textMatrix = Matrix().apply { setConcat(documentMatrix, viewport.viewToDocumentMatrix()) }
+                canvas.save()
+                canvas.concat(textMatrix)
+                textInputLayer.draw(canvas)
+                canvas.restore()
+            } else {
+                textInputLayer.draw(canvas)
+            }
         }
         ExportColorTransform.applyTo(inkAndText)
-        return linkedMapOf("页面背景" to background, "插入内容" to inserted, "墨迹与文字" to inkAndText)
+        return ExportSnapshot(
+            layers = linkedMapOf("页面背景" to background, "插入内容" to inserted, "墨迹与文字" to inkAndText),
+            pageSize = pdfInfo?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) },
+        )
     }
 
     private fun bitmapToPdfLayer(name: String, bitmap: Bitmap): PdfRasterLayer {
@@ -4003,12 +4444,12 @@ class MainActivity : Activity() {
     private fun titleIconButton(icon: String, description: String, action: (View) -> Unit): TextView =
         TextView(this).apply {
             contentDescription = description
+            setDarkTooltip(this, description)
             gravity = Gravity.CENTER
             setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon), null, null, null)
             compoundDrawableTintList = ColorStateList.valueOf(if (description == "导航") Color.WHITE else TEXT_PRIMARY)
             background = rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT)
             setOnClickListener { action(this) }
-            tooltipText = description
         }
 
     private fun verticalDivider(): View =
@@ -4020,6 +4461,29 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
+
+    private fun setDarkTooltip(view: View, label: CharSequence) {
+        view.setOnHoverListener { hovered, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER -> {
+                    dismissDarkTooltip()
+                    darkTooltipAnchor = hovered
+                    darkTooltipLabel = label
+                    mainHandler.postDelayed(showDarkTooltip, DARK_TOOLTIP_DELAY_MILLIS)
+                }
+                MotionEvent.ACTION_HOVER_EXIT -> if (darkTooltipAnchor === hovered) dismissDarkTooltip()
+            }
+            false
+        }
+    }
+
+    private fun dismissDarkTooltip() {
+        mainHandler.removeCallbacks(showDarkTooltip)
+        darkTooltipPopup?.dismiss()
+        darkTooltipPopup = null
+        darkTooltipAnchor = null
+        darkTooltipLabel = ""
+    }
 
     private fun horizontalDivider(): View =
         View(this).apply { setBackgroundColor(BORDER_COLOR) }
@@ -4109,6 +4573,10 @@ class MainActivity : Activity() {
         private const val REQUEST_IMAGES = 4104
         private const val REQUEST_STICKER_IMPORT = 4105
         private const val REQUEST_EXPORT = 4106
+        private const val REQUEST_PDF_PAGES = 4107
+        private const val PDF_EXPORT_LONGEST_SIDE_PX = 1800f
+        private const val SPLIT_FOCUS_PULSE_MILLIS = 500L
+        private const val DARK_TOOLTIP_DELAY_MILLIS = 500L
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800)
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
@@ -4116,9 +4584,10 @@ class MainActivity : Activity() {
         private val ACCENT_PURPLE = Color.rgb(218, 178, 233)
         private val SELECTED_LAVENDER = Color.rgb(55, 64, 72)
         private val TOOLBAR_BACKGROUND = Color.rgb(35, 35, 35)
+        private val DARK_TOOLTIP_BACKGROUND = Color.rgb(58, 58, 58)
         private val NAV_BACKGROUND = Color.rgb(15, 15, 15)
         private val PAGE_LIST_BACKGROUND = Color.rgb(42, 42, 42)
-        private val PAPER_COLOR = Color.rgb(ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY, ImageViewFilter.TARGET_BACKGROUND_GRAY)
+        private val PAPER_COLOR = Color.rgb(10, 10, 10)
         private val BORDER_COLOR = Color.rgb(61, 61, 61)
         private val BORDER_STRONG = Color.rgb(87, 87, 87)
         private val TEXT_PRIMARY = Color.rgb(244, 244, 244)

@@ -28,4 +28,20 @@ class LayeredPdfWriterTest {
             it.writeBytes(output.toByteArray())
         }
     }
+
+    @Test
+    fun preservesImportedPdfMediaBox() {
+        val layer = PdfRasterLayer("PDF 页面", 2, 1, byteArrayOf(255.toByte(), 0, 0, 0, 0, 255.toByte()))
+        val output = ByteArrayOutputStream()
+
+        LayeredPdfWriter.write(output, listOf(layer), PdfOutputPageSize(612f, 792f))
+
+        val pdf = output.toString(StandardCharsets.ISO_8859_1.name())
+        assertTrue(pdf.contains("/MediaBox [0 0 612 792]"))
+        assertTrue(pdf.contains("q 612 0 0 792 0 0 cm"))
+        File("build/verification/layered-pdf-media-box-test.pdf").also {
+            it.parentFile?.mkdirs()
+            it.writeBytes(output.toByteArray())
+        }
+    }
 }

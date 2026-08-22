@@ -22,6 +22,11 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - A PDF printout keeps the original PDF asset and creates one PNG-backed image object per rendered
   page. It therefore behaves like a batch image insertion while preserving the source PDF in the
   private package.
+- PDF import from the gray page-pane `+` is a different operation from an Insert-ribbon printout.
+  It creates one `NotePage` per source PDF page. Each new page stores the original PDF reference,
+  page number/count, original PDF point dimensions, and a private rendered page image. That image
+  is an immutable page-background object at document origin; normal insert objects, ink, text, and
+  tags remain above it.
 - A spreadsheet keeps the original workbook and a bounded first-sheet cell preview. Tapping it
   delegates editing to an installed spreadsheet application. Spreadsheet previews and inserted
   tables automatically use dark cells/light text on the canvas and white cells/dark text in export;
@@ -78,8 +83,17 @@ versions rather than guessing.
 PDF is for visual sharing and cannot expose embedded attachments for download. `.mjn` is the
 portable editable/archive boundary that carries those original files.
 
+For a PDF-backed notebook page, export uses the imported page's original PDF point dimensions for
+the output MediaBox rather than the current screen or split-pane pixel size. The rendered source
+page remains in `插入内容`, while annotations remain in `墨迹与文字`; view-only inversion is still
+bypassed. This preserves writing-over-PDF behavior without flattening the source and annotations
+into one inseparable raster layer.
+
 ## UI contract
 
-The Insert ribbon follows the existing compact dark desktop rhythm. Each command uses one simple
-line icon, a short Chinese label, and a quiet hover/pressed surface. Image and sticker are adjacent.
-Dialogs use the same dark surfaces, 2--3 dp corners, thin borders, and restrained purple accent.
+The Insert ribbon follows the existing compact dark desktop rhythm. Each command is a Fluent-style
+line icon with no visible name or explanatory copy; the screenshot-reference semantics are table,
+attachment, PDF printout, spreadsheet, image, sticker, and link. Image and sticker are adjacent.
+Accessibility descriptions remain invisible, and mouse/stylus hover uses an app-owned delayed
+tooltip with a `#3A3A3A` background and white text instead of the platform light tooltip. Dialogs
+use the same dark surfaces, 2--3 dp corners, thin borders, and restrained purple accent.

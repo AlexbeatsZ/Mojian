@@ -1,6 +1,6 @@
 # Stylus Shortcuts, Viewport Gestures, and Pressure Erasing
 
-Last verified: 2026-08-22
+Last verified: 2026-08-23
 
 Read this document before changing key dispatch, touch arbitration, viewport transforms, or eraser
 activation.
@@ -40,6 +40,12 @@ The protected application code does not expose the mapping from that 20% user va
 pressure, or the exact dwell and stationarity constants. The lab must show its normalized threshold
 explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered Notein constants.
 
+The installed protected APK likewise exposes editor gesture class names only as unresolved
+references, including `NoteinZoomHandle`; their implementations and numeric motion thresholds are
+not defined in the shell DEX. Do not claim a Notein-specific pinch threshold from static inspection.
+The clean-room implementation instead follows Android's public gesture convention: scale slop is
+twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment described below.
+
 ## Clean-room implementation contract
 
 ### Shortcut interface only
@@ -65,7 +71,14 @@ explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered
 - With the panorama-hand control off, one finger is consumed but does not write, pan, or zoom.
 - With the panorama hand selected, one finger pans at 1x scale; tapping the selected hand again or
   choosing a drawing tool restores the default two-finger-only mode.
-- Two finger pointers begin a combined pan/zoom gesture only when no stylus stroke is active.
+- Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
+  drift below one platform touch slop and span drift below two touch slops do nothing.
+- After a candidate crosses a threshold, the whole pointer sequence commits to either pan or scale
+  according to the larger normalized motion. A committed pan ignores later span noise; a committed
+  scale may translate around its moving centroid. Crossing the threshold rebases the incremental
+  transform so the page does not jump.
+- The zoom lock prevents a scale candidate from committing but does not disable a two-finger pan;
+  ribbon presets and zoom buttons are outside this touch arbiter and continue to work.
 - Adding, removing, or reindexing pointers rebases the gesture centroid and span to avoid jumps.
 - A viewport transform never changes during an active stylus stroke.
 
@@ -101,7 +114,8 @@ erasures, and persistence are separate future features.
 
 ## Verification
 
-Automated tests cover viewport anchoring/clamping, pressure-erasing arming/dwell/reset, exact Xiaomi
+Automated tests cover transform slop/mode-lock behavior, viewport anchoring/clamping,
+pressure-erasing arming/dwell/reset, exact Xiaomi
 device/key filtering, lasso geometry, translation/scaling geometry, and finger-only text routing.
 Real-device acceptance still requires:
 

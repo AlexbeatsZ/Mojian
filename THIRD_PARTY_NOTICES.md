@@ -5,8 +5,8 @@
 The Android interface includes a small, source-selected subset of the regular 24 px icons from
 [microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons). The original
 drawing/navigation subset came from artifact version `1.1.315`; Start-ribbon additions came from
-repository commit `fb047fb395f4`. Drawing-ribbon insert-space/background formatting and View-ribbon
-icons adhere to the regular 24 px Fluent vector specification. The icons are used for ordinary product controls;
+repository commit `fb047fb395f4`. Drawing-ribbon insert-space/background formatting, View/split,
+and icon-only Insert-ribbon controls adhere to the regular 24 px Fluent vector specification. The icons are used for ordinary product controls;
 no Microsoft or OneNote logo, brand art, screenshot, or proprietary OneNote asset is included.
 
 Copyright (c) Microsoft Corporation.

@@ -20,6 +20,12 @@ class CanvasTag(
     var documentY: Float,
 )
 
+data class CanvasTagSnapshot(
+    val kind: CanvasTagKind,
+    val documentX: Float,
+    val documentY: Float,
+)
+
 /** Session-only page tags placed in document coordinates. */
 @SuppressLint("ViewConstructor")
 class CanvasTagLayer(
@@ -61,6 +67,20 @@ class CanvasTagLayer(
     }
 
     fun allTags(): List<CanvasTag> = tags.toList()
+
+    fun snapshotTags(): List<CanvasTagSnapshot> =
+        tags.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY) }
+
+    fun replaceTags(replacement: List<CanvasTagSnapshot>) {
+        tags.clear()
+        tags += replacement.map { CanvasTag(it.kind, it.documentX, it.documentY) }
+        selectedTags.clear()
+        pendingKind = null
+        focusedIndex = null
+        pressedTag = null
+        isClickable = false
+        invalidate()
+    }
 
     fun contentBottom(): Float = tags.maxOfOrNull { it.documentY + dp(10f) } ?: 0f
 
@@ -241,14 +261,22 @@ class CanvasTagLayer(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        drawTags(canvas, viewport.documentToViewMatrix(), includeFocus = true)
+    }
+
+    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix) {
+        drawTags(canvas, documentMatrix, includeFocus = false)
+    }
+
+    private fun drawTags(canvas: Canvas, documentMatrix: android.graphics.Matrix, includeFocus: Boolean) {
         canvas.save()
-        canvas.concat(viewport.documentToViewMatrix())
+        canvas.concat(documentMatrix)
         tags.forEachIndexed { index, tag ->
             when (tag.kind) {
                 CanvasTagKind.IMPORTANT -> drawStar(canvas, tag.documentX, tag.documentY)
                 CanvasTagKind.QUESTION -> drawQuestion(canvas, tag.documentX, tag.documentY)
             }
-            if (focusedIndex == index) {
+            if (includeFocus && focusedIndex == index) {
                 canvas.drawCircle(tag.documentX, tag.documentY, dp(14f), focusPaint)
             }
         }

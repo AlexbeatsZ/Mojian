@@ -1,6 +1,6 @@
 # Workspace Navigation and Drawing UI
 
-Last verified: 2026-08-22
+Last verified: 2026-08-23
 
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
@@ -150,11 +150,37 @@ paper-size menu names are visible. Accessibility descriptions and hover tooltips
   edited content reaches the final sheet's bottom. Automatic editing never shrinks the sheet count.
 - Switching the page between light and dark backgrounds remaps logical black ink and default text
   editor colors for readability without changing blue/red ink.
+- Finite paper is a surface, not a clipping mask. Changing paper size never hides text, ink, tags,
+  or inserted objects outside the new edge; those objects stay visible and movable over the
+  `#0A0A0A` workspace until the user moves them back onto paper.
 
 The page pane's `+` opens a compact creation dialog with unbounded/A4 template cards, the shared
 baseline selector, and page-color swatches. It contains no explanatory paragraph. Only a successful
 creation becomes the next dialog's default configuration; cancelling leaves the remembered template
 unchanged.
+
+The same dialog has a quiet two-item tab strip at its top: `页` keeps the normal-page template
+controls, while `PDF` exposes the system PDF picker. PDF import creates one real notebook page for
+every source PDF page, in source order and at that page's original aspect and physical point size.
+PDF pages show a small muted `PDF` suffix at the far right of their gray-pane row; the canvas itself
+does not add a PDF badge over the document.
+
+## Split view
+
+Split view is an independent View-ribbon state, not a variant of full-page mode. It divides the
+canvas into left and right page slots with a one-physical-pixel center rule inside a narrow gray
+gutter. A restrained lavender focus border pulses for 500 ms when focus changes, then disappears;
+there is no permanent accent frame, pane title, or instruction.
+
+- Each slot retains its own notebook, focused section root, owning section, page, viewport, and
+  session ink/tag/text state.
+- The black and gray sidebars always reflect the focused slot. Selecting a notebook, section, or
+  page changes only that slot, so the other slot keeps its prior location.
+- Tapping the other page focuses it and immediately switches both sidebars to its saved context.
+- Full-page mode may be entered while split view is active. It hides normal chrome but preserves
+  both slots and their focus; leaving full-page mode restores the same split state.
+- Leaving split view always keeps the right slot as the single visible page, regardless of which
+  slot was focused immediately before exit.
 
 ## Start ribbon and page tags
 
@@ -204,8 +230,9 @@ shown as a permanent workspace control.
 
 The full-page quick toolbar has its own full-screen settings subpage. Every implemented Start
 command and every current drawing command/preset appears in one catalog and can be added or
-removed. Added commands are appended in selection order. The full-page toolbar scrolls horizontally
-so a large custom set remains usable on narrow screens. The ordered command IDs are stored in local
+removed. Added commands are appended in selection order. Its floating surface measures to the
+actual configured buttons instead of reserving a long fixed strip; it becomes horizontally
+scrollable only when that content reaches the available page width. The ordered command IDs are stored in local
 workspace preferences; unsupported stale IDs are ignored when rendering.
 
 ## Adaptive behavior
@@ -221,12 +248,14 @@ while their pane is expanded:
 - the navigation icon hides or reveals only the black section pane, matching desktop OneNote;
 - the Fluent `panel_left` icon hides or reveals only the 196 dp gray page pane.
 
-The rail never disappears, so either pane can be restored after both are hidden. Independent pane
+The rail never disappears in normal view, so either pane can be restored after both are hidden. Independent pane
 visibility allows a user to keep pages visible while reclaiming the section width, or return almost
 the full width to handwriting without sacrificing a recovery control.
 
 The paper's top-right controls are context-sensitive. Normal view shows search and enter-full-page;
 the regular drawing ribbon cannot be hidden there. Full-page view hides tabs, the regular ribbon,
-rail, and both panes, then shows the configurable, horizontally scrollable quick toolbar plus pen,
-search, and exit-full-page controls. Only the full-page pen control toggles that toolbar. Search
-remains directly to the right of that pen control.
+rail, and both panes, then leaves the two pane controls as independent floating buttons at the
+original left edge. They reopen the same black/gray panes without restoring the black rail. Full
+page also shows the configurable quick toolbar plus pen, search, and exit-full-page controls. Only
+the full-page pen control toggles that toolbar. Search remains directly to the right of that pen
+control.

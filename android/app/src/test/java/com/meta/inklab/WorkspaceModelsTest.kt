@@ -83,6 +83,21 @@ class WorkspaceModelsTest {
     }
 
     @Test
+    fun importedPdfPagesAreAddedInSourceOrderAndSelectTheFirstPage() {
+        val workspace = NotebookWorkspace.sample()
+        val pages =
+            listOf(
+                NotePage("pdf-1", "讲义 · 1", pdfPage = PdfPageInfo("pdf-1", "source.pdf", "1.png", "讲义.pdf", 1, 2, 595f, 842f)),
+                NotePage("pdf-2", "讲义 · 2", pdfPage = PdfPageInfo("pdf-1", "source.pdf", "2.png", "讲义.pdf", 2, 2, 595f, 842f)),
+            )
+
+        assertTrue(workspace.addPages("section-product", pages))
+
+        assertEquals("pdf-1", workspace.selectedPageId)
+        assertEquals(listOf("page-overview", "page-flow", "pdf-1", "pdf-2"), workspace.pagePaneRows().map { (it as PagePaneRow.PageItem).page.id })
+    }
+
+    @Test
     fun sectionAddUsesFocusedSectionAndBlankFocusCreatesAtRoot() {
         val workspace = NotebookWorkspace.sample()
 

@@ -1,10 +1,29 @@
 package com.meta.inklab
 
+data class PdfPageInfo(
+    val sourceOwnerPageId: String,
+    val sourceAssetName: String,
+    val renderedAssetName: String,
+    val sourceDocumentName: String,
+    val pageNumber: Int,
+    val pageCount: Int,
+    val widthPoints: Float,
+    val heightPoints: Float,
+)
+
 data class NotePage(
     val id: String,
     var title: String,
     val subtitle: String = "刚刚",
     val viewSettings: PageViewSettings = PageViewSettings(),
+    val pdfPage: PdfPageInfo? = null,
+)
+
+data class WorkspaceLocation(
+    val notebookId: String,
+    val focusedSectionId: String?,
+    val selectedPageSectionId: String,
+    val pageId: String,
 )
 
 data class SectionNode(
@@ -80,6 +99,25 @@ class NotebookWorkspace(
 
     fun selectedPage(): NotePage? =
         findSection(selectedPageSectionId)?.pages?.firstOrNull { it.id == selectedPageId }
+
+    fun captureLocation(): WorkspaceLocation =
+        WorkspaceLocation(id, focusedSectionId, selectedPageSectionId, selectedPageId)
+
+    fun restoreLocation(location: WorkspaceLocation): Boolean {
+        if (location.notebookId != id) return false
+        if (location.pageId.isEmpty()) {
+            focusedSectionId = location.focusedSectionId?.takeIf { findSection(it) != null }
+            selectedPageSectionId = location.selectedPageSectionId.takeIf { findSection(it) != null }.orEmpty()
+            selectedPageId = ""
+            return true
+        }
+        val owner = findSection(location.selectedPageSectionId) ?: return false
+        if (owner.pages.none { it.id == location.pageId }) return false
+        focusedSectionId = location.focusedSectionId?.takeIf { findSection(it) != null }
+        selectedPageSectionId = owner.id
+        selectedPageId = location.pageId
+        return true
+    }
 
     fun pagePaneRows(): List<PagePaneRow> {
         val focusedId = focusedSectionId
@@ -242,6 +280,20 @@ class NotebookWorkspace(
         return page
     }
 
+    fun addPages(
+        sectionId: String,
+        pages: List<NotePage>,
+        selectedPageId: String = pages.firstOrNull()?.id.orEmpty(),
+    ): Boolean {
+        if (pages.isEmpty()) return false
+        val section = findSection(sectionId) ?: return false
+        section.pages += pages
+        focusedSectionId = section.id
+        selectedPageSectionId = section.id
+        this.selectedPageId = selectedPageId.takeIf { id -> pages.any { it.id == id } } ?: pages.first().id
+        return true
+    }
+
     fun breadcrumb(sectionId: String? = focusedSectionId): List<SectionNode> {
         if (sectionId == null) return emptyList()
         fun descend(nodes: List<SectionNode>, path: MutableList<SectionNode>): List<SectionNode>? {
@@ -314,6 +366,13 @@ class NotebookLibrary(
 
     fun activeNotebook(): NotebookWorkspace =
         notebooks.firstOrNull { it.id == activeNotebookId } ?: error("Active notebook is missing")
+
+    fun captureLocation(): WorkspaceLocation = activeNotebook().captureLocation()
+
+    fun restoreLocation(location: WorkspaceLocation): Boolean {
+        if (!selectNotebook(location.notebookId)) return false
+        return activeNotebook().restoreLocation(location)
+    }
 
     fun selectNotebook(id: String): Boolean {
         if (notebooks.none { it.id == id }) return false

@@ -50,7 +50,34 @@ class NotebookPackageExporter(private val repository: PageContentRepository) {
                     JSONObject().apply {
                         put("id", section.id)
                         put("title", section.title)
-                        put("pages", JSONArray().apply { section.pages.forEach { page -> put(JSONObject().put("id", page.id).put("title", page.title)) } })
+                        put(
+                            "pages",
+                            JSONArray().apply {
+                                section.pages.forEach { page ->
+                                    put(
+                                        JSONObject().apply {
+                                            put("id", page.id)
+                                            put("title", page.title)
+                                            put("kind", if (page.pdfPage == null) "PAGE" else "PDF")
+                                            put("viewSettings", page.viewSettings.toJson())
+                                            page.pdfPage?.let { pdf ->
+                                                put(
+                                                    "pdf",
+                                                    JSONObject()
+                                                        .put("sourceOwnerPageId", pdf.sourceOwnerPageId)
+                                                        .put("sourceAssetName", pdf.sourceAssetName)
+                                                        .put("sourceDocumentName", pdf.sourceDocumentName)
+                                                        .put("pageNumber", pdf.pageNumber)
+                                                        .put("pageCount", pdf.pageCount)
+                                                        .put("widthPoints", pdf.widthPoints.toDouble())
+                                                        .put("heightPoints", pdf.heightPoints.toDouble()),
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                            },
+                        )
                         put("children", sectionsJson(section.children))
                     },
                 )

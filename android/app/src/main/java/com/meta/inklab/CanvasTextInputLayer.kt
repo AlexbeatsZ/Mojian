@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.text.InputType
 import android.text.Layout
 import android.text.Spannable
+import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.AlignmentSpan
@@ -36,6 +37,16 @@ enum class FormatPainterResult {
     APPLIED,
     UNAVAILABLE,
 }
+
+data class CanvasTextSnapshot(
+    val text: CharSequence,
+    val left: Int,
+    val top: Int,
+    val width: Int,
+    val height: Int,
+    val lineSpacingExtra: Float,
+    val lineSpacingMultiplier: Float,
+)
 
 private data class CapturedTextFormat(
     val typefaceFamily: String?,
@@ -79,6 +90,41 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         removeAllViews()
         activeEditor = null
         capturedFormat = null
+    }
+
+    fun snapshotEditors(): List<CanvasTextSnapshot> =
+        buildList {
+            forEachEditor { editor ->
+                val params = editor.layoutParams as LayoutParams
+                add(
+                    CanvasTextSnapshot(
+                        text = SpannableString(editor.text),
+                        left = params.leftMargin,
+                        top = params.topMargin,
+                        width = params.width,
+                        height = params.height,
+                        lineSpacingExtra = editor.lineSpacingExtra,
+                        lineSpacingMultiplier = editor.lineSpacingMultiplier,
+                    ),
+                )
+            }
+        }
+
+    fun replaceEditors(snapshots: List<CanvasTextSnapshot>) {
+        clearAll()
+        snapshots.forEach { snapshot ->
+            val editor = createEditor().apply {
+                setText(snapshot.text)
+                setLineSpacing(snapshot.lineSpacingExtra, snapshot.lineSpacingMultiplier)
+            }
+            addView(
+                editor,
+                LayoutParams(snapshot.width, snapshot.height).apply {
+                    leftMargin = snapshot.left
+                    topMargin = snapshot.top
+                },
+            )
+        }
     }
 
     fun paste(): Boolean = contextAction(android.R.id.paste)
@@ -221,25 +267,7 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
 
     private fun addEditor(touchX: Float, touchY: Float) {
         val editorWidth = dp(300)
-        val editor =
-            EditText(context).apply {
-                applyDefaultEditorColors(this)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                setBackgroundColor(Color.TRANSPARENT)
-                setPadding(0, 0, 0, 0)
-                gravity = Gravity.TOP or Gravity.START
-                minHeight = dp(32)
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-                imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
-                isSingleLine = false
-                isFocusableInTouchMode = true
-                setOnFocusChangeListener { view, focused ->
-                    if (focused) {
-                        activeEditor = view as EditText
-                        if (textModeEnabled) showKeyboard(view)
-                    }
-                }
-            }
+        val editor = createEditor()
         val left = (touchX - dp(2)).roundToInt().coerceIn(0, (width - editorWidth).coerceAtLeast(0))
         val top = (touchY - dp(18)).roundToInt().coerceIn(0, (height - dp(40)).coerceAtLeast(0))
         addView(editor, LayoutParams(editorWidth, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = left; topMargin = top })
@@ -247,6 +275,27 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         editor.requestFocus()
         editor.post { showKeyboard(editor) }
     }
+
+    private fun createEditor(): EditText =
+        EditText(context).apply {
+            applyDefaultEditorColors(this)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(0, 0, 0, 0)
+            gravity = Gravity.TOP or Gravity.START
+            minHeight = dp(32)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            isSingleLine = false
+            isFocusableInTouchMode = true
+            isEnabled = textModeEnabled
+            setOnFocusChangeListener { view, focused ->
+                if (focused) {
+                    activeEditor = view as EditText
+                    if (textModeEnabled) showKeyboard(view)
+                }
+            }
+        }
 
     private fun currentEditor(): EditText? = activeEditor?.takeIf { it.parent === this && it.isEnabled }
 

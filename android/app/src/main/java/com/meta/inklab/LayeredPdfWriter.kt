@@ -13,13 +13,24 @@ data class PdfRasterLayer(
     val alpha: ByteArray? = null,
 )
 
+data class PdfOutputPageSize(
+    val widthPoints: Float,
+    val heightPoints: Float,
+)
+
 object LayeredPdfWriter {
-    fun write(output: OutputStream, layers: List<PdfRasterLayer>) {
+    fun write(
+        output: OutputStream,
+        layers: List<PdfRasterLayer>,
+        pageSize: PdfOutputPageSize? = null,
+    ) {
         require(layers.isNotEmpty())
         val width = layers.first().width
         val height = layers.first().height
         require(width > 0 && height > 0)
         require(layers.all { it.width == width && it.height == height && it.rgb.size == width * height * 3 })
+        val pageWidth = pageSize?.widthPoints?.takeIf { it > 0f } ?: width.toFloat()
+        val pageHeight = pageSize?.heightPoints?.takeIf { it > 0f } ?: height.toFloat()
 
         val objects = mutableListOf<ByteArray>()
         fun reserve(): Int = objects.run { add(ByteArray(0)); size }
@@ -53,7 +64,7 @@ object LayeredPdfWriter {
             buildString {
                 layerRecords.forEach { record ->
                     append("/OC /L${record.number} BDC\n")
-                    append("q $width 0 0 $height 0 0 cm /Im${record.number} Do Q\n")
+                    append("q ${pdfNumber(pageWidth)} 0 0 ${pdfNumber(pageHeight)} 0 0 cm /Im${record.number} Do Q\n")
                     append("EMC\n")
                 }
             }.toByteArray(StandardCharsets.US_ASCII)
@@ -64,7 +75,7 @@ object LayeredPdfWriter {
         set(
             pageId,
             ascii(
-                "<< /Type /Page /Parent $pagesId 0 R /MediaBox [0 0 $width $height] " +
+                "<< /Type /Page /Parent $pagesId 0 R /MediaBox [0 0 ${pdfNumber(pageWidth)} ${pdfNumber(pageHeight)}] " +
                     "/Resources << /Properties << $properties >> /XObject << $images >> >> /Contents $contentId 0 R >>",
             ),
         )
@@ -120,6 +131,11 @@ object LayeredPdfWriter {
             value.toByteArray(Charsets.UTF_16BE).forEach { byte -> append(String.format("%02X", byte.toInt() and 0xFF)) }
             append('>')
         }
+
+    private fun pdfNumber(value: Float): String {
+        val rounded = value.toInt()
+        return if (value == rounded.toFloat()) rounded.toString() else String.format(java.util.Locale.US, "%.3f", value).trimEnd('0').trimEnd('.')
+    }
 
     private data class LayerRecord(
         val number: Int,

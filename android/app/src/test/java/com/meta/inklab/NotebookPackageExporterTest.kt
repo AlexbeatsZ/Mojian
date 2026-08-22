@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.util.zip.ZipInputStream
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +37,10 @@ class NotebookPackageExporterTest {
             assertTrue("assets/${page.id}/source.pdf" in entries)
             assertTrue("layers/${page.id}/页面背景.png" in entries)
             assertEquals(listOf<Byte>(1, 2, 3, 4), entries.getValue("assets/${page.id}/source.pdf").toList())
+            val manifest = JSONObject(entries.getValue("manifest.json").toString(Charsets.UTF_8))
+            val firstPage = manifest.getJSONArray("sections").getJSONObject(0).getJSONArray("pages").getJSONObject(0)
+            assertEquals("PAGE", firstPage.getString("kind"))
+            assertTrue(firstPage.has("viewSettings"))
         } finally {
             root.deleteRecursively()
         }
