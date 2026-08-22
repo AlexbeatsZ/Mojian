@@ -95,10 +95,11 @@ tapping the already selected tool opens its own flyout. The flyout shows only pa
 to that tool. Pixel erasing remains a labeled shell; it must not masquerade as a completed function.
 
 Follow the desktop OneNote grouping rhythm: undo, a hairline divider, text cursor and lasso,
-another hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, then
-low-frequency page clearing after a final divider. Dividers are one physical pixel on the tested
-tablet rather than one density-independent pixel. Keep icons and selected frames compact and do
-not restore permanent tool labels.
+another hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, a divider,
+insert space and background format (rule lines/grid styles), then low-frequency page clearing
+after a final divider. Dividers are one physical pixel on the tested tablet rather than one
+density-independent pixel. Keep icons and selected frames compact and do not restore permanent
+tool labels.
 
 The cursor is a working session-only, finger-only text mode. Selecting it suppresses finger drawing;
 tapping the paper with a finger creates a transparent multi-line editor at that point, shows a
@@ -110,8 +111,12 @@ this interaction prototype.
 
 The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
 allows one-finger panning while preserving two-finger pinch; deselecting it restores two-finger-only
-navigation. Choosing any drawing tool also exits panorama-hand mode. A ruler is intentionally not
-shown until its behavior is implemented.
+navigation. Choosing any drawing tool also exits panorama-hand mode.
+
+The insert space and background format group directly to the right of panorama hand provides:
+- an insert space tool toggle;
+- a background format tool that opens a flyout menu offering default grid, rule lines with left margin,
+  dense grid, and blank page formatting, instantly updating the underlying canvas.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
 dark note theme. A future persisted document must store the logical palette value and theme-map it

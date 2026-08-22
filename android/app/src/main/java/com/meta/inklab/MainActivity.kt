@@ -102,6 +102,7 @@ class MainActivity : Activity() {
     private var activeDirectTool: DrawingToolKind? = null
     private var lastPenToolId: String = toolShelf.tools.first { it.kind == DrawingToolKind.PEN }.id
     private var singleFingerPanEnabled = false
+    private var insertSpaceModeEnabled = false
     private var textModeEnabled = false
     private var sectionPaneVisible = true
     private var pagePaneVisible = true
@@ -992,6 +993,36 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun handleInsertSpace(anchor: View) {
+        setTextMode(false, rerender = false)
+        tagLayer.cancelPlacement()
+        singleFingerPanEnabled = false
+        transformGestureActive = false
+        toolDetailPopup?.dismiss()
+        toolDetailPopup = null
+        insertSpaceModeEnabled = !insertSpaceModeEnabled
+        renderToolShelf()
+        Toast.makeText(
+            this,
+            if (insertSpaceModeEnabled) "已开启插入空白空间模式（在页面上垂直拖动可插入空白）" else "已退出插入空白空间模式",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    private fun showBackgroundFormatMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            CanvasBackgroundFormat.entries.forEach { format ->
+                val label = if (dryInkView.backgroundFormat == format) "✓ ${format.label}" else format.label
+                menu.add(label).setOnMenuItemClickListener {
+                    dryInkView.backgroundFormat = format
+                    Toast.makeText(this@MainActivity, "页面背景：${format.label}", Toast.LENGTH_SHORT).show()
+                    true
+                }
+            }
+            show()
+        }
+    }
+
     private fun buildNavigationPane(): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1406,6 +1437,8 @@ class MainActivity : Activity() {
             }
             add(FullPageToolDescriptor("draw:add", "添加绘图工具", "add"))
             add(FullPageToolDescriptor("draw:pan", "单指平移", "hand_left"))
+            add(FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space"))
+            add(FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines"))
             add(FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"))
             HomeCommand.entries.forEach { command ->
                 add(
@@ -1443,8 +1476,17 @@ class MainActivity : Activity() {
                     setTextMode(false, rerender = false)
                     tagLayer.cancelPlacement()
                     singleFingerPanEnabled = !singleFingerPanEnabled
+                    insertSpaceModeEnabled = false
                     transformGestureActive = false
                     renderToolShelf()
+                }
+            "draw:insert_space" ->
+                commandButton("insert_space", "插入空白空间", insertSpaceModeEnabled, preserveColors = true) { anchor ->
+                    handleInsertSpace(anchor)
+                }
+            "draw:rule_lines" ->
+                commandButton("rule_lines", "设置背景格式", false, preserveColors = true) { anchor ->
+                    showBackgroundFormatMenu(anchor)
                 }
             "draw:clear" -> commandButton("delete_dismiss", "清纸", false) { confirmClearPage() }
             else -> null
@@ -1482,10 +1524,24 @@ class MainActivity : Activity() {
                 setTextMode(false, rerender = false)
                 tagLayer.cancelPlacement()
                 singleFingerPanEnabled = !singleFingerPanEnabled
+                insertSpaceModeEnabled = false
                 transformGestureActive = false
                 toolDetailPopup?.dismiss()
                 toolDetailPopup = null
                 renderToolShelf()
+            },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        row.addView(verticalDivider())
+        row.addView(
+            commandButton("insert_space", "插入空白空间", selected = insertSpaceModeEnabled, preserveColors = true) { anchor ->
+                handleInsertSpace(anchor)
+            },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        row.addView(
+            commandButton("rule_lines", "设置背景格式", selected = false, preserveColors = true) { anchor ->
+                showBackgroundFormatMenu(anchor)
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
@@ -1884,6 +1940,7 @@ class MainActivity : Activity() {
         restoreTextModeAfterTagPlacement = false
         setTextMode(false, rerender = false)
         singleFingerPanEnabled = false
+        insertSpaceModeEnabled = false
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
@@ -1908,6 +1965,7 @@ class MainActivity : Activity() {
         if (enabled) {
             tagLayer.cancelPlacement()
             singleFingerPanEnabled = false
+            insertSpaceModeEnabled = false
             transformGestureActive = false
             toolDetailPopup?.dismiss()
             toolDetailPopup = null
@@ -2204,7 +2262,7 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = !singleFingerPanEnabled && !textModeEnabled && tool.id == toolShelf.selectedId
+        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && !textModeEnabled && tool.id == toolShelf.selectedId
         return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
@@ -2258,13 +2316,21 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun commandButton(icon: String, label: String, selected: Boolean, action: (View) -> Unit): View =
+    private fun commandButton(
+        icon: String,
+        label: String,
+        selected: Boolean,
+        preserveColors: Boolean = icon in setOf("insert_space", "rule_lines"),
+        action: (View) -> Unit,
+    ): View =
         FrameLayout(this).apply {
             background = toggleBackground(selected)
             val iconView =
                 ImageView(this@MainActivity).apply {
                     setImageDrawable(fluentIcon(icon))
-                    imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                    if (!preserveColors) {
+                        imageTintList = ColorStateList.valueOf(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
+                    }
                     if (icon == "hand_left") translationX = dp(1).toFloat()
                 }
             addView(iconView, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))

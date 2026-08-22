@@ -24,5 +24,10 @@ class HomeToolbarModelsTest {
         assertTrue(config.contains("home:tag"))
         assertFalse(config.add("home:tag"))
         assertTrue(config.remove("home:tag"))
+
+        assertTrue(config.add("draw:insert_space"))
+        assertTrue(config.contains("draw:insert_space"))
+        assertTrue(config.add("draw:rule_lines"))
+        assertTrue(config.contains("draw:rule_lines"))
     }
 }

@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Outer Frame (Gray) -->
+    <path
+        android:fillColor="#9E9E9E"
+        android:pathData="M4 4h16v16H4V4zm1.5 1.5v13h13v-13h-13z" />
+    <!-- Horizontal Ruled Lines (Blue) -->
+    <path
+        android:fillColor="#0078D4"
+        android:pathData="M5.5 7.5h13v1.2h-13V7.5zm0 3.6h13v1.2h-13v-1.2zm0 3.6h13v1.2h-13v-1.2zm0 3.6h13v1.2h-13v-1.2z" />
+    <!-- Left Vertical Margin Line (Red) -->
+    <path
+        android:fillColor="#E81123"
+        android:pathData="M8.2 4v16h1.2V4H8.2z" />
+</vector>

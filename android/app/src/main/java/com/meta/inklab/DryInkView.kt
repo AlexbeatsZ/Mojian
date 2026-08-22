@@ -17,12 +17,30 @@ import androidx.ink.strokes.Stroke
 import kotlin.math.floor
 import kotlin.math.sqrt
 
+enum class CanvasBackgroundFormat(val label: String) {
+    GRID("默认网格"),
+    RULE_LINES("标尺横线"),
+    DENSE_GRID("密集网格"),
+    BLANK("空白页面"),
+}
+
 class DryInkView(context: Context) : View(context) {
+    var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val strokes = mutableListOf<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
     private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
     private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
+    private val marginLinePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(160, 50, 50)
+            strokeWidth = 1.2f * resources.displayMetrics.density
+        }
     private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
     private val gridStep = 28f * resources.displayMetrics.density
     private val documentToView = Matrix()
@@ -200,19 +218,30 @@ class DryInkView(context: Context) : View(context) {
     }
 
     private fun drawGrid(canvas: Canvas) {
+        if (backgroundFormat == CanvasBackgroundFormat.BLANK) return
         val visible = visibleDocumentBounds()
-        var x = floor(visible.left / gridStep) * gridStep
-        while (x <= visible.right) {
-            val index = floor(x / gridStep).toInt()
-            canvas.drawLine(x, visible.top, x, visible.bottom, if (index % 4 == 0) majorGridPaint else thinGridPaint)
-            x += gridStep
+        val step = if (backgroundFormat == CanvasBackgroundFormat.DENSE_GRID) gridStep * 0.5f else gridStep
+
+        if (backgroundFormat != CanvasBackgroundFormat.RULE_LINES) {
+            var x = floor(visible.left / step) * step
+            while (x <= visible.right) {
+                val index = floor(x / step).toInt()
+                canvas.drawLine(x, visible.top, x, visible.bottom, if (index % 4 == 0) majorGridPaint else thinGridPaint)
+                x += step
+            }
+        } else {
+            val marginX = 64f * resources.displayMetrics.density
+            if (visible.left <= marginX && visible.right >= marginX) {
+                canvas.drawLine(marginX, visible.top, marginX, visible.bottom, marginLinePaint)
+            }
         }
 
-        var y = floor(visible.top / gridStep) * gridStep
+        var y = floor(visible.top / step) * step
         while (y <= visible.bottom) {
-            val index = floor(y / gridStep).toInt()
-            canvas.drawLine(visible.left, y, visible.right, y, if (index % 4 == 0) majorGridPaint else thinGridPaint)
-            y += gridStep
+            val index = floor(y / step).toInt()
+            val paint = if (index % 4 == 0) majorGridPaint else thinGridPaint
+            canvas.drawLine(visible.left, y, visible.right, y, paint)
+            y += step
         }
     }
 

@@ -72,6 +72,7 @@
 - [x] Fix gray page pane behavior on notebook selection: empty with disabled `+` in non-recursive mode, and full-notebook hierarchy in recursive mode.
 - [x] Persist tool shelf presets, sidebar visibility, page modes, active selections, and pressure eraser parameters across app updates/restarts.
 - [x] Add adjustable press dwell time and pressure threshold controls to the eraser tool dropdown.
+- [x] Add insert-space and background format (rule lines/grid styles) tool group to the right of the panorama hand in the drawing ribbon.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
