@@ -74,6 +74,7 @@ class MainActivity : Activity() {
     private var backstageDialog: Dialog? = null
     private lateinit var sectionList: LinearLayout
     private lateinit var pageList: LinearLayout
+    private lateinit var addPageButton: TextView
     private lateinit var navigationPane: View
     private lateinit var pagePane: View
     private lateinit var rootLayout: LinearLayout
@@ -960,15 +961,17 @@ class MainActivity : Activity() {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(8), 0, dp(6), 0)
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
-                    addView(
+                    addPageButton =
                         titleIconButton("add", "新建页面") { _ ->
                             if (workspace.hasSelectedSection()) {
                                 workspace.addPage()
                                 renderPages()
                             } else {
-                                Toast.makeText(this@MainActivity, "请先在左侧新建分区", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, "笔记本下无法直接创建页面，请先在左侧选择或新建分区", Toast.LENGTH_SHORT).show()
                             }
-                        },
+                        }
+                    addView(
+                        addPageButton,
                         LinearLayout.LayoutParams(dp(38), dp(38)),
                     )
                 },
@@ -1200,6 +1203,13 @@ class MainActivity : Activity() {
     }
 
     private fun renderPages() {
+        val canAdd = workspace.hasSelectedSection()
+        if (::addPageButton.isInitialized) {
+            addPageButton.isEnabled = canAdd
+            addPageButton.alpha = if (canAdd) 1f else 0.35f
+            addPageButton.compoundDrawableTintList =
+                ColorStateList.valueOf(if (canAdd) TEXT_PRIMARY else Color.rgb(120, 120, 120))
+        }
         pageList.removeAllViews()
         val rows = workspace.pagePaneRows()
         if (rows.isEmpty()) {
@@ -1207,7 +1217,8 @@ class MainActivity : Activity() {
                 TextView(this).apply {
                     text =
                         if (workspace.hasSelectedSection()) "这里还没有页面\n点击右上角 + 新建"
-                        else "这个笔记本还没有分区\n请从左侧 + 新建分区"
+                        else if (workspace.sections.isEmpty()) "这个笔记本还没有分区\n请从左侧 + 新建分区"
+                        else "未选择分区\n请在左侧选择分区以查看页面"
                     setTextColor(TEXT_SECONDARY)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                     gravity = Gravity.CENTER

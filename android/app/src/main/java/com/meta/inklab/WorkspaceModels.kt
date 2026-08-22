@@ -44,19 +44,19 @@ class NotebookWorkspace(
 ) {
     private var sequence = 100
 
-    var selectedSectionId: String = flattenSections().firstOrNull()?.section?.id.orEmpty()
+    var focusedSectionId: String? = flattenSections().firstOrNull()?.section?.id
         private set
 
-    var focusedSectionId: String? = selectedSectionId.takeIf { it.isNotEmpty() }
-        private set
+    val selectedSectionId: String
+        get() = focusedSectionId.orEmpty()
 
     var pagePaneMode: PagePaneMode = PagePaneMode.CURRENT_SECTION
         private set
 
-    var selectedPageSectionId: String = selectedSectionId
+    var selectedPageSectionId: String = focusedSectionId.orEmpty()
         private set
 
-    var selectedPageId: String = findSection(selectedSectionId)?.pages?.firstOrNull()?.id.orEmpty()
+    var selectedPageId: String = focusedSectionId?.let { findSection(it) }?.pages?.firstOrNull()?.id.orEmpty()
         private set
 
     fun flattenSections(): List<SectionRow> {
@@ -71,16 +71,36 @@ class NotebookWorkspace(
         return rows
     }
 
-    fun selectedSection(): SectionNode =
-        findSection(selectedSectionId) ?: error("Selected section is missing")
+    fun selectedSection(): SectionNode? =
+        focusedSectionId?.let(::findSection)
 
-    fun hasSelectedSection(): Boolean = findSection(selectedSectionId) != null
+    fun hasSelectedSection(): Boolean =
+        focusedSectionId != null && findSection(focusedSectionId!!) != null
 
     fun selectedPage(): NotePage? =
         findSection(selectedPageSectionId)?.pages?.firstOrNull { it.id == selectedPageId }
 
     fun pagePaneRows(): List<PagePaneRow> {
-        val root = findSection(selectedSectionId) ?: return emptyList()
+        val focusedId = focusedSectionId
+        if (focusedId == null) {
+            if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
+                return emptyList()
+            }
+            val rows = mutableListOf<PagePaneRow>()
+            fun visit(section: SectionNode, depth: Int) {
+                rows += PagePaneRow.SectionHeader(section, depth)
+                rows += section.pages.map { PagePaneRow.PageItem(it, section.id, depth + 1) }
+                for (child in section.children) {
+                    visit(child, depth + 1)
+                }
+            }
+            for (section in sections) {
+                visit(section, 0)
+            }
+            return rows
+        }
+
+        val root = findSection(focusedId) ?: return emptyList()
         if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
             return root.pages.map { PagePaneRow.PageItem(it, root.id, 0) }
         }
@@ -98,7 +118,6 @@ class NotebookWorkspace(
 
     fun selectSection(id: String): Boolean {
         val section = findSection(id) ?: return false
-        selectedSectionId = section.id
         focusedSectionId = section.id
         selectFirstPageForMode()
         return true
@@ -106,22 +125,29 @@ class NotebookWorkspace(
 
     fun clearSectionFocus() {
         focusedSectionId = null
+        selectFirstPageForMode()
     }
 
     fun focusNotebook() {
         focusedSectionId = null
+        selectFirstPageForMode()
     }
 
     fun selectPage(id: String): Boolean {
-        return selectPage(selectedSectionId, id)
+        return selectPage(selectedPageSectionId.ifEmpty { focusedSectionId.orEmpty() }, id)
     }
 
     fun selectPage(sectionId: String, id: String): Boolean {
         val section = findSection(sectionId) ?: return false
         val page = section.pages.firstOrNull { it.id == id } ?: return false
-        if (pagePaneMode == PagePaneMode.CURRENT_SECTION && section.id != selectedSectionId) return false
-        val selectedRoot = findSection(selectedSectionId) ?: return false
-        if (pagePaneMode == PagePaneMode.RECURSIVE && !isDescendantOrSame(selectedRoot, section.id)) return false
+        val focusedId = focusedSectionId
+        if (focusedId == null) {
+            if (pagePaneMode == PagePaneMode.CURRENT_SECTION) return false
+        } else {
+            if (pagePaneMode == PagePaneMode.CURRENT_SECTION && section.id != focusedId) return false
+            val selectedRoot = findSection(focusedId) ?: return false
+            if (pagePaneMode == PagePaneMode.RECURSIVE && !isDescendantOrSame(selectedRoot, section.id)) return false
+        }
         selectedPageSectionId = section.id
         selectedPageId = page.id
         return true
@@ -136,7 +162,19 @@ class NotebookWorkspace(
     }
 
     private fun selectFirstPageForMode() {
-        val root = findSection(selectedSectionId)
+        val focusedId = focusedSectionId
+        if (focusedId == null) {
+            if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
+                selectedPageSectionId = ""
+                selectedPageId = ""
+            } else {
+                val first = firstPageInNotebook()
+                selectedPageSectionId = first?.first.orEmpty()
+                selectedPageId = first?.second?.id.orEmpty()
+            }
+            return
+        }
+        val root = findSection(focusedId)
         if (root == null) {
             selectedPageSectionId = ""
             selectedPageId = ""
@@ -144,12 +182,19 @@ class NotebookWorkspace(
         }
         val first =
             if (pagePaneMode == PagePaneMode.CURRENT_SECTION) {
-                root.pages.firstOrNull()?.let { selectedSectionId to it }
+                root.pages.firstOrNull()?.let { focusedId to it }
             } else {
                 firstPageInTree(root)
             }
-        selectedPageSectionId = first?.first ?: selectedSectionId
+        selectedPageSectionId = first?.first ?: focusedId
         selectedPageId = first?.second?.id.orEmpty()
+    }
+
+    private fun firstPageInNotebook(): Pair<String, NotePage>? {
+        for (section in sections) {
+            firstPageInTree(section)?.let { return it }
+        }
+        return null
     }
 
     private fun firstPageInTree(section: SectionNode): Pair<String, NotePage>? {
@@ -185,14 +230,16 @@ class NotebookWorkspace(
     fun addSectionAtFocus(): SectionNode = addSection(focusedSectionId)
 
     fun addPage(title: String = "无标题页"): NotePage {
+        val section = selectedSection() ?: error("Cannot add page without a selected section")
         val page = NotePage(nextId("page"), title)
-        selectedSection().pages += page
-        selectedPageSectionId = selectedSectionId
+        section.pages += page
+        selectedPageSectionId = section.id
         selectedPageId = page.id
         return page
     }
 
-    fun breadcrumb(sectionId: String = selectedSectionId): List<SectionNode> {
+    fun breadcrumb(sectionId: String? = focusedSectionId): List<SectionNode> {
+        if (sectionId == null) return emptyList()
         fun descend(nodes: List<SectionNode>, path: MutableList<SectionNode>): List<SectionNode>? {
             for (node in nodes) {
                 path += node

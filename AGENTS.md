@@ -30,6 +30,7 @@
 - Options and its quick-toolbar configuration page are full-screen. Any implemented Start or drawing command can be added to or removed from the horizontally scrollable full-page toolbar.
 - Pane type headings are removed. The black-pane `+` offers notebook or section creation; notebook rows are focusable so a section can be added at notebook root, while a focused section receives the new child section.
 - Tags can be selected by direct tap or lasso, transformed with a shared selection frame, and removed by the whole-stroke eraser. Cursor mode routes only finger input to text; stylus contact immediately authors with the most recently selected pen without disabling finger text mode.
+- Selecting a notebook in the black pane clears section focus and updates the gray pane: in direct/current-section mode the page list is empty and page addition is grayed out/disabled, while in recursive mode the gray pane displays all sections, nested sub-sections, and pages across the entire notebook.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -66,6 +67,7 @@
 - [x] Implement the working Start ribbon, one-shot canvas tags, full-screen options, and configurable full-page quick toolbar.
 - [x] Remove redundant pane headings and add notebook-versus-section creation with notebook-level focus.
 - [x] Make tags selectable/erasable, implement lasso drag and corner scaling, and separate finger text input from immediate stylus pen input.
+- [x] Fix gray page pane behavior on notebook selection: empty with disabled `+` in non-recursive mode, and full-notebook hierarchy in recursive mode.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.

@@ -170,4 +170,67 @@ class WorkspaceModelsTest {
         assertEquals("section-product", workspace.selectedPageSectionId)
         assertEquals("page-overview", workspace.selectedPageId)
     }
+
+    @Test
+    fun focusingNotebookInCurrentSectionModeEmptiesThePagePaneAndDisablesSectionScope() {
+        val workspace = NotebookWorkspace.sample()
+        assertEquals(PagePaneMode.CURRENT_SECTION, workspace.pagePaneMode)
+        assertTrue(workspace.hasSelectedSection())
+
+        workspace.focusNotebook()
+
+        org.junit.Assert.assertFalse(workspace.hasSelectedSection())
+        org.junit.Assert.assertNull(workspace.focusedSectionId)
+        assertTrue(workspace.pagePaneRows().isEmpty())
+        org.junit.Assert.assertNull(workspace.selectedPage())
+    }
+
+    @Test
+    fun focusingNotebookInRecursiveModeShowsAllSectionsSubsectionsAndPages() {
+        val workspace = NotebookWorkspace.sample()
+        workspace.setPagePaneMode(PagePaneMode.RECURSIVE)
+        workspace.focusNotebook()
+
+        val labels =
+            workspace.pagePaneRows().map {
+                when (it) {
+                    is PagePaneRow.PageItem -> "P:${it.page.title}:${it.depth}"
+                    is PagePaneRow.SectionHeader -> "S:${it.section.title}:${it.depth}"
+                }
+            }
+
+        assertEquals(
+            listOf(
+                "S:产品设计:0",
+                "P:界面与交互:1",
+                "P:操作流程:1",
+                "S:Notein 兼容:1",
+                "P:格式研究:2",
+                "S:笔迹引擎:2",
+                "P:钢笔手感:3",
+                "P:延迟观察:3",
+                "S:灵感:1",
+                "P:随手记录:2",
+                "S:学习:0",
+                "P:阅读笔记:1",
+            ),
+            labels,
+        )
+        assertEquals("page-overview", workspace.selectedPageId)
+        assertEquals("section-product", workspace.selectedPageSectionId)
+    }
+
+    @Test
+    fun selectingPageWhenNotebookIsFocusedInRecursiveModeUpdatesThePage() {
+        val workspace = NotebookWorkspace.sample()
+        workspace.setPagePaneMode(PagePaneMode.RECURSIVE)
+        workspace.focusNotebook()
+
+        assertTrue(workspace.selectPage("section-study", "page-reading"))
+
+        org.junit.Assert.assertNull(workspace.focusedSectionId)
+        assertEquals("section-study", workspace.selectedPageSectionId)
+        assertEquals("page-reading", workspace.selectedPageId)
+        assertEquals("阅读笔记", workspace.selectedPage()?.title)
+    }
 }
