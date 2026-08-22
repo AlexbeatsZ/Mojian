@@ -3,12 +3,17 @@ package com.meta.inklab
 import android.app.Activity
 import android.annotation.SuppressLint
 import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.PointF
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -26,9 +31,14 @@ import androidx.ink.brush.Brush
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
 import java.util.Locale
+import kotlin.math.sqrt
 
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
+    private val viewport = ViewportState()
+    private val pressureEraser = PressureEraserController()
+    private val shortcutDispatcher = XiaomiStylusShortcutDispatcher()
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     private lateinit var wetInkView: InProgressStrokesView
     private lateinit var dryInkView: DryInkView
@@ -36,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var profileText: TextView
     private lateinit var predictionButton: TextView
+    private lateinit var pressureEraserButton: TextView
 
     private var selectedSize = 4.8649f
     private var pressureCorrect = 2f
@@ -47,6 +58,23 @@ class MainActivity : Activity() {
     private var movingInputAgeMs = 0f
     private var lastHistorySize = 0
     private var lastStatusUpdateMs = 0L
+    private var transformGestureActive = false
+    private var lastGestureFocusX = 0f
+    private var lastGestureFocusY = 0f
+    private var lastGestureSpan = 0f
+    private var pressurePointerId: Int? = null
+    private var lastPressure = 0f
+    private var lastPressurePoint = PointF()
+
+    private val activatePressureEraser =
+        Runnable {
+            val pointerId = pressurePointerId ?: return@Runnable
+            if (!pressureEraser.activate(SystemClock.uptimeMillis())) return@Runnable
+            activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
+            eraseAt(lastPressurePoint)
+            updateSelectionUi()
+            updateStatus(force = true)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,13 +82,24 @@ class MainActivity : Activity() {
         window.statusBarColor = RAIL_COLOR
         window.navigationBarColor = PAPER_COLOR
         setContentView(buildInterface())
+        pressureEraser.stationarySlop = dp(2).toFloat()
         bindInkPipeline()
         updateSelectionUi()
         updateStatus(force = true)
         wetInkView.post { wetInkView.eagerInit() }
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (shortcutDispatcher.dispatch(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onPause() {
+        mainHandler.removeCallbacks(activatePressureEraser)
+        pressureEraser.cancelCandidate()
+        pressurePointerId = null
+        transformGestureActive = false
+        dryInkView.setEraserCursor(null)
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
         super.onPause()
@@ -89,6 +128,7 @@ class MainActivity : Activity() {
         val paper = FrameLayout(this)
         dryInkView = DryInkView(this)
         wetInkView = InProgressStrokesView(this)
+        dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
 
@@ -153,7 +193,7 @@ class MainActivity : Activity() {
 
         profileRow.addView(
             TextView(this).apply {
-                text = "研究钢笔 · 单一笔触"
+                text = "研究钢笔 · 双指移动缩放 · 压感橡皮"
                 setTextColor(Color.rgb(145, 158, 174))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 gravity = Gravity.CENTER_VERTICAL
@@ -184,6 +224,21 @@ class MainActivity : Activity() {
             parameterControl("出墨", initial = 100, max = 200, value = { "$it%" }) {
                 speedCorrect = it / 100f
                 rebuildBrush()
+            },
+        )
+        pressureEraserButton = chip("压擦 开") {
+            pressureEraser.enabled = !pressureEraser.enabled
+            if (!pressureEraser.enabled) {
+                mainHandler.removeCallbacks(activatePressureEraser)
+                pressureEraser.cancelCandidate()
+            }
+            updateSelectionUi()
+            updateStatus(force = true)
+        }
+        optionRow.addView(pressureEraserButton)
+        optionRow.addView(
+            parameterControl("压擦阈值", initial = 38, max = 60, value = { "${it + 40}%" }) {
+                pressureEraser.pressureThreshold = (it + 40) / 100f
             },
         )
 
@@ -239,10 +294,17 @@ class MainActivity : Activity() {
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
-        predictor.record(event)
         lastHistorySize = event.historySize
         val eventAge = (SystemClock.uptimeMillis() - event.eventTime).coerceAtLeast(0L).toFloat()
         movingInputAgeMs = if (movingInputAgeMs == 0f) eventAge else movingInputAgeMs * 0.86f + eventAge * 0.14f
+
+        if (handleFingerGesture(event)) {
+            updateStatus(force = false)
+            return
+        }
+        if (!hasStylusPointer(event) && activeStrokes.isEmpty()) return
+
+        predictor.record(event)
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN,
@@ -250,34 +312,75 @@ class MainActivity : Activity() {
                 val pointerIndex = event.actionIndex
                 val pointerId = event.getPointerId(pointerIndex)
                 if (isStylus(event.getToolType(pointerIndex))) {
+                    pressurePointerId = pointerId
+                    lastPressure = event.getPressure(pointerIndex)
+                    lastPressurePoint =
+                        viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex))
                     activeStrokes[pointerId] =
                         wetInkView.startStroke(
                             event = event,
                             pointerId = pointerId,
                             brush = currentBrush,
+                            motionEventToWorldTransform = viewport.viewToDocumentMatrix(),
+                            strokeToWorldTransform = Matrix(),
                         )
+                    schedulePressureEraser(
+                        pressure = lastPressure,
+                        viewX = event.getX(pointerIndex),
+                        viewY = event.getY(pointerIndex),
+                        eventTime = event.eventTime,
+                    )
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
-                val prediction = if (predictionEnabled) predictor.predict() else null
-                predictedEventSeen = prediction != null
-                for ((pointerId, strokeId) in activeStrokes) {
-                    if (event.findPointerIndex(pointerId) >= 0) {
-                        wetInkView.addToStroke(event, pointerId, strokeId, prediction)
+                val pressureIndex = pressurePointerId?.let(event::findPointerIndex) ?: -1
+                if (pressureIndex >= 0) {
+                    lastPressure = event.getPressure(pressureIndex)
+                    lastPressurePoint =
+                        viewport.viewToDocument(event.getX(pressureIndex), event.getY(pressureIndex))
+                }
+                if (pressureEraser.isErasing) {
+                    if (pressureIndex >= 0) eraseAt(lastPressurePoint)
+                } else {
+                    val prediction = if (predictionEnabled) predictor.predict() else null
+                    predictedEventSeen = prediction != null
+                    for ((pointerId, strokeId) in activeStrokes) {
+                        if (event.findPointerIndex(pointerId) >= 0) {
+                            wetInkView.addToStroke(event, pointerId, strokeId, prediction)
+                        }
+                    }
+                    prediction?.recycle()
+                    if (pressureIndex >= 0) {
+                        schedulePressureEraser(
+                            pressure = lastPressure,
+                            viewX = event.getX(pressureIndex),
+                            viewY = event.getY(pressureIndex),
+                            eventTime = event.eventTime,
+                        )
                     }
                 }
-                prediction?.recycle()
             }
 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP -> {
                 val pointerId = event.getPointerId(event.actionIndex)
                 val strokeId = activeStrokes.remove(pointerId)
-                if (strokeId != null) wetInkView.finishStroke(event, pointerId, strokeId)
+                val wasErasing = pressureEraser.isErasing && pointerId == pressurePointerId
+                if (!wasErasing && strokeId != null) wetInkView.finishStroke(event, pointerId, strokeId)
+                if (pointerId == pressurePointerId) {
+                    mainHandler.removeCallbacks(activatePressureEraser)
+                    pressureEraser.onStylusLift(completedInk = !wasErasing && strokeId != null)
+                    pressurePointerId = null
+                    dryInkView.setEraserCursor(null)
+                }
             }
 
             MotionEvent.ACTION_CANCEL -> {
+                mainHandler.removeCallbacks(activatePressureEraser)
+                pressureEraser.cancelCandidate()
+                pressurePointerId = null
+                dryInkView.setEraserCursor(null)
                 wetInkView.cancelUnfinishedStrokes()
                 activeStrokes.clear()
             }
@@ -295,15 +398,18 @@ class MainActivity : Activity() {
 
     private fun updateSelectionUi() {
         setChipSelected(predictionButton, predictionEnabled)
+        setChipSelected(pressureEraserButton, pressureEraser.enabled)
         predictionButton.text = if (predictionEnabled) "预测 开" else "预测 关"
+        pressureEraserButton.text = if (pressureEraser.enabled) "压擦 开" else "压擦 关"
         profileText.text =
             String.format(
                 Locale.US,
-                "%s  /  笔宽 %.1f mm · 压感 %.0f%% · 出墨 %.0f%%",
+                "%s  /  笔宽 %.1f mm · 压感 %.0f%% · 出墨 %.0f%% · 画布 %.0f%%",
                 "研究钢笔",
                 selectedSize / INTERNAL_UNITS_PER_MM,
                 pressureCorrect * 100f,
                 speedCorrect * 100f,
+                viewport.scale * 100f,
             )
     }
 
@@ -327,7 +433,9 @@ class MainActivity : Activity() {
         statusText.text =
             String.format(
                 Locale.US,
-                "WET→DRY  ·  prediction %-6s  ·  input age %4.1f ms  ·  history %2d  ·  %5.1f Hz  ·  strokes %d",
+                "%-5s · zoom %4.0f%% · prediction %-6s · input age %4.1f ms · history %2d · %5.1f Hz · strokes %d",
+                if (pressureEraser.isErasing) "ERASE" else "PEN",
+                viewport.scale * 100f,
                 predictionState,
                 movingInputAgeMs,
                 lastHistorySize,
@@ -338,6 +446,98 @@ class MainActivity : Activity() {
 
     private fun isStylus(toolType: Int): Boolean =
         toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
+
+    private fun hasStylusPointer(event: MotionEvent): Boolean =
+        (0 until event.pointerCount).any { isStylus(event.getToolType(it)) }
+
+    private fun handleFingerGesture(event: MotionEvent): Boolean {
+        if (hasStylusPointer(event) || activeStrokes.isNotEmpty()) return false
+        val fingerIndices =
+            (0 until event.pointerCount).filter { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
+        if (fingerIndices.isEmpty()) return false
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (fingerIndices.size >= 2) beginTransformGesture(event, fingerIndices)
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (transformGestureActive && fingerIndices.size >= 2) {
+                    val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
+                    val scaleFactor = if (lastGestureSpan > 0f) span / lastGestureSpan else 1f
+                    viewport.applyGesture(
+                        previousFocusX = lastGestureFocusX,
+                        previousFocusY = lastGestureFocusY,
+                        focusX = focusX,
+                        focusY = focusY,
+                        requestedScaleFactor = scaleFactor,
+                    )
+                    lastGestureFocusX = focusX
+                    lastGestureFocusY = focusY
+                    lastGestureSpan = span
+                    dryInkView.setViewport(viewport.documentToViewMatrix())
+                    updateSelectionUi()
+                }
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                val remaining = fingerIndices.filter { it != event.actionIndex }
+                if (remaining.size >= 2) beginTransformGesture(event, remaining)
+                else transformGestureActive = false
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> transformGestureActive = false
+        }
+        return true
+    }
+
+    private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
+        val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
+        transformGestureActive = true
+        lastGestureFocusX = focusX
+        lastGestureFocusY = focusY
+        lastGestureSpan = span
+    }
+
+    private fun gestureGeometry(event: MotionEvent, fingerIndices: List<Int>): Triple<Float, Float, Float> {
+        val first = fingerIndices[0]
+        val second = fingerIndices[1]
+        val firstX = event.getX(first)
+        val firstY = event.getY(first)
+        val secondX = event.getX(second)
+        val secondY = event.getY(second)
+        val deltaX = secondX - firstX
+        val deltaY = secondY - firstY
+        return Triple(
+            (firstX + secondX) * 0.5f,
+            (firstY + secondY) * 0.5f,
+            sqrt(deltaX * deltaX + deltaY * deltaY).coerceAtLeast(1f),
+        )
+    }
+
+    private fun schedulePressureEraser(
+        pressure: Float,
+        viewX: Float,
+        viewY: Float,
+        eventTime: Long,
+    ) {
+        mainHandler.removeCallbacks(activatePressureEraser)
+        val remaining =
+            pressureEraser.updateSample(
+                pressure = pressure,
+                viewX = viewX,
+                viewY = viewY,
+                eventTimeMillis = eventTime,
+            ) ?: return
+        mainHandler.postDelayed(activatePressureEraser, remaining.coerceAtLeast(1L))
+    }
+
+    private fun eraseAt(point: PointF) {
+        val radius = dp(18) / viewport.scale
+        dryInkView.setEraserCursor(point, radius)
+        dryInkView.eraseAtDocument(point.x, point.y, radius)
+    }
 
     private fun chip(label: String, action: () -> Unit): TextView =
         TextView(this).apply {

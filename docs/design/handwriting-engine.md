@@ -31,6 +31,39 @@ Therefore Notein's current native ink core is AndroidX Ink 1.0.0, not an unident
 renderer. Notein's product-specific value is its brush family, configuration, input integration,
 and surrounding note application.
 
+### Protection boundary and Xiaomi prediction path
+
+The APK manifest uses Baidu Protect's `com.sagittarius.v6.StubApplication`. Defined-only DEX
+inspection finds the protection shell and third-party libraries but not Notein's business classes;
+the apparent archive JARs are encrypted payloads loaded at runtime. This explains why resource
+names and native exports decompile normally while the Kotlin/Java state machines that select and
+configure them do not.
+
+The native layer nevertheless proves a separate Xiaomi integration in this exact build:
+
+- `libestimate_interface.so` exports JNI methods named for
+  `com.miui.penengine.facade.algorithm.JNIPathEstimateInterface`;
+- it loads Xiaomi's `libtflite_interface_wrap.touch.so`, present on this tablet at
+  `/system_ext/lib64/`;
+- it forwards model initialization, float-array inference, destruction, and availability checks;
+- Notein bundles an encrypted `assets/predict/estimate.hdb` TensorFlow Lite model for that route.
+
+This is distinct from AndroidX Ink's own `MotionEventPredictor`. It is strong evidence that Notein
+can add a Xiaomi-specific trajectory forecast before or alongside its general Ink authoring path.
+The model's preprocessing window, output horizon, and blending rules are not yet recovered. An
+isolated no-data probe succeeded after declaring Xiaomi's public touch native library: the facade
+reported availability, initialization returned zero, and one raw inference returned a two-float
+array. This proves the route runs on the user's tablet; it does not yet prove what the two normalized
+values mean. The probe and Notein's proprietary model must not become a distributed product
+dependency.
+
+Xiaomi now documents a supported Pencil Engine SDK. Its public integration collects current and
+historical `MotionEvent` points on each move, sets the current display refresh rate, and returns a
+list of predicted points. Production should use that authenticated SDK for Xiaomi-specific
+acceleration and retain AndroidX `MotionEventPredictor` as the portable fallback. This is safer and
+more maintainable than reproducing Notein's private JNI/model packaging. Reference:
+[Xiaomi Pencil Engine client integration guide](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=1884).
+
 ### Local backup and stroke records
 
 The user-authorized local backup is a 1,579,602,577-byte unencrypted ZIP with 170 entries:
@@ -138,6 +171,9 @@ The tablet exhibits touch/stylus instability while charging. Evaluate brush smoo
 alignment while unplugged; charger-induced digitizer noise is a separate raw-input condition and
 must not be attributed to the brush algorithm without a controlled capture.
 
+Viewport, touch arbitration, Xiaomi shortcut input, and pressure-erasing behavior are specified in
+`docs/design/input-gestures.md` and must preserve the same wet/dry document transform.
+
 ### Interface direction
 
 Subject: a stylus-engine test bench for a technically engaged tablet user.
@@ -181,6 +217,12 @@ strip. The signature element is the explicit wet/predicted-ink state rather than
   `assembleDebug` and `lintDebug` pass; the APK was updated directly through wireless ADB and cold
   launched in 393 ms. Live device interaction reached the newly extended high-value region without
   an application exception.
+- The later 2026-08-22 revision adds shared-coordinate two-finger pan/pinch zoom, a temporary
+  pressure whole-stroke eraser, and an unbound Xiaomi shortcut adapter. Its first device build was
+  installed and cold-launched in 720 ms. After the user's heavy-writing observation, the eraser
+  candidate was changed to require stationarity as well as pressure; ten unit tests plus
+  `assembleDebug` and `lintDebug` pass. After the user supplied the changed wireless-debugging
+  port, the corrected APK was installed and cold-launched in 408 ms.
 
 The remaining acceptance items—palm rejection quality, visible wet-to-dry handoff, nib alignment, and subjective brush character—require the user's physical stylus judgment.
 

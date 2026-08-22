@@ -58,3 +58,18 @@ Test unplugged. This tablet has shown charging-related touch/stylus noise, which
 rather than evidence about the brush model.
 
 The amber `input age` value measures how old the delivered input event is when handled. It is not an end-to-end pen latency measurement.
+
+## Gesture and pressure-eraser test
+
+- Move two fingers together to pan. Pinch around a recognizable stroke to zoom; the point between
+  the fingers should stay anchored.
+- One finger must neither write nor move the page.
+- Write and lift one normal stroke. On the next contact, press above the displayed `压擦阈值` for
+  about 140 ms. The provisional ink should disappear and a circular whole-stroke eraser should
+  remain active until lift.
+- After zooming, write directly beside an existing stroke and confirm wet ink, dry ink, and the nib
+  stay in the same coordinate space.
+
+The Xiaomi shortcut adapter recognizes PageUp/PageDown only from the observed
+`Xiaomi Smart Pen Keyboard` device. No actions are registered yet, so those exact pen events are
+consumed and intentionally do nothing; PageUp/PageDown from ordinary keyboards are not captured.
