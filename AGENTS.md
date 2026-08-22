@@ -83,8 +83,7 @@
 - Lab build and lint: from `android`, run `.\gradlew.bat :app:assembleDebug :app:lintDebug`.
 - Workspace unit tests: from `android`, run `.\gradlew.bat :app:testDebugUnitTest`; navigation tests cover unlimited section depth and both page-pane modes, while tool tests cover required presets and add/delete behavior.
 - Debug APK: `android\app\build\outputs\apk\debug\app-debug.apk`; installed debug package/activity: `com.meta.inklab.debug/com.meta.inklab.MainActivity`.
-- Tablet-staged v0.3.1 APK: `/sdcard/Download/inklab-v0.3.1-debug.apk` (14,759,275 bytes). Unlock the tablet, open it in Xiaomi File Manager, and use `单次安装授权` before runtime/visual QA.
-- HyperOS rejects streamed ADB installs with `INSTALL_FAILED_USER_RESTRICTED`. Use Xiaomi File Manager and the installer menu's one-time `单次安装授权`; do not enable a persistent global install setting.
+- Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
 # Durable Lessons
 
