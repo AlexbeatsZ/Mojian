@@ -188,6 +188,7 @@ class MainActivity : Activity() {
 
     private lateinit var wetInkView: InProgressStrokesView
     private lateinit var dryInkView: DryInkView
+    private lateinit var canvasBackgroundLayer: CanvasBackgroundLayer
     private lateinit var predictor: MotionEventPredictor
     private lateinit var currentBrush: Brush
     private lateinit var toolShelfRow: LinearLayout
@@ -1951,6 +1952,7 @@ class MainActivity : Activity() {
         pageSurfaceForeground = PageSurfaceView(this, viewport, PageSurfaceLayer.FOREGROUND)
         dryInkView = DryInkView(this)
         dryInkView.backgroundFormat = workspace.selectedPage()?.viewSettings?.backgroundFormat ?: legacyBackgroundFormat
+        canvasBackgroundLayer = CanvasBackgroundLayer(this, dryInkView)
         wetInkView = InProgressStrokesView(this)
         insertContentLayer = InsertContentLayer(this, viewport, pageContentRepository)
         tagLayer = CanvasTagLayer(this, viewport)
@@ -1988,6 +1990,7 @@ class MainActivity : Activity() {
         insertContentLayer.onObjectActivated = ::activateInsertObject
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paperContainer.addView(pageSurfaceBackground, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(canvasBackgroundLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(insertContentLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))

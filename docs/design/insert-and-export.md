@@ -66,6 +66,11 @@ PDF export writes the current visible page. It contains three Optional Content G
 2. `插入内容`
 3. `墨迹与文字`
 
+The live canvas follows the same semantic order. Paper color and rule/grid/dot patterns render below
+all inserted images, PDF printouts, stickers, tables, and attachments; dry/wet ink, text, and tags
+render above inserted content. Background patterns must not share a top-level view layer with ink,
+because doing so makes the pattern bleed across opaque inserted images.
+
 Export is intentionally light-theme: the page background becomes white and logical black ink is
 rendered black; blue, red, and other pen colors remain unchanged. View-only image inversion is not
 applied. Each group is a separate raster XObject with alpha preserved through a soft mask. The PDF is

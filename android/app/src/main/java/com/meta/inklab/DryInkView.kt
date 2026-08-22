@@ -48,8 +48,11 @@ class DryInkView(context: Context) : View(context) {
     var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
         set(value) {
             field = value
-            invalidate()
+            invalidateBackground()
         }
+
+    private var renderBackgroundInInkLayer = true
+    private var backgroundInvalidator: (() -> Unit)? = null
 
     private val strokes = mutableListOf<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
@@ -192,6 +195,14 @@ class DryInkView(context: Context) : View(context) {
     fun setViewport(matrix: Matrix) {
         documentToView.set(matrix)
         invalidate()
+        backgroundInvalidator?.invoke()
+    }
+
+    internal fun delegateBackgroundRendering(invalidator: () -> Unit) {
+        renderBackgroundInInkLayer = false
+        backgroundInvalidator = invalidator
+        invalidate()
+        invalidator()
     }
 
     fun setDarkBackground(enabled: Boolean) {
@@ -364,9 +375,17 @@ class DryInkView(context: Context) : View(context) {
 
     fun renderBackgroundForExport(canvas: Canvas, documentMatrix: Matrix = documentToView) {
         canvas.drawColor(Color.WHITE)
+        renderBackground(canvas, documentMatrix, exportTheme = true)
+    }
+
+    fun renderBackground(canvas: Canvas, documentMatrix: Matrix = documentToView) {
+        renderBackground(canvas, documentMatrix, exportTheme = false)
+    }
+
+    private fun renderBackground(canvas: Canvas, documentMatrix: Matrix, exportTheme: Boolean) {
         canvas.save()
         canvas.concat(documentMatrix)
-        drawGrid(canvas, exportTheme = true)
+        drawGrid(canvas, exportTheme)
         canvas.restore()
     }
 
@@ -384,7 +403,7 @@ class DryInkView(context: Context) : View(context) {
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
             transformedCanvas.concat(documentToView)
-            drawGrid(transformedCanvas)
+            if (renderBackgroundInInkLayer) drawGrid(transformedCanvas)
             val startY = insertSpaceStartY
             val currentY = insertSpaceCurrentY
             for (stroke in strokes) {
@@ -546,6 +565,10 @@ class DryInkView(context: Context) : View(context) {
         val inverse = Matrix()
         if (!documentToView.invert(inverse)) return RectF(0f, 0f, width.toFloat(), height.toFloat())
         return RectF(0f, 0f, width.toFloat(), height.toFloat()).also(inverse::mapRect)
+    }
+
+    private fun invalidateBackground() {
+        if (renderBackgroundInInkLayer) invalidate() else backgroundInvalidator?.invoke()
     }
 
     private fun strokeTouchesCircle(stroke: Stroke, x: Float, y: Float, radius: Float): Boolean {
