@@ -29,11 +29,9 @@ This document is an interoperability assessment and a clean-room design boundary
 
 ### Supported backup path
 
-Decoded application resources identify the local-backup location as:
+Decoded resources mention `Internal storage/Documents/Notein/backup`, but the observed 2.0.10.0 local-backup flow actually opens Android's system Save-As picker with the default filename `backup.zip`. The user-authorized snapshot was saved as `/sdcard/Download/backup.zip` and completed successfully. The same resources say imported backups coexist with current notes rather than replacing them.
 
-`Internal storage/Documents/Notein/backup`
-
-The same resources say that imported backups coexist with current notes and do not overwrite or replace them. At inspection time, `Documents/Notein/backup` did not exist and no local backup was present. `Documents/Notein/share` did exist.
+The resulting 1,579,602,577-byte file is an unencrypted, monolithic full-library ZIP with 167 per-note `.in` nested ZIPs, two `.template` entries, and one `.tree`. Each inspected `.in` contains a Room/SQLite v25 database, JSON metadata, and the original source PDF when applicable. This is a usable import boundary, but the outer full-library snapshot is not a live merge format.
 
 The resources also distinguish three separate mechanisms:
 
@@ -64,24 +62,23 @@ It does not solve user-controlled live synchronization:
 
 This route is acceptable only as an isolated convenience client, preferably with Notein's own sync. It does not meet the requested Syncthing-first design on its own.
 
-### Clean-room Windows companion: feasible, conditional on backup format
+### Clean-room Windows companion: feasible for import; Notein write compatibility remains conditional
 
-The promising route is to treat Notein's app-supported local backup as the interoperability boundary:
+The backup experiment resolved the first uncertainty: the container is open and structurally parseable. The clean-room route should now treat the app-supported backup as a read-only interoperability boundary:
 
-1. Create one backup containing only a disposable test notebook.
-2. Copy it from `Documents/Notein/backup` without modifying it.
-3. Determine whether it is ZIP, SQLite, protobuf/JSON plus assets, encrypted data, or another container.
-4. Build a read-only parser and renderer first.
-5. Compare its rendered page with Notein's PDF/PNG export.
-6. Only after the parser is correct, generate a modified copy and import it as a coexisting notebook.
-7. Never test write-back against the only copy of a real notebook.
+1. Keep the tablet-created backup as a restorable snapshot and inspect only copies.
+2. Build a read-only parser for the outer ZIP, per-note ZIP, metadata, Room entities, and both stroke families.
+3. Render selected disposable pages and compare them with Notein PDF/PNG exports.
+4. Define a clean, product-owned notebook model rather than using Notein's monolithic outer ZIP as live state.
+5. Only after rendering is correct, generate a modified copy and import it as a coexisting notebook.
+6. Never test write-back against the only copy of a real notebook.
 
 The possible outcomes are:
 
 | Backup result | Windows scope |
 | --- | --- |
-| Open container with documented-enough vector/page records | Full clean-room viewer/editor is feasible. |
-| Open container but proprietary brush records | Viewer plus basic pen/highlighter writing is feasible; exact brush fidelity may not be. |
+| Open container with documented-enough vector/page records | **Observed.** Read-only viewer/importer and an independent editor are feasible. |
+| Open container but proprietary brush records | **Partly observed.** Legacy points are explicit; new strokes are parseable, but the complete private `notein-fountain-v1` brush graph is not persisted. |
 | Encrypted or signed container with keys only in private app state | Safe write-compatible client is not feasible without vendor cooperation; use a PDF-based bridge or emulator. |
 | Monolithic full-library snapshot | Import/export can be automated, but it is not suitable for concurrent Syncthing merges. |
 
@@ -91,7 +88,7 @@ Do not sync `/Android/data/com.orion.notein/files`; it is mostly previews and om
 
 Use two layers:
 
-1. **Exchange layer** — Notein-generated backup files in `Documents/Notein/backup`. Syncthing may copy these as immutable snapshots.
+1. **Exchange layer** — Notein-generated `backup.zip` files saved through the system picker. Syncthing may copy renamed/versioned files as immutable snapshots.
 2. **Canonical PC layer** — one directory per notebook, owned by the companion app, for example:
 
 ```text
@@ -131,18 +128,18 @@ This is a new compatible product, not a source-code port. The first deliverable 
 
 ## Next Required Experiment
 
-On the unlocked tablet:
+Prove a read-only renderer against disposable content:
 
-1. In Notein, create a disposable notebook containing one short stroke and one text box.
-2. Open Settings > Local Backup > Back Up Now.
-3. Copy the new file from `Documents/Notein/backup` to the analysis workspace.
-4. Record its filename, size, file signature, archive entries, and whether any encryption/signature metadata is present.
-5. Export the same notebook as PDF or PNG for a rendering reference.
-
-Creating the backup is a deliberate device write and may include every notebook depending on Notein's implementation. Before pressing the button, verify the UI's scope. Do not publish or commit the resulting backup.
+1. Identify one user-designated disposable note/page in a copied backup.
+2. Decode both legacy `record_json` and new `ink_stroke_blob` inputs without displaying unrelated note content.
+3. Render page background, layers, and strokes from the copy.
+4. Compare geometry and bounds with a Notein PDF/PNG export.
+5. Record unsupported entities and visual differences before attempting any generated import.
 
 ## Current Conclusion
 
 - Native Windows port of the APK: **no**.
 - Same APK in an Android runtime: **yes, with compromises**, but Syncthing cannot safely live-sync the private database.
-- Independent Windows writer plus Syncthing: **potentially yes**, with the app-supported local backup as the only sensible starting boundary. Final feasibility depends on one disposable backup sample.
+- Independent product plus Syncthing: **yes as a clean-room notebook application** using its own per-notebook files and conflict model.
+- Read-only Notein import: **feasible** from the observed open ZIP/SQLite backup.
+- Notein-compatible write-back: **still conditional** on a disposable render/round-trip test; it should not block development of the independent handwriting engine.
