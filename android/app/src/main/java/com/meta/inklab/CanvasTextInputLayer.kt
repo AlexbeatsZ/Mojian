@@ -167,18 +167,18 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled) return false
+        if (!textModeEnabled || !isFingerEvent(event)) return false
         return super.dispatchTouchEvent(event)
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled) return false
+        if (!textModeEnabled || !isFingerEvent(event)) return false
         if (event.actionMasked != MotionEvent.ACTION_DOWN) return false
         return editorAt(event.x, event.y) == null
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled) return false
+        if (!textModeEnabled || !isFingerEvent(event)) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
@@ -353,6 +353,12 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         }
         return null
     }
+
+    private fun isFingerEvent(event: MotionEvent): Boolean =
+        InputModality.acceptsTextInput(
+            pointerToolTypes = (0 until event.pointerCount).map(event::getToolType),
+            fingerToolType = MotionEvent.TOOL_TYPE_FINGER,
+        )
 
     private fun forEachEditor(action: (EditText) -> Unit) {
         for (index in 0 until childCount) (getChildAt(index) as? EditText)?.let(action)

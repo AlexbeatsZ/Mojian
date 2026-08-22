@@ -7,7 +7,7 @@
 # Current State
 
 - Repository was initialized with feasibility commit `817787a`; it has no remote.
-- Tablet is reachable through wireless ADB at `192.168.31.243:38317` (Xiaomi `23046RP50C`, Android 15 / API 35, arm64). The wireless-debugging port changes across sessions; rediscover it with `adb mdns services` instead of assuming the old endpoint.
+- Tablet is reachable through wireless ADB at `192.168.31.243:35539` (Xiaomi `23046RP50C`, Android 15 / API 35, arm64). The wireless-debugging port changes across sessions; rediscover it with `adb mdns services` instead of assuming the old endpoint.
 - Installed China package: `com.orion.notein`, `v2.0.10.0` (`versionCode=343`, `minSdk=26`, `targetSdk=35`), single 114,190,617-byte APK, installed from Xiaomi Market.
 - APK is non-debuggable and app-private `/data/user/0/com.orion.notein` cannot be read with `run-as`.
 - App-specific external files are readable at `/sdcard/Android/data/com.orion.notein/files`; current snapshot is about 256 MiB / 5,638 files, mainly UUID-named blobs and PNGs.
@@ -16,10 +16,10 @@
 - A user-authorized full local backup was created through Android's save picker as `/sdcard/Download/backup.zip` (1,579,602,577 bytes). Keep the tablet copy; the analysis copy is temporary and must not be committed.
 - The backup is an unencrypted ZIP containing 167 per-note `.in` nested ZIPs, two `.template` entries, and one `.tree`; per-note containers include a Room/SQLite v25 database and metadata, plus source PDFs when applicable.
 - Notein uses AndroidX Ink 1.0.0 exactly: its arm64 `libink.so` matches the Google Maven artifact in size and ELF Build ID.
-- Android workspace prototype v0.3.0 passes unit tests, debug build, and lint as `com.meta.inklab.debug`. It has no Internet/storage permission and remains separate from the untouched Notein package. The APK is staged at `/sdcard/Download/inklab-v0.3.0-debug.apk`; the last installed tablet build is still v0.2.0 because the tablet was locked before Xiaomi's one-time installer authorization could be accepted.
+- Android workspace prototype v0.3.1 passes unit tests, debug build, and lint as `com.meta.inklab.debug`. It has no Internet/storage permission and remains separate from the untouched Notein package. The APK is staged at `/sdcard/Download/inklab-v0.3.1-debug.apk`; the last installed tablet build is still v0.2.0 because Xiaomi's one-time installer authorization must be accepted on-device.
 - The installed lab uses AndroidX Ink wet/dry authoring, motion prediction, one adjustable fountain-pen stroke, prediction toggle, undo, and clear. Controls are width 0.1–2.0 mm, pressure 0–400%, and ink flow 0–200%, with Notein-observed defaults 0.4 mm / 200% / 100%.
 - The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Completed ink applies the viewport inside `ViewStrokeRenderer` so screen-space antialiasing remains sharp while zoomed. Tests, build, and lint pass; the corrected APK was installed and cold-launched in 503 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
-- Workspace v0.3.0 adds compact OneNote-desktop-inspired dark chrome, multiple notebooks, recursively nestable sections, separate section/page panes with settings-owned `本层` and `递归` page modes, per-tool flyouts, add/delete tool presets, logical black/blue/red pens, a translucent highlighter, explicit whole-stroke eraser, functional lasso selection/delete, and a working Start ribbon. Search, Insert/View tabs, pixel erasing, and lasso move/resize remain labeled shells.
+- Workspace v0.3.1 adds compact OneNote-desktop-inspired dark chrome, multiple notebooks, recursively nestable sections, separate section/page panes with settings-owned `本层` and `递归` page modes, per-tool flyouts, add/delete tool presets, logical black/blue/red pens, a translucent highlighter, explicit whole-stroke eraser, functional lasso selection/delete/move/scale, and a working Start ribbon. Search, Insert/View tabs, and pixel erasing remain labeled shells.
 - The persistent vertical rail independently toggles the black notebook/section pane and gray page pane. The sole section-add button is in the black-pane header: it adds beneath a focused section or at notebook root after blank-space focus clearing. The black pane never renders pages, and the gray pane never renders child-section navigation nodes.
 - `文件` opens a full-screen dark Backstage-style notebook/options surface. Prediction and direct-versus-recursive page display live in Options rather than the main workspace. The compact icon-only drawing ribbon uses physical-pixel hairline separators, opens a tool flyout only on the second click of an already selected tool, and leaves the canvas free of permanent page/tool/zoom overlays.
 - The panorama hand is functional: selected hand mode enables one-finger panning, selecting it again or choosing a drawing tool exits the mode, and the default remains two-finger pan/pinch with inert single-finger touch. Tablet visual QA confirms the selected state and the expected grid displacement after a 200 x 130 px one-finger drag.
@@ -29,6 +29,7 @@
 - The `开始` ribbon provides working clipboard, rich-text character/paragraph formatting, styles, and pure-red page tags. Tags use a one-shot choose-then-place interaction and tag search recenters the document on a chosen result.
 - Options and its quick-toolbar configuration page are full-screen. Any implemented Start or drawing command can be added to or removed from the horizontally scrollable full-page toolbar.
 - Pane type headings are removed. The black-pane `+` offers notebook or section creation; notebook rows are focusable so a section can be added at notebook root, while a focused section receives the new child section.
+- Tags can be selected by direct tap or lasso, transformed with a shared selection frame, and removed by the whole-stroke eraser. Cursor mode routes only finger input to text; stylus contact immediately authors with the most recently selected pen without disabling finger text mode.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -64,6 +65,7 @@
 - [x] Clear the stationary pressure-eraser circle on stylus lift.
 - [x] Implement the working Start ribbon, one-shot canvas tags, full-screen options, and configurable full-page quick toolbar.
 - [x] Remove redundant pane headings and add notebook-versus-section creation with notebook-level focus.
+- [x] Make tags selectable/erasable, implement lasso drag and corner scaling, and separate finger text input from immediate stylus pen input.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
@@ -79,7 +81,7 @@
 - Lab build and lint: from `android`, run `.\gradlew.bat :app:assembleDebug :app:lintDebug`.
 - Workspace unit tests: from `android`, run `.\gradlew.bat :app:testDebugUnitTest`; navigation tests cover unlimited section depth and both page-pane modes, while tool tests cover required presets and add/delete behavior.
 - Debug APK: `android\app\build\outputs\apk\debug\app-debug.apk`; installed debug package/activity: `com.meta.inklab.debug/com.meta.inklab.MainActivity`.
-- Tablet-staged v0.3.0 APK: `/sdcard/Download/inklab-v0.3.0-debug.apk` (14,700,807 bytes). Unlock the tablet, open it in Xiaomi File Manager, and use `单次安装授权` before runtime/visual QA.
+- Tablet-staged v0.3.1 APK: `/sdcard/Download/inklab-v0.3.1-debug.apk` (14,759,275 bytes). Unlock the tablet, open it in Xiaomi File Manager, and use `单次安装授权` before runtime/visual QA.
 - HyperOS rejects streamed ADB installs with `INSTALL_FAILED_USER_RESTRICTED`. Use Xiaomi File Manager and the installer menu's one-time `单次安装授权`; do not enable a persistent global install setting.
 
 # Durable Lessons
@@ -102,3 +104,5 @@
 - An empty first `adb mdns services` result does not prove that wireless debugging is disabled; retry discovery before diagnosing state because the service advertisement can be transient.
 - A custom dark view hierarchy still inherits the application base theme for system menus and dialogs. Keep the Android base theme dark as well, or `PopupMenu` surfaces will remain light.
 - Keep section and page pane data types separate. The black pane recursively flattens only `SectionNode`; the gray pane either lists direct `NotePage` items or a separate recursive stream of section headers plus owned pages. A deep-page selection must not silently change the black-pane root.
+- Keep text input modality filtering at the text-layer dispatch boundary. Changing only the selected toolbar mode cannot prevent an enabled `EditText` tree from consuming stylus events.
+- Render and hit-test a mixed ink/tag selection through one top-level overlay, but keep the underlying content transforms in their owning layers so selection chrome never becomes document content.

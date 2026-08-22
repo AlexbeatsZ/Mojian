@@ -87,12 +87,12 @@ Required working tools:
   ink-flow/speed response, and optional stationary pressure eraser;
 - highlighter with the same restricted black/blue/red palette, width, and opacity;
 - whole-stroke eraser with its own radius;
-- freeform lasso that selects intersecting complete strokes and can delete the selection.
+- freeform lasso that selects intersecting complete strokes and enclosed page tags, can delete the
+  selection, supports dragging from inside the selection frame, and scales from any corner handle.
 
 The drawing ribbon is icon-only. A first tap on an unselected tool selects it without interruption;
 tapping the already selected tool opens its own flyout. The flyout shows only parameters meaningful
-to that tool. Pixel erasing and lasso move/resize are labeled shells; they must not masquerade as
-completed functions.
+to that tool. Pixel erasing remains a labeled shell; it must not masquerade as a completed function.
 
 Follow the desktop OneNote grouping rhythm: undo, a hairline divider, text cursor and lasso,
 another hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, then
@@ -100,11 +100,13 @@ low-frequency page clearing after a final divider. Dividers are one physical pix
 tablet rather than one density-independent pixel. Keep icons and selected frames compact and do
 not restore permanent tool labels.
 
-The cursor is a working session-only text mode. Selecting it suppresses drawing-tool selection;
-tapping the paper creates a transparent multi-line editor at that point, shows a visible caret, and
-requests the Android keyboard. Choosing a drawing tool or the panorama hand exits text mode. Text
-persistence and document-coordinate pan/zoom are later storage/rendering work, not implied by this
-interaction prototype.
+The cursor is a working session-only, finger-only text mode. Selecting it suppresses finger drawing;
+tapping the paper with a finger creates a transparent multi-line editor at that point, shows a
+visible caret, and requests the Android keyboard. Stylus events bypass the text layer and author
+with the most recently selected pen immediately, without requiring the user to leave cursor mode;
+the hardware eraser still erases. Choosing a drawing tool or the panorama hand exits text mode.
+Text persistence and document-coordinate pan/zoom are later storage/rendering work, not implied by
+this interaction prototype.
 
 The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
 allows one-finger panning while preserving two-finger pinch; deselecting it restores two-finger-only
@@ -129,14 +131,18 @@ do not claim that desktop Calibri is installed on the tablet.
 The tag menu contains exactly `重要` and `问题`. Choosing one arms a one-shot placement mode; the
 next tap on the paper places a minimal pure-red tag in document coordinates. The toolbar `标记` and
 `查找标记` icons use the same red with no decorative frame. Tag search lists placed tags, recenters
-the page on the chosen result, and briefly identifies it. Tags are session-only until the document
-storage model is implemented.
+the page on the chosen result, and briefly identifies it. A tag can also be selected by tapping it,
+included in a lasso selection, moved or scaled with that selection, and removed by either the
+whole-stroke eraser or selection deletion. Tags are session-only until the document storage model
+is implemented.
 
 ## Preserved input behavior
 
-- Stylus input authors the selected pen or highlighter.
-- The explicit eraser and hardware eraser erase complete intersecting strokes.
-- The lasso consumes stylus motion without creating ink.
+- Stylus input authors the selected pen or highlighter; while finger text mode is active it authors
+  with the most recently selected pen.
+- The explicit eraser and hardware eraser erase complete intersecting strokes and page tags.
+- The lasso consumes stylus motion without creating ink, and its selection frame owns move/scale
+  gestures while the lasso tool remains active.
 - One finger does not write or move the page; two fingers pan/zoom only when no stylus stroke is
   active.
 - Prediction, undo, clear-with-confirmation, pressure erasing, viewport transforms, Xiaomi shortcut

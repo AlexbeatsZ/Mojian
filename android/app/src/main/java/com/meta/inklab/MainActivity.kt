@@ -8,6 +8,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -82,6 +83,7 @@ class MainActivity : Activity() {
     private lateinit var floatingToolbox: View
     private lateinit var textInputLayer: CanvasTextInputLayer
     private lateinit var tagLayer: CanvasTagLayer
+    private lateinit var selectionOverlay: SelectionOverlayView
     private lateinit var sectionPaneToggle: View
     private lateinit var pagePaneToggle: View
     private lateinit var toolbarToggle: View
@@ -97,6 +99,7 @@ class MainActivity : Activity() {
     private var lastPressure = 0f
     private var lastPressurePoint = PointF()
     private var activeDirectTool: DrawingToolKind? = null
+    private var lastPenToolId: String = toolShelf.tools.first { it.kind == DrawingToolKind.PEN }.id
     private var singleFingerPanEnabled = false
     private var textModeEnabled = false
     private var sectionPaneVisible = true
@@ -144,7 +147,7 @@ class MainActivity : Activity() {
         activeDirectTool = null
         transformGestureActive = false
         dryInkView.setEraserCursor(null)
-        dryInkView.clearSelection()
+        clearContentSelection()
         textModeEnabled = false
         restoreTextModeAfterTagPlacement = false
         if (::textInputLayer.isInitialized) textInputLayer.setTextMode(false)
@@ -338,7 +341,7 @@ class MainActivity : Activity() {
                     isEnabled = notebook.id != notebookLibrary.activeNotebookId
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
-                        dryInkView.clearSelection()
+                        clearContentSelection()
                         renderWorkspace()
                         dialog.dismiss()
                     }
@@ -889,6 +892,8 @@ class MainActivity : Activity() {
         singleFingerPanEnabled = false
         transformGestureActive = false
         tagLayer.beginPlacement(kind)
+        selectionOverlay.selectionEnabled = false
+        tagLayer.selectionModeEnabled = false
         Toast.makeText(this, "点击页面放置${kind.label}标记", Toast.LENGTH_SHORT).show()
     }
 
@@ -903,6 +908,8 @@ class MainActivity : Activity() {
                 menu.add("${index + 1}. ${tag.kind.label}").setOnMenuItemClickListener {
                     viewport.centerDocumentPoint(tag.documentX, tag.documentY, tagLayer.width * 0.5f, tagLayer.height * 0.5f)
                     dryInkView.setViewport(viewport.documentToViewMatrix())
+                    tagLayer.invalidate()
+                    selectionOverlay.invalidate()
                     tagLayer.focusTag(index)
                     true
                 }
@@ -983,17 +990,37 @@ class MainActivity : Activity() {
         wetInkView = InProgressStrokesView(this)
         tagLayer = CanvasTagLayer(this, viewport)
         textInputLayer = CanvasTextInputLayer(this)
+        selectionOverlay =
+            SelectionOverlayView(this, viewport).apply {
+                selectionBoundsProvider = ::combinedSelectionBounds
+                onTranslateSelection = { deltaX, deltaY ->
+                    dryInkView.translateSelection(deltaX, deltaY)
+                    tagLayer.translateSelection(deltaX, deltaY)
+                }
+                onScaleSelection = { anchorX, anchorY, factor ->
+                    dryInkView.scaleSelection(anchorX, anchorY, factor)
+                    tagLayer.scaleSelection(anchorX, anchorY, factor)
+                }
+                onTransformFinished = { renderToolDetails() }
+            }
         tagLayer.onPlacementFinished = { tag ->
             if (restoreTextModeAfterTagPlacement) setTextMode(true)
             restoreTextModeAfterTagPlacement = false
+            updateSelectionInteraction()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
             renderFullPageToolbar()
+        }
+        tagLayer.onTagClicked = {
+            dryInkView.clearSelection()
+            selectionOverlay.invalidate()
+            renderToolDetails()
         }
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
-        paper.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paper.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        paper.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        paper.addView(selectionOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
 
         floatingToolbox = buildFloatingToolbox()
         paper.addView(
@@ -1077,7 +1104,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
                         notebook.focusNotebook()
-                        dryInkView.clearSelection()
+                        clearContentSelection()
                         renderWorkspace()
                     }
                 }
@@ -1129,7 +1156,7 @@ class MainActivity : Activity() {
                         setOnClickListener {
                             notebookLibrary.selectNotebook(notebook.id)
                             notebook.selectSection(section.id)
-                            dryInkView.clearSelection()
+                            clearContentSelection()
                             renderWorkspace()
                         }
                     }
@@ -1319,7 +1346,7 @@ class MainActivity : Activity() {
         return when (id) {
             "draw:undo" ->
                 commandButton("arrow_undo", "撤销", false) {
-                    dryInkView.clearSelection()
+                    clearContentSelection()
                     dryInkView.undo()
                 }
             "draw:cursor" -> commandButton("cursor", "键入文本", textModeEnabled) { setTextMode(!textModeEnabled) }
@@ -1341,7 +1368,7 @@ class MainActivity : Activity() {
         row.removeAllViews()
         row.addView(
             commandButton("arrow_undo", "撤销", selected = false) {
-                dryInkView.clearSelection()
+                clearContentSelection()
                 dryInkView.undo()
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
@@ -1486,15 +1513,15 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                addToolDetailLine(detailHint("闭合套索后选择整条笔迹"))
+                addToolDetailLine(detailHint("闭合套索可同时选择笔迹和标记"))
                 addToolDetailLine(
-                    detailChip("删除所选 ${dryInkView.selectedCount()}", dryInkView.selectedCount() > 0) {
-                        val removed = dryInkView.deleteSelection()
-                        if (removed == 0) Toast.makeText(this, "请先圈选笔迹", Toast.LENGTH_SHORT).show()
+                    detailChip("删除所选 ${selectedContentCount()}", selectedContentCount() > 0) {
+                        val removed = deleteContentSelection()
+                        if (removed == 0) Toast.makeText(this, "请先选择笔迹或标记", Toast.LENGTH_SHORT).show()
                         renderToolDetails()
                     },
                 )
-                addToolDetailLine(detailHint("移动与缩放稍后接入"))
+                addToolDetailLine(detailHint("在框内按住拖动；拖动四角缩放"))
             }
         }
 
@@ -1508,7 +1535,10 @@ class MainActivity : Activity() {
                 }
                 fullPageToolbarConfig.remove("tool:$removedToolId")
                 persistFullPageToolbarIds()
-                dryInkView.clearSelection()
+                clearContentSelection()
+                if (removedToolId == lastPenToolId) {
+                    toolShelf.tools.firstOrNull { it.kind == DrawingToolKind.PEN }?.let { lastPenToolId = it.id }
+                }
                 toolDetailPopup?.dismiss()
                 toolDetailPopup = null
                 rebuildBrush()
@@ -1611,18 +1641,26 @@ class MainActivity : Activity() {
         pressurePointerId = pointerId
         lastPressure = event.getPressure(pointerIndex)
         lastPressurePoint = viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex))
-        activeDirectTool =
-            if (event.getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_ERASER) DrawingToolKind.ERASER
-            else toolShelf.selected.kind
+        val hardwareEraser = event.getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_ERASER
+        val directPreset =
+            when {
+                hardwareEraser -> null
+                textModeEnabled -> cursorModePenPreset()
+                else -> toolShelf.selected
+            }
+        activeDirectTool = if (hardwareEraser) DrawingToolKind.ERASER else directPreset?.kind ?: DrawingToolKind.PEN
 
         when (activeDirectTool) {
             DrawingToolKind.PEN,
             DrawingToolKind.HIGHLIGHTER -> {
+                clearContentSelection()
+                pressureEraser.enabled =
+                    activeDirectTool == DrawingToolKind.PEN && (directPreset?.pressureEraseEnabled ?: false)
                 activeStrokes[pointerId] =
                     wetInkView.startStroke(
                         event = event,
                         pointerId = pointerId,
-                        brush = currentBrush,
+                        brush = directPreset?.let(::brushFor) ?: currentBrush,
                         motionEventToWorldTransform = viewport.viewToDocumentMatrix(),
                         strokeToWorldTransform = Matrix(),
                     )
@@ -1637,7 +1675,11 @@ class MainActivity : Activity() {
                 eraseAt(lastPressurePoint, selectedEraserRadius())
             }
 
-            DrawingToolKind.LASSO -> dryInkView.beginLasso(lastPressurePoint)
+            DrawingToolKind.LASSO -> {
+                tagLayer.clearSelection()
+                selectionOverlay.invalidate()
+                dryInkView.beginLasso(lastPressurePoint)
+            }
             null -> Unit
         }
     }
@@ -1686,7 +1728,9 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                dryInkView.finishLasso()
+                val polygon = dryInkView.finishLasso()
+                tagLayer.selectInPolygon(polygon)
+                selectionOverlay.invalidate()
                 renderToolDetails()
             }
 
@@ -1699,6 +1743,7 @@ class MainActivity : Activity() {
         }
         pressurePointerId = null
         activeDirectTool = null
+        syncPressureEraserWithTool()
     }
 
     private fun cancelStylusAction() {
@@ -1707,14 +1752,17 @@ class MainActivity : Activity() {
         pressurePointerId = null
         activeDirectTool = null
         dryInkView.setEraserCursor(null)
-        dryInkView.clearSelection()
+        clearContentSelection()
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
+        syncPressureEraserWithTool()
     }
 
     private fun selectTool(id: String) {
         if (!toolShelf.select(id)) return
+        if (toolShelf.selected.kind == DrawingToolKind.PEN) lastPenToolId = toolShelf.selected.id
         tagLayer.cancelPlacement()
+        restoreTextModeAfterTagPlacement = false
         setTextMode(false, rerender = false)
         singleFingerPanEnabled = false
         transformGestureActive = false
@@ -1723,8 +1771,9 @@ class MainActivity : Activity() {
         mainHandler.removeCallbacks(activatePressureEraser)
         pressureEraser.cancelCandidate()
         dryInkView.setEraserCursor(null)
-        if (toolShelf.selected.kind != DrawingToolKind.LASSO) dryInkView.clearSelection()
+        if (toolShelf.selected.kind != DrawingToolKind.LASSO) clearContentSelection()
         rebuildBrush()
+        updateSelectionInteraction()
         renderToolShelf()
         renderToolDetails()
     }
@@ -1732,6 +1781,7 @@ class MainActivity : Activity() {
     private fun setTextMode(enabled: Boolean, rerender: Boolean = true) {
         if (textModeEnabled == enabled && ::textInputLayer.isInitialized) {
             textInputLayer.setTextMode(enabled)
+            updateSelectionInteraction()
             if (rerender) renderToolShelf()
             return
         }
@@ -1745,11 +1795,16 @@ class MainActivity : Activity() {
             mainHandler.removeCallbacks(activatePressureEraser)
             pressureEraser.cancelCandidate()
             dryInkView.setEraserCursor(null)
-            dryInkView.clearSelection()
+            clearContentSelection()
         }
         if (::textInputLayer.isInitialized) textInputLayer.setTextMode(enabled)
+        updateSelectionInteraction()
         if (rerender) renderToolShelf()
     }
+
+    private fun cursorModePenPreset(): ToolPreset? =
+        toolShelf.tools.firstOrNull { it.id == lastPenToolId && it.kind == DrawingToolKind.PEN }
+            ?: toolShelf.tools.firstOrNull { it.kind == DrawingToolKind.PEN }?.also { lastPenToolId = it.id }
 
     private fun rebuildBrush() {
         if (toolShelf.selected.kind == DrawingToolKind.PEN || toolShelf.selected.kind == DrawingToolKind.HIGHLIGHTER) {
@@ -1852,6 +1907,7 @@ class MainActivity : Activity() {
         lastGestureSpan = nextSpan
         dryInkView.setViewport(viewport.documentToViewMatrix())
         tagLayer.invalidate()
+        selectionOverlay.invalidate()
     }
 
     private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
@@ -1888,7 +1944,43 @@ class MainActivity : Activity() {
 
     private fun eraseAt(point: PointF, radius: Float) {
         dryInkView.setEraserCursor(point, radius)
-        dryInkView.eraseAtDocument(point.x, point.y, radius)
+        val removed =
+            dryInkView.eraseAtDocument(point.x, point.y, radius) +
+                tagLayer.eraseAtDocument(point.x, point.y, radius)
+        if (removed > 0) {
+            selectionOverlay.invalidate()
+            if (toolShelf.selected.kind == DrawingToolKind.LASSO) renderToolDetails()
+        }
+    }
+
+    private fun selectedContentCount(): Int = dryInkView.selectedCount() + tagLayer.selectedCount()
+
+    private fun clearContentSelection() {
+        dryInkView.clearSelection()
+        if (::tagLayer.isInitialized) tagLayer.clearSelection()
+        if (::selectionOverlay.isInitialized) selectionOverlay.invalidate()
+    }
+
+    private fun deleteContentSelection(): Int {
+        val removed = dryInkView.deleteSelection() + tagLayer.deleteSelection()
+        selectionOverlay.invalidate()
+        return removed
+    }
+
+    private fun combinedSelectionBounds(): RectF? {
+        val strokeBounds = dryInkView.selectedBounds()
+        val tagBounds = tagLayer.selectedBounds()
+        if (strokeBounds == null) return tagBounds?.let(::RectF)
+        if (tagBounds == null) return RectF(strokeBounds)
+        return RectF(strokeBounds).apply { union(tagBounds) }
+    }
+
+    private fun updateSelectionInteraction() {
+        if (!::selectionOverlay.isInitialized) return
+        val lassoActive = !textModeEnabled && toolShelf.selected.kind == DrawingToolKind.LASSO
+        selectionOverlay.selectionEnabled = lassoActive
+        tagLayer.selectionModeEnabled = lassoActive
+        selectionOverlay.invalidate()
     }
 
     private fun toggleSectionPane() {
@@ -1937,7 +2029,7 @@ class MainActivity : Activity() {
         PopupMenu(this, anchor).apply {
             menu.add("新建笔记本").setOnMenuItemClickListener {
                 notebookLibrary.addNotebook()
-                dryInkView.clearSelection()
+                clearContentSelection()
                 renderWorkspace()
                 true
             }
@@ -1951,7 +2043,10 @@ class MainActivity : Activity() {
     }
 
     private fun addTool(kind: DrawingToolKind) {
-        toolShelf.add(kind)
+        val added = toolShelf.add(kind)
+        if (kind == DrawingToolKind.PEN) lastPenToolId = added.id
+        setTextMode(false, rerender = false)
+        updateSelectionInteraction()
         rebuildBrush()
         renderToolShelf()
         renderToolDetails()

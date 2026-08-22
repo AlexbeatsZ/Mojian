@@ -57,6 +57,11 @@ explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered
 ### Touch arbitration
 
 - Stylus/eraser tool types author ink and take priority while a stroke is active.
+- Text cursor mode accepts finger-only MotionEvent streams. A stylus bypasses the text layer and
+  begins the most recently selected pen immediately; this does not disable finger text mode.
+- Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
+  tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
+- The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
 - With the panorama-hand control off, one finger is consumed but does not write, pan, or zoom.
 - With the panorama hand selected, one finger pans at 1x scale; tapping the selected hand again or
   choosing a drawing tool restores the default two-finger-only mode.
@@ -75,6 +80,8 @@ scale and translation:
 - stylus MotionEvents enter AndroidX Ink through the inverse view-to-document matrix;
 - wet ink uses AndroidX Ink's world/stroke transforms so it matches the dry renderer;
 - eraser hit testing converts the pointer through the same inverse matrix.
+- lasso selection bounds, tag hit testing, move deltas, and corner scaling all use the same document
+  coordinate space; the overlay converts only touch and rendering at its boundary.
 
 Zoom is anchored at the two-finger centroid, not the screen center. The lab range is 50–800%. This
 is a safe prototype limit, not a claim about Notein's full runtime range.
@@ -94,8 +101,9 @@ erasures, and persistence are separate future features.
 
 ## Verification
 
-Automated tests cover viewport anchoring/clamping, pressure-erasing arming/dwell/reset, and exact
-Xiaomi device/key filtering. Real-device acceptance still requires:
+Automated tests cover viewport anchoring/clamping, pressure-erasing arming/dwell/reset, exact Xiaomi
+device/key filtering, lasso geometry, translation/scaling geometry, and finger-only text routing.
+Real-device acceptance still requires:
 
 - two-finger pan without scale drift;
 - hand-selected one-finger pan, followed by hand deselection restoring inert one-finger input;
@@ -106,3 +114,6 @@ Xiaomi device/key filtering. Real-device acceptance still requires:
 - eraser activation after dwell and pen restoration on lift;
 - Xiaomi pen keys causing no action until a handler is intentionally registered, without changing
   a focused control.
+- finger taps creating/focusing text while a hovering or contacting stylus immediately writes ink;
+- tag tap/lasso selection, whole-stroke erasure, selection drag, and all four scale handles under
+  the actual tablet touch/stylus dispatcher.

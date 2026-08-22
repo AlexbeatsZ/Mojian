@@ -12,6 +12,7 @@ import android.graphics.DashPathEffect
 import android.view.View
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.rendering.android.view.ViewStrokeRenderer
+import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
 import kotlin.math.floor
 import kotlin.math.sqrt
@@ -19,7 +20,7 @@ import kotlin.math.sqrt
 class DryInkView(context: Context) : View(context) {
     private val strokes = mutableListOf<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
-    private val lassoPoints = mutableListOf<PointF>()
+    private val lassoPoints = mutableListOf<DocumentPoint>()
     private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
     private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
     private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
@@ -39,18 +40,6 @@ class DryInkView(context: Context) : View(context) {
             style = Paint.Style.STROKE
             strokeWidth = 1.5f * resources.displayMetrics.density
             pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
-        }
-    private val selectionPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(218, 178, 233)
-            style = Paint.Style.STROKE
-            strokeWidth = 1.5f * resources.displayMetrics.density
-        }
-    private val selectionHandlePaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-            setShadowLayer(2f * resources.displayMetrics.density, 0f, 1f, Color.argb(90, 0, 0, 0))
         }
 
     init {
@@ -92,26 +81,27 @@ class DryInkView(context: Context) : View(context) {
     fun beginLasso(point: PointF) {
         selectedStrokes.clear()
         lassoPoints.clear()
-        lassoPoints += PointF(point.x, point.y)
+        lassoPoints += DocumentPoint(point.x, point.y)
         invalidate()
     }
 
     fun extendLasso(point: PointF) {
         val previous = lassoPoints.lastOrNull()
-        if (previous == null || squaredDistance(previous.x, previous.y, point.x, point.y) >= 4f) {
-            lassoPoints += PointF(point.x, point.y)
+        if (previous == null || SelectionGeometry.squaredDistance(previous.x, previous.y, point.x, point.y) >= 4f) {
+            lassoPoints += DocumentPoint(point.x, point.y)
             invalidate()
         }
     }
 
-    fun finishLasso(): Int {
+    fun finishLasso(): List<DocumentPoint> {
+        val polygon = lassoPoints.toList()
         selectedStrokes.clear()
-        if (lassoPoints.size >= 3) {
+        if (polygon.size >= 3) {
             for (stroke in strokes) {
                 val inputs = stroke.inputs
                 if ((0 until inputs.size).any { index ->
                         val input = inputs.get(index)
-                        pointInPolygon(input.x, input.y, lassoPoints)
+                        SelectionGeometry.pointInPolygon(input.x, input.y, polygon)
                     }
                 ) {
                     selectedStrokes += stroke
@@ -120,7 +110,7 @@ class DryInkView(context: Context) : View(context) {
         }
         lassoPoints.clear()
         invalidate()
-        return selectedStrokes.size
+        return polygon
     }
 
     fun selectedCount(): Int = selectedStrokes.size
@@ -138,6 +128,32 @@ class DryInkView(context: Context) : View(context) {
         selectedStrokes.clear()
         invalidate()
         return count
+    }
+
+    fun selectedBounds(): RectF? {
+        if (selectedStrokes.isEmpty()) return null
+        var bounds: RectF? = null
+        for (stroke in selectedStrokes) {
+            val inputs = stroke.inputs
+            for (index in 0 until inputs.size) {
+                val input = inputs.get(index)
+                val current = bounds
+                if (current == null) bounds = RectF(input.x, input.y, input.x, input.y)
+                else current.union(input.x, input.y)
+            }
+        }
+        return bounds
+    }
+
+    fun translateSelection(deltaX: Float, deltaY: Float) {
+        transformSelection(pointTransform = { x, y -> SelectionGeometry.translate(x, y, deltaX, deltaY) })
+    }
+
+    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+        transformSelection(
+            pointTransform = { x, y -> SelectionGeometry.scale(x, y, anchorX, anchorY, factor) },
+            brushScale = factor,
+        )
     }
 
     /** First implementation deliberately erases complete strokes touched by the pressure eraser. */
@@ -167,7 +183,6 @@ class DryInkView(context: Context) : View(context) {
             drawGrid(transformedCanvas)
             for (stroke in strokes) scope.drawStroke(stroke)
             drawLasso(transformedCanvas)
-            drawSelection(transformedCanvas)
             eraserCursor?.let { cursor ->
                 transformedCanvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)
             }
@@ -182,46 +197,6 @@ class DryInkView(context: Context) : View(context) {
             for (index in 1 until lassoPoints.size) lineTo(lassoPoints[index].x, lassoPoints[index].y)
         }
         canvas.drawPath(path, lassoPaint)
-    }
-
-    private fun drawSelection(canvas: Canvas) {
-        val bounds = selectionBounds() ?: return
-        val padding = 8f * resources.displayMetrics.density / currentViewportScale()
-        bounds.inset(-padding, -padding)
-        canvas.drawRect(bounds, selectionPaint)
-        val handleRadius = 4f * resources.displayMetrics.density / currentViewportScale()
-        val corners =
-            listOf(
-                PointF(bounds.left, bounds.top),
-                PointF(bounds.right, bounds.top),
-                PointF(bounds.right, bounds.bottom),
-                PointF(bounds.left, bounds.bottom),
-            )
-        for (corner in corners) {
-            canvas.drawCircle(corner.x, corner.y, handleRadius, selectionHandlePaint)
-            canvas.drawCircle(corner.x, corner.y, handleRadius, selectionPaint)
-        }
-    }
-
-    private fun selectionBounds(): RectF? {
-        if (selectedStrokes.isEmpty()) return null
-        var bounds: RectF? = null
-        for (stroke in selectedStrokes) {
-            val inputs = stroke.inputs
-            for (index in 0 until inputs.size) {
-                val input = inputs.get(index)
-                val current = bounds
-                if (current == null) bounds = RectF(input.x, input.y, input.x, input.y)
-                else current.union(input.x, input.y)
-            }
-        }
-        return bounds
-    }
-
-    private fun currentViewportScale(): Float {
-        val values = FloatArray(9)
-        documentToView.getValues(values)
-        return values[Matrix.MSCALE_X].coerceAtLeast(0.01f)
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -251,7 +226,7 @@ class DryInkView(context: Context) : View(context) {
         val inputs = stroke.inputs
         if (inputs.isEmpty()) return false
         val first = inputs.get(0)
-        if (inputs.size == 1) return squaredDistance(first.x, first.y, x, y) <= radius * radius
+        if (inputs.size == 1) return SelectionGeometry.squaredDistance(first.x, first.y, x, y) <= radius * radius
         var previousX = first.x
         var previousY = first.y
         for (index in 1 until inputs.size) {
@@ -274,31 +249,48 @@ class DryInkView(context: Context) : View(context) {
         val deltaX = endX - startX
         val deltaY = endY - startY
         val lengthSquared = deltaX * deltaX + deltaY * deltaY
-        if (lengthSquared == 0f) return sqrt(squaredDistance(pointX, pointY, startX, startY))
+        if (lengthSquared == 0f) return sqrt(SelectionGeometry.squaredDistance(pointX, pointY, startX, startY))
         val projection =
             (((pointX - startX) * deltaX + (pointY - startY) * deltaY) / lengthSquared)
                 .coerceIn(0f, 1f)
         val nearestX = startX + projection * deltaX
         val nearestY = startY + projection * deltaY
-        return sqrt(squaredDistance(pointX, pointY, nearestX, nearestY))
+        return sqrt(SelectionGeometry.squaredDistance(pointX, pointY, nearestX, nearestY))
     }
 
-    private fun squaredDistance(x1: Float, y1: Float, x2: Float, y2: Float): Float {
-        val deltaX = x1 - x2
-        val deltaY = y1 - y2
-        return deltaX * deltaX + deltaY * deltaY
-    }
-
-    private fun pointInPolygon(x: Float, y: Float, polygon: List<PointF>): Boolean {
-        var inside = false
-        var previous = polygon.last()
-        for (current in polygon) {
-            val crosses =
-                ((current.y > y) != (previous.y > y)) &&
-                    (x < (previous.x - current.x) * (y - current.y) / (previous.y - current.y) + current.x)
-            if (crosses) inside = !inside
-            previous = current
+    private fun transformSelection(
+        pointTransform: (Float, Float) -> DocumentPoint,
+        brushScale: Float = 1f,
+    ) {
+        if (selectedStrokes.isEmpty()) return
+        val replacements = LinkedHashMap<Stroke, Stroke>()
+        for (stroke in selectedStrokes) {
+            val transformedInputs = MutableStrokeInputBatch()
+            val inputs = stroke.inputs
+            for (index in 0 until inputs.size) {
+                val input = inputs.get(index)
+                val point = pointTransform(input.x, input.y)
+                transformedInputs.add(
+                    input.toolType,
+                    point.x,
+                    point.y,
+                    input.elapsedTimeMillis,
+                    input.strokeUnitLengthCm,
+                    input.pressure,
+                    input.tiltRadians,
+                    input.orientationRadians,
+                )
+            }
+            val brush =
+                if (brushScale == 1f) stroke.brush
+                else stroke.brush.copy(size = (stroke.brush.size * brushScale).coerceAtLeast(0.01f))
+            replacements[stroke] = Stroke(brush, transformedInputs)
         }
-        return inside
+        for (index in strokes.indices) {
+            replacements[strokes[index]]?.let { strokes[index] = it }
+        }
+        selectedStrokes.clear()
+        selectedStrokes.addAll(replacements.values)
+        invalidate()
     }
 }
