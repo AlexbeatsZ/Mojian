@@ -4,3 +4,7 @@ android/local.properties
 android/.idea/
 *.iml
 captures/
+**/bin/
+**/obj/
+.vs/
+*.user
