@@ -16,14 +16,16 @@
 - A user-authorized full local backup was created through Android's save picker as `/sdcard/Download/backup.zip` (1,579,602,577 bytes). Keep the tablet copy; the analysis copy is temporary and must not be committed.
 - The backup is an unencrypted ZIP containing 167 per-note `.in` nested ZIPs, two `.template` entries, and one `.tree`; per-note containers include a Room/SQLite v25 database and metadata, plus source PDFs when applicable.
 - Notein uses AndroidX Ink 1.0.0 exactly: its arm64 `libink.so` matches the Google Maven artifact in size and ELF Build ID.
-- Android lab v0.1.0 is built and installed as `com.meta.inklab.debug`. It has no Internet/storage permission and runs alongside the untouched Notein package.
+- Android workspace prototype v0.2.0 is built as `com.meta.inklab.debug`. The earlier v0.1.0 lab was installed; v0.2.0 has not been installed because the tablet is not currently discoverable over ADB. It has no Internet/storage permission and remains separate from the untouched Notein package.
 - The installed lab uses AndroidX Ink wet/dry authoring, motion prediction, one adjustable fountain-pen stroke, prediction toggle, undo, and clear. Controls are width 0.1–2.0 mm, pressure 0–400%, and ink flow 0–200%, with Notein-observed defaults 0.4 mm / 200% / 100%.
 - The current source adds default two-finger pan/pinch zoom, a stationary-dwell pressure whole-stroke eraser, and an unbound Xiaomi shortcut interface. Completed ink applies the viewport inside `ViewStrokeRenderer` so screen-space antialiasing remains sharp while zoomed. Tests, build, and lint pass; the corrected APK was installed and cold-launched in 503 ms. Device capture proves the pen exposes `NVTCapacitivePen` plus `Xiaomi Smart Pen Keyboard`; its two shortcut keys send PageUp/PageDown.
+- Workspace v0.2.0 adds OneNote-desktop-inspired dark chrome, recursively nestable sections, separate section/page panes with `本层` and `递归` page modes, per-tool flyouts, add/delete tool presets, logical black/blue/red pens, a translucent highlighter, explicit whole-stroke eraser, and functional lasso selection/delete. Search, non-drawing ribbon tabs, pixel erasing, and lasso move/resize are labeled shells.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
   - `docs/design/handwriting-engine.md` (read before ink-input, brush, rendering, or tablet-lab work).
   - `docs/design/input-gestures.md` (read before shortcut, gesture arbitration, viewport, or pressure-eraser work).
+  - `docs/design/workspace-ui.md` (read before notebook/section/page navigation, tool configuration, or workspace styling).
 
 # Active Work
 
@@ -42,6 +44,9 @@
 - [x] Install the corrected pressure-eraser build after wireless ADB moved to port 33039.
 - [x] Correct completed-stroke transform ordering so zoom no longer enlarges the 1x antialias fringe.
 - [x] Prove that the isolated Xiaomi prediction facade/model initializes and emits a two-float raw inference result.
+- [x] Build the first OneNote-desktop-inspired workspace UI with nested sections and working pen/highlighter/eraser/lasso tools.
+- [x] Implement both user-specified page-pane modes without mixing pages into the black section pane.
+- [ ] Install and visually inspect v0.2.0 on the tablet after wireless ADB is re-enabled and rediscovered.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.
@@ -55,6 +60,7 @@
 - Keep device probes read-only until a tested backup/restore strategy exists. Do not enable Notein cloud sync or write into its live data directory during format discovery.
 - Initial handwriting lab package must remain `com.meta.inklab`, request no network/storage permission, and store no durable user content.
 - Lab build and lint: from `android`, run `.\gradlew.bat :app:assembleDebug :app:lintDebug`.
+- Workspace unit tests: from `android`, run `.\gradlew.bat :app:testDebugUnitTest`; navigation tests cover unlimited section depth and both page-pane modes, while tool tests cover required presets and add/delete behavior.
 - Debug APK: `android\app\build\outputs\apk\debug\app-debug.apk`; installed debug package/activity: `com.meta.inklab.debug/com.meta.inklab.MainActivity`.
 - HyperOS rejects streamed ADB installs with `INSTALL_FAILED_USER_RESTRICTED`. Use Xiaomi File Manager and the installer menu's one-time `单次安装授权`; do not enable a persistent global install setting.
 
@@ -75,3 +81,4 @@
 - `ViewStrokeRenderer` captures the canvas transform when `drawWithStrokes` starts. Apply viewport
   transforms inside its drawing block; applying zoom before entry makes its screen-space
   antialiasing omit the zoom even though Canvas still scales the geometry, producing soft edges.
+- Keep section and page pane data types separate. The black pane recursively flattens only `SectionNode`; the gray pane either lists direct `NotePage` items or a separate recursive stream of section headers plus owned pages. A deep-page selection must not silently change the black-pane root.

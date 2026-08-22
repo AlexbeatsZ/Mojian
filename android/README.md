@@ -1,6 +1,21 @@
-# Ink Lab Android Prototype
+# 墨笺 Android Workspace Prototype
 
-`Ink Lab` is a clean-room tablet test bench for studying Notein-like handwriting behavior. It does not read or modify Notein data and is not a notebook application yet.
+`墨笺` is a clean-room tablet workspace for studying Notein-like handwriting and the navigation
+model of a future independent notebook application. It does not read or modify Notein data.
+
+## Current workspace
+
+- desktop-OneNote-inspired dark chrome with a collapsible section/page navigation area;
+- a black pane containing recursively nestable sections only;
+- a gray page pane switchable between direct pages (`本层`) and recursive descendant sections plus
+  their pages (`递归`);
+- per-tool flyouts and add/delete for black, blue, and red fountain pens, highlighter, whole-stroke
+  eraser, and freeform lasso selection;
+- preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, clear, and
+  telemetry.
+
+Notebook hierarchy, pages, and strokes are still session-only. Search, non-drawing ribbon tabs,
+pixel erasing, and lasso move/resize are explicit later-feature shells.
 
 ## Safety boundary
 
@@ -16,7 +31,7 @@
 Use the repository-local Gradle wrapper:
 
 ```powershell
-cd C:\Users\Meta\Documents\ChatGPT\Notein\android
+cd C:\Users\Meta\Project\Workspaces\Notein\android
 .\gradlew.bat :app:assembleDebug :app:lintDebug
 ```
 
@@ -73,3 +88,9 @@ The amber `input age` value measures how old the delivered input event is when h
 The Xiaomi shortcut adapter recognizes PageUp/PageDown only from the observed
 `Xiaomi Smart Pen Keyboard` device. No actions are registered yet, so those exact pen events are
 consumed and intentionally do nothing; PageUp/PageDown from ordinary keyboards are not captured.
+
+## Open-source UI assets
+
+The app ships a small source-selected subset of Microsoft's MIT-licensed Fluent UI System Icons.
+See `..\THIRD_PARTY_NOTICES.md`. It does not ship the OneNote logo, proprietary Office art, or
+copied OneNote UI screenshots.

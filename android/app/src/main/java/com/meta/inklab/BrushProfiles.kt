@@ -22,6 +22,7 @@ object BrushProfiles {
         sizePx: Float,
         pressureCorrect: Float = 2f,
         speedCorrect: Float = 1f,
+        colorArgb: Int = Color.rgb(16, 19, 23),
     ): Brush {
         // Notein persists the displayed percentage as percentage / 100: 200% -> 2.0 and
         // 100% -> 1.0. The lab keeps that exact boundary mapping. Internally, 200% remains the
@@ -45,7 +46,23 @@ object BrushProfiles {
 
         return Brush.createWithColorIntArgb(
             family = family,
-            colorIntArgb = Color.rgb(16, 19, 23),
+            colorIntArgb = colorArgb,
+            size = sizePx,
+            epsilon = 0.01f,
+        )
+    }
+
+    fun createHighlighter(
+        sizePx: Float,
+        colorArgb: Int,
+        opacityPercent: Int,
+    ): Brush {
+        val alpha = (opacityPercent.coerceIn(10, 70) / 100f * 255f).toInt()
+        val translucentColor =
+            Color.argb(alpha, Color.red(colorArgb), Color.green(colorArgb), Color.blue(colorArgb))
+        return Brush.createWithColorIntArgb(
+            family = StockBrushes.highlighter(),
+            colorIntArgb = translucentColor,
             size = sizePx,
             epsilon = 0.01f,
         )

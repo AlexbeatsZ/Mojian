@@ -5,8 +5,10 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.DashPathEffect
 import android.view.View
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.rendering.android.view.ViewStrokeRenderer
@@ -16,25 +18,47 @@ import kotlin.math.sqrt
 
 class DryInkView(context: Context) : View(context) {
     private val strokes = mutableListOf<Stroke>()
-    private val thinGridPaint = Paint().apply { color = Color.rgb(225, 232, 242) }
-    private val majorGridPaint = Paint().apply { color = Color.rgb(207, 219, 235) }
+    private val selectedStrokes = mutableSetOf<Stroke>()
+    private val lassoPoints = mutableListOf<PointF>()
+    private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
+    private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
     private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
     private val gridStep = 28f * resources.displayMetrics.density
     private val documentToView = Matrix()
     private val eraserCursorPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(82, 96, 114)
+            color = Color.rgb(190, 190, 190)
             style = Paint.Style.STROKE
             strokeWidth = 1.5f * resources.displayMetrics.density
         }
     private var eraserCursor: PointF? = null
     private var eraserRadius = 0f
+    private val lassoPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(218, 178, 233)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * resources.displayMetrics.density
+            pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
+        }
+    private val selectionPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(218, 178, 233)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * resources.displayMetrics.density
+        }
+    private val selectionHandlePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            setShadowLayer(2f * resources.displayMetrics.density, 0f, 1f, Color.argb(90, 0, 0, 0))
+        }
 
     init {
-        setBackgroundColor(Color.rgb(247, 249, 252))
+        setBackgroundColor(Color.rgb(27, 27, 27))
     }
 
     fun addStrokes(newStrokes: Collection<Stroke>) {
+        selectedStrokes.clear()
         strokes.addAll(newStrokes)
     }
 
@@ -47,6 +71,8 @@ class DryInkView(context: Context) : View(context) {
 
     fun clear() {
         strokes.clear()
+        selectedStrokes.clear()
+        lassoPoints.clear()
         invalidate()
     }
 
@@ -63,6 +89,57 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
+    fun beginLasso(point: PointF) {
+        selectedStrokes.clear()
+        lassoPoints.clear()
+        lassoPoints += PointF(point.x, point.y)
+        invalidate()
+    }
+
+    fun extendLasso(point: PointF) {
+        val previous = lassoPoints.lastOrNull()
+        if (previous == null || squaredDistance(previous.x, previous.y, point.x, point.y) >= 4f) {
+            lassoPoints += PointF(point.x, point.y)
+            invalidate()
+        }
+    }
+
+    fun finishLasso(): Int {
+        selectedStrokes.clear()
+        if (lassoPoints.size >= 3) {
+            for (stroke in strokes) {
+                val inputs = stroke.inputs
+                if ((0 until inputs.size).any { index ->
+                        val input = inputs.get(index)
+                        pointInPolygon(input.x, input.y, lassoPoints)
+                    }
+                ) {
+                    selectedStrokes += stroke
+                }
+            }
+        }
+        lassoPoints.clear()
+        invalidate()
+        return selectedStrokes.size
+    }
+
+    fun selectedCount(): Int = selectedStrokes.size
+
+    fun clearSelection() {
+        selectedStrokes.clear()
+        lassoPoints.clear()
+        invalidate()
+    }
+
+    fun deleteSelection(): Int {
+        val count = selectedStrokes.size
+        if (count == 0) return 0
+        strokes.removeAll(selectedStrokes)
+        selectedStrokes.clear()
+        invalidate()
+        return count
+    }
+
     /** First implementation deliberately erases complete strokes touched by the pressure eraser. */
     fun eraseAtDocument(x: Float, y: Float, radius: Float): Int {
         var removed = 0
@@ -71,6 +148,7 @@ class DryInkView(context: Context) : View(context) {
             val stroke = iterator.next()
             if (strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f)) {
                 iterator.remove()
+                selectedStrokes.remove(stroke)
                 removed++
             }
         }
@@ -88,11 +166,62 @@ class DryInkView(context: Context) : View(context) {
             transformedCanvas.concat(documentToView)
             drawGrid(transformedCanvas)
             for (stroke in strokes) scope.drawStroke(stroke)
+            drawLasso(transformedCanvas)
+            drawSelection(transformedCanvas)
             eraserCursor?.let { cursor ->
                 transformedCanvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)
             }
             transformedCanvas.restore()
         }
+    }
+
+    private fun drawLasso(canvas: Canvas) {
+        if (lassoPoints.isEmpty()) return
+        val path = Path().apply {
+            moveTo(lassoPoints.first().x, lassoPoints.first().y)
+            for (index in 1 until lassoPoints.size) lineTo(lassoPoints[index].x, lassoPoints[index].y)
+        }
+        canvas.drawPath(path, lassoPaint)
+    }
+
+    private fun drawSelection(canvas: Canvas) {
+        val bounds = selectionBounds() ?: return
+        val padding = 8f * resources.displayMetrics.density / currentViewportScale()
+        bounds.inset(-padding, -padding)
+        canvas.drawRect(bounds, selectionPaint)
+        val handleRadius = 4f * resources.displayMetrics.density / currentViewportScale()
+        val corners =
+            listOf(
+                PointF(bounds.left, bounds.top),
+                PointF(bounds.right, bounds.top),
+                PointF(bounds.right, bounds.bottom),
+                PointF(bounds.left, bounds.bottom),
+            )
+        for (corner in corners) {
+            canvas.drawCircle(corner.x, corner.y, handleRadius, selectionHandlePaint)
+            canvas.drawCircle(corner.x, corner.y, handleRadius, selectionPaint)
+        }
+    }
+
+    private fun selectionBounds(): RectF? {
+        if (selectedStrokes.isEmpty()) return null
+        var bounds: RectF? = null
+        for (stroke in selectedStrokes) {
+            val inputs = stroke.inputs
+            for (index in 0 until inputs.size) {
+                val input = inputs.get(index)
+                val current = bounds
+                if (current == null) bounds = RectF(input.x, input.y, input.x, input.y)
+                else current.union(input.x, input.y)
+            }
+        }
+        return bounds
+    }
+
+    private fun currentViewportScale(): Float {
+        val values = FloatArray(9)
+        documentToView.getValues(values)
+        return values[Matrix.MSCALE_X].coerceAtLeast(0.01f)
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -158,5 +287,18 @@ class DryInkView(context: Context) : View(context) {
         val deltaX = x1 - x2
         val deltaY = y1 - y2
         return deltaX * deltaX + deltaY * deltaY
+    }
+
+    private fun pointInPolygon(x: Float, y: Float, polygon: List<PointF>): Boolean {
+        var inside = false
+        var previous = polygon.last()
+        for (current in polygon) {
+            val crosses =
+                ((current.y > y) != (previous.y > y)) &&
+                    (x < (previous.x - current.x) * (y - current.y) / (previous.y - current.y) + current.x)
+            if (crosses) inside = !inside
+            previous = current
+        }
+        return inside
     }
 }
