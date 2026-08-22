@@ -1,6 +1,8 @@
 package com.meta.inklab
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -247,5 +249,70 @@ class WorkspaceModelsTest {
         assertEquals("section-study", workspace.selectedPageSectionId)
         assertEquals("page-reading", workspace.selectedPageId)
         assertEquals("阅读笔记", workspace.selectedPage()?.title)
+    }
+
+    @Test
+    fun deletingASectionRemovesItsSubtreeAndSelectsANeighbor() {
+        val workspace = NotebookWorkspace.sample()
+        workspace.selectSection("section-product")
+
+        val removed = workspace.deleteSection("section-product")
+
+        assertEquals("section-product", removed?.id)
+        assertNull(workspace.section("section-notein"))
+        assertEquals("section-study", workspace.focusedSectionId)
+        assertEquals("page-reading", workspace.selectedPageId)
+    }
+
+    @Test
+    fun draggingASectionAdjacentToAnotherSectionChangesParentAndOrder() {
+        val workspace = NotebookWorkspace.sample()
+
+        assertTrue(workspace.moveSectionAdjacent("section-study", "section-notein", after = true))
+
+        assertEquals(
+            listOf("section-product", "section-notein", "section-ink", "section-study", "section-ideas"),
+            workspace.flattenSections().map { it.section.id },
+        )
+        assertEquals(listOf("section-product", "section-study"), workspace.breadcrumb("section-study").map { it.id })
+    }
+
+    @Test
+    fun pagesCanBeDeletedAndManuallySortedAcrossSections() {
+        val workspace = NotebookWorkspace.sample()
+
+        assertTrue(workspace.movePageAdjacent("section-product", "page-flow", "section-study", "page-reading", after = false))
+        assertEquals(listOf("page-flow", "page-reading"), workspace.section("section-study")?.pages?.map { it.id })
+        assertEquals("page-flow", workspace.deletePage("section-study", "page-flow")?.id)
+        assertFalse(workspace.section("section-product")?.pages?.any { it.id == "page-flow" } == true)
+    }
+
+    @Test
+    fun copyingASectionAllocatesIndependentSectionAndPageIds() {
+        val workspace = NotebookWorkspace.sample()
+
+        val copied = workspace.copySectionToParent("section-notein", null)!!
+
+        assertTrue(copied.section.id != "section-notein")
+        assertEquals(listOf("格式研究", "钢笔手感", "延迟观察"), copied.pages.map { it.copy.title })
+        assertTrue(copied.pages.all { it.source.id != it.copy.id })
+        copied.section.title = "副本"
+        assertEquals("Notein 兼容", workspace.section("section-notein")?.title)
+    }
+
+    @Test
+    fun persistedLibraryKeepsManualOrderNamesAndCollapsedDescendants() {
+        val library = NotebookLibrary.sample()
+        val workspace = library.activeNotebook()
+        workspace.renameSection("section-ink", "笔迹")
+        workspace.toggleExpanded("section-product")
+        workspace.movePageAdjacent("section-product", "page-flow", "section-product", "page-overview", after = false)
+
+        val restored = NotebookLibrary.fromJson(library.toJsonString())!!
+        val restoredWorkspace = restored.activeNotebook()
+
+        assertEquals("笔迹", restoredWorkspace.section("section-ink")?.title)
+        assertFalse(restoredWorkspace.section("section-product")!!.expanded)
+        assertEquals(listOf("page-flow", "page-overview"), restoredWorkspace.section("section-product")?.pages?.map { it.id })
     }
 }

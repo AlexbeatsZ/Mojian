@@ -45,4 +45,30 @@ class NotebookPackageExporterTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun sectionExportContainsOnlyTheSelectedSectionTree() {
+        val root = Files.createTempDirectory("mojian-section-package").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            val notebook = NotebookWorkspace.sample()
+            val section = notebook.section("section-notein")!!
+            val output = ByteArrayOutputStream()
+
+            NotebookPackageExporter(repository).writeSection(output, notebook, section, null, emptyMap())
+
+            val entries = linkedMapOf<String, ByteArray>()
+            ZipInputStream(ByteArrayInputStream(output.toByteArray())).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    entries[entry.name] = zip.readBytes()
+                }
+            }
+            val manifest = JSONObject(entries.getValue("manifest.json").toString(Charsets.UTF_8))
+            assertEquals("mojian-section", manifest.getString("format"))
+            assertEquals(listOf("section-notein"), List(manifest.getJSONArray("sections").length()) { index -> manifest.getJSONArray("sections").getJSONObject(index).getString("id") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

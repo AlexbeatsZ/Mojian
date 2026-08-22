@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -28,6 +31,8 @@ import android.os.SystemClock
 import android.text.Layout
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.DragEvent
+import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -72,6 +77,7 @@ private enum class RibbonPage {
 private enum class PendingExport {
     PDF,
     PRIVATE_PACKAGE,
+    SECTION_PACKAGE,
 }
 
 private enum class PageCreationTab {
@@ -109,6 +115,58 @@ private data class ExportSnapshot(
     val pageSize: PdfOutputPageSize?,
 )
 
+private sealed interface NavigationDragPayload {
+    data class Section(
+        val notebookId: String,
+        val sectionId: String,
+    ) : NavigationDragPayload
+
+    data class Page(
+        val notebookId: String,
+        val sectionId: String,
+        val pageId: String,
+    ) : NavigationDragPayload
+}
+
+private data class SectionRowTag(
+    val notebookId: String,
+    val sectionId: String,
+)
+
+private data class PageRowTag(
+    val notebookId: String,
+    val sectionId: String,
+    val pageId: String,
+)
+
+private data class NavigationDropTarget(
+    val tag: Any,
+    val after: Boolean,
+)
+
+private sealed interface PageNavigationClipboard {
+    val notebookId: String
+    val sectionId: String
+    val pageId: String
+
+    data class Copy(
+        override val notebookId: String,
+        override val sectionId: String,
+        override val pageId: String,
+    ) : PageNavigationClipboard
+
+    data class Cut(
+        override val notebookId: String,
+        override val sectionId: String,
+        override val pageId: String,
+    ) : PageNavigationClipboard
+}
+
+private data class SectionExportTarget(
+    val notebookId: String,
+    val sectionId: String,
+)
+
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
     private val viewport = ViewportState()
@@ -120,7 +178,7 @@ class MainActivity : Activity() {
         TransformGestureArbiter(panSlop = touchSlop, scaleSlop = touchSlop * 2f)
     }
     private val toolShelf = ToolShelf()
-    private val notebookLibrary = NotebookLibrary.sample()
+    private var notebookLibrary = NotebookLibrary.sample()
     private val splitViewState = SplitViewState()
     private val pageSessions = mutableMapOf<PageSessionKey, PageSessionState>()
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
@@ -215,9 +273,12 @@ class MainActivity : Activity() {
     private var imageImportDisplayMode = ImageImportDisplayMode.ASK
     private var pdfPrintoutDisplayMode = ImageImportDisplayMode.ASK
     private var pendingExport: PendingExport? = null
+    private var pendingSectionExport: SectionExportTarget? = null
     private var pendingPdfPageTarget: PdfPageTarget? = null
     private var boundPageKey: PageSessionKey? = null
     private var splitFocusVisible = false
+    private var navigationDropTarget: NavigationDropTarget? = null
+    private var pageNavigationClipboard: PageNavigationClipboard? = null
 
     private val hideSplitFocus =
         Runnable {
@@ -300,7 +361,10 @@ class MainActivity : Activity() {
                 chooseDisplayFilter(imageImportDisplayMode, "这批图片如何显示？") { inverted -> importImages(uris, inverted) }
             }
             REQUEST_STICKER_IMPORT -> if (uris.isNotEmpty()) importStickerPresets(uris)
-            REQUEST_EXPORT -> pendingExport?.let { type -> exportToUri(data.data ?: return, type) }.also { pendingExport = null }
+            REQUEST_EXPORT -> pendingExport?.let { type -> exportToUri(data.data ?: return, type) }.also {
+                pendingExport = null
+                pendingSectionExport = null
+            }
             REQUEST_PDF_PAGES -> uris.firstOrNull()?.let(::importPdfPages)
         }
     }
@@ -759,6 +823,10 @@ class MainActivity : Activity() {
 
     private fun loadPreferences() {
         val prefs = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+        prefs.getString(KEY_NOTEBOOK_LIBRARY, null)
+            ?.takeIf(String::isNotBlank)
+            ?.let(NotebookLibrary::fromJson)
+            ?.let { notebookLibrary = it }
         predictionEnabled = prefs.getBoolean(KEY_PREDICTION_ENABLED, true)
         imageImportDisplayMode =
             runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_IMAGE_IMPORT_DISPLAY_MODE, "") ?: "") }
@@ -793,7 +861,7 @@ class MainActivity : Activity() {
         }
         val focusedSectionId = prefs.getString(KEY_FOCUSED_SECTION_ID, null)
         if (focusedSectionId != null) {
-            if (focusedSectionId.isNotEmpty() && workspace.flattenSections().any { it.section.id == focusedSectionId }) {
+            if (focusedSectionId.isNotEmpty() && workspace.allSections().any { it.id == focusedSectionId }) {
                 workspace.selectSection(focusedSectionId)
             } else {
                 workspace.focusNotebook()
@@ -801,9 +869,9 @@ class MainActivity : Activity() {
         }
         val selectedPageId = prefs.getString(KEY_SELECTED_PAGE_ID, "")
         if (!selectedPageId.isNullOrEmpty()) {
-            for (row in workspace.flattenSections()) {
-                if (row.section.pages.any { it.id == selectedPageId }) {
-                    workspace.selectPage(row.section.id, selectedPageId)
+            for (section in workspace.allSections()) {
+                if (section.pages.any { it.id == selectedPageId }) {
+                    workspace.selectPage(section.id, selectedPageId)
                     break
                 }
             }
@@ -848,6 +916,7 @@ class MainActivity : Activity() {
             .putFloat(KEY_PRESSURE_THRESHOLD, pressureEraser.pressureThreshold)
             .putLong(KEY_PRESSURE_DWELL_MILLIS, pressureEraser.dwellMillis)
             .putBoolean(KEY_ZOOM_LOCKED, zoomLocked)
+            .putString(KEY_NOTEBOOK_LIBRARY, notebookLibrary.toJsonString())
             .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
             .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
@@ -861,8 +930,8 @@ class MainActivity : Activity() {
     ) {
         val root = jsonString?.takeIf(String::isNotBlank)?.let { runCatching { JSONObject(it) }.getOrNull() }
         for (notebook in notebookLibrary.notebooks) {
-            for (row in notebook.flattenSections()) {
-                for (page in row.section.pages) {
+            for (section in notebook.allSections()) {
+                for (page in section.pages) {
                     val json = root?.optJSONObject(page.id)
                     val restored =
                         if (json != null) PageViewSettings.fromJson(json)
@@ -882,8 +951,8 @@ class MainActivity : Activity() {
     private fun persistPageViewSettings() {
         val root = JSONObject()
         for (notebook in notebookLibrary.notebooks) {
-            for (row in notebook.flattenSections()) {
-                for (page in row.section.pages) root.put(page.id, page.viewSettings.toJson())
+            for (section in notebook.allSections()) {
+                for (page in section.pages) root.put(page.id, page.viewSettings.toJson())
             }
         }
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
@@ -1786,7 +1855,11 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(MATCH, dp(44)),
             )
 
-            sectionList = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            sectionList =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setOnDragListener { _, event -> handleSectionListDrag(event) }
+                }
             addView(
                 ScrollView(this@MainActivity).apply {
                     isFillViewport = true
@@ -1825,7 +1898,11 @@ class MainActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(MATCH, dp(48)),
             )
-            pageList = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            pageList =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setOnDragListener { _, event -> handlePageListDrag(event) }
+                }
             addView(
                 ScrollView(this@MainActivity).apply {
                     isFillViewport = true
@@ -2198,6 +2275,11 @@ class MainActivity : Activity() {
                             renderWorkspace()
                         }
                     }
+                item.tag = SectionRowTag(notebook.id, section.id)
+                installNavigationLongPressAndDrag(
+                    item,
+                    NavigationDragPayload.Section(notebook.id, section.id),
+                ) { showSectionMenu(item, notebook, section) }
                 val chevron =
                     TextView(this).apply {
                         text =
@@ -2299,6 +2381,7 @@ class MainActivity : Activity() {
                     LinearLayout.LayoutParams(0, MATCH, 1f),
                 )
             }
+        installNavigationLongPressAndDrag(item, payload = null) { showSectionMenu(item, workspace, row.section) }
         pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(32)).apply { setMargins(dp(6), dp(5), dp(6), 0) })
     }
 
@@ -2356,8 +2439,490 @@ class MainActivity : Activity() {
                     renderPages()
                 }
             }
+        item.tag = PageRowTag(workspace.id, row.sectionId, page.id)
+        installNavigationLongPressAndDrag(
+            item,
+            NavigationDragPayload.Page(workspace.id, row.sectionId, page.id),
+        ) { showPageMenu(item, workspace, row.sectionId, page) }
         pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(58)).apply { setMargins(dp(6), dp(1), dp(6), dp(1)) })
     }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun installNavigationLongPressAndDrag(
+        view: View,
+        payload: NavigationDragPayload?,
+        onReleasedLongPress: () -> Unit,
+    ) {
+        val slop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
+        var downX = 0f
+        var downY = 0f
+        val gesture = NavigationLongPressGesture()
+        val armLongPress =
+            Runnable {
+                gesture.arm()
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+            }
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    gesture.reset()
+                    mainHandler.postDelayed(armLongPress, ViewConfiguration.getLongPressTimeout().toLong())
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val distance = kotlin.math.hypot(event.rawX - downX, event.rawY - downY)
+                    if (!gesture.isArmed && distance > slop) mainHandler.removeCallbacks(armLongPress)
+                    if (gesture.isArmed && !gesture.isDragging && payload != null && distance > slop) {
+                        gesture.recordDragStart(
+                            view.startDragAndDrop(
+                                ClipData.newPlainText("navigation", ""),
+                                View.DragShadowBuilder(view),
+                                payload,
+                                0,
+                            ),
+                        )
+                    }
+                    gesture.isArmed
+                }
+                MotionEvent.ACTION_UP -> {
+                    mainHandler.removeCallbacks(armLongPress)
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    val action = gesture.release()
+                    if (action != NavigationReleaseAction.CLICK) view.isPressed = false
+                    when (action) {
+                        NavigationReleaseAction.DROP_ONLY -> Unit
+                        NavigationReleaseAction.MENU -> onReleasedLongPress()
+                        NavigationReleaseAction.CLICK -> Unit
+                    }
+                    action != NavigationReleaseAction.CLICK
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    mainHandler.removeCallbacks(armLongPress)
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    gesture.reset()
+                    false
+                }
+                else -> gesture.isArmed
+            }
+        }
+    }
+
+    private fun handleSectionListDrag(event: DragEvent): Boolean {
+        val payload = event.localState as? NavigationDragPayload.Section ?: return false
+        return when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> true
+            DragEvent.ACTION_DRAG_LOCATION -> {
+                autoScrollNavigationList(sectionList, event.y)
+                navigationDropTarget = findNavigationDropTarget(sectionList, event.y) { it is SectionRowTag && it.notebookId == payload.notebookId }
+                true
+            }
+            DragEvent.ACTION_DROP -> {
+                val target = navigationDropTarget?.tag as? SectionRowTag
+                val notebook = notebookLibrary.notebooks.firstOrNull { it.id == payload.notebookId }
+                val moved =
+                    target != null && target.notebookId == payload.notebookId &&
+                        notebook?.moveSectionAdjacent(payload.sectionId, target.sectionId, navigationDropTarget?.after == true) == true
+                navigationDropTarget = null
+                if (moved) {
+                    persistWorkspacePreferences()
+                    renderWorkspace()
+                }
+                moved
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                navigationDropTarget = null
+                true
+            }
+            else -> true
+        }
+    }
+
+    private fun handlePageListDrag(event: DragEvent): Boolean {
+        val payload = event.localState as? NavigationDragPayload.Page ?: return false
+        return when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> payload.notebookId == workspace.id
+            DragEvent.ACTION_DRAG_LOCATION -> {
+                autoScrollNavigationList(pageList, event.y)
+                navigationDropTarget = findNavigationDropTarget(pageList, event.y) { it is PageRowTag && it.notebookId == payload.notebookId }
+                true
+            }
+            DragEvent.ACTION_DROP -> {
+                val target = navigationDropTarget?.tag as? PageRowTag
+                val notebook = notebookLibrary.notebooks.firstOrNull { it.id == payload.notebookId }
+                val moved =
+                    target != null && target.notebookId == payload.notebookId &&
+                        notebook?.movePageAdjacent(
+                            payload.sectionId,
+                            payload.pageId,
+                            target.sectionId,
+                            target.pageId,
+                            navigationDropTarget?.after == true,
+                        ) == true
+                navigationDropTarget = null
+                if (moved) {
+                    persistWorkspacePreferences()
+                    renderWorkspace()
+                }
+                moved
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                navigationDropTarget = null
+                true
+            }
+            else -> true
+        }
+    }
+
+    private fun findNavigationDropTarget(
+        container: LinearLayout,
+        y: Float,
+        accepts: (Any) -> Boolean,
+    ): NavigationDropTarget? {
+        val candidates =
+            (0 until container.childCount)
+                .map(container::getChildAt)
+                .filter { child -> child.tag?.let(accepts) == true }
+        val closest = candidates.minByOrNull { child -> kotlin.math.abs(y - (child.top + child.bottom) / 2f) } ?: return null
+        return NavigationDropTarget(closest.tag, y >= (closest.top + closest.bottom) / 2f)
+    }
+
+    private fun autoScrollNavigationList(container: LinearLayout, y: Float) {
+        val scroll = container.parent as? ScrollView ?: return
+        val edge = dp(44)
+        when {
+            y - scroll.scrollY < edge -> scroll.scrollBy(0, -dp(12))
+            scroll.scrollY + scroll.height - y < edge -> scroll.scrollBy(0, dp(12))
+        }
+    }
+
+    private fun showSectionMenu(anchor: View, notebook: NotebookWorkspace, section: SectionNode) {
+        val labels = NavigationMenuCatalog.sectionItems
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, labels[0]).setOnMenuItemClickListener {
+                showRenameDialog("重命名分区", section.title) { title ->
+                    if (notebook.renameSection(section.id, title)) finishNavigationMutation()
+                }
+                true
+            }
+            menu.add(0, 2, 1, labels[1]).setOnMenuItemClickListener {
+                startSectionExport(notebook, section)
+                true
+            }
+            menu.add(0, 3, 2, labels[2]).setOnMenuItemClickListener {
+                confirmDeleteSection(notebook, section)
+                true
+            }
+            menu.add(0, 4, 3, labels[3]).setOnMenuItemClickListener {
+                showSectionMoveOrCopyDialog(notebook, section)
+                true
+            }
+            menu.add(0, 5, 4, labels[4]).setOnMenuItemClickListener {
+                showSectionMergeDialog(notebook, section)
+                true
+            }
+            menu.add(0, 6, 5, labels[5]).setOnMenuItemClickListener {
+                copyNavigationLink("分区链接", sectionLink(notebook.id, section.id))
+                true
+            }
+            menu.add(1, 7, 6, labels[6]).setOnMenuItemClickListener {
+                notebookLibrary.selectNotebook(notebook.id)
+                notebook.addSection(section.id)
+                finishNavigationMutation()
+                true
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true)
+            show()
+        }
+    }
+
+    private fun showPageMenu(anchor: View, notebook: NotebookWorkspace, sectionId: String, page: NotePage) {
+        val labels = NavigationMenuCatalog.pageItems
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, labels[0]).setOnMenuItemClickListener {
+                showRenameDialog("重命名页面", page.title) { title ->
+                    if (notebook.renamePage(sectionId, page.id, title)) finishNavigationMutation()
+                }
+                true
+            }
+            menu.add(0, 2, 1, labels[1]).setOnMenuItemClickListener {
+                confirmDeletePage(notebook, sectionId, page)
+                true
+            }
+            menu.add(0, 3, 2, labels[2]).setOnMenuItemClickListener {
+                pageNavigationClipboard = PageNavigationClipboard.Cut(notebook.id, sectionId, page.id)
+                Toast.makeText(this@MainActivity, "已剪切“${page.title}”", Toast.LENGTH_SHORT).show()
+                true
+            }
+            menu.add(0, 4, 3, labels[3]).setOnMenuItemClickListener {
+                pageNavigationClipboard = PageNavigationClipboard.Copy(notebook.id, sectionId, page.id)
+                Toast.makeText(this@MainActivity, "已复制“${page.title}”", Toast.LENGTH_SHORT).show()
+                true
+            }
+            menu.add(0, 5, 4, labels[4]).apply {
+                isEnabled = pageNavigationClipboard != null
+                setOnMenuItemClickListener {
+                    pastePageAfter(notebook, sectionId, page.id)
+                    true
+                }
+            }
+            menu.add(0, 6, 5, labels[5]).setOnMenuItemClickListener {
+                copyNavigationLink("页面链接", pageLink(notebook.id, sectionId, page.id))
+                true
+            }
+            menu.add(1, 7, 6, labels[6]).setOnMenuItemClickListener {
+                showPageMoveOrCopyDialog(notebook, sectionId, page)
+                true
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true)
+            show()
+        }
+    }
+
+    private fun showRenameDialog(title: String, currentValue: String, onSave: (String) -> Unit) {
+        val input =
+            EditText(this).apply {
+                setText(currentValue)
+                selectAll()
+                setSingleLine(true)
+                setPadding(dp(18), dp(8), dp(18), dp(8))
+            }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton("保存") { _, _ -> onSave(input.text.toString()) }
+            .setNegativeButton("取消", null)
+            .show()
+        input.requestFocus()
+    }
+
+    private fun confirmDeleteSection(notebook: NotebookWorkspace, section: SectionNode) {
+        val pages = notebook.pagesInSectionTree(section.id)
+        val childCount = notebook.allSections().count { candidate -> notebook.breadcrumb(candidate.id).dropLast(1).any { it.id == section.id } }
+        val message =
+            buildString {
+                append("将删除“${section.title}”")
+                if (childCount > 0 || pages.isNotEmpty()) append("以及其中 $childCount 个子分区、${pages.size} 个页面")
+                append("。此操作无法撤销。")
+            }
+        AlertDialog.Builder(this)
+            .setTitle("删除分区？")
+            .setMessage(message)
+            .setPositiveButton("删除") { _, _ ->
+                saveBoundPageSession()
+                val removedPageIds = pages.mapTo(mutableSetOf()) { it.id }
+                pages.forEach { rehomeSharedPdfSource(notebook, it, removedPageIds) }
+                val removed = notebook.deleteSection(section.id) ?: return@setPositiveButton
+                removedPageIds(removed).forEach { pageId -> removePageRuntimeAndData(notebook.id, pageId) }
+                if (notebookLibrary.activeNotebookId == notebook.id && workspace.focusedSectionId == null && workspace.sections.isNotEmpty()) {
+                    workspace.selectSection(workspace.sections.first().id)
+                }
+                finishNavigationMutation()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmDeletePage(notebook: NotebookWorkspace, sectionId: String, page: NotePage) {
+        AlertDialog.Builder(this)
+            .setTitle("删除页面？")
+            .setMessage("将删除“${page.title}”及其本地内容。此操作无法撤销。")
+            .setPositiveButton("删除") { _, _ ->
+                saveBoundPageSession()
+                rehomeSharedPdfSource(notebook, page)
+                if (notebook.deletePage(sectionId, page.id) != null) {
+                    removePageRuntimeAndData(notebook.id, page.id)
+                    if (pageNavigationClipboard?.pageId == page.id && pageNavigationClipboard?.notebookId == notebook.id) {
+                        pageNavigationClipboard = null
+                    }
+                    finishNavigationMutation()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showSectionMoveOrCopyDialog(notebook: NotebookWorkspace, section: SectionNode) {
+        val candidates =
+            buildList<Pair<String, String?>> {
+                add(notebook.title to null)
+                notebook.allSections()
+                    .filter { candidate -> candidate.id != section.id && notebook.breadcrumb(candidate.id).none { it.id == section.id } }
+                    .forEach { candidate -> add(notebook.breadcrumb(candidate.id).joinToString(" / ") { it.title } to candidate.id) }
+            }
+        val currentParentId = notebook.breadcrumb(section.id).dropLast(1).lastOrNull()?.id
+        var selectedIndex = candidates.indexOfFirst { it.second == currentParentId }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("移动或复制“${section.title}”")
+            .setSingleChoiceItems(candidates.map { it.first }.toTypedArray(), selectedIndex) { _, which -> selectedIndex = which }
+            .setPositiveButton("移动") { _, _ ->
+                if (notebook.moveSectionToParent(section.id, candidates[selectedIndex].second)) finishNavigationMutation()
+            }
+            .setNeutralButton("复制") { _, _ ->
+                val copied = notebook.copySectionToParent(section.id, candidates[selectedIndex].second)
+                if (copied != null) {
+                    copied.pages.forEach { copyPageRuntimeAndData(notebook.id, it.source, notebook.id, it.copy) }
+                    finishNavigationMutation()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showSectionMergeDialog(notebook: NotebookWorkspace, section: SectionNode) {
+        val candidates =
+            notebook.allSections()
+                .filter { candidate -> candidate.id != section.id && notebook.breadcrumb(candidate.id).none { it.id == section.id } }
+        if (candidates.isEmpty()) {
+            Toast.makeText(this, "没有可合并的其他分区", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("与其他分区合并")
+            .setItems(candidates.map { notebook.breadcrumb(it.id).joinToString(" / ") { node -> node.title } }.toTypedArray()) { _, which ->
+                val target = candidates[which]
+                AlertDialog.Builder(this)
+                    .setTitle("合并分区？")
+                    .setMessage("“${section.title}”中的页面和子分区将移入“${target.title}”，原分区会被删除。")
+                    .setPositiveButton("合并") { _, _ ->
+                        if (notebook.mergeSectionInto(section.id, target.id)) finishNavigationMutation()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showPageMoveOrCopyDialog(notebook: NotebookWorkspace, sourceSectionId: String, page: NotePage) {
+        val candidates = notebook.allSections()
+        if (candidates.isEmpty()) return
+        var selectedIndex = candidates.indexOfFirst { it.id == sourceSectionId }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("移动或复制“${page.title}”")
+            .setSingleChoiceItems(
+                candidates.map { notebook.breadcrumb(it.id).joinToString(" / ") { node -> node.title } }.toTypedArray(),
+                selectedIndex,
+            ) { _, which -> selectedIndex = which }
+            .setPositiveButton("移动") { _, _ ->
+                if (notebook.movePage(sourceSectionId, page.id, candidates[selectedIndex].id)) finishNavigationMutation()
+            }
+            .setNeutralButton("复制") { _, _ ->
+                val copied = notebook.copyPage(sourceSectionId, page.id, candidates[selectedIndex].id)
+                if (copied != null) {
+                    copyPageRuntimeAndData(notebook.id, copied.source, notebook.id, copied.copy)
+                    finishNavigationMutation()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun pastePageAfter(targetNotebook: NotebookWorkspace, targetSectionId: String, targetPageId: String) {
+        val clipboard = pageNavigationClipboard ?: return
+        val sourceNotebook = notebookLibrary.notebooks.firstOrNull { it.id == clipboard.notebookId } ?: return
+        val sourcePage = sourceNotebook.page(clipboard.sectionId, clipboard.pageId) ?: run {
+            pageNavigationClipboard = null
+            return
+        }
+        val targetIndex = targetNotebook.section(targetSectionId)?.pages?.indexOfFirst { it.id == targetPageId }?.plus(1) ?: return
+        if (clipboard is PageNavigationClipboard.Cut && sourceNotebook === targetNotebook) {
+            if (targetNotebook.movePage(clipboard.sectionId, clipboard.pageId, targetSectionId, targetIndex)) {
+                pageNavigationClipboard = null
+                finishNavigationMutation()
+            }
+            return
+        }
+        val copied = targetNotebook.copyPageFrom(sourcePage, targetSectionId, targetIndex) ?: return
+        copyPageRuntimeAndData(sourceNotebook.id, sourcePage, targetNotebook.id, copied.copy)
+        if (clipboard is PageNavigationClipboard.Cut) {
+            rehomeSharedPdfSource(sourceNotebook, sourcePage)
+            sourceNotebook.deletePage(clipboard.sectionId, clipboard.pageId)
+            removePageRuntimeAndData(sourceNotebook.id, clipboard.pageId)
+            pageNavigationClipboard = null
+        }
+        notebookLibrary.selectNotebook(targetNotebook.id)
+        finishNavigationMutation()
+    }
+
+    private fun copyPageRuntimeAndData(
+        sourceNotebookId: String,
+        sourcePage: NotePage,
+        targetNotebookId: String,
+        targetPage: NotePage,
+    ) {
+        val sourcePdf = sourcePage.pdfPage
+        val extraAssets =
+            sourcePdf?.takeIf { it.sourceOwnerPageId != sourcePage.id }?.let { pdf ->
+                listOf(File(pageContentRepository.assetDirectory(sourceNotebookId, pdf.sourceOwnerPageId), pdf.sourceAssetName))
+            }.orEmpty()
+        pageContentRepository.copyPageData(sourceNotebookId, sourcePage.id, targetNotebookId, targetPage.id, extraAssets)
+        pageSessions[PageSessionKey(sourceNotebookId, sourcePage.id)]?.let { session ->
+            pageSessions[PageSessionKey(targetNotebookId, targetPage.id)] =
+                session.copy(
+                    strokes = session.strokes.toList(),
+                    tags = session.tags.toList(),
+                    textBoxes = session.textBoxes.toList(),
+                )
+        }
+    }
+
+    private fun rehomeSharedPdfSource(
+        notebook: NotebookWorkspace,
+        page: NotePage,
+        excludedPageIds: Set<String> = setOf(page.id),
+    ) {
+        val pdf = page.pdfPage ?: return
+        if (pdf.sourceOwnerPageId != page.id) return
+        val dependents =
+            notebook.allSections()
+                .flatMap { it.pages }
+                .filter { candidate -> candidate.id !in excludedPageIds && candidate.pdfPage?.sourceOwnerPageId == page.id }
+        val newOwner = dependents.firstOrNull() ?: return
+        val source = File(pageContentRepository.assetDirectory(notebook.id, page.id), pdf.sourceAssetName)
+        if (source.isFile) source.copyTo(File(pageContentRepository.assetDirectory(notebook.id, newOwner.id), source.name), overwrite = true)
+        dependents.forEach { dependent ->
+            dependent.pdfPage = dependent.pdfPage?.copy(sourceOwnerPageId = newOwner.id)
+        }
+    }
+
+    private fun removePageRuntimeAndData(notebookId: String, pageId: String) {
+        val key = PageSessionKey(notebookId, pageId)
+        pageSessions.remove(key)
+        if (boundPageKey == key) boundPageKey = null
+        pageContentRepository.deletePageData(notebookId, pageId)
+    }
+
+    private fun removedPageIds(section: SectionNode): List<String> =
+        buildList {
+            fun visit(node: SectionNode) {
+                addAll(node.pages.map { it.id })
+                node.children.forEach(::visit)
+            }
+            visit(section)
+        }
+
+    private fun finishNavigationMutation() {
+        persistWorkspacePreferences()
+        persistPageViewSettings()
+        clearContentSelection()
+        renderWorkspace()
+    }
+
+    private fun copyNavigationLink(label: String, value: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
+        Toast.makeText(this, "链接已复制", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun sectionLink(notebookId: String, sectionId: String): String =
+        Uri.Builder().scheme("mojian").authority("open").appendPath("notebook").appendPath(notebookId)
+            .appendPath("section").appendPath(sectionId).build().toString()
+
+    private fun pageLink(notebookId: String, sectionId: String, pageId: String): String =
+        Uri.parse(sectionLink(notebookId, sectionId)).buildUpon().appendPath("page").appendPath(pageId).build().toString()
 
     private fun bindSelectedPageContent() {
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
@@ -4323,8 +4888,16 @@ class MainActivity : Activity() {
         pendingExport = type
         val pageTitle = workspace.selectedPage()?.title ?: "页面"
         val fileName =
-            if (type == PendingExport.PDF) "${safeFileName(pageTitle)}.pdf"
-            else "${safeFileName(workspace.title)}.mjn"
+            when (type) {
+                PendingExport.PDF -> "${safeFileName(pageTitle)}.pdf"
+                PendingExport.PRIVATE_PACKAGE -> "${safeFileName(workspace.title)}.mjn"
+                PendingExport.SECTION_PACKAGE -> {
+                    val target = pendingSectionExport
+                    val notebook = notebookLibrary.notebooks.firstOrNull { it.id == target?.notebookId }
+                    val section = target?.sectionId?.let { notebook?.section(it) }
+                    "${safeFileName(section?.title ?: "分区")}.mjn"
+                }
+            }
         startActivityForResult(
             Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -4335,9 +4908,16 @@ class MainActivity : Activity() {
         )
     }
 
+    private fun startSectionExport(notebook: NotebookWorkspace, section: SectionNode) {
+        pendingSectionExport = SectionExportTarget(notebook.id, section.id)
+        startExport(PendingExport.SECTION_PACKAGE)
+    }
+
     private fun exportToUri(uri: Uri, type: PendingExport) {
-        val snapshot = captureExportLayers() ?: return
-        val layers = snapshot.layers
+        val sectionExportTarget = pendingSectionExport
+        val snapshot = captureExportLayers()
+        if (type == PendingExport.PDF && snapshot == null) return
+        val layers = snapshot?.layers ?: linkedMapOf()
         val pageId = workspace.selectedPageId
         val notebook = workspace
         Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
@@ -4345,12 +4925,25 @@ class MainActivity : Activity() {
             runCatching {
                 contentResolver.openOutputStream(uri, "w").use { output ->
                     requireNotNull(output) { "无法写入目标文件" }
-                    if (type == PendingExport.PDF) {
-                        val rasterLayers = layers.map { (name, bitmap) -> bitmapToPdfLayer(name, bitmap) }
-                        LayeredPdfWriter.write(output, rasterLayers, snapshot.pageSize)
-                    } else {
-                        val pngLayers = layers.entries.associate { (name, bitmap) -> name to bitmapToPng(bitmap) }
-                        NotebookPackageExporter(pageContentRepository).write(output, notebook, pageId, pngLayers)
+                    val pngLayers = layers.entries.associate { (name, bitmap) -> name to bitmapToPng(bitmap) }
+                    when (type) {
+                        PendingExport.PDF -> {
+                            val rasterLayers = layers.map { (name, bitmap) -> bitmapToPdfLayer(name, bitmap) }
+                            LayeredPdfWriter.write(output, rasterLayers, requireNotNull(snapshot).pageSize)
+                        }
+                        PendingExport.PRIVATE_PACKAGE ->
+                            NotebookPackageExporter(pageContentRepository).write(output, notebook, pageId, pngLayers)
+                        PendingExport.SECTION_PACKAGE -> {
+                            val target = requireNotNull(sectionExportTarget) { "分区导出目标已丢失" }
+                            val targetNotebook = notebookLibrary.notebooks.first { it.id == target.notebookId }
+                            val section = requireNotNull(targetNotebook.section(target.sectionId)) { "分区已不存在" }
+                            val currentPageId =
+                                pageId.takeIf { id ->
+                                    notebook.id == targetNotebook.id && targetNotebook.pagesInSectionTree(section.id).any { it.id == id }
+                                }
+                            NotebookPackageExporter(pageContentRepository)
+                                .writeSection(output, targetNotebook, section, currentPageId, pngLayers.takeIf { currentPageId != null }.orEmpty())
+                        }
                     }
                 }
             }.onSuccess { runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() } }
@@ -4567,6 +5160,7 @@ class MainActivity : Activity() {
         private const val KEY_LAST_PAGE_TEMPLATE = "last-page-template"
         private const val KEY_IMAGE_IMPORT_DISPLAY_MODE = "image-import-display-mode"
         private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"
+        private const val KEY_NOTEBOOK_LIBRARY = "notebook-library"
         private const val REQUEST_ATTACHMENT = 4101
         private const val REQUEST_PDF_PRINTOUT = 4102
         private const val REQUEST_SPREADSHEET = 4103

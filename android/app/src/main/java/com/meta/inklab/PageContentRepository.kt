@@ -36,6 +36,33 @@ class PageContentRepository(private val root: File) {
         assetDirectory(notebookId, pageId).deleteRecursively()
     }
 
+    fun copyPageData(
+        sourceNotebookId: String,
+        sourcePageId: String,
+        targetNotebookId: String,
+        targetPageId: String,
+        extraAssets: List<File> = emptyList(),
+    ) {
+        val sourceDocument = load(sourceNotebookId, sourcePageId)
+        if (sourceDocument.objects.isNotEmpty() || pageFile(sourceNotebookId, sourcePageId).isFile) {
+            save(
+                PageInsertDocument(
+                    notebookId = targetNotebookId,
+                    pageId = targetPageId,
+                    objects = sourceDocument.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
+                ),
+            )
+        }
+        val destination = assetDirectory(targetNotebookId, targetPageId)
+        val sourceDirectory = assetDirectory(sourceNotebookId, sourcePageId)
+        sourceDirectory.listFiles()?.filter(File::isFile)?.forEach { source ->
+            source.copyTo(File(destination, source.name), overwrite = true)
+        }
+        extraAssets.filter(File::isFile).forEach { source ->
+            source.copyTo(File(destination, source.name), overwrite = true)
+        }
+    }
+
     companion object {
         fun safeId(value: String): String = value.replace(Regex("[^A-Za-z0-9._-]"), "_")
     }

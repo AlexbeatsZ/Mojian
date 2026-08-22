@@ -14,9 +14,30 @@ class NotebookPackageExporter(private val repository: PageContentRepository) {
         currentPageId: String?,
         currentLayers: Map<String, ByteArray>,
     ) {
+        writeRoots(output, notebook, notebook.sections, "mojian-notebook", currentPageId, currentLayers)
+    }
+
+    fun writeSection(
+        output: OutputStream,
+        notebook: NotebookWorkspace,
+        section: SectionNode,
+        currentPageId: String?,
+        currentLayers: Map<String, ByteArray>,
+    ) {
+        writeRoots(output, notebook, listOf(section), "mojian-section", currentPageId, currentLayers)
+    }
+
+    private fun writeRoots(
+        output: OutputStream,
+        notebook: NotebookWorkspace,
+        sections: List<SectionNode>,
+        format: String,
+        currentPageId: String?,
+        currentLayers: Map<String, ByteArray>,
+    ) {
         ZipOutputStream(output.buffered()).use { zip ->
-            putBytes(zip, "manifest.json", manifest(notebook, currentPageId).toString(2).toByteArray(Charsets.UTF_8))
-            visitPages(notebook.sections) { page ->
+            putBytes(zip, "manifest.json", manifest(notebook, sections, format, currentPageId).toString(2).toByteArray(Charsets.UTF_8))
+            visitPages(sections) { page ->
                 val pageFile = repository.pageFile(notebook.id, page.id)
                 if (pageFile.isFile) putFile(zip, "pages/${safe(page.id)}.json", pageFile)
                 val assetDirectory = repository.assetDirectory(notebook.id, page.id)
@@ -32,15 +53,20 @@ class NotebookPackageExporter(private val repository: PageContentRepository) {
         }
     }
 
-    private fun manifest(notebook: NotebookWorkspace, currentPageId: String?): JSONObject =
+    private fun manifest(
+        notebook: NotebookWorkspace,
+        sections: List<SectionNode>,
+        format: String,
+        currentPageId: String?,
+    ): JSONObject =
         JSONObject().apply {
-            put("format", "mojian-notebook")
+            put("format", format)
             put("version", 1)
             put("notebookId", notebook.id)
             put("title", notebook.title)
             put("currentPageId", currentPageId ?: JSONObject.NULL)
             put("pdfLayerOrder", JSONArray(listOf("页面背景", "插入内容", "墨迹与文字")))
-            put("sections", sectionsJson(notebook.sections))
+            put("sections", sectionsJson(sections))
         }
 
     private fun sectionsJson(sections: List<SectionNode>): JSONArray =

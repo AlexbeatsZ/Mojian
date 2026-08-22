@@ -12,8 +12,9 @@ Windows client. The interaction language is inspired by the user's installed des
 the product remains an independent clean-room application with its own recursively nestable section
 model.
 
-The notebook hierarchy and ink/text/tag layers remain prototype state, while inserted page objects
-and their embedded assets now persist in the product-owned private store. Full notebook import and
+The notebook hierarchy, manual ordering, names, and active navigation persist in product-owned
+preferences. Ink/text/tag layers remain prototype state, while inserted page objects and their
+embedded assets persist in the product-owned private store. Full notebook import and
 sync remain later product layers; their visible entry points may be shells, but drawing, hierarchy
 selection, insertion, and export must be real.
 
@@ -76,6 +77,28 @@ The page pane supports two modes. The default is `本层`; the mode selector bel
 
 The recursive page pane ignores black-pane collapse state: collapse controls navigation density,
 not which descendant pages exist in recursive page mode.
+
+### Long-press management and manual ordering
+
+Section and page rows use one mutually exclusive long-press gesture:
+
+- holding and releasing without entering drag shows that row's context menu;
+- holding and then moving beyond touch slop enters drag-and-drop ordering;
+- after drag has started, releasing performs only the drop and must never also open the menu;
+- movement before the long-press threshold remains ordinary list scrolling.
+
+Dragging a section places it immediately before or after another visible section and adopts that
+target's parent. Dragging a page places it before or after another visible page and adopts that
+page's owning section. This makes both same-parent ordering and deliberate cross-parent moves
+possible without inventing a second sort mode. Dragging and the current move/copy destination list
+stay within the source notebook; cross-notebook hierarchy transfer remains later storage work.
+
+The section menu contains `重命名`, `导出`, `删除`, `移动或复制`, `与其他分区合并`,
+`复制指向分区的链接`, and `新建分区`. The page menu contains `重命名`, `删除`, `剪切`,
+`复制`, `粘贴`, `复制指向页面的链接`, and `移动或复制`. These are real hierarchy/data
+operations: deletion removes product-owned page data, copying includes embedded assets, section
+export writes a scoped private package, and changes survive restart. Destructive operations require
+confirmation; a section deletion explicitly includes its descendant sections and pages.
 
 ## Drawing-tool contract
 
