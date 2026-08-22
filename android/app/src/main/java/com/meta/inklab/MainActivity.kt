@@ -45,10 +45,12 @@ import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import org.json.JSONObject
 
 private enum class RibbonPage {
     HOME,
     DRAW,
+    VIEW,
 }
 
 class MainActivity : Activity() {
@@ -85,11 +87,20 @@ class MainActivity : Activity() {
     private lateinit var textInputLayer: CanvasTextInputLayer
     private lateinit var tagLayer: CanvasTagLayer
     private lateinit var selectionOverlay: SelectionOverlayView
+    private lateinit var paperContainer: FrameLayout
+    private lateinit var pageSurfaceBackground: PageSurfaceView
+    private lateinit var pageSurfaceForeground: PageSurfaceView
     private lateinit var sectionPaneToggle: View
     private lateinit var pagePaneToggle: View
     private lateinit var toolbarToggle: View
     private lateinit var fullPageToggle: View
     private lateinit var fullPageToggleIcon: ImageView
+    private var fullViewButton: View? = null
+    private var normalViewButton: View? = null
+    private var pageTitleViewButton: View? = null
+    private var backgroundViewButton: View? = null
+    private var zoomPercentButton: TextView? = null
+    private var pageColorSwatch: View? = null
 
     private var predictionEnabled = true
     private var transformGestureActive = false
@@ -113,6 +124,7 @@ class MainActivity : Activity() {
     private var fullPageMode = false
     private var activeRibbonPage = RibbonPage.DRAW
     private var restoreTextModeAfterTagPlacement = false
+    private var darkCanvasActive = true
 
     private val activatePressureEraser =
         Runnable {
@@ -603,6 +615,7 @@ class MainActivity : Activity() {
                 }
             }
         }
+        restorePageViewSettings(prefs.getString(KEY_PAGE_VIEW_SETTINGS, ""))
     }
 
     private fun persistToolShelf() {
@@ -625,6 +638,36 @@ class MainActivity : Activity() {
             .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
             .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
+            .apply()
+    }
+
+    private fun restorePageViewSettings(jsonString: String?) {
+        if (jsonString.isNullOrBlank()) return
+        val root = runCatching { JSONObject(jsonString) }.getOrNull() ?: return
+        for (notebook in notebookLibrary.notebooks) {
+            for (row in notebook.flattenSections()) {
+                for (page in row.section.pages) {
+                    val json = root.optJSONObject(page.id) ?: continue
+                    val restored = PageViewSettings.fromJson(json)
+                    page.viewSettings.paperSize = restored.paperSize
+                    page.viewSettings.pageColor = restored.pageColor
+                    page.viewSettings.pageTitleVisible = restored.pageTitleVisible
+                    page.viewSettings.darkBackground = restored.darkBackground
+                }
+            }
+        }
+    }
+
+    private fun persistPageViewSettings() {
+        val root = JSONObject()
+        for (notebook in notebookLibrary.notebooks) {
+            for (row in notebook.flattenSections()) {
+                for (page in row.section.pages) root.put(page.id, page.viewSettings.toJson())
+            }
+        }
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PAGE_VIEW_SETTINGS, root.toString())
             .apply()
     }
 
@@ -715,7 +758,7 @@ class MainActivity : Activity() {
         row.addView(ribbonTab("开始", activeRibbonPage == RibbonPage.HOME) { selectRibbonPage(RibbonPage.HOME) })
         row.addView(ribbonTab("插入", false) { showShell("插入工具") })
         row.addView(ribbonTab("绘图", activeRibbonPage == RibbonPage.DRAW) { selectRibbonPage(RibbonPage.DRAW) })
-        row.addView(ribbonTab("视图", false) { showShell("视图工具") })
+        row.addView(ribbonTab("视图", activeRibbonPage == RibbonPage.VIEW) { selectRibbonPage(RibbonPage.VIEW) })
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
     }
 
@@ -729,14 +772,20 @@ class MainActivity : Activity() {
         val host = drawingRibbon as FrameLayout
         host.removeAllViews()
         host.addView(
-            if (page == RibbonPage.HOME) buildHomeRibbon() else buildDrawingRibbon(),
+            when (page) {
+                RibbonPage.HOME -> buildHomeRibbon()
+                RibbonPage.DRAW -> buildDrawingRibbon()
+                RibbonPage.VIEW -> buildViewRibbon()
+            },
             FrameLayout.LayoutParams(MATCH, MATCH),
         )
         if (page == RibbonPage.HOME) {
             setTextMode(true, rerender = false)
-        } else {
+        } else if (page == RibbonPage.DRAW) {
             renderToolShelf()
             renderToolDetails()
+        } else {
+            refreshViewRibbonState()
         }
     }
 
@@ -830,6 +879,69 @@ class MainActivity : Activity() {
                     addHomeCommand(HomeCommand.FIND_TAGS, redAccent = true)
                     addView(verticalDivider())
                     addView(homeDropdownButton("样式", HomeCommand.STYLES), LinearLayout.LayoutParams(dp(70), dp(38)))
+                },
+                ViewGroup.LayoutParams(WRAP, MATCH),
+            )
+        }
+
+    private fun buildViewRibbon(): View =
+        HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(TOOLBAR_BACKGROUND)
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(2), dp(8), dp(2))
+
+                    fullViewButton =
+                        commandButton("full_screen_maximize", "整页视图", fullPageMode) { setFullPageMode(true) }
+                    addView(fullViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    normalViewButton =
+                        commandButton("panel_left", "普通视图", !fullPageMode) { setFullPageMode(false) }
+                    addView(normalViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(verticalDivider())
+
+                    zoomPercentButton = zoomValueButton()
+                    addView(zoomPercentButton, LinearLayout.LayoutParams(dp(70), dp(34)).apply { marginEnd = dp(3) })
+                    addView(
+                        commandButton("zoom_in", "放大", false) { zoomByStep(1) },
+                        LinearLayout.LayoutParams(dp(38), dp(42)),
+                    )
+                    addView(
+                        commandButton("zoom_out", "缩小", false) { zoomByStep(-1) },
+                        LinearLayout.LayoutParams(dp(38), dp(42)),
+                    )
+                    addView(zoomResetButton(), LinearLayout.LayoutParams(dp(54), dp(34)).apply { marginStart = dp(2) })
+                    addView(
+                        commandButton("page_width", "页宽", false) { fitPageWidth() },
+                        LinearLayout.LayoutParams(dp(40), dp(42)),
+                    )
+                    addView(verticalDivider())
+
+                    addView(pageColorButton(), LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(
+                        pageBoundCommand("document_page", "纸张大小") { anchor -> showPaperSizeMenu(anchor) },
+                        LinearLayout.LayoutParams(dp(40), dp(42)),
+                    )
+                    pageTitleViewButton =
+                        pageBoundCommand(
+                            "eye_off",
+                            "隐藏页面标题",
+                            selected = workspace.selectedPage()?.viewSettings?.pageTitleVisible == false,
+                        ) {
+                            updateCurrentPageView { it.pageTitleVisible = !it.pageTitleVisible }
+                        }
+                    addView(pageTitleViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    backgroundViewButton =
+                        pageBoundCommand(
+                            "weather_moon",
+                            "切换背景",
+                            selected = workspace.selectedPage()?.viewSettings?.darkBackground == true,
+                        ) {
+                            updateCurrentPageView { it.darkBackground = !it.darkBackground }
+                        }
+                    addView(backgroundViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
                 },
                 ViewGroup.LayoutParams(WRAP, MATCH),
             )
@@ -1152,7 +1264,9 @@ class MainActivity : Activity() {
         }.also { it.background = bordered(PAGE_LIST_BACKGROUND, BORDER_COLOR, 0f) }
 
     private fun buildPaper(): View {
-        val paper = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
+        paperContainer = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
+        pageSurfaceBackground = PageSurfaceView(this, viewport, PageSurfaceLayer.BACKGROUND)
+        pageSurfaceForeground = PageSurfaceView(this, viewport, PageSurfaceLayer.FOREGROUND)
         dryInkView = DryInkView(this)
         wetInkView = InProgressStrokesView(this)
         tagLayer = CanvasTagLayer(this, viewport)
@@ -1183,14 +1297,16 @@ class MainActivity : Activity() {
             renderToolDetails()
         }
         dryInkView.setViewport(viewport.documentToViewMatrix())
-        paper.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
-        paper.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
-        paper.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
-        paper.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
-        paper.addView(selectionOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(pageSurfaceBackground, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(selectionOverlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        paperContainer.addView(pageSurfaceForeground, FrameLayout.LayoutParams(MATCH, MATCH))
 
         floatingToolbox = buildFloatingToolbox()
-        paper.addView(
+        paperContainer.addView(
             floatingToolbox,
             FrameLayout.LayoutParams(MATCH, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(7)
@@ -1198,14 +1314,14 @@ class MainActivity : Activity() {
                 rightMargin = dp(116)
             },
         )
-        paper.addView(
+        paperContainer.addView(
             buildCanvasActions(),
             FrameLayout.LayoutParams(WRAP, dp(36), Gravity.TOP or Gravity.END).apply {
                 topMargin = dp(6)
                 rightMargin = dp(7)
             },
         )
-        return paper
+        return paperContainer
     }
 
     private fun buildFloatingToolbox(): View =
@@ -1243,8 +1359,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(4) },
             )
             fullPageToggle = canvasActionButton("full_screen_maximize", "进入整页视图", selected = false) {
-                fullPageMode = !fullPageMode
-                applyChromeVisibility()
+                setFullPageMode(!fullPageMode)
             }
             fullPageToggleIcon = (fullPageToggle as ViewGroup).getChildAt(0) as ImageView
             addView(fullPageToggle, LinearLayout.LayoutParams(dp(34), dp(34)))
@@ -1392,6 +1507,7 @@ class MainActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(MATCH, WRAP),
             )
+            applySelectedPageAppearance()
             return
         }
         for (row in rows) {
@@ -1400,6 +1516,7 @@ class MainActivity : Activity() {
                 is PagePaneRow.PageItem -> addPageRow(row)
             }
         }
+        applySelectedPageAppearance()
     }
 
     private fun addRecursiveSectionHeader(row: PagePaneRow.SectionHeader) {
@@ -2172,9 +2289,16 @@ class MainActivity : Activity() {
         lastGestureFocusX = focusX
         lastGestureFocusY = focusY
         lastGestureSpan = nextSpan
+        applyViewportToLayers()
+    }
+
+    private fun applyViewportToLayers() {
         dryInkView.setViewport(viewport.documentToViewMatrix())
+        pageSurfaceBackground.invalidate()
+        pageSurfaceForeground.invalidate()
         tagLayer.invalidate()
         selectionOverlay.invalidate()
+        refreshViewRibbonState()
     }
 
     private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
@@ -2262,13 +2386,20 @@ class MainActivity : Activity() {
         applyChromeVisibility()
     }
 
+    private fun setFullPageMode(enabled: Boolean) {
+        if (fullPageMode == enabled) return
+        fullPageMode = enabled
+        applyChromeVisibility()
+        refreshViewRibbonState()
+    }
+
     private fun applyChromeVisibility() {
         if (!::ribbonTabs.isInitialized) return
         if (!fullPageMode) drawingToolbarVisible = true
         ribbonTabs.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         drawingRibbon.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         floatingToolbox.visibility = if (fullPageMode && drawingToolbarVisible) View.VISIBLE else View.GONE
-        toolbarToggle.visibility = if (fullPageMode) View.GONE else View.VISIBLE
+        toolbarToggle.visibility = if (fullPageMode) View.VISIBLE else View.GONE
         navigationRail.visibility = if (fullPageMode) View.GONE else View.VISIBLE
         navigationPane.visibility = if (!fullPageMode && sectionPaneVisible) View.VISIBLE else View.GONE
         pagePane.visibility = if (!fullPageMode && pagePaneVisible) View.VISIBLE else View.GONE
@@ -2282,6 +2413,204 @@ class MainActivity : Activity() {
         val fullPageDescription = if (fullPageMode) "退出整页视图" else "进入整页视图"
         fullPageToggle.contentDescription = fullPageDescription
         fullPageToggle.tooltipText = fullPageDescription
+    }
+
+    private fun applySelectedPageAppearance() {
+        if (!::pageSurfaceBackground.isInitialized) return
+        val page = workspace.selectedPage()
+        val settings = page?.viewSettings ?: PageViewSettings()
+        val nextDark = settings.darkBackground
+        darkCanvasActive = nextDark
+        dryInkView.setDarkBackground(nextDark)
+        textInputLayer.setDarkBackground(nextDark)
+        pageSurfaceBackground.updatePage(page?.title.orEmpty(), settings)
+        pageSurfaceForeground.updatePage(page?.title.orEmpty(), settings)
+        if (::currentBrush.isInitialized) rebuildBrush()
+        refreshViewRibbonState()
+    }
+
+    private fun updateCurrentPageView(change: (PageViewSettings) -> Unit) {
+        if (activeStrokes.isNotEmpty()) return
+        val page = workspace.selectedPage() ?: return
+        change(page.viewSettings)
+        persistPageViewSettings()
+        applySelectedPageAppearance()
+    }
+
+    private fun refreshViewRibbonState() {
+        zoomPercentButton?.text = "${(viewport.scale * 100f).roundToInt()}%"
+        fullViewButton?.let { updateToggleVisual(it, fullPageMode) }
+        normalViewButton?.let { updateToggleVisual(it, !fullPageMode) }
+        val settings = workspace.selectedPage()?.viewSettings
+        pageTitleViewButton?.let { updateToggleVisual(it, settings?.pageTitleVisible == false) }
+        backgroundViewButton?.let { updateToggleVisual(it, settings?.darkBackground == true) }
+        pageColorSwatch?.background =
+            rounded(
+                settings?.pageColor?.displayArgb(settings.darkBackground) ?: Color.TRANSPARENT,
+                dp(1).toFloat(),
+                if (settings != null) BORDER_STRONG else Color.TRANSPARENT,
+            )
+    }
+
+    private fun zoomValueButton(): TextView =
+        TextView(this).apply {
+            text = "${(viewport.scale * 100f).roundToInt()}%"
+            gravity = Gravity.CENTER
+            setTextColor(TEXT_PRIMARY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            background = rounded(Color.rgb(42, 42, 42), dp(2).toFloat(), BORDER_STRONG)
+            contentDescription = "显示比例"
+            tooltipText = "显示比例"
+            setOnClickListener { showZoomPresetMenu(this) }
+        }
+
+    private fun zoomResetButton(): TextView =
+        TextView(this).apply {
+            text = "100%"
+            gravity = Gravity.CENTER
+            setTextColor(TEXT_PRIMARY)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            background = toggleBackground(false)
+            contentDescription = "恢复 100%"
+            tooltipText = "恢复 100%"
+            setOnClickListener { setZoomScale(1f) }
+        }
+
+    private fun pageBoundCommand(
+        icon: String,
+        label: String,
+        selected: Boolean = false,
+        action: (View) -> Unit,
+    ): View =
+        commandButton(icon, label, selected, action = action).apply {
+            isEnabled = workspace.selectedPage() != null
+            alpha = if (isEnabled) 1f else 0.35f
+        }
+
+    private fun pageColorButton(): View =
+        pageBoundCommand("paint_brush", "页面颜色") { anchor -> showPageColorMenu(anchor) }.also { button ->
+            pageColorSwatch =
+                View(this).apply {
+                    val settings = workspace.selectedPage()?.viewSettings
+                    background =
+                        rounded(
+                            settings?.pageColor?.displayArgb(settings.darkBackground) ?: Color.TRANSPARENT,
+                            dp(1).toFloat(),
+                            if (settings != null) BORDER_STRONG else Color.TRANSPARENT,
+                        )
+                }
+            (button as FrameLayout).addView(
+                pageColorSwatch,
+                FrameLayout.LayoutParams(dp(20), dp(4), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                    bottomMargin = dp(3)
+                },
+            )
+        }
+
+    private fun showZoomPresetMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            for (percent in ZOOM_PRESETS) {
+                menu.add("$percent%").setOnMenuItemClickListener {
+                    setZoomScale(percent / 100f)
+                    true
+                }
+            }
+            show()
+        }
+    }
+
+    private fun zoomByStep(direction: Int) {
+        val current = viewport.scale * 100f
+        val target =
+            if (direction > 0) ZOOM_PRESETS.firstOrNull { it > current + 0.5f } ?: ZOOM_PRESETS.last()
+            else ZOOM_PRESETS.lastOrNull { it < current - 0.5f } ?: ZOOM_PRESETS.first()
+        setZoomScale(target / 100f)
+    }
+
+    private fun setZoomScale(scale: Float) {
+        if (activeStrokes.isNotEmpty()) return
+        if (paperContainer.width <= 0 || paperContainer.height <= 0) {
+            paperContainer.post { setZoomScale(scale) }
+            return
+        }
+        viewport.setScaleAround(scale, paperContainer.width * 0.5f, paperContainer.height * 0.5f)
+        applyViewportToLayers()
+    }
+
+    private fun fitPageWidth() {
+        val page = workspace.selectedPage() ?: return
+        if (activeStrokes.isNotEmpty()) return
+        if (paperContainer.width <= 0) {
+            paperContainer.post(::fitPageWidth)
+            return
+        }
+        viewport.fitDocumentWidth(
+            documentLeft = 0f,
+            documentWidth = page.viewSettings.paperSize.documentWidth,
+            viewWidth = paperContainer.width.toFloat(),
+            horizontalPadding = dp(24).toFloat(),
+        )
+        applyViewportToLayers()
+    }
+
+    private fun showPaperSizeMenu(anchor: View) {
+        val page = workspace.selectedPage() ?: return
+        PopupMenu(this, anchor).apply {
+            for (size in PaperSize.entries) {
+                menu.add(size.menuLabel).apply { isChecked = size == page.viewSettings.paperSize }
+                    .setOnMenuItemClickListener {
+                        updateCurrentPageView { it.paperSize = size }
+                        true
+                    }
+            }
+            menu.setGroupCheckable(0, true, true)
+            show()
+        }
+    }
+
+    private fun showPageColorMenu(anchor: View) {
+        val page = workspace.selectedPage() ?: return
+        toolDetailPopup?.dismiss()
+        val row =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+            }
+        lateinit var popup: PopupWindow
+        for (color in PageColor.entries) {
+            row.addView(
+                FrameLayout(this).apply {
+                    contentDescription = color.description
+                    tooltipText = color.description
+                    addView(
+                        View(this@MainActivity).apply {
+                            background =
+                                rounded(
+                                    color.displayArgb(page.viewSettings.darkBackground),
+                                    dp(2).toFloat(),
+                                    if (color == page.viewSettings.pageColor) ACCENT_PURPLE else BORDER_STRONG,
+                                )
+                        },
+                        FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER),
+                    )
+                    setOnClickListener {
+                        updateCurrentPageView { it.pageColor = color }
+                        popup.dismiss()
+                    }
+                },
+                LinearLayout.LayoutParams(dp(40), dp(36)),
+            )
+        }
+        popup =
+            PopupWindow(row, dp(216), dp(48), true).apply {
+                isOutsideTouchable = true
+                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+                elevation = dp(10).toFloat()
+                setOnDismissListener { if (toolDetailPopup === this) toolDetailPopup = null }
+            }
+        popup.showAsDropDown(anchor, -dp(8), dp(2))
+        toolDetailPopup = popup
     }
 
     private fun showAddToolMenu(anchor: View) {
@@ -2613,7 +2942,7 @@ class MainActivity : Activity() {
 
     /** OneNote dark mode shows logical black ink as light ink without changing its saved color. */
     private fun displayColor(color: InkPalette): Int =
-        if (color == InkPalette.BLACK) Color.rgb(239, 239, 239) else color.argb
+        if (color == InkPalette.BLACK && darkCanvasActive) Color.rgb(239, 239, 239) else color.argb
 
     private fun rounded(fill: Int, radius: Float, stroke: Int): GradientDrawable =
         GradientDrawable().apply {
@@ -2662,7 +2991,9 @@ class MainActivity : Activity() {
         private const val KEY_ACTIVE_NOTEBOOK_ID = "active-notebook-id"
         private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
         private const val KEY_SELECTED_PAGE_ID = "selected-page-id"
+        private const val KEY_PAGE_VIEW_SETTINGS = "page-view-settings"
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
+        private val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800)
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
         private val ACCENT_PURPLE = Color.rgb(218, 178, 233)

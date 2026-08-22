@@ -46,4 +46,25 @@ class ViewportStateTest {
         viewport.applyGesture(0f, 0f, 0f, 0f, 0.001f)
         assertEquals(0.5f, viewport.scale, 0.0001f)
     }
+
+    @Test
+    fun explicitZoomKeepsTheAnchorDocumentPointStationary() {
+        val viewport = ViewportState()
+
+        viewport.setScaleAround(2f, 300f, 180f)
+
+        assertEquals(2f, viewport.scale, 0.0001f)
+        assertEquals(-300f, viewport.translationX, 0.0001f)
+        assertEquals(-180f, viewport.translationY, 0.0001f)
+    }
+
+    @Test
+    fun fitDocumentWidthCentersThePageInsideTheRequestedPadding() {
+        val viewport = ViewportState(minScale = 0.1f)
+
+        viewport.fitDocumentWidth(documentLeft = 10f, documentWidth = 1000f, viewWidth = 800f, horizontalPadding = 40f)
+
+        assertEquals(0.72f, viewport.scale, 0.0001f)
+        assertEquals(32.8f, viewport.translationX, 0.0001f)
+    }
 }

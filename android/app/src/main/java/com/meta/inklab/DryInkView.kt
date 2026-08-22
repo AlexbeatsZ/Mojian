@@ -108,7 +108,7 @@ class DryInkView(context: Context) : View(context) {
         }
 
     init {
-        setBackgroundColor(Color.rgb(27, 27, 27))
+        setBackgroundColor(Color.TRANSPARENT)
     }
 
     fun addStrokes(newStrokes: Collection<Stroke>) {
@@ -134,6 +134,30 @@ class DryInkView(context: Context) : View(context) {
 
     fun setViewport(matrix: Matrix) {
         documentToView.set(matrix)
+        invalidate()
+    }
+
+    fun setDarkBackground(enabled: Boolean) {
+        val replacements = LinkedHashMap<Stroke, Stroke>()
+        for (stroke in strokes) {
+            val color = stroke.brush.colorIntArgb
+            val red = Color.red(color)
+            val green = Color.green(color)
+            val blue = Color.blue(color)
+            val isMappedBlack =
+                (red == 239 && green == 239 && blue == 239) ||
+                    (red == 27 && green == 27 && blue == 31)
+            if (!isMappedBlack) continue
+            val mappedRgb = if (enabled) 0xFFEFEFEF.toInt() else InkPalette.BLACK.argb
+            val mapped = Color.argb(Color.alpha(color), Color.red(mappedRgb), Color.green(mappedRgb), Color.blue(mappedRgb))
+            if (mapped == color) continue
+            replacements[stroke] = Stroke(stroke.brush.copyWithColorIntArgb(mapped), stroke.inputs)
+        }
+        if (replacements.isEmpty()) return
+        for (index in strokes.indices) replacements[strokes[index]]?.let { strokes[index] = it }
+        val selectedReplacements = selectedStrokes.mapNotNull(replacements::get)
+        selectedStrokes.removeAll(replacements.keys)
+        selectedStrokes.addAll(selectedReplacements)
         invalidate()
     }
 

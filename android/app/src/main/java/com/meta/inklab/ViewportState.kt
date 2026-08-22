@@ -46,6 +46,27 @@ class ViewportState(
         translationY = viewCenterY - documentY * scale
     }
 
+    fun setScaleAround(
+        requestedScale: Float,
+        anchorViewX: Float,
+        anchorViewY: Float,
+    ) {
+        val factor = requestedScale / scale
+        applyGesture(anchorViewX, anchorViewY, anchorViewX, anchorViewY, factor)
+    }
+
+    fun fitDocumentWidth(
+        documentLeft: Float,
+        documentWidth: Float,
+        viewWidth: Float,
+        horizontalPadding: Float,
+    ) {
+        if (documentWidth <= 0f || viewWidth <= 0f) return
+        val availableWidth = (viewWidth - horizontalPadding * 2f).coerceAtLeast(1f)
+        scale = (availableWidth / documentWidth).coerceIn(minScale, maxScale)
+        translationX = horizontalPadding - documentLeft * scale
+    }
+
     fun documentToViewMatrix(): Matrix =
         Matrix().apply {
             setValues(

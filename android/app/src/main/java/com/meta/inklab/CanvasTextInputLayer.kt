@@ -56,6 +56,7 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
     private val touchSlop = dp(8).toFloat()
     private var activeEditor: EditText? = null
     private var capturedFormat: CapturedTextFormat? = null
+    private var darkBackground = true
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
@@ -67,6 +68,11 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         textModeEnabled = enabled
         forEachEditor { it.isEnabled = enabled }
         if (!enabled) hideKeyboard()
+    }
+
+    fun setDarkBackground(enabled: Boolean) {
+        darkBackground = enabled
+        forEachEditor(::applyDefaultEditorColors)
     }
 
     fun clearAll() {
@@ -217,8 +223,7 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         val editorWidth = dp(300)
         val editor =
             EditText(context).apply {
-                setTextColor(Color.rgb(239, 239, 239))
-                setHintTextColor(Color.rgb(155, 155, 155))
+                applyDefaultEditorColors(this)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 setBackgroundColor(Color.TRANSPARENT)
                 setPadding(0, 0, 0, 0)
@@ -362,6 +367,11 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
 
     private fun forEachEditor(action: (EditText) -> Unit) {
         for (index in 0 until childCount) (getChildAt(index) as? EditText)?.let(action)
+    }
+
+    private fun applyDefaultEditorColors(editor: EditText) {
+        editor.setTextColor(if (darkBackground) Color.rgb(239, 239, 239) else Color.rgb(27, 27, 31))
+        editor.setHintTextColor(if (darkBackground) Color.rgb(155, 155, 155) else Color.rgb(100, 100, 100))
     }
 
     private fun showKeyboard(view: View) {

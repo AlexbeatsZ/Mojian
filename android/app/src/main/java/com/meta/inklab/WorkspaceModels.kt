@@ -4,6 +4,7 @@ data class NotePage(
     val id: String,
     var title: String,
     val subtitle: String = "刚刚",
+    val viewSettings: PageViewSettings = PageViewSettings(),
 )
 
 data class SectionNode(
