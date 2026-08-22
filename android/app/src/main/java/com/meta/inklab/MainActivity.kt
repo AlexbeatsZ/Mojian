@@ -103,6 +103,9 @@ class MainActivity : Activity() {
     private var lastPenToolId: String = toolShelf.tools.first { it.kind == DrawingToolKind.PEN }.id
     private var singleFingerPanEnabled = false
     private var insertSpaceModeEnabled = false
+    private var insertSpaceActive = false
+    private var insertSpaceStartDocY = 0f
+    private var insertSpaceCurrentDocY = 0f
     private var textModeEnabled = false
     private var sectionPaneVisible = true
     private var pagePaneVisible = true
@@ -1000,13 +1003,70 @@ class MainActivity : Activity() {
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
+        insertSpaceActive = false
+        dryInkView.setInsertSpaceHoverY(null)
+        dryInkView.setInsertSpaceGuide(null, null)
         insertSpaceModeEnabled = !insertSpaceModeEnabled
         renderToolShelf()
         Toast.makeText(
             this,
-            if (insertSpaceModeEnabled) "已开启插入空白空间模式（在页面上垂直拖动可插入空白）" else "已退出插入空白空间模式",
+            if (insertSpaceModeEnabled) "已开启插入空白空间：笔尖悬浮可预览基准线，按下并向下拖动可推移下方内容" else "已退出插入空白空间",
             Toast.LENGTH_SHORT,
         ).show()
+    }
+
+    private fun handleInsertSpaceGesture(event: MotionEvent): Boolean {
+        val fingerIndices = (0 until event.pointerCount).filter { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
+        if (fingerIndices.size >= 2) {
+            if (insertSpaceActive) {
+                insertSpaceActive = false
+                dryInkView.setInsertSpaceGuide(null, null)
+            }
+            return false
+        }
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val pointerIndex = event.actionIndex
+                val docPoint = viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex))
+                insertSpaceStartDocY = docPoint.y
+                insertSpaceCurrentDocY = docPoint.y
+                insertSpaceActive = true
+                dryInkView.setInsertSpaceHoverY(null)
+                dryInkView.setInsertSpaceGuide(insertSpaceStartDocY, insertSpaceCurrentDocY)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (insertSpaceActive) {
+                    val docPoint = viewport.viewToDocument(event.x, event.y)
+                    insertSpaceCurrentDocY = docPoint.y
+                    dryInkView.setInsertSpaceGuide(insertSpaceStartDocY, insertSpaceCurrentDocY)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (insertSpaceActive) {
+                    val deltaY = insertSpaceCurrentDocY - insertSpaceStartDocY
+                    if (kotlin.math.abs(deltaY) >= 2f) {
+                        dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                        tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                    }
+                    insertSpaceActive = false
+                    dryInkView.setInsertSpaceGuide(null, null)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (insertSpaceActive) {
+                    insertSpaceActive = false
+                    dryInkView.setInsertSpaceGuide(null, null)
+                    return true
+                }
+            }
+        }
+        return insertSpaceActive
     }
 
     private fun showBackgroundFormatMenu(anchor: View) {
@@ -1477,6 +1537,9 @@ class MainActivity : Activity() {
                     tagLayer.cancelPlacement()
                     singleFingerPanEnabled = !singleFingerPanEnabled
                     insertSpaceModeEnabled = false
+                    insertSpaceActive = false
+                    dryInkView.setInsertSpaceHoverY(null)
+                    dryInkView.setInsertSpaceGuide(null, null)
                     transformGestureActive = false
                     renderToolShelf()
                 }
@@ -1525,6 +1588,9 @@ class MainActivity : Activity() {
                 tagLayer.cancelPlacement()
                 singleFingerPanEnabled = !singleFingerPanEnabled
                 insertSpaceModeEnabled = false
+                insertSpaceActive = false
+                dryInkView.setInsertSpaceHoverY(null)
+                dryInkView.setInsertSpaceGuide(null, null)
                 transformGestureActive = false
                 toolDetailPopup?.dismiss()
                 toolDetailPopup = null
@@ -1791,9 +1857,27 @@ class MainActivity : Activity() {
             handleMotionEvent(event)
             true
         }
+        wetInkView.setOnHoverListener { _, event ->
+            if (insertSpaceModeEnabled) {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_HOVER_ENTER,
+                    MotionEvent.ACTION_HOVER_MOVE -> {
+                        val docPoint = viewport.viewToDocument(event.x, event.y)
+                        dryInkView.setInsertSpaceHoverY(docPoint.y)
+                    }
+                    MotionEvent.ACTION_HOVER_EXIT -> {
+                        dryInkView.setInsertSpaceHoverY(null)
+                    }
+                }
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
+        if (insertSpaceModeEnabled && handleInsertSpaceGesture(event)) return
         if (handleFingerGesture(event)) return
         if (!hasStylusPointer(event) && activeStrokes.isEmpty()) return
         predictor.record(event)
@@ -1941,6 +2025,9 @@ class MainActivity : Activity() {
         setTextMode(false, rerender = false)
         singleFingerPanEnabled = false
         insertSpaceModeEnabled = false
+        insertSpaceActive = false
+        dryInkView.setInsertSpaceHoverY(null)
+        dryInkView.setInsertSpaceGuide(null, null)
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
@@ -1966,6 +2053,9 @@ class MainActivity : Activity() {
             tagLayer.cancelPlacement()
             singleFingerPanEnabled = false
             insertSpaceModeEnabled = false
+            insertSpaceActive = false
+            dryInkView.setInsertSpaceHoverY(null)
+            dryInkView.setInsertSpaceGuide(null, null)
             transformGestureActive = false
             toolDetailPopup?.dismiss()
             toolDetailPopup = null

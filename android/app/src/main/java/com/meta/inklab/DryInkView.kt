@@ -9,6 +9,7 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.DashPathEffect
+import android.util.TypedValue
 import android.view.View
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.rendering.android.view.ViewStrokeRenderer
@@ -58,6 +59,52 @@ class DryInkView(context: Context) : View(context) {
             style = Paint.Style.STROKE
             strokeWidth = 1.5f * resources.displayMetrics.density
             pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
+        }
+
+    private var insertSpaceHoverY: Float? = null
+    private var insertSpaceStartY: Float? = null
+    private var insertSpaceCurrentY: Float? = null
+
+    private val insertSpaceLinePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(200, 200, 200)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * resources.displayMetrics.density
+            pathEffect = DashPathEffect(floatArrayOf(12f, 8f), 0f)
+        }
+    private val insertSpaceMovingLinePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(0, 120, 215)
+            style = Paint.Style.STROKE
+            strokeWidth = 2f * resources.displayMetrics.density
+        }
+    private val insertSpaceBandPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(45, 0, 120, 215)
+            style = Paint.Style.FILL
+        }
+    private val insertSpaceBadgePaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(32, 32, 32)
+            style = Paint.Style.FILL
+        }
+    private val insertSpaceBadgeBorderPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(0, 120, 215)
+            style = Paint.Style.STROKE
+            strokeWidth = 1f * resources.displayMetrics.density
+        }
+    private val insertSpaceTextPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(240, 240, 240)
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
+            textAlign = Paint.Align.CENTER
+            isFakeBoldText = true
+        }
+    private val insertSpaceArrowPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(0, 120, 215)
+            style = Paint.Style.FILL
         }
 
     init {
@@ -190,21 +237,136 @@ class DryInkView(context: Context) : View(context) {
         return removed
     }
 
+    fun setInsertSpaceHoverY(hoverY: Float?) {
+        if (insertSpaceHoverY != hoverY) {
+            insertSpaceHoverY = hoverY
+            invalidate()
+        }
+    }
+
+    fun setInsertSpaceGuide(startY: Float?, currentY: Float?) {
+        insertSpaceStartY = startY
+        insertSpaceCurrentY = currentY
+        invalidate()
+    }
+
+    fun insertVerticalSpace(startY: Float, deltaY: Float) {
+        if (deltaY == 0f || strokes.isEmpty()) return
+        val replacements = LinkedHashMap<Stroke, Stroke>()
+        for (stroke in strokes) {
+            val inputs = stroke.inputs
+            if (inputs.isEmpty()) continue
+            val minY = (0 until inputs.size).minOf { inputs.get(it).y }
+            if (minY >= startY) {
+                val transformedInputs = MutableStrokeInputBatch()
+                for (index in 0 until inputs.size) {
+                    val input = inputs.get(index)
+                    transformedInputs.add(
+                        input.toolType,
+                        input.x,
+                        input.y + deltaY,
+                        input.elapsedTimeMillis,
+                        input.strokeUnitLengthCm,
+                        input.pressure,
+                        input.tiltRadians,
+                        input.orientationRadians,
+                    )
+                }
+                replacements[stroke] = Stroke(stroke.brush, transformedInputs)
+            }
+        }
+        for (index in strokes.indices) {
+            replacements[strokes[index]]?.let { strokes[index] = it }
+        }
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
-            // Apply the viewport after ViewStrokeRenderer captures its baseline canvas matrix.
-            // Otherwise its screen-space antialiasing misses the zoom and the edge feathering is
-            // enlarged together with the stroke.
             transformedCanvas.concat(documentToView)
             drawGrid(transformedCanvas)
-            for (stroke in strokes) scope.drawStroke(stroke)
+            val startY = insertSpaceStartY
+            val currentY = insertSpaceCurrentY
+            for (stroke in strokes) {
+                if (startY != null && currentY != null) {
+                    val deltaY = currentY - startY
+                    val inputs = stroke.inputs
+                    val isBelow = if (inputs.isEmpty()) false else (0 until inputs.size).minOf { inputs.get(it).y } >= startY
+                    if (isBelow) {
+                        transformedCanvas.save()
+                        transformedCanvas.translate(0f, deltaY)
+                        scope.drawStroke(stroke)
+                        transformedCanvas.restore()
+                        continue
+                    }
+                }
+                scope.drawStroke(stroke)
+            }
             drawLasso(transformedCanvas)
             eraserCursor?.let { cursor ->
                 transformedCanvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)
             }
+            drawInsertSpaceGuide(transformedCanvas)
             transformedCanvas.restore()
+        }
+    }
+
+    private fun drawInsertSpaceGuide(canvas: Canvas) {
+        val visible = visibleDocumentBounds()
+        val startY = insertSpaceStartY
+        val currentY = insertSpaceCurrentY
+
+        if (startY != null && currentY != null) {
+            // Baseline at touch down point
+            canvas.drawLine(visible.left, startY, visible.right, startY, insertSpaceLinePaint)
+            // Moving line at current touch point
+            canvas.drawLine(visible.left, currentY, visible.right, currentY, insertSpaceMovingLinePaint)
+
+            val topY = minOf(startY, currentY)
+            val bottomY = maxOf(startY, currentY)
+            if (bottomY - topY >= 1f) {
+                canvas.drawRect(visible.left, topY, visible.right, bottomY, insertSpaceBandPaint)
+
+                val deltaY = currentY - startY
+                val badgeText = if (deltaY >= 0) "+${deltaY.toInt()} px" else "${deltaY.toInt()} px"
+                val centerX = (visible.left + visible.right) * 0.5f
+                val centerY = (topY + bottomY) * 0.5f
+                val badgeWidth = 76f * resources.displayMetrics.density
+                val badgeHeight = 24f * resources.displayMetrics.density
+                val badgeRect = RectF(
+                    centerX - badgeWidth * 0.5f,
+                    centerY - badgeHeight * 0.5f,
+                    centerX + badgeWidth * 0.5f,
+                    centerY + badgeHeight * 0.5f,
+                )
+                canvas.drawRoundRect(badgeRect, 4f * resources.displayMetrics.density, 4f * resources.displayMetrics.density, insertSpaceBadgePaint)
+                canvas.drawRoundRect(badgeRect, 4f * resources.displayMetrics.density, 4f * resources.displayMetrics.density, insertSpaceBadgeBorderPaint)
+                val fontMetrics = insertSpaceTextPaint.fontMetrics
+                val textY = centerY - (fontMetrics.ascent + fontMetrics.descent) * 0.5f
+                canvas.drawText(badgeText, centerX, textY, insertSpaceTextPaint)
+            }
+            return
+        }
+
+        val hoverY = insertSpaceHoverY
+        if (hoverY != null) {
+            canvas.drawLine(visible.left, hoverY, visible.right, hoverY, insertSpaceLinePaint)
+            val centerX = (visible.left + visible.right) * 0.5f
+            val size = 6f * resources.displayMetrics.density
+            val arrowPath = Path().apply {
+                moveTo(centerX, hoverY - size * 1.6f)
+                lineTo(centerX - size * 0.9f, hoverY - size * 0.5f)
+                lineTo(centerX + size * 0.9f, hoverY - size * 0.5f)
+                close()
+
+                moveTo(centerX, hoverY + size * 1.6f)
+                lineTo(centerX - size * 0.9f, hoverY + size * 0.5f)
+                lineTo(centerX + size * 0.9f, hoverY + size * 0.5f)
+                close()
+            }
+            canvas.drawPath(arrowPath, insertSpaceArrowPaint)
         }
     }
 

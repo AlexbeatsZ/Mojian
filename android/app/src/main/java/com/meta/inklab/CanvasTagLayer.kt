@@ -134,6 +134,18 @@ class CanvasTagLayer(
         if (selectedTags.isNotEmpty()) invalidate()
     }
 
+    fun insertVerticalSpace(startY: Float, deltaY: Float) {
+        if (deltaY == 0f || tags.isEmpty()) return
+        var changed = false
+        tags.forEach { tag ->
+            if (tag.documentY >= startY) {
+                tag.documentY += deltaY
+                changed = true
+            }
+        }
+        if (changed) invalidate()
+    }
+
     fun eraseAtDocument(x: Float, y: Float, radius: Float): Int {
         val hitRadius = radius + dp(10f)
         val removed =
