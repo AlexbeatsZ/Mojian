@@ -3114,7 +3114,7 @@ class MainActivity : Activity() {
     }
 
     private fun endTransformGesture() {
-        endTransformGesture()
+        transformGestureActive = false
         transformGestureArbiter.cancel()
     }
 

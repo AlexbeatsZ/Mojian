@@ -46,4 +46,17 @@ class TransformGestureArbiterTest {
         assertNull(arbiter.update(100f, 100f, 240f, allowScale = false))
         assertEquals(TransformGestureMode.UNDECIDED, arbiter.mode)
     }
+
+    @Test
+    fun cancelResetsCommittedGestureAndAllowsCleanRestart() {
+        val arbiter = TransformGestureArbiter(panSlop = 8f, scaleSlop = 16f)
+        arbiter.begin(100f, 100f, 200f)
+        arbiter.update(110f, 100f, 200f, allowScale = true)
+        assertEquals(TransformGestureMode.PAN, arbiter.mode)
+
+        arbiter.cancel()
+        assertEquals(TransformGestureMode.UNDECIDED, arbiter.mode)
+        assertNull(arbiter.update(300f, 300f, 400f, allowScale = true))
+        assertEquals(TransformGestureMode.UNDECIDED, arbiter.mode)
+    }
 }
