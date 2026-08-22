@@ -603,6 +603,10 @@ class MainActivity : Activity() {
                 }
             }
         }
+
+        val savedBg = prefs.getString(KEY_BACKGROUND_FORMAT, CanvasBackgroundFormat.GRID_STANDARD.name)
+        val bgFormat = runCatching { CanvasBackgroundFormat.valueOf(savedBg ?: "") }.getOrDefault(CanvasBackgroundFormat.GRID_STANDARD)
+        dryInkView.backgroundFormat = bgFormat
     }
 
     private fun persistToolShelf() {
@@ -625,6 +629,7 @@ class MainActivity : Activity() {
             .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
             .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
+            .putString(KEY_BACKGROUND_FORMAT, dryInkView.backgroundFormat.name)
             .apply()
     }
 
@@ -639,7 +644,7 @@ class MainActivity : Activity() {
 
     private fun isKnownFullPageToolId(id: String): Boolean =
         when {
-            id in setOf("draw:undo", "draw:cursor", "draw:add", "draw:pan", "draw:clear") -> true
+            id in setOf("draw:undo", "draw:cursor", "draw:add", "draw:pan", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
             id.startsWith("home:") -> HomeCommand.fromId(id.removePrefix("home:")) != null
             id.startsWith("tool:") -> toolShelf.tools.any { it.id == id.removePrefix("tool:") }
             else -> false
@@ -1072,9 +1077,10 @@ class MainActivity : Activity() {
     private fun showBackgroundFormatMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             CanvasBackgroundFormat.entries.forEach { format ->
-                val label = if (dryInkView.backgroundFormat == format) "✓ ${format.label}" else format.label
-                menu.add(label).setOnMenuItemClickListener {
+                val prefix = if (dryInkView.backgroundFormat == format) "✓ " else "   "
+                menu.add("$prefix${format.label}").setOnMenuItemClickListener {
                     dryInkView.backgroundFormat = format
+                    persistWorkspacePreferences()
                     Toast.makeText(this@MainActivity, "页面背景：${format.label}", Toast.LENGTH_SHORT).show()
                     true
                 }
@@ -2662,6 +2668,7 @@ class MainActivity : Activity() {
         private const val KEY_ACTIVE_NOTEBOOK_ID = "active-notebook-id"
         private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
         private const val KEY_SELECTED_PAGE_ID = "selected-page-id"
+        private const val KEY_BACKGROUND_FORMAT = "background-format"
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)

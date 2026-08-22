@@ -114,9 +114,8 @@ allows one-finger panning while preserving two-finger pinch; deselecting it rest
 navigation. Choosing any drawing tool also exits panorama-hand mode.
 
 The insert space and background format group directly to the right of panorama hand provides:
-- an insert space tool toggle;
-- a background format tool that opens a flyout menu offering default grid, rule lines with left margin,
-  dense grid, and blank page formatting, instantly updating the underlying canvas.
+- an insert space tool toggle supporting stylus hover preview lines, drag displacement, and downward content shifting;
+- a background format tool that opens a flyout menu offering ruled lines (narrow, standard with margin line, wide, clean), grid styles (standard, dense, wide), dot matrix styles (standard, dense, wide), and blank page formatting, instantly updating and persisting on the underlying canvas.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
 dark note theme. A future persisted document must store the logical palette value and theme-map it
