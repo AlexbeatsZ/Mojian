@@ -253,6 +253,18 @@ not a floating dialog. The working general-options panel owns the
 global motion-prediction toggle and the global page-pane mode (`本层` or `递归`); neither preference is
 shown as a permanent workspace control.
 
+The shortcut panel is a peer of `常规` inside that same Backstage/options shell: it keeps the same
+150 dp navigation column, heading rhythm, dividers, row density, and value buttons. The device
+section is named `触控笔`; product-facing text does not expose Xiaomi implementation names or
+platform qualifiers, and the single/double/hold rows do not carry redundant descriptive captions.
+The exact input-device name remains an internal filtering boundary only.
+
+Ribbon drop-downs and sidebar/object context menus are app-owned command surfaces rather than OEM
+`PopupMenu` widgets. They use the workspace's near-black panel, thin gray border, compact 40 dp
+rows, Fluent icon rail, separators, disabled state, and lavender selection. Nested commands open a
+second app-owned surface to the right (or left when space is constrained); context commands always
+show an icon.
+
 The full-page quick toolbar has its own full-screen settings subpage. Every implemented Start
 command and every current drawing command/preset appears in one catalog and can be added or
 removed. Added commands are appended in selection order. Its floating surface measures to the

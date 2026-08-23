@@ -48,7 +48,7 @@ twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment
 
 ## Clean-room implementation contract
 
-### Android Xiaomi shortcuts and shared command IDs
+### Android stylus shortcuts and shared command IDs
 
 `XiaomiStylusShortcutDispatcher` is an Android-only device boundary:
 
@@ -67,7 +67,8 @@ twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment
 - consume application-delivered repeats, but do not claim that Android can override a Xiaomi
   system gesture that the OEM handles before it reaches this process.
 
-Xiaomi device bindings are never exposed on Windows. Android and Windows instead share stable
+The settings UI calls these `触控笔` bindings; Xiaomi device bindings are never exposed on Windows.
+Android and Windows instead share stable
 action IDs/categories for `文件`, `开始`, `插入`, `绘图`, and `视图`, with platform-local key assignments.
 Only concrete leaf actions are bindable: `重要` and `问题` are separate actions, while the parent
 tag chooser is not. Duplicate key combinations move to the newly assigned action.
@@ -80,7 +81,9 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 - Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
   tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
 - The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
-- With the panorama-hand control off, one finger is consumed but does not write, pan, or zoom.
+- With the panorama-hand control off, a one-finger stream first reaches the inserted-object layer.
+  A hit image/object may consume double-tap selection, selection drag/resize, activation, or long
+  press. A miss continues to the ordinary canvas arbiter and does not write, pan, or zoom.
 - With the panorama hand selected, one finger or a contacting stylus/eraser pans at 1x scale and
   cannot author ink. Tapping the selected hand again or choosing a drawing tool restores the
   default two-finger-only mode.
@@ -145,3 +148,5 @@ Real-device acceptance still requires:
 - finger taps creating/focusing text while a hovering or contacting stylus immediately writes ink;
 - tag tap/lasso selection, whole-stroke erasure, selection drag, and all four scale handles under
   the actual tablet touch/stylus dispatcher.
+- inserted-image finger double tap, eight-handle resize, image drag, immediate long-press menu, and
+  stylus authoring above an image under the actual tablet dispatcher.

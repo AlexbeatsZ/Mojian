@@ -23,6 +23,9 @@ class InsertModelsTest {
                 sourceAssetName = "source.pdf",
                 sourcePageNumber = 3,
                 pageBackground = true,
+                rotationQuarterTurns = 3,
+                flipHorizontal = true,
+                flipVertical = true,
             )
         document.objects += InsertObject.Table("table", 0f, 0f, 240f, 80f, 2, 3, mutableListOf("a", "b", "c", "d", "e", "f"))
 
@@ -33,7 +36,24 @@ class InsertModelsTest {
         assertEquals("source.pdf", image.sourceAssetName)
         assertEquals(3, image.sourcePageNumber)
         assertTrue(image.pageBackground)
+        assertEquals(3, image.rotationQuarterTurns)
+        assertTrue(image.flipHorizontal)
+        assertTrue(image.flipVertical)
         assertEquals(listOf("a", "b", "c", "d", "e", "f"), (restored.objects[1] as InsertObject.Table).cells)
+    }
+
+    @Test
+    fun legacyImageJsonDefaultsToUntransformedImage() {
+        val json =
+            org.json.JSONObject(
+                """{"id":"legacy","type":"IMAGE","x":0,"y":0,"width":80,"height":40,"assetName":"legacy.png","displayName":"legacy.png","mimeType":"image/png","sourceKind":"IMAGE"}""",
+            )
+
+        val image = InsertObject.fromJson(json) as InsertObject.Image
+
+        assertEquals(0, image.rotationQuarterTurns)
+        assertEquals(false, image.flipHorizontal)
+        assertEquals(false, image.flipVertical)
     }
 }
 

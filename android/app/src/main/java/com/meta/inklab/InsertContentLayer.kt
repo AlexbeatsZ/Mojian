@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -32,8 +33,6 @@ class InsertContentLayer(
     private var gestureMode = ObjectGestureMode.NONE
     private var resizeHandle = -1
     private var lastDocumentPoint = DocumentPoint(0f, 0f)
-    private var resizeAnchor = DocumentPoint(0f, 0f)
-    private var resizeStartCorner = DocumentPoint(0f, 0f)
     private var resizeStartBounds = RectF()
     private var objectMutated = false
     private val bitmapCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
@@ -68,7 +67,8 @@ class InsertContentLayer(
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     var onObjectActivated: ((InsertObject) -> Unit)? = null
-    var onObjectContextMenuRequested: ((InsertObject) -> Unit)? = null
+    var onObjectContextMenuRequested: ((InsertObject, Float, Float) -> Unit)? = null
+    var onSelectionChanged: ((InsertObject?) -> Unit)? = null
     var onDocumentChanged: ((PageInsertDocument) -> Unit)? = null
 
     private val gestureDetector =
@@ -85,18 +85,18 @@ class InsertContentLayer(
 
                 override fun onDoubleTap(event: MotionEvent): Boolean {
                     val item = hitSelectable(event.x, event.y) ?: return false
-                    selectedObject = item
+                    select(item)
                     invalidate()
                     return true
                 }
 
                 override fun onLongPress(event: MotionEvent) {
                     val item = hitSelectable(event.x, event.y) ?: return
-                    selectedObject = item
+                    select(item)
                     gestureMode = ObjectGestureMode.NONE
                     invalidate()
                     performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                    onObjectContextMenuRequested?.invoke(item)
+                    onObjectContextMenuRequested?.invoke(item, event.x, event.y)
                 }
             },
         )
@@ -110,7 +110,7 @@ class InsertContentLayer(
         if (this.document?.notebookId == document?.notebookId && this.document?.pageId == document?.pageId) return
         this.document = document
         pressedObject = null
-        selectedObject = null
+        select(null)
         bitmapCache.evictAll()
         invalidate()
     }
@@ -123,7 +123,7 @@ class InsertContentLayer(
 
     fun clearSelection() {
         if (selectedObject == null) return
-        selectedObject = null
+        select(null)
         gestureMode = ObjectGestureMode.NONE
         invalidate()
     }
@@ -132,7 +132,7 @@ class InsertContentLayer(
         val target = document ?: return 0
         val selected = selectedObject ?: return 0
         if (!target.objects.remove(selected)) return 0
-        selectedObject = null
+        select(null)
         changed(target)
         return 1
     }
@@ -146,7 +146,7 @@ class InsertContentLayer(
             put("y", source.documentY + dp(18f))
         })
         target.objects += copy
-        selectedObject = copy
+        select(copy)
         changed(target)
         return copy
     }
@@ -155,9 +155,73 @@ class InsertContentLayer(
 
     fun sendSelectionToBack(): Boolean = reorderSelection(toFront = false)
 
+    fun moveSelectionForward(): Boolean = moveSelectionBy(1)
+
+    fun moveSelectionBackward(): Boolean = moveSelectionBy(-1)
+
+    fun selectedImage(): InsertObject.Image? = selectedObject as? InsertObject.Image
+
+    fun rotateSelectedImage(clockwise: Boolean): Boolean {
+        val target = document ?: return false
+        val image = selectedImage() ?: return false
+        val centerX = image.documentX + image.width * 0.5f
+        val centerY = image.documentY + image.height * 0.5f
+        val oldWidth = image.width
+        image.width = image.height
+        image.height = oldWidth
+        image.documentX = centerX - image.width * 0.5f
+        image.documentY = centerY - image.height * 0.5f
+        image.rotationQuarterTurns = (image.rotationQuarterTurns + if (clockwise) 1 else 3).mod(4)
+        changed(target)
+        return true
+    }
+
+    fun flipSelectedImage(horizontal: Boolean): Boolean {
+        val target = document ?: return false
+        val image = selectedImage() ?: return false
+        if (horizontal) image.flipHorizontal = !image.flipHorizontal else image.flipVertical = !image.flipVertical
+        changed(target)
+        return true
+    }
+
+    fun restoreSelectedImageSize(): Boolean {
+        val target = document ?: return false
+        val image = selectedImage() ?: return false
+        val file = FileFor(target, image.assetName)
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return false
+        val centerX = image.documentX + image.width * 0.5f
+        val centerY = image.documentY + image.height * 0.5f
+        image.width = (if (image.rotationQuarterTurns.mod(2) == 0) options.outWidth else options.outHeight).toFloat()
+        image.height = (if (image.rotationQuarterTurns.mod(2) == 0) options.outHeight else options.outWidth).toFloat()
+        image.documentX = centerX - image.width * 0.5f
+        image.documentY = centerY - image.height * 0.5f
+        changed(target)
+        return true
+    }
+
+    fun setSelectedImageAsBackground(): Boolean {
+        val target = document ?: return false
+        val image = selectedImage() ?: return false
+        image.pageBackground = true
+        target.objects.remove(image)
+        target.objects.add(0, image)
+        select(null)
+        changed(target)
+        return true
+    }
+
     fun addObject(item: InsertObject) {
         val target = document ?: return
         target.objects += item
+        changed(target)
+    }
+
+    fun addObjectAndSelect(item: InsertObject) {
+        val target = document ?: return
+        target.objects += item
+        select(item)
         changed(target)
     }
 
@@ -246,23 +310,25 @@ class InsertContentLayer(
         val box = bounds(item)
         val scale = viewport.scale.coerceAtLeast(0.01f)
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(218, 178, 233)
+            color = Color.rgb(238, 238, 238)
             style = Paint.Style.STROKE
-            strokeWidth = dp(1.5f) / scale
+            strokeWidth = dp(1f) / scale
+            pathEffect = DashPathEffect(floatArrayOf(dp(3f) / scale, dp(3f) / scale), 0f)
         }.also { canvas.drawRect(box, it) }
-        val radius = dp(5.5f) / scale
+        val half = dp(4.5f) / scale
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(35, 35, 35)
+            color = Color.rgb(245, 245, 245)
             style = Paint.Style.FILL
         }.also { fill ->
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(218, 178, 233)
+                color = Color.rgb(86, 86, 86)
                 style = Paint.Style.STROKE
-                strokeWidth = dp(1.5f) / scale
+                strokeWidth = dp(1f) / scale
             }.also { stroke ->
-                selectionCorners(box).forEach { point ->
-                    canvas.drawCircle(point.x, point.y, radius, fill)
-                    canvas.drawCircle(point.x, point.y, radius, stroke)
+                selectionHandles(box).forEach { point ->
+                    val handle = RectF(point.x - half, point.y - half, point.x + half, point.y + half)
+                    canvas.drawRect(handle, fill)
+                    canvas.drawRect(handle, stroke)
                 }
             }
         }
@@ -316,7 +382,20 @@ class InsertContentLayer(
         val bitmap = bitmap(file)
         val destination = bounds(image)
         if (bitmap != null) {
-            canvas.drawBitmap(bitmap, null, destination, if (ImageViewFilter.shouldApply(image.viewInverted, forExport)) invertedImagePaint else bitmapPaint)
+            val paint = if (ImageViewFilter.shouldApply(image.viewInverted, forExport)) invertedImagePaint else bitmapPaint
+            val quarterTurns = image.rotationQuarterTurns.mod(4)
+            canvas.save()
+            canvas.translate(destination.centerX(), destination.centerY())
+            canvas.scale(if (image.flipHorizontal) -1f else 1f, if (image.flipVertical) -1f else 1f)
+            canvas.rotate(quarterTurns * 90f)
+            val localDestination =
+                if (quarterTurns.mod(2) == 0) {
+                    RectF(-destination.width() * 0.5f, -destination.height() * 0.5f, destination.width() * 0.5f, destination.height() * 0.5f)
+                } else {
+                    RectF(-destination.height() * 0.5f, -destination.width() * 0.5f, destination.height() * 0.5f, destination.width() * 0.5f)
+                }
+            canvas.drawBitmap(bitmap, null, localDestination, paint)
+            canvas.restore()
         } else {
             fillPaint.color = Color.rgb(43, 43, 43)
             canvas.drawRect(destination, fillPaint)
@@ -403,9 +482,6 @@ class InsertContentLayer(
                     if (resizeHandle >= 0) {
                         gestureMode = ObjectGestureMode.RESIZE
                         resizeStartBounds = RectF(selectedBounds)
-                        val corners = selectionCorners(selectedBounds)
-                        resizeStartCorner = corners[resizeHandle]
-                        resizeAnchor = corners[(resizeHandle + 2) % 4]
                     } else if (selectedBounds.contains(point.x, point.y)) {
                         gestureMode = ObjectGestureMode.MOVE
                     }
@@ -426,18 +502,7 @@ class InsertContentLayer(
                         invalidate()
                     }
                     ObjectGestureMode.RESIZE -> {
-                        val startDistance = hypot(resizeStartCorner.x - resizeAnchor.x, resizeStartCorner.y - resizeAnchor.y).coerceAtLeast(1f)
-                        val currentDistance = hypot(point.x - resizeAnchor.x, point.y - resizeAnchor.y).coerceAtLeast(1f)
-                        val factor = (currentDistance / startDistance).coerceIn(0.1f, 10f)
-                        val scaledCorner =
-                            DocumentPoint(
-                                resizeAnchor.x + (resizeStartCorner.x - resizeAnchor.x) * factor,
-                                resizeAnchor.y + (resizeStartCorner.y - resizeAnchor.y) * factor,
-                            )
-                        item.documentX = minOf(resizeAnchor.x, scaledCorner.x)
-                        item.documentY = minOf(resizeAnchor.y, scaledCorner.y)
-                        item.width = (resizeStartBounds.width() * factor).coerceAtLeast(dp(24f) / viewport.scale)
-                        item.height = (resizeStartBounds.height() * factor).coerceAtLeast(dp(24f) / viewport.scale)
+                        applyResize(item, DocumentPoint(point.x, point.y))
                         objectMutated = true
                         invalidate()
                     }
@@ -489,17 +554,43 @@ class InsertContentLayer(
         }
     }
 
-    private fun selectionCorners(bounds: RectF): List<DocumentPoint> =
+    private fun selectionHandles(bounds: RectF): List<DocumentPoint> =
         listOf(
             DocumentPoint(bounds.left, bounds.top),
+            DocumentPoint(bounds.centerX(), bounds.top),
             DocumentPoint(bounds.right, bounds.top),
+            DocumentPoint(bounds.right, bounds.centerY()),
             DocumentPoint(bounds.right, bounds.bottom),
+            DocumentPoint(bounds.centerX(), bounds.bottom),
             DocumentPoint(bounds.left, bounds.bottom),
+            DocumentPoint(bounds.left, bounds.centerY()),
         )
 
     private fun hitResizeHandle(x: Float, y: Float, bounds: RectF): Int {
         val radius = dp(14f) / viewport.scale.coerceAtLeast(0.01f)
-        return selectionCorners(bounds).indexOfFirst { point -> hypot(point.x - x, point.y - y) <= radius }
+        return selectionHandles(bounds).indexOfFirst { point -> hypot(point.x - x, point.y - y) <= radius }
+    }
+
+    private fun applyResize(item: InsertObject, point: DocumentPoint) {
+        val minimum = dp(24f) / viewport.scale.coerceAtLeast(0.01f)
+        var left = resizeStartBounds.left
+        var top = resizeStartBounds.top
+        var right = resizeStartBounds.right
+        var bottom = resizeStartBounds.bottom
+        when (resizeHandle) {
+            0 -> { left = point.x.coerceAtMost(right - minimum); top = point.y.coerceAtMost(bottom - minimum) }
+            1 -> top = point.y.coerceAtMost(bottom - minimum)
+            2 -> { right = point.x.coerceAtLeast(left + minimum); top = point.y.coerceAtMost(bottom - minimum) }
+            3 -> right = point.x.coerceAtLeast(left + minimum)
+            4 -> { right = point.x.coerceAtLeast(left + minimum); bottom = point.y.coerceAtLeast(top + minimum) }
+            5 -> bottom = point.y.coerceAtLeast(top + minimum)
+            6 -> { left = point.x.coerceAtMost(right - minimum); bottom = point.y.coerceAtLeast(top + minimum) }
+            7 -> left = point.x.coerceAtMost(right - minimum)
+        }
+        item.documentX = left
+        item.documentY = top
+        item.width = right - left
+        item.height = bottom - top
     }
 
     private fun reorderSelection(toFront: Boolean): Boolean {
@@ -512,6 +603,26 @@ class InsertContentLayer(
         }
         changed(target)
         return true
+    }
+
+    private fun moveSelectionBy(delta: Int): Boolean {
+        val target = document ?: return false
+        val item = selectedObject ?: return false
+        val current = target.objects.indexOf(item)
+        if (current < 0) return false
+        val firstMovable = target.objects.indexOfFirst { it !is InsertObject.Image || !it.pageBackground }.coerceAtLeast(0)
+        val destination = (current + delta).coerceIn(firstMovable, target.objects.lastIndex)
+        if (destination == current) return false
+        target.objects.removeAt(current)
+        target.objects.add(destination, item)
+        changed(target)
+        return true
+    }
+
+    private fun select(item: InsertObject?) {
+        if (selectedObject === item) return
+        selectedObject = item
+        onSelectionChanged?.invoke(item)
     }
 
     private fun bounds(item: InsertObject): RectF =

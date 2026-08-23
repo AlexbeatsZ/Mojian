@@ -46,7 +46,6 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.EditText
-import android.widget.PopupMenu
 import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -167,6 +166,11 @@ private data class SectionExportTarget(
     val sectionId: String,
 )
 
+private data class InsertObjectClipboard(
+    val source: PageSessionKey,
+    val json: JSONObject,
+)
+
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
     private val viewport = ViewportState()
@@ -283,6 +287,8 @@ class MainActivity : Activity() {
     private var splitFocusVisible = false
     private var navigationDropTarget: NavigationDropTarget? = null
     private var pageNavigationClipboard: PageNavigationClipboard? = null
+    private var insertObjectClipboard: InsertObjectClipboard? = null
+    private var pendingImageSaveFile: File? = null
     private val toggledPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
     private val heldPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
     private val consumedKeyboardShortcutKeys = mutableSetOf<Pair<Int, Int>>()
@@ -363,6 +369,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data == null) {
             if (requestCode == REQUEST_PDF_PAGES) pendingPdfPageTarget = null
+            if (requestCode == REQUEST_SAVE_IMAGE) pendingImageSaveFile = null
             return
         }
         val uris = selectedUris(data)
@@ -381,6 +388,7 @@ class MainActivity : Activity() {
                 pendingSectionExport = null
             }
             REQUEST_PDF_PAGES -> uris.firstOrNull()?.let(::importPdfPages)
+            REQUEST_SAVE_IMAGE -> data.data?.let(::finishSaveImageAs)
         }
     }
 
@@ -1072,45 +1080,39 @@ class MainActivity : Activity() {
 
     private fun buildShortcutOptionsPage(dialog: Dialog): View =
         LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.rgb(37, 37, 37))
             addView(
                 LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(16), 0, dp(18), 0)
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(8), dp(8), dp(8), dp(14))
                     setBackgroundColor(NAV_BACKGROUND)
-                    addView(
-                        backstageNavItem("←  返回选项", false) { dialog.setContentView(buildOptionsPage(dialog)) },
-                        LinearLayout.LayoutParams(dp(150), dp(48)),
-                    )
-                    addView(
-                        TextView(this@MainActivity).apply {
-                            text = "快捷键"
-                            gravity = Gravity.CENTER_VERTICAL
-                            setTextColor(TEXT_PRIMARY)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                        },
-                        LinearLayout.LayoutParams(0, MATCH, 1f),
-                    )
+                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(44)))
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
+                    addView(backstageNavItem("常规", false) { dialog.setContentView(buildOptionsPage(dialog)) }, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    addView(backstageNavItem("快捷键", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
+                        addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    }
                 },
-                LinearLayout.LayoutParams(MATCH, dp(52)),
+                LinearLayout.LayoutParams(dp(150), MATCH),
             )
 
             val body =
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(dp(28), dp(18), dp(34), dp(32))
-                    addView(optionsSectionTitle("小米笔（仅 Android）"), LinearLayout.LayoutParams(MATCH, dp(38)))
+                    setPadding(dp(30), dp(22), dp(34), dp(32))
                     addView(
                         TextView(this@MainActivity).apply {
-                            text = "两个按键各自可设置单击、急促双击和按住。单击会等双击窗口结束后执行；按住在抬起时恢复原工具。首次请实机确认 PageUp / PageDown 对应的机身位置。"
-                            setTextColor(TEXT_SECONDARY)
-                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                            text = "快捷键"
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                         },
-                        LinearLayout.LayoutParams(MATCH, dp(42)),
+                        LinearLayout.LayoutParams(MATCH, dp(54)),
                     )
+                    addView(optionsSectionTitle("触控笔"), LinearLayout.LayoutParams(MATCH, dp(36)))
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
                     addView(
                         shortcutTimingRow("双击间隔", 150, 600, xiaomiPenShortcutSettings.doubleTapMillis.toInt()) { value ->
                             xiaomiPenShortcutSettings.doubleTapMillis = value.toLong()
@@ -1129,14 +1131,15 @@ class MainActivity : Activity() {
                     )
                     XiaomiStylusKey.entries.forEach { key ->
                         val profile = xiaomiPenShortcutSettings.profile(key)
-                        val label = if (key == XiaomiStylusKey.PAGE_UP) "按键 PageUp" else "按键 PageDown"
-                        addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(46)).apply { topMargin = dp(8) })
-                        addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
-                        addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
-                        addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
+                        val label = if (key == XiaomiStylusKey.PAGE_UP) "PageUp" else "PageDown"
+                        addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
+                        addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
+                        addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
+                        addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
                     }
 
-                    addView(optionsSectionTitle("键盘 / 外接键盘"), LinearLayout.LayoutParams(MATCH, dp(54)).apply { topMargin = dp(16) })
+                    addView(optionsSectionTitle("键盘"), LinearLayout.LayoutParams(MATCH, dp(54)).apply { topMargin = dp(16) })
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
                     ShortcutCategory.entries.forEach { category ->
                         val actions = ShortcutActionCatalog.actions(toolShelf.tools).filter { it.category == category }
                         if (actions.isEmpty()) return@forEach
@@ -1148,7 +1151,7 @@ class MainActivity : Activity() {
                 }
             addView(
                 ScrollView(this@MainActivity).apply { isFillViewport = true; addView(body, ViewGroup.LayoutParams(MATCH, WRAP)) },
-                LinearLayout.LayoutParams(MATCH, 0, 1f),
+                LinearLayout.LayoutParams(0, MATCH, 1f),
             )
         }
 
@@ -1194,15 +1197,28 @@ class MainActivity : Activity() {
         }
 
     private fun stylusBindingSettingsRow(title: String, binding: StylusActionBinding, holdOnly: Boolean, dialog: Dialog): View =
-        settingsRow(
-            title,
-            if (holdOnly) "达到按住阈值后生效，抬起恢复。" else "选择一个立即执行的动作。",
-            settingsValueButton(stylusBindingLabel(binding)).apply {
-                setOnClickListener {
-                    showStylusBindingChooser(binding, holdOnly) { dialog.setContentView(buildShortcutOptionsPage(dialog)) }
-                }
-            },
-        )
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(6), 0)
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = title
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
+            )
+            addView(
+                settingsValueButton(stylusBindingLabel(binding)).apply {
+                    setOnClickListener {
+                        showStylusBindingChooser(this, binding, holdOnly) { dialog.setContentView(buildShortcutOptionsPage(dialog)) }
+                    }
+                },
+                LinearLayout.LayoutParams(dp(170), dp(36)),
+            )
+        }
 
     private fun stylusBindingLabel(binding: StylusActionBinding): String =
         when (binding.type) {
@@ -1211,7 +1227,7 @@ class MainActivity : Activity() {
             else -> binding.type.label
         }
 
-    private fun showStylusBindingChooser(binding: StylusActionBinding, holdOnly: Boolean, refresh: () -> Unit) {
+    private fun showStylusBindingChooser(anchor: View, binding: StylusActionBinding, holdOnly: Boolean, refresh: () -> Unit) {
         val types =
             if (holdOnly) listOf(StylusBindingType.NONE, StylusBindingType.HOLD_TOOL)
             else listOf(
@@ -1222,31 +1238,50 @@ class MainActivity : Activity() {
                 StylusBindingType.NEXT_TOOL,
                 StylusBindingType.PREVIOUS_TOOL,
             )
-        AlertDialog.Builder(this)
-            .setTitle(if (holdOnly) "设置按住动作" else "设置按键动作")
-            .setItems(types.map(StylusBindingType::label).toTypedArray()) { _, which ->
-                val type = types[which]
+        val tools = drawingRibbonTools()
+        val items = types.map { type ->
+            val toolSubmenu =
                 if (type == StylusBindingType.TOGGLE_TOOL || type == StylusBindingType.HOLD_TOOL) {
-                    val tools = drawingRibbonTools()
-                    AlertDialog.Builder(this)
-                        .setTitle("选择工具")
-                        .setItems(tools.map(ToolPreset::displayName).toTypedArray()) { _, toolIndex ->
-                            binding.type = type
-                            binding.toolId = tools[toolIndex].id
-                            persistWorkspacePreferences()
-                            refresh()
-                        }
-                        .setNegativeButton("取消", null)
-                        .show()
-                } else {
-                    binding.type = type
-                    binding.toolId = null
-                    persistWorkspacePreferences()
-                    refresh()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+                    tools.map { tool ->
+                        MojianCommandMenu.Item(
+                            label = tool.displayName,
+                            icon = when (tool.kind) {
+                                DrawingToolKind.PEN -> "pen"
+                                DrawingToolKind.HIGHLIGHTER -> "highlight"
+                                DrawingToolKind.ERASER -> "eraser"
+                                DrawingToolKind.LASSO -> "lasso"
+                            },
+                            checked = binding.type == type && binding.toolId == tool.id,
+                            action = {
+                                binding.type = type
+                                binding.toolId = tool.id
+                                persistWorkspacePreferences()
+                                refresh()
+                            },
+                        )
+                    }
+                } else emptyList()
+            MojianCommandMenu.Item(
+                label = type.label,
+                icon = when (type) {
+                    StylusBindingType.NONE -> "eye_off"
+                    StylusBindingType.TOGGLE_TOOL, StylusBindingType.HOLD_TOOL -> "pen"
+                    StylusBindingType.UNDO, StylusBindingType.PREVIOUS_TOOL -> "arrow_undo"
+                    StylusBindingType.REDO, StylusBindingType.NEXT_TOOL -> "arrow_redo"
+                },
+                checked = binding.type == type,
+                submenu = toolSubmenu,
+                action = if (toolSubmenu.isEmpty()) {
+                    {
+                        binding.type = type
+                        binding.toolId = null
+                        persistWorkspacePreferences()
+                        refresh()
+                    }
+                } else null,
+            )
+        }
+        MojianCommandMenu.show(this, anchor, items, widthDp = 238)
     }
 
     private fun shortcutBindingRow(descriptor: ShortcutActionDescriptor, dialog: Dialog): View =
@@ -1288,14 +1323,47 @@ class MainActivity : Activity() {
         }
 
     private fun showShortcutCaptureDialog(descriptor: ShortcutActionDescriptor, owner: Dialog) {
-        val capture = AlertDialog.Builder(this)
-            .setTitle("设置 ${descriptor.label}")
-            .setMessage("现在按下新的组合键。已有相同组合会自动改绑到此操作。")
-            .setNegativeButton("取消", null)
-            .create()
+        val capture = Dialog(this)
+        capture.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        capture.setContentView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(24), dp(20), dp(20), dp(16))
+                background = rounded(TOOLBAR_BACKGROUND, dp(5).toFloat(), BORDER_STRONG)
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "设置 ${descriptor.label}"
+                        setTextColor(TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(38)),
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "按下新的组合键"
+                        setTextColor(TEXT_SECONDARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                        gravity = Gravity.CENTER_VERTICAL
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(42)),
+                )
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "取消"
+                        gravity = Gravity.CENTER
+                        setTextColor(TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                        background = rounded(Color.rgb(48, 48, 48), dp(3).toFloat(), BORDER_COLOR)
+                        setOnClickListener { capture.dismiss() }
+                    },
+                    LinearLayout.LayoutParams(dp(78), dp(36)).apply { gravity = Gravity.END },
+                )
+            },
+        )
         capture.setOnKeyListener { _, _, event ->
             if (event.device?.name == "Xiaomi Smart Pen Keyboard") {
-                Toast.makeText(this, "小米笔请在上方专属区域设置", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "触控笔按键请在上方设置", Toast.LENGTH_SHORT).show()
                 return@setOnKeyListener true
             }
             val chord = ShortcutKeyChord.fromEvent(event) ?: return@setOnKeyListener false
@@ -1306,6 +1374,10 @@ class MainActivity : Activity() {
             true
         }
         capture.show()
+        capture.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(dp(420), WRAP)
+        }
     }
 
     private fun loadRemainingPreferences(prefs: android.content.SharedPreferences) {
@@ -1876,27 +1948,27 @@ class MainActivity : Activity() {
     }
 
     private fun showTextChoiceMenu(anchor: View, choices: List<Pair<String, () -> Boolean>>) {
-        PopupMenu(this, anchor).apply {
-            choices.forEach { (label, action) ->
-                menu.add(label).setOnMenuItemClickListener {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            choices.map { (label, action) ->
+                MojianCommandMenu.Item(label = label, icon = "style_guide") {
                     if (!action()) showTextSelectionHint()
-                    true
                 }
-            }
-            show()
-        }
+            },
+            widthDp = 220,
+        )
     }
 
     private fun showTagMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            CanvasTagKind.entries.forEach { kind ->
-                menu.add(kind.label).setOnMenuItemClickListener {
-                    beginTagPlacement(kind)
-                    true
-                }
-            }
-            show()
-        }
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            CanvasTagKind.entries.map { kind ->
+                MojianCommandMenu.Item(kind.label, icon = "tag", action = { beginTagPlacement(kind) })
+            },
+            widthDp = 220,
+        )
     }
 
     private fun beginTagPlacement(kind: CanvasTagKind) {
@@ -1916,20 +1988,21 @@ class MainActivity : Activity() {
             Toast.makeText(this, "当前页面还没有标记", Toast.LENGTH_SHORT).show()
             return
         }
-        PopupMenu(this, anchor).apply {
-            tags.forEachIndexed { index, tag ->
-                menu.add("${index + 1}. ${tag.kind.label}").setOnMenuItemClickListener {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            tags.mapIndexed { index, tag ->
+                MojianCommandMenu.Item("${index + 1}. ${tag.kind.label}", icon = "tag_search", action = {
                     viewport.centerDocumentPoint(tag.documentX, tag.documentY, tagLayer.width * 0.5f, tagLayer.height * 0.5f)
                     dryInkView.setViewport(viewport.documentToViewMatrix())
                     insertContentLayer.invalidate()
                     tagLayer.invalidate()
                     selectionOverlay.invalidate()
                     tagLayer.focusTag(index)
-                    true
-                }
-            }
-            show()
-        }
+                })
+            },
+            widthDp = 240,
+        )
     }
 
     private fun handleInsertSpace(anchor: View) {
@@ -2019,16 +2092,19 @@ class MainActivity : Activity() {
         current: CanvasBackgroundFormat,
         onSelected: (CanvasBackgroundFormat) -> Unit,
     ) {
-        PopupMenu(this, anchor).apply {
-            PageAppearanceCatalog.backgroundFormats.forEach { format ->
-                val prefix = if (current == format) "✓ " else "   "
-                menu.add("$prefix${format.label}").setOnMenuItemClickListener {
-                    onSelected(format)
-                    true
-                }
-            }
-            show()
-        }
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            PageAppearanceCatalog.backgroundFormats.map { format ->
+                MojianCommandMenu.Item(
+                    label = format.label,
+                    icon = "rule_lines",
+                    checked = current == format,
+                    action = { onSelected(format) },
+                )
+            },
+            widthDp = 242,
+        )
     }
 
     private fun showNewPageTemplateDialog() {
@@ -2456,6 +2532,14 @@ class MainActivity : Activity() {
         insertContentLayer.onDocumentChanged = pageContentRepository::save
         insertContentLayer.onObjectActivated = ::activateInsertObject
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
+        insertContentLayer.onSelectionChanged = { selected ->
+            if (selected != null) {
+                dryInkView.clearSelection()
+                tagLayer.clearSelection()
+                selectionOverlay.invalidate()
+            }
+            renderToolDetails()
+        }
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paperContainer.addView(pageSurfaceBackground, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(canvasBackgroundLayer, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -3085,85 +3169,62 @@ class MainActivity : Activity() {
 
     private fun showSectionMenu(anchor: View, notebook: NotebookWorkspace, section: SectionNode) {
         val labels = NavigationMenuCatalog.sectionItems
-        PopupMenu(this, anchor).apply {
-            menu.add(0, 1, 0, labels[0]).setOnMenuItemClickListener {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            listOf(
+                MojianCommandMenu.Item(labels[0], "pen", action = {
                 showRenameDialog("重命名分区", section.title) { title ->
                     if (notebook.renameSection(section.id, title)) finishNavigationMutation()
                 }
-                true
-            }
-            menu.add(0, 2, 1, labels[1]).setOnMenuItemClickListener {
-                startSectionExport(notebook, section)
-                true
-            }
-            menu.add(0, 3, 2, labels[2]).setOnMenuItemClickListener {
-                confirmDeleteSection(notebook, section)
-                true
-            }
-            menu.add(0, 4, 3, labels[3]).setOnMenuItemClickListener {
-                showSectionMoveOrCopyDialog(notebook, section)
-                true
-            }
-            menu.add(0, 5, 4, labels[4]).setOnMenuItemClickListener {
-                showSectionMergeDialog(notebook, section)
-                true
-            }
-            menu.add(0, 6, 5, labels[5]).setOnMenuItemClickListener {
-                copyNavigationLink("分区链接", sectionLink(notebook.id, section.id))
-                true
-            }
-            menu.add(1, 7, 6, labels[6]).setOnMenuItemClickListener {
-                notebookLibrary.selectNotebook(notebook.id)
-                notebook.addSection(section.id)
-                finishNavigationMutation()
-                true
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true)
-            show()
-        }
+                }),
+                MojianCommandMenu.Item(labels[1], "document_pdf", action = { startSectionExport(notebook, section) }),
+                MojianCommandMenu.Item(labels[2], "delete_dismiss", destructive = true, action = { confirmDeleteSection(notebook, section) }),
+                MojianCommandMenu.Item(labels[3], "copy", dividerBefore = true, action = { showSectionMoveOrCopyDialog(notebook, section) }),
+                MojianCommandMenu.Item(labels[4], "split_view", action = { showSectionMergeDialog(notebook, section) }),
+                MojianCommandMenu.Item(labels[5], "link", dividerBefore = true, action = { copyNavigationLink("分区链接", sectionLink(notebook.id, section.id)) }),
+                MojianCommandMenu.Item(labels[6], "add", dividerBefore = true, action = {
+                    notebookLibrary.selectNotebook(notebook.id)
+                    notebook.addSection(section.id)
+                    finishNavigationMutation()
+                }),
+            ),
+            widthDp = 292,
+        )
     }
 
     private fun showPageMenu(anchor: View, notebook: NotebookWorkspace, sectionId: String, page: NotePage) {
         val labels = NavigationMenuCatalog.pageItems
-        PopupMenu(this, anchor).apply {
-            menu.add(0, 1, 0, labels[0]).setOnMenuItemClickListener {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            listOf(
+                MojianCommandMenu.Item(labels[0], "pen", action = {
                 showRenameDialog("重命名页面", page.title) { title ->
                     if (notebook.renamePage(sectionId, page.id, title)) finishNavigationMutation()
                 }
-                true
-            }
-            menu.add(0, 2, 1, labels[1]).setOnMenuItemClickListener {
-                confirmDeletePage(notebook, sectionId, page)
-                true
-            }
-            menu.add(0, 3, 2, labels[2]).setOnMenuItemClickListener {
-                pageNavigationClipboard = PageNavigationClipboard.Cut(notebook.id, sectionId, page.id)
-                Toast.makeText(this@MainActivity, "已剪切“${page.title}”", Toast.LENGTH_SHORT).show()
-                true
-            }
-            menu.add(0, 4, 3, labels[3]).setOnMenuItemClickListener {
-                pageNavigationClipboard = PageNavigationClipboard.Copy(notebook.id, sectionId, page.id)
-                Toast.makeText(this@MainActivity, "已复制“${page.title}”", Toast.LENGTH_SHORT).show()
-                true
-            }
-            menu.add(0, 5, 4, labels[4]).apply {
-                isEnabled = pageNavigationClipboard != null
-                setOnMenuItemClickListener {
+                }),
+                MojianCommandMenu.Item(labels[1], "delete_dismiss", destructive = true, action = { confirmDeletePage(notebook, sectionId, page) }),
+                MojianCommandMenu.Item(labels[2], "cut", dividerBefore = true, action = {
+                    pageNavigationClipboard = PageNavigationClipboard.Cut(notebook.id, sectionId, page.id)
+                    Toast.makeText(this@MainActivity, "已剪切“${page.title}”", Toast.LENGTH_SHORT).show()
+                }),
+                MojianCommandMenu.Item(labels[3], "copy", action = {
+                    pageNavigationClipboard = PageNavigationClipboard.Copy(notebook.id, sectionId, page.id)
+                    Toast.makeText(this@MainActivity, "已复制“${page.title}”", Toast.LENGTH_SHORT).show()
+                }),
+                MojianCommandMenu.Item(labels[4], "clipboard_paste", enabled = pageNavigationClipboard != null, action = {
                     pastePageAfter(notebook, sectionId, page.id)
-                    true
-                }
-            }
-            menu.add(0, 6, 5, labels[5]).setOnMenuItemClickListener {
-                copyNavigationLink("页面链接", pageLink(notebook.id, sectionId, page.id))
-                true
-            }
-            menu.add(1, 7, 6, labels[6]).setOnMenuItemClickListener {
-                showPageMoveOrCopyDialog(notebook, sectionId, page)
-                true
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) menu.setGroupDividerEnabled(true)
-            show()
-        }
+                }),
+                MojianCommandMenu.Item(labels[5], "link", dividerBefore = true, action = {
+                    copyNavigationLink("页面链接", pageLink(notebook.id, sectionId, page.id))
+                }),
+                MojianCommandMenu.Item(labels[6], "copy", dividerBefore = true, action = {
+                    showPageMoveOrCopyDialog(notebook, sectionId, page)
+                }),
+            ),
+            widthDp = 292,
+        )
     }
 
     private fun showRenameDialog(title: String, currentValue: String, onSave: (String) -> Unit) {
@@ -3805,6 +3866,13 @@ class MainActivity : Activity() {
             },
         )
         wetInkView.setOnTouchListener { _, event ->
+            if (
+                event.pointerCount == 1 &&
+                event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER &&
+                insertContentLayer.onTouchEvent(event)
+            ) {
+                return@setOnTouchListener true
+            }
             handleMotionEvent(event)
             true
         }
@@ -4425,16 +4493,15 @@ class MainActivity : Activity() {
         }
 
     private fun showZoomPresetMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            for (percent in ZOOM_PRESETS) {
-                val selected = (viewport.scale * 100f).roundToInt() == percent
-                menu.add(if (selected) "✓ $percent%" else "   $percent%").setOnMenuItemClickListener {
-                    setZoomScale(percent / 100f)
-                    true
-                }
-            }
-            show()
-        }
+        val current = (viewport.scale * 100f).roundToInt()
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            ZOOM_PRESETS.map { percent ->
+                MojianCommandMenu.Item("$percent%", "zoom_in", checked = current == percent, action = { setZoomScale(percent / 100f) })
+            },
+            widthDp = 170,
+        )
     }
 
     private fun zoomByStep(direction: Int) {
@@ -4474,11 +4541,16 @@ class MainActivity : Activity() {
 
     private fun showPaperSizeMenu(anchor: View) {
         val page = workspace.selectedPage() ?: return
-        PopupMenu(this, anchor).apply {
-            val sizes = if (page.viewSettings.paperSize == PaperSize.PDF) listOf(PaperSize.PDF) else PageAppearanceCatalog.paperTemplates
-            for (size in sizes) {
-                menu.add(size.menuLabel).apply { isChecked = size == page.viewSettings.paperSize }
-                    .setOnMenuItemClickListener {
+        val sizes = if (page.viewSettings.paperSize == PaperSize.PDF) listOf(PaperSize.PDF) else PageAppearanceCatalog.paperTemplates
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            sizes.map { size ->
+                MojianCommandMenu.Item(
+                    size.menuLabel,
+                    "document_page",
+                    checked = size == page.viewSettings.paperSize,
+                    action = {
                         if (size != PaperSize.PDF) {
                             updateCurrentPageView {
                                 it.paperSize = size
@@ -4487,12 +4559,11 @@ class MainActivity : Activity() {
                                 it.a4PageCount = 1
                             }
                         }
-                        true
-                    }
-            }
-            menu.setGroupCheckable(0, true, true)
-            show()
-        }
+                    },
+                )
+            },
+            widthDp = 232,
+        )
     }
 
     private fun showPageColorMenu(anchor: View) {
@@ -4541,32 +4612,38 @@ class MainActivity : Activity() {
     }
 
     private fun showAddToolMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            menu.add("添加钢笔").setOnMenuItemClickListener { addTool(DrawingToolKind.PEN); true }
-            menu.add("添加荧光笔").setOnMenuItemClickListener { addTool(DrawingToolKind.HIGHLIGHTER); true }
-            menu.add("添加橡皮").setOnMenuItemClickListener { addTool(DrawingToolKind.ERASER); true }
-            menu.add("添加框选").setOnMenuItemClickListener { addTool(DrawingToolKind.LASSO); true }
-            show()
-        }
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            listOf(
+                MojianCommandMenu.Item("添加钢笔", "pen", action = { addTool(DrawingToolKind.PEN) }),
+                MojianCommandMenu.Item("添加荧光笔", "highlight", action = { addTool(DrawingToolKind.HIGHLIGHTER) }),
+                MojianCommandMenu.Item("添加橡皮", "eraser", action = { addTool(DrawingToolKind.ERASER) }),
+                MojianCommandMenu.Item("添加框选", "lasso", action = { addTool(DrawingToolKind.LASSO) }),
+            ),
+            widthDp = 220,
+        )
     }
 
     private fun showNavigationAddMenu(anchor: View) {
-        PopupMenu(this, anchor).apply {
-            menu.add("新建笔记本").setOnMenuItemClickListener {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            listOf(
+                MojianCommandMenu.Item("新建笔记本", "notebook", action = {
                 notebookLibrary.addNotebook()
                 clearContentSelection()
                 persistWorkspacePreferences()
                 renderWorkspace()
-                true
-            }
-            menu.add("新建分区").setOnMenuItemClickListener {
+                }),
+                MojianCommandMenu.Item("新建分区", "add", action = {
                 workspace.addSectionAtFocus()
                 persistWorkspacePreferences()
                 renderWorkspace()
-                true
-            }
-            show()
-        }
+                }),
+            ),
+            widthDp = 224,
+        )
     }
 
     private fun addTool(kind: DrawingToolKind) {
@@ -5344,26 +5421,142 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showInsertObjectContextMenu(item: InsertObject) {
-        val labels = mutableListOf<String>()
-        val actions = mutableListOf<() -> Unit>()
-        if (item !is InsertObject.Image) {
-            labels += if (item is InsertObject.Table) "编辑" else "打开"
-            actions += { activateInsertObject(item) }
+    private fun showInsertObjectContextMenu(item: InsertObject, viewX: Float, viewY: Float) {
+        val layer = insertContentLayer
+        val location = IntArray(2)
+        layer.getLocationOnScreen(location)
+        val items =
+            if (item is InsertObject.Image) imageContextMenuItems(item)
+            else objectContextMenuItems(item)
+        MojianCommandMenu.showAt(
+            this,
+            layer,
+            location[0] + viewX.roundToInt(),
+            location[1] + viewY.roundToInt(),
+            items,
+            widthDp = 294,
+        )
+    }
+
+    private fun imageContextMenuItems(image: InsertObject.Image): List<MojianCommandMenu.Item> {
+        val orderMenu =
+            listOf(
+                MojianCommandMenu.Item("上移一层", "navigation", action = { insertContentLayer.moveSelectionForward() }),
+                MojianCommandMenu.Item("置于顶层", "full_screen_maximize", action = { insertContentLayer.bringSelectionToFront() }),
+                MojianCommandMenu.Item("下移一层", "navigation", dividerBefore = true, action = { insertContentLayer.moveSelectionBackward() }),
+                MojianCommandMenu.Item("置于底层", "full_screen_minimize", action = { insertContentLayer.sendSelectionToBack() }),
+            )
+        val rotateMenu =
+            listOf(
+                MojianCommandMenu.Item("向右旋转 90°", "arrow_redo", action = { insertContentLayer.rotateSelectedImage(clockwise = true) }),
+                MojianCommandMenu.Item("向左旋转 90°", "arrow_undo", action = { insertContentLayer.rotateSelectedImage(clockwise = false) }),
+                MojianCommandMenu.Item("水平翻转", "split_view", dividerBefore = true, action = { insertContentLayer.flipSelectedImage(horizontal = true) }),
+                MojianCommandMenu.Item("垂直翻转", "split_view", action = { insertContentLayer.flipSelectedImage(horizontal = false) }),
+            )
+        val page = workspace.selectedPage()
+        val sectionId = workspace.selectedPageSectionId
+        val selectedPageLink = page?.let { pageLink(workspace.id, sectionId, it.id) }
+        return listOf(
+            MojianCommandMenu.Item("剪切", "cut", action = { copySelectedInsertObject(cut = true) }),
+            MojianCommandMenu.Item("复制", "copy", action = { copySelectedInsertObject(cut = false) }),
+            MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+            MojianCommandMenu.Item("另存为…", "document_page", dividerBefore = true, action = { saveImageAs(image) }),
+            MojianCommandMenu.Item("链接…", "link", enabled = false),
+            MojianCommandMenu.Item(
+                "复制指向段落的链接",
+                "link",
+                enabled = selectedPageLink != null,
+                action = selectedPageLink?.let { link -> { copyNavigationLink("页面链接", link) } },
+            ),
+            MojianCommandMenu.Item("顺序", "navigation", dividerBefore = true, submenu = orderMenu),
+            MojianCommandMenu.Item("旋转", "arrow_redo", submenu = rotateMenu),
+            MojianCommandMenu.Item("移动", "hand_left", enabled = false, dividerBefore = true),
+            MojianCommandMenu.Item("裁剪", "image", enabled = false),
+            MojianCommandMenu.Item("还原为原始尺寸", "full_screen_maximize", dividerBefore = true, action = { insertContentLayer.restoreSelectedImageSize() }),
+            MojianCommandMenu.Item("将图片设置为背景", "image", action = { insertContentLayer.setSelectedImageAsBackground() }),
+        )
+    }
+
+    private fun objectContextMenuItems(item: InsertObject): List<MojianCommandMenu.Item> =
+        listOf(
+            MojianCommandMenu.Item(if (item is InsertObject.Table) "编辑" else "打开", "document_page", action = { activateInsertObject(item) }),
+            MojianCommandMenu.Item("复制", "copy", action = { insertContentLayer.duplicateSelection() }),
+            MojianCommandMenu.Item(
+                "顺序",
+                "navigation",
+                dividerBefore = true,
+                submenu = listOf(
+                    MojianCommandMenu.Item("上移一层", "navigation", action = { insertContentLayer.moveSelectionForward() }),
+                    MojianCommandMenu.Item("置于顶层", "full_screen_maximize", action = { insertContentLayer.bringSelectionToFront() }),
+                    MojianCommandMenu.Item("下移一层", "navigation", dividerBefore = true, action = { insertContentLayer.moveSelectionBackward() }),
+                    MojianCommandMenu.Item("置于底层", "full_screen_minimize", action = { insertContentLayer.sendSelectionToBack() }),
+                ),
+            ),
+            MojianCommandMenu.Item("删除", "delete_dismiss", dividerBefore = true, destructive = true, action = { insertContentLayer.deleteSelection() }),
+        )
+
+    private fun copySelectedInsertObject(cut: Boolean) {
+        val document = insertContentLayer.currentDocument() ?: return
+        val selected = insertContentLayer.selectedImage() ?: return
+        insertObjectClipboard = InsertObjectClipboard(PageSessionKey(document.notebookId, document.pageId), JSONObject(selected.toJson().toString()))
+        if (cut) insertContentLayer.deleteSelection()
+        Toast.makeText(this, if (cut) "已剪切图片" else "已复制图片", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun pasteInsertObject() {
+        val clipboard = insertObjectClipboard ?: return
+        val target = insertContentLayer.currentDocument() ?: return
+        val json = JSONObject(clipboard.json.toString()).apply {
+            put("id", "paste-${UUID.randomUUID()}")
+            put("x", getDouble("x") + dp(18))
+            put("y", getDouble("y") + dp(18))
+            put("pageBackground", false)
         }
-        labels += "复制"
-        actions += { insertContentLayer.duplicateSelection() }
-        labels += "置于顶层"
-        actions += { insertContentLayer.bringSelectionToFront() }
-        labels += "置于底层"
-        actions += { insertContentLayer.sendSelectionToBack() }
-        labels += "删除"
-        actions += { insertContentLayer.deleteSelection() }
-        AlertDialog.Builder(this)
-            .setTitle("对象操作")
-            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
-            .setNegativeButton("取消", null)
-            .show()
+        val pasted = InsertObject.fromJson(json)
+        if (clipboard.source.notebookId != target.notebookId || clipboard.source.pageId != target.pageId) {
+            val sourceDirectory = pageContentRepository.assetDirectory(clipboard.source.notebookId, clipboard.source.pageId)
+            val targetDirectory = pageContentRepository.assetDirectory(target.notebookId, target.pageId)
+            val image = pasted as? InsertObject.Image
+            listOfNotNull(image?.assetName, image?.sourceAssetName).distinct().forEach { assetName ->
+                val source = File(sourceDirectory, PageContentRepository.safeId(assetName))
+                val destination = File(targetDirectory, PageContentRepository.safeId(assetName))
+                if (source.isFile && !destination.exists()) source.copyTo(destination)
+            }
+        }
+        insertContentLayer.addObjectAndSelect(pasted)
+        expandA4ForContentIfNeeded()
+    }
+
+    private fun saveImageAs(image: InsertObject.Image) {
+        val document = insertContentLayer.currentDocument() ?: return
+        val source = assetStore.assetFile(document.notebookId, document.pageId, image.assetName)
+        if (!source.isFile) {
+            Toast.makeText(this, "图片文件已丢失", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingImageSaveFile = source
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = image.mimeType
+                putExtra(Intent.EXTRA_TITLE, image.displayName.ifBlank { source.name })
+            },
+            REQUEST_SAVE_IMAGE,
+        )
+    }
+
+    private fun finishSaveImageAs(uri: Uri) {
+        val source = pendingImageSaveFile ?: return
+        pendingImageSaveFile = null
+        ioExecutor.execute {
+            val result = runCatching {
+                contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
+                    ?: error("无法写入目标文件")
+            }
+            runOnUiThread {
+                Toast.makeText(this, if (result.isSuccess) "图片已保存" else "图片保存失败", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun openEmbeddedAsset(assetName: String, mimeType: String) {
@@ -5703,6 +5896,7 @@ class MainActivity : Activity() {
         private const val REQUEST_STICKER_IMPORT = 4105
         private const val REQUEST_EXPORT = 4106
         private const val REQUEST_PDF_PAGES = 4107
+        private const val REQUEST_SAVE_IMAGE = 4108
         private const val PDF_EXPORT_LONGEST_SIDE_PX = 1800f
         private const val SPLIT_FOCUS_PULSE_MILLIS = 500L
         private const val DARK_TOOLTIP_DELAY_MILLIS = 500L

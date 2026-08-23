@@ -31,7 +31,7 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   delegates editing to an installed spreadsheet application. Spreadsheet previews and inserted
   tables automatically use dark cells/light text on the canvas and white cells/dark text in export;
   this is theme adaptation, not a user-selectable image filter.
-- Normal images support multi-selection. Stickers use the same image object and asset pipeline;
+- Normal images support batch import. Stickers use the same image object and asset pipeline;
   built-in presets are rendered into page-owned PNG assets, while user presets are first copied to
   the sticker library and then copied into the target page.
 - Image inversion is a view-only property chosen at import time. Its color transform follows the
@@ -47,9 +47,15 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   a table and tapping that table opens its cell editor.
 - On Android, a finger double tap selects any non-background inserted object, including an image,
   PDF printout, sticker, table, attachment, spreadsheet, or note link. A selected object can be
-  dragged or uniformly resized from any corner. Holding reaches the context menu before release;
-  its actions open/edit, duplicate, change stacking order, or delete. Immutable PDF page-background
-  objects never participate in this direct selection path.
+  dragged by its body or resized from eight square handles on a light dotted frame. Corner handles
+  change two axes and edge handles change one axis. Holding reaches the context menu before release.
+  Immutable PDF page-background objects never participate in this direct selection path.
+- Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
+  four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise
+  90-degree rotation, horizontal/vertical flip, restore original pixel size, and set-as-background.
+  Order and rotation are right-side submenus; unavailable link/move/crop commands remain visibly
+  disabled instead of silently disappearing. Rotation quarter-turns, both flip flags, size, position,
+  and background state are persisted in page JSON with backward-compatible defaults.
 
 ## Placement and persistence
 
@@ -107,3 +113,5 @@ attachment, PDF printout, spreadsheet, image, sticker, and link. Image and stick
 Accessibility descriptions remain invisible, and mouse/stylus hover uses an app-owned delayed
 tooltip with a `#3A3A3A` background and white text instead of the platform light tooltip. Dialogs
 use the same dark surfaces, 2--3 dp corners, thin borders, and restrained purple accent.
+All object context menus and command drop-downs use the shared app-owned command surface with Fluent
+icons; Android/OEM popup styling is not accepted for these interaction surfaces.
