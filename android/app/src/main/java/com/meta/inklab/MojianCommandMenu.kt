@@ -175,6 +175,7 @@ class MojianCommandMenu private constructor(
                 "arrow_undo" -> R.drawable.ic_fluent_arrow_undo_24_regular
                 "clipboard_paste" -> R.drawable.ic_fluent_clipboard_paste_24_regular
                 "copy" -> R.drawable.ic_fluent_copy_24_regular
+                "crop" -> R.drawable.ic_fluent_crop_24_regular
                 "cut" -> R.drawable.ic_fluent_cut_24_regular
                 "delete_dismiss" -> R.drawable.ic_fluent_delete_dismiss_24_regular
                 "document_pdf" -> R.drawable.ic_fluent_document_pdf_24_regular
@@ -231,7 +232,7 @@ class MojianCommandMenu private constructor(
         private val ACCENT = Color.rgb(218, 178, 233)
         private val DESTRUCTIVE = Color.rgb(238, 92, 92)
 
-        fun show(context: Context, anchor: View, items: List<Item>, widthDp: Int = 264): MojianCommandMenu =
+        fun show(context: Context, anchor: View, items: List<Item>, widthDp: Int = 232): MojianCommandMenu =
             MojianCommandMenu(
                 context,
                 items,
@@ -244,7 +245,7 @@ class MojianCommandMenu private constructor(
             screenX: Int,
             screenY: Int,
             items: List<Item>,
-            widthDp: Int = 264,
+            widthDp: Int = 232,
         ): MojianCommandMenu =
             MojianCommandMenu(
                 context,

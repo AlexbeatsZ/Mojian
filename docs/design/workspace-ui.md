@@ -263,7 +263,8 @@ Ribbon drop-downs and sidebar/object context menus are app-owned command surface
 `PopupMenu` widgets. They use the workspace's near-black panel, thin gray border, compact 40 dp
 rows, Fluent icon rail, separators, disabled state, and lavender selection. Nested commands open a
 second app-owned surface to the right (or left when space is constrained); context commands always
-show an icon.
+show an icon. Sidebar context menus stay near 244 dp wide and image menus near 236 dp rather than
+stretching to dialog-like widths.
 
 The full-page quick toolbar has its own full-screen settings subpage. Every implemented Start
 command and every current drawing command/preset appears in one catalog and can be added or

@@ -47,8 +47,9 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   a table and tapping that table opens its cell editor.
 - On Android, a finger double tap selects any non-background inserted object, including an image,
   PDF printout, sticker, table, attachment, spreadsheet, or note link. A selected object can be
-  dragged by its body or resized from eight square handles on a light dotted frame. Corner handles
-  change two axes and edge handles change one axis. Holding reaches the context menu before release.
+  dragged by its body or resized from eight compact square handles on a light dotted frame. Each
+  handle keeps an approximately 48 dp invisible touch target; corner handles change two
+  axes and edge handles change one axis. Holding reaches the context menu before release.
   Immutable PDF page-background objects never participate in this direct selection path.
 - Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
   four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise

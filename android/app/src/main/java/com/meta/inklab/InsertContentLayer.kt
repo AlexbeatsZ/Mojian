@@ -567,7 +567,7 @@ class InsertContentLayer(
         )
 
     private fun hitResizeHandle(x: Float, y: Float, bounds: RectF): Int {
-        val radius = dp(14f) / viewport.scale.coerceAtLeast(0.01f)
+        val radius = dp(24f) / viewport.scale.coerceAtLeast(0.01f)
         return selectionHandles(bounds).indexOfFirst { point -> hypot(point.x - x, point.y - y) <= radius }
     }
 

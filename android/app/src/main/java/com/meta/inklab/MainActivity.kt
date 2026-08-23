@@ -3189,7 +3189,7 @@ class MainActivity : Activity() {
                     finishNavigationMutation()
                 }),
             ),
-            widthDp = 292,
+            widthDp = 244,
         )
     }
 
@@ -3223,7 +3223,7 @@ class MainActivity : Activity() {
                     showPageMoveOrCopyDialog(notebook, sectionId, page)
                 }),
             ),
-            widthDp = 292,
+            widthDp = 244,
         )
     }
 
@@ -5434,7 +5434,7 @@ class MainActivity : Activity() {
             location[0] + viewX.roundToInt(),
             location[1] + viewY.roundToInt(),
             items,
-            widthDp = 294,
+            widthDp = 236,
         )
     }
 
@@ -5471,7 +5471,7 @@ class MainActivity : Activity() {
             MojianCommandMenu.Item("顺序", "navigation", dividerBefore = true, submenu = orderMenu),
             MojianCommandMenu.Item("旋转", "arrow_redo", submenu = rotateMenu),
             MojianCommandMenu.Item("移动", "hand_left", enabled = false, dividerBefore = true),
-            MojianCommandMenu.Item("裁剪", "image", enabled = false),
+            MojianCommandMenu.Item("裁剪", "crop", enabled = false),
             MojianCommandMenu.Item("还原为原始尺寸", "full_screen_maximize", dividerBefore = true, action = { insertContentLayer.restoreSelectedImageSize() }),
             MojianCommandMenu.Item("将图片设置为背景", "image", action = { insertContentLayer.setSelectedImageAsBackground() }),
         )
