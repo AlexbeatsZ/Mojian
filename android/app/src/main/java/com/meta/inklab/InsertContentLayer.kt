@@ -484,8 +484,8 @@ class InsertContentLayer(
                 val point = viewport.viewToDocument(event.x, event.y)
                 lastDocumentPoint = DocumentPoint(point.x, point.y)
                 var requestedMode = InsertObjectGestureMode.NONE
-                if (selectedObject === pressedObject) {
-                    val selectedBounds = bounds(pressedObject!!)
+                selectedPressTarget(selectedObject, pressedObject)?.let { selectedPress ->
+                    val selectedBounds = bounds(selectedPress)
                     resizeHandle = hitResizeHandle(point.x, point.y, selectedBounds)
                     if (resizeHandle >= 0) {
                         requestedMode = InsertObjectGestureMode.RESIZE

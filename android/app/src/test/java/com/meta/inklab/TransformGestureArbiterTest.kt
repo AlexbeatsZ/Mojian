@@ -15,15 +15,32 @@ class TransformGestureArbiterTest {
     }
 
     @Test
-    fun panCommitLocksOutLaterSpanNoise() {
+    fun panIgnoresLaterSpanNoiseBelowScaleSlop() {
         val arbiter = TransformGestureArbiter(panSlop = 8f, scaleSlop = 16f)
         arbiter.begin(100f, 100f, 200f)
 
         assertNull(arbiter.update(110f, 100f, 204f, allowScale = true))
         assertEquals(TransformGestureMode.PAN, arbiter.mode)
-        val update = requireNotNull(arbiter.update(120f, 105f, 260f, allowScale = true))
+        val update = requireNotNull(arbiter.update(120f, 105f, 212f, allowScale = true))
         assertEquals(TransformGestureMode.PAN, update.mode)
         assertEquals(1f, update.scaleFactor, 0.0001f)
+    }
+
+    @Test
+    fun committedPanPromotesToScaleOncePinchBecomesClear() {
+        val arbiter = TransformGestureArbiter(panSlop = 8f, scaleSlop = 16f)
+        arbiter.begin(100f, 100f, 200f)
+
+        assertNull(arbiter.update(110f, 100f, 204f, allowScale = true))
+        assertEquals(TransformGestureMode.PAN, arbiter.mode)
+
+        val promotion = requireNotNull(arbiter.update(120f, 105f, 220f, allowScale = true))
+        assertEquals(TransformGestureMode.SCALE, promotion.mode)
+        assertEquals(1f, promotion.scaleFactor, 0.0001f)
+
+        val scale = requireNotNull(arbiter.update(123f, 107f, 242f, allowScale = true))
+        assertEquals(TransformGestureMode.SCALE, scale.mode)
+        assertEquals(1.1f, scale.scaleFactor, 0.0001f)
     }
 
     @Test

@@ -8,6 +8,10 @@ internal enum class InsertObjectGestureMode {
     RESIZE,
 }
 
+/** Null is never a selected press target, even though Kotlin's `null === null` is true. */
+internal fun <T : Any> selectedPressTarget(selected: T?, pressed: T?): T? =
+    pressed?.takeIf { selected === it }
+
 /** Keeps object manipulation pending until motion is unambiguously a drag. */
 internal class InsertObjectGestureArbiter(
     private val movementSlop: Float,

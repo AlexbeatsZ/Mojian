@@ -42,9 +42,11 @@ explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered
 
 The installed protected APK likewise exposes editor gesture class names only as unresolved
 references, including `NoteinZoomHandle`; their implementations and numeric motion thresholds are
-not defined in the shell DEX. Do not claim a Notein-specific pinch threshold from static inspection.
+not defined in the shell DEX. A fresh scan of all six DEX files marks `NoteinZoomHandle` as `r`
+(referenced) rather than `d` (defined), while the defined application-loader classes belong to
+`com.sagittarius.v6`. Do not claim a Notein-specific pinch threshold from static inspection.
 The clean-room implementation instead follows Android's public gesture convention: scale slop is
-twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment described below.
+twice `ViewConfiguration.scaledTouchSlop`, with explicit pan/scale arbitration described below.
 
 ## Clean-room implementation contract
 
@@ -100,10 +102,11 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
   default two-finger-only mode.
 - Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
   drift below one platform touch slop and span drift below two touch slops do nothing.
-- After a candidate crosses a threshold, the whole pointer sequence commits to either pan or scale
-  according to the larger normalized motion. A committed pan ignores later span noise; a committed
-  scale may translate around its moving centroid. Crossing the threshold rebases the incremental
-  transform so the page does not jump.
+- After a candidate crosses a threshold, it initially commits to pan or scale according to the
+  larger normalized motion. A committed pan ignores span noise below scale slop but promotes to
+  scale if the same contact sequence later develops an unambiguous pinch. Scale remains committed
+  and may translate around its moving centroid. Initial commitment and pan-to-scale promotion both
+  rebase the incremental span so the page does not jump.
 - The zoom lock prevents a scale candidate from committing but does not disable a two-finger pan;
   ribbon presets and zoom buttons are outside this touch arbiter and continue to work.
 - Adding, removing, or reindexing pointers rebases the gesture centroid and span to avoid jumps.
@@ -141,7 +144,7 @@ erasures, and persistence are separate future features.
 
 ## Verification
 
-Automated tests cover transform slop/mode-lock behavior, viewport anchoring/clamping,
+Automated tests cover transform slop, pan-to-scale promotion, scale commitment, viewport anchoring/clamping,
 pressure-erasing arming/dwell/reset, exact Xiaomi
 device/key filtering, lasso geometry, translation/scaling geometry, and finger-only text routing.
 Real-device acceptance still requires:

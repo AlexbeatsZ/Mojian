@@ -20,7 +20,8 @@ data class TransformGestureUpdate(
 
 /**
  * Holds a two-finger gesture in an undecided state until movement clears a
- * platform-scaled slop, then locks that contact sequence to pan or scale.
+ * platform-scaled slop. A clear pinch may promote a committed pan to scale;
+ * scale remains committed for the rest of that contact sequence.
  */
 class TransformGestureArbiter(
     private val panSlop: Float,
@@ -84,6 +85,29 @@ class TransformGestureArbiter(
             previousFocusY = focusY
             previousSpan = safeSpan
             return null
+        }
+
+        if (
+            mode == TransformGestureMode.PAN &&
+                allowScale &&
+                abs(safeSpan - initialSpan) >= scaleSlop
+        ) {
+            mode = TransformGestureMode.SCALE
+            val update =
+                TransformGestureUpdate(
+                    previousFocusX = previousFocusX,
+                    previousFocusY = previousFocusY,
+                    focusX = focusX,
+                    focusY = focusY,
+                    scaleFactor = 1f,
+                    mode = mode,
+                )
+            // Rebase scale at promotion so ignored pre-threshold span noise
+            // cannot become a sudden zoom jump.
+            previousFocusX = focusX
+            previousFocusY = focusY
+            previousSpan = safeSpan
+            return update
         }
 
         val update =

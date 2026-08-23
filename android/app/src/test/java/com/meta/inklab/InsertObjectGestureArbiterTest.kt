@@ -2,10 +2,21 @@ package com.meta.inklab
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InsertObjectGestureArbiterTest {
+    @Test
+    fun blankPressIsNotMistakenForASelectedObjectWhenBothReferencesAreNull() {
+        assertNull(selectedPressTarget<Any>(selected = null, pressed = null))
+
+        val item = Any()
+        assertSame(item, selectedPressTarget(selected = item, pressed = item))
+        assertNull(selectedPressTarget(selected = item, pressed = Any()))
+    }
+
     @Test
     fun selectedBodyWaitsForDragSlopBeforeMoving() {
         val arbiter = InsertObjectGestureArbiter(movementSlop = 8f)
