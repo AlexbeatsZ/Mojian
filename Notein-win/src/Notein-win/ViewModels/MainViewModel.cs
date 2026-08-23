@@ -46,6 +46,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<SearchResult> SearchResults { get; } = new();
     public ObservableCollection<FullPageToolDescriptor> FullPageToolbarItems { get; } = new();
     public ObservableCollection<FullPageToolDescriptor> FullPageToolbarAvailableItems { get; } = new();
+    public ObservableCollection<ShortcutActionGroup> ShortcutGroups { get; } = new();
 
     public NotebookLibrary Library => _library;
     public NotebookWorkspace ActiveWorkspace => _library.ActiveNotebook;
@@ -318,6 +319,7 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(IsBackstageToolbar));
             OnPropertyChanged(nameof(IsBackstageAccount));
             OnPropertyChanged(nameof(IsBackstageOptions));
+            OnPropertyChanged(nameof(IsBackstageShortcuts));
         }
     }
 
@@ -331,6 +333,7 @@ public sealed class MainViewModel : ObservableObject
     public bool IsBackstageToolbar => BackstageTab == "Toolbar";
     public bool IsBackstageAccount => BackstageTab == "Account";
     public bool IsBackstageOptions => BackstageTab == "Options";
+    public bool IsBackstageShortcuts => BackstageTab == "Shortcuts";
 
     public string SearchQuery
     {
@@ -397,6 +400,7 @@ public sealed class MainViewModel : ObservableObject
         _store = new WorkspaceStore(root);
         _library = _store.LoadLibrary();
         _settings = _store.LoadSettings();
+        _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
         _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
         _preferences.WorkspaceRoot = _store.RootDirectory;
@@ -639,6 +643,7 @@ public sealed class MainViewModel : ObservableObject
         _store = new WorkspaceStore(rootDirectory);
         _library = _store.LoadLibrary();
         _settings = _store.LoadSettings();
+        _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
         _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
         _preferences.WorkspaceRoot = _store.RootDirectory;
@@ -727,7 +732,7 @@ public sealed class MainViewModel : ObservableObject
         RequestAppearanceRefresh?.Invoke();
     }
 
-    private void TogglePageTheme()
+    public void TogglePageTheme()
     {
         var page = ActiveWorkspace.SelectedPage();
         if (page == null) return;
@@ -809,6 +814,78 @@ public sealed class MainViewModel : ObservableObject
             SaveSettings();
         }
         RefreshTools();
+    }
+
+    public bool SelectToolImmediate(string id)
+    {
+        if (!_toolShelf.Select(id)) return false;
+        IsToolFlyoutOpen = false;
+        SingleFingerPanEnabled = false;
+        TextModeEnabled = false;
+        InsertSpaceModeEnabled = false;
+        RefreshTools();
+        SaveSettings();
+        return true;
+    }
+
+    public bool CycleDrawingTool(int direction)
+    {
+        var ordered = _toolShelf.Tools
+            .OrderBy(tool => tool.Kind switch
+            {
+                DrawingToolKind.Lasso => 0,
+                DrawingToolKind.Eraser => 1,
+                DrawingToolKind.Highlighter => 2,
+                _ => 3,
+            })
+            .ToList();
+        if (ordered.Count == 0) return false;
+        var index = ordered.FindIndex(tool => tool.Id == _toolShelf.SelectedId);
+        var next = (Math.Max(0, index) + Math.Sign(direction) + ordered.Count) % ordered.Count;
+        return SelectToolImmediate(ordered[next].Id);
+    }
+
+    public bool CyclePage(int direction)
+    {
+        var pages = ActiveWorkspace.GetPagePaneRows(PagePaneMode)
+            .Where(row => !row.IsHeader && row.Page != null)
+            .ToList();
+        if (pages.Count == 0) return false;
+        var current = pages.FindIndex(row => row.Page!.Id == ActiveWorkspace.SelectedPageId);
+        var next = (Math.Max(0, current) + Math.Sign(direction) + pages.Count) % pages.Count;
+        SaveFocusedDocument();
+        if (!ActiveWorkspace.SelectPage(pages[next].SectionId, pages[next].Page!.Id, PagePaneMode)) return false;
+        LoadSelectedIntoFocusedSlot();
+        SaveLibrary();
+        RefreshNavigation();
+        return true;
+    }
+
+    public string? FindShortcutAction(ShortcutGesture gesture)
+    {
+        if (!gesture.IsValid) return null;
+        return _settings.ShortcutBindings.FirstOrDefault(binding =>
+            ShortcutGesture.TryParse(binding.Value, out var parsed) && parsed == gesture).Key;
+    }
+
+    public void SetShortcut(string actionId, ShortcutGesture gesture)
+    {
+        if (!gesture.IsValid) return;
+        foreach (var conflict in _settings.ShortcutBindings
+                     .Where(binding => ShortcutGesture.TryParse(binding.Value, out var parsed) && parsed == gesture)
+                     .Select(binding => binding.Key)
+                     .ToList())
+            _settings.ShortcutBindings.Remove(conflict);
+        _settings.ShortcutBindings[actionId] = gesture.Serialize();
+        SaveSettings();
+        RefreshShortcutCatalog();
+    }
+
+    public void ClearShortcut(string actionId)
+    {
+        if (!_settings.ShortcutBindings.Remove(actionId)) return;
+        SaveSettings();
+        RefreshShortcutCatalog();
     }
 
     private void AddTool(DrawingToolKind kind)
@@ -1009,6 +1086,26 @@ public sealed class MainViewModel : ObservableObject
         }
         NotifySelectedToolProperties();
         RefreshFullPageToolbarCatalog();
+        RefreshShortcutCatalog();
+    }
+
+    private void RefreshShortcutCatalog()
+    {
+        var labels = new Dictionary<ShortcutCategory, string>
+        {
+            [ShortcutCategory.File] = "文件",
+            [ShortcutCategory.Home] = "开始",
+            [ShortcutCategory.Insert] = "插入",
+            [ShortcutCategory.Draw] = "绘图",
+            [ShortcutCategory.View] = "视图",
+        };
+        var actions = ShortcutActionCatalog.Build(_toolShelf.Tools);
+        foreach (var action in actions)
+            action.GestureText = _settings.ShortcutBindings.TryGetValue(action.Id, out var value)
+                && ShortcutGesture.TryParse(value, out var gesture) ? gesture.DisplayText : "未设置";
+        ShortcutGroups.Clear();
+        foreach (var category in Enum.GetValues<ShortcutCategory>())
+            ShortcutGroups.Add(new ShortcutActionGroup(labels[category], actions.Where(action => action.Category == category).ToList()));
     }
 
     private void ToggleFullPageTool(string? id)

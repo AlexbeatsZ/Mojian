@@ -43,6 +43,7 @@ public partial class NoteCanvas : UserControl
     private Point _lastPointer;
     private Point _transformPoint;
     private bool _isPanning;
+    private bool _isDragZooming;
     private bool _isLassoing;
     private bool _isTransforming;
     private int _resizeHandle = -1;
@@ -452,7 +453,8 @@ public partial class NoteCanvas : UserControl
 
         if (forcePan || SingleFingerPanEnabled)
         {
-            _isPanning = true;
+            _isDragZooming = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && !ZoomLocked;
+            _isPanning = !_isDragZooming;
             CaptureMouse();
             return;
         }
@@ -539,6 +541,15 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return;
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        if (_isDragZooming)
+        {
+            var factor = (float)Math.Exp((_lastPointer.Y - viewPoint.Y) / 240d);
+            _viewport.ZoomAt((float)_lastPointer.X, (float)_lastPointer.Y, factor);
+            _lastPointer = viewPoint;
+            UpdateTextEditorPositions();
+            InvalidateVisual();
+            return;
+        }
         if (_isPanning)
         {
             _viewport.Pan((float)(viewPoint.X - _lastPointer.X), (float)(viewPoint.Y - _lastPointer.Y));
@@ -611,6 +622,11 @@ public partial class NoteCanvas : UserControl
         if (_isPanning)
         {
             _isPanning = false;
+            ViewportMutated();
+        }
+        if (_isDragZooming)
+        {
+            _isDragZooming = false;
             ViewportMutated();
         }
         if (_isInsertingSpace)

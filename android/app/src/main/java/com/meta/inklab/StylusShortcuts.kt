@@ -17,7 +17,115 @@ data class StylusShortcutSignal(
     val phase: StylusKeyPhase,
     val repeatCount: Int,
     val heldMillis: Long,
+    val eventTime: Long = 0L,
 )
+
+enum class StylusGestureKind {
+    SINGLE_TAP,
+    DOUBLE_TAP,
+    HOLD_START,
+    HOLD_END,
+}
+
+data class StylusGestureDecision(
+    val key: XiaomiStylusKey,
+    val kind: StylusGestureKind,
+)
+
+/**
+ * Pure timing state machine. The caller advances it from both hardware events and its next
+ * deadline, which keeps double-tap suppression and hold restoration deterministic.
+ */
+class XiaomiStylusGestureInterpreter(
+    var doubleTapMillis: Long = 260L,
+    var holdMillis: Long = 450L,
+) {
+    private data class State(
+        var isDown: Boolean = false,
+        var downAt: Long = 0L,
+        var secondTap: Boolean = false,
+        var holdStarted: Boolean = false,
+        var pendingSingleAt: Long? = null,
+    )
+
+    private val states = XiaomiStylusKey.entries.associateWith { State() }
+
+    fun accept(signal: StylusShortcutSignal): List<StylusGestureDecision> {
+        if (signal.phase == StylusKeyPhase.DOWN && signal.repeatCount > 0) return emptyList()
+        val now = signal.heldMillis.takeIf { signal.phase == StylusKeyPhase.UP }?.let { _ ->
+            // KeyEvent event times are supplied through acceptAt in production; this fallback keeps
+            // direct signal tests deterministic.
+            states.getValue(signal.key).downAt + signal.heldMillis
+        } ?: states.getValue(signal.key).downAt
+        return acceptAt(signal, now)
+    }
+
+    fun acceptAt(signal: StylusShortcutSignal, eventTime: Long): List<StylusGestureDecision> {
+        val result = advance(eventTime).toMutableList()
+        val state = states.getValue(signal.key)
+        when (signal.phase) {
+            StylusKeyPhase.DOWN -> {
+                if (signal.repeatCount > 0 || state.isDown) return result
+                state.secondTap = state.pendingSingleAt?.let { eventTime - it <= doubleTapMillis } == true
+                if (state.secondTap) state.pendingSingleAt = null
+                state.isDown = true
+                state.downAt = eventTime
+                state.holdStarted = false
+            }
+            StylusKeyPhase.UP -> {
+                if (!state.isDown) return result
+                if (state.holdStarted) {
+                    result += StylusGestureDecision(signal.key, StylusGestureKind.HOLD_END)
+                } else if (state.secondTap) {
+                    result += StylusGestureDecision(signal.key, StylusGestureKind.DOUBLE_TAP)
+                } else {
+                    state.pendingSingleAt = eventTime
+                }
+                state.isDown = false
+                state.secondTap = false
+                state.holdStarted = false
+            }
+        }
+        return result
+    }
+
+    fun advance(now: Long): List<StylusGestureDecision> =
+        buildList {
+            states.forEach { (key, state) ->
+                if (state.isDown && !state.holdStarted && now - state.downAt >= holdMillis) {
+                    state.holdStarted = true
+                    state.secondTap = false
+                    state.pendingSingleAt = null
+                    add(StylusGestureDecision(key, StylusGestureKind.HOLD_START))
+                }
+                val pendingAt = state.pendingSingleAt
+                if (pendingAt != null && now - pendingAt >= doubleTapMillis) {
+                    state.pendingSingleAt = null
+                    add(StylusGestureDecision(key, StylusGestureKind.SINGLE_TAP))
+                }
+            }
+        }
+
+    fun nextDeadline(): Long? =
+        states.values
+            .flatMap { state ->
+                buildList {
+                    if (state.isDown && !state.holdStarted) add(state.downAt + holdMillis)
+                    state.pendingSingleAt?.let { add(it + doubleTapMillis) }
+                }
+            }.minOrNull()
+
+    fun reset(): List<StylusGestureDecision> =
+        buildList {
+            states.forEach { (key, state) ->
+                if (state.holdStarted) add(StylusGestureDecision(key, StylusGestureKind.HOLD_END))
+                state.isDown = false
+                state.secondTap = false
+                state.holdStarted = false
+                state.pendingSingleAt = null
+            }
+        }
+}
 
 /** Return true when a registered feature handles the shortcut. */
 fun interface StylusShortcutHandler {
@@ -25,9 +133,9 @@ fun interface StylusShortcutHandler {
 }
 
 /**
- * Clean adapter boundary for this tablet's Bluetooth pen keyboard protocol. No actions are bound
- * yet; recognized pen events are consumed so they cannot accidentally scroll or adjust a focused
- * control. PageUp/PageDown from every other keyboard remain available to the Android hierarchy.
+ * Clean adapter boundary for this tablet's Bluetooth pen keyboard protocol. Recognized pen events
+ * are consumed and forwarded to the app-owned configurable gesture state machine. PageUp/PageDown
+ * from every other keyboard remain available to the Android hierarchy.
  */
 class XiaomiStylusShortcutDispatcher(
     var handler: StylusShortcutHandler? = null,
@@ -72,6 +180,7 @@ class XiaomiStylusShortcutDispatcher(
                 phase = phase,
                 repeatCount = repeatCount,
                 heldMillis = (eventTime - downTime).coerceAtLeast(0L),
+                eventTime = eventTime,
             )
         }
 

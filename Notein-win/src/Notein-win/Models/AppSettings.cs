@@ -13,6 +13,7 @@ public sealed class WorkspaceSettings
     public ImageImportDisplayMode ImageDisplayMode { get; set; } = ImageImportDisplayMode.Ask;
     public ImageImportDisplayMode PdfDisplayMode { get; set; } = ImageImportDisplayMode.Ask;
     public PageAppearance LastPageAppearance { get; set; } = new();
+    public Dictionary<string, string> ShortcutBindings { get; set; } = ShortcutActionCatalog.DefaultBindings();
 }
 
 public sealed class AppPreferences

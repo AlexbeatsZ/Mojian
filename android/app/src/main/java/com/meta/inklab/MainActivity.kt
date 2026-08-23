@@ -172,6 +172,9 @@ class MainActivity : Activity() {
     private val viewport = ViewportState()
     private val pressureEraser = PressureEraserController()
     private val shortcutDispatcher = XiaomiStylusShortcutDispatcher()
+    private var keyboardShortcutSettings = KeyboardShortcutSettings()
+    private var xiaomiPenShortcutSettings = XiaomiPenShortcutSettings()
+    private val xiaomiGestureInterpreter = XiaomiStylusGestureInterpreter()
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val transformGestureArbiter by lazy {
         val touchSlop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
@@ -280,6 +283,10 @@ class MainActivity : Activity() {
     private var splitFocusVisible = false
     private var navigationDropTarget: NavigationDropTarget? = null
     private var pageNavigationClipboard: PageNavigationClipboard? = null
+    private val toggledPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
+    private val heldPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
+    private val consumedKeyboardShortcutKeys = mutableSetOf<Pair<Int, Int>>()
+    private var panoramaPointerId: Int? = null
 
     private val hideSplitFocus =
         Runnable {
@@ -318,12 +325,19 @@ class MainActivity : Activity() {
             eraseAt(lastPressurePoint, dp(18) / viewport.scale)
         }
 
+    private val dispatchXiaomiGestureDeadline =
+        Runnable {
+            applyXiaomiGestureDecisions(xiaomiGestureInterpreter.advance(SystemClock.uptimeMillis()))
+            scheduleXiaomiGestureDeadline()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         window.statusBarColor = TITLE_PURPLE
         window.navigationBarColor = NAV_BACKGROUND
         loadPreferences()
+        shortcutDispatcher.handler = StylusShortcutHandler(::handleXiaomiStylusSignal)
         pageContentRepository = PageContentRepository(filesDir)
         assetStore = AssetStore(this, pageContentRepository)
         pdfPageImporter = PdfPageImporter(pageContentRepository, assetStore)
@@ -372,6 +386,18 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (shortcutDispatcher.dispatch(event)) return true
+        val keyIdentity = event.deviceId to event.keyCode
+        if (event.action == KeyEvent.ACTION_UP && consumedKeyboardShortcutKeys.remove(keyIdentity)) return true
+        val chord = ShortcutKeyChord.fromEvent(event)
+        if (chord != null) {
+            keyboardShortcutSettings.actionFor(chord)?.let { actionId ->
+                if (event.repeatCount == 0 && executeShortcutAction(actionId)) {
+                    consumedKeyboardShortcutKeys += keyIdentity
+                    return true
+                }
+                if (keyIdentity in consumedKeyboardShortcutKeys) return true
+            }
+        }
         return super.dispatchKeyEvent(event)
     }
 
@@ -381,9 +407,13 @@ class MainActivity : Activity() {
         toolDetailPopup = null
         mainHandler.removeCallbacks(activatePressureEraser)
         mainHandler.removeCallbacks(hideSplitFocus)
+        mainHandler.removeCallbacks(dispatchXiaomiGestureDeadline)
+        consumedKeyboardShortcutKeys.clear()
+        applyXiaomiGestureDecisions(xiaomiGestureInterpreter.reset())
         pressureEraser.cancelCandidate()
         pressurePointerId = null
         activeDirectTool = null
+        panoramaPointerId = null
         transformGestureActive = false
         dryInkView.setEraserCursor(null)
         clearContentSelection()
@@ -394,6 +424,188 @@ class MainActivity : Activity() {
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
         super.onPause()
+    }
+
+    private fun handleXiaomiStylusSignal(signal: StylusShortcutSignal): Boolean {
+        mainHandler.removeCallbacks(dispatchXiaomiGestureDeadline)
+        xiaomiGestureInterpreter.doubleTapMillis = xiaomiPenShortcutSettings.doubleTapMillis
+        xiaomiGestureInterpreter.holdMillis = xiaomiPenShortcutSettings.holdMillis
+        applyXiaomiGestureDecisions(xiaomiGestureInterpreter.acceptAt(signal, signal.eventTime))
+        scheduleXiaomiGestureDeadline()
+        return true
+    }
+
+    private fun scheduleXiaomiGestureDeadline() {
+        mainHandler.removeCallbacks(dispatchXiaomiGestureDeadline)
+        val deadline = xiaomiGestureInterpreter.nextDeadline() ?: return
+        mainHandler.postDelayed(dispatchXiaomiGestureDeadline, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L))
+    }
+
+    private fun applyXiaomiGestureDecisions(decisions: List<StylusGestureDecision>) {
+        decisions.forEach { decision ->
+            val profile = xiaomiPenShortcutSettings.profile(decision.key)
+            when (decision.kind) {
+                StylusGestureKind.SINGLE_TAP -> executeStylusBinding(decision.key, profile.single)
+                StylusGestureKind.DOUBLE_TAP -> {
+                    if (profile.double.type == StylusBindingType.NONE) {
+                        executeStylusBinding(decision.key, profile.single)
+                        executeStylusBinding(decision.key, profile.single)
+                    } else {
+                        executeStylusBinding(decision.key, profile.double)
+                    }
+                }
+                StylusGestureKind.HOLD_START -> {
+                    val binding = profile.hold
+                    if (binding.type == StylusBindingType.HOLD_TOOL) {
+                        val target = binding.toolId ?: return@forEach
+                        heldPreviousTools[decision.key] = toolShelf.selectedId
+                        selectTool(target)
+                    }
+                }
+                StylusGestureKind.HOLD_END -> {
+                    val previous = heldPreviousTools.remove(decision.key)
+                    if (previous != null && toolShelf.tools.any { it.id == previous }) selectTool(previous)
+                    else if (profile.hold.type == StylusBindingType.NONE) executeStylusBinding(decision.key, profile.single)
+                }
+            }
+        }
+    }
+
+    private fun executeStylusBinding(key: XiaomiStylusKey, binding: StylusActionBinding) {
+        when (binding.type) {
+            StylusBindingType.NONE,
+            StylusBindingType.HOLD_TOOL -> Unit
+            StylusBindingType.TOGGLE_TOOL -> {
+                val target = binding.toolId ?: return
+                val previous = toggledPreviousTools[key]
+                if (toolShelf.selectedId == target && previous != null && toolShelf.tools.any { it.id == previous }) {
+                    toggledPreviousTools.remove(key)
+                    selectTool(previous)
+                } else {
+                    toggledPreviousTools[key] = toolShelf.selectedId
+                    selectTool(target)
+                }
+            }
+            StylusBindingType.UNDO -> dryInkView.undo()
+            StylusBindingType.REDO -> dryInkView.redo()
+            StylusBindingType.NEXT_TOOL -> cycleDrawingTool(1)
+            StylusBindingType.PREVIOUS_TOOL -> cycleDrawingTool(-1)
+        }
+    }
+
+    private fun drawingRibbonTools(): List<ToolPreset> =
+        toolShelf.tools.sortedWith(
+            compareBy {
+                when (it.kind) {
+                    DrawingToolKind.LASSO -> 0
+                    DrawingToolKind.ERASER -> 1
+                    DrawingToolKind.HIGHLIGHTER -> 2
+                    DrawingToolKind.PEN -> 3
+                }
+            },
+        )
+
+    private fun cycleDrawingTool(direction: Int) {
+        val tools = drawingRibbonTools()
+        if (tools.isEmpty()) return
+        val current = tools.indexOfFirst { it.id == toolShelf.selectedId }.takeIf { it >= 0 } ?: 0
+        val next = (current + direction).mod(tools.size)
+        selectTool(tools[next].id)
+    }
+
+    private fun cyclePage(direction: Int) {
+        val pages = workspace.pagePaneRows().filterIsInstance<PagePaneRow.PageItem>()
+        if (pages.isEmpty()) return
+        val current = pages.indexOfFirst { it.page.id == workspace.selectedPageId }.takeIf { it >= 0 } ?: 0
+        val next = (current + direction).mod(pages.size)
+        workspace.selectPage(pages[next].sectionId, pages[next].page.id)
+        persistWorkspacePreferences()
+        renderWorkspace()
+    }
+
+    private fun togglePanoramaMode() {
+        setTextMode(false, rerender = false)
+        tagLayer.cancelPlacement()
+        singleFingerPanEnabled = !singleFingerPanEnabled
+        insertSpaceModeEnabled = false
+        insertSpaceActive = false
+        panoramaPointerId = null
+        dryInkView.setInsertSpaceHoverY(null)
+        dryInkView.setInsertSpaceGuide(null, null)
+        transformGestureActive = false
+        toolDetailPopup?.dismiss()
+        toolDetailPopup = null
+        renderToolShelf()
+    }
+
+    private fun executeShortcutAction(actionId: String): Boolean {
+        if (!::dryInkView.isInitialized) return false
+        if (actionId.startsWith("tool:")) {
+            val id = actionId.removePrefix("tool:")
+            if (toolShelf.tools.none { it.id == id }) return false
+            selectTool(id)
+            return true
+        }
+        if (actionId.startsWith("home:")) {
+            when (actionId) {
+                "home:tag-important" -> beginTagPlacement(CanvasTagKind.IMPORTANT)
+                "home:tag-question" -> beginTagPlacement(CanvasTagKind.QUESTION)
+                else -> {
+                    val command = HomeCommand.fromId(actionId.removePrefix("home:")) ?: return false
+                    performHomeCommand(command, drawingRibbon)
+                }
+            }
+            return true
+        }
+        if (actionId.startsWith("draw:background:")) {
+            val format = runCatching { CanvasBackgroundFormat.valueOf(actionId.removePrefix("draw:background:")) }.getOrNull() ?: return false
+            updateCurrentPageView { it.backgroundFormat = format }
+            return true
+        }
+        if (actionId.startsWith("view:zoom:")) {
+            val percent = actionId.removePrefix("view:zoom:").toIntOrNull() ?: return false
+            setZoomScale(percent / 100f)
+            return true
+        }
+        return when (actionId) {
+            "file:backstage" -> { showBackstage(); true }
+            "file:save" -> { saveBoundPageSession(); persistWorkspacePreferences(); Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show(); true }
+            "file:export-page-pdf" -> { startExport(PendingExport.PDF); true }
+            "file:export-notebook" -> { startExport(PendingExport.PRIVATE_PACKAGE); true }
+            "insert:table-2x2" -> { insertTable(2, 2); true }
+            "insert:attachment" -> { launchDocumentPicker(REQUEST_ATTACHMENT, "*/*"); true }
+            "insert:pdf-printout" -> { launchDocumentPicker(REQUEST_PDF_PRINTOUT, "application/pdf"); true }
+            "insert:spreadsheet" -> { launchSpreadsheetPicker(); true }
+            "insert:images" -> { launchImagePicker(REQUEST_IMAGES); true }
+            "insert:stickers" -> { showStickerPicker(); true }
+            "insert:note-link" -> { showNoteLinkPicker(); true }
+            "draw:undo" -> { clearContentSelection(); dryInkView.undo(); true }
+            "draw:redo" -> { clearContentSelection(); dryInkView.redo(); true }
+            "draw:cursor" -> { setTextMode(!textModeEnabled); true }
+            "draw:previous-tool" -> { cycleDrawingTool(-1); true }
+            "draw:next-tool" -> { cycleDrawingTool(1); true }
+            "draw:pan" -> { togglePanoramaMode(); true }
+            "draw:insert-space" -> { handleInsertSpace(drawingRibbon); true }
+            "draw:delete-selection" -> { deleteContentSelection(); true }
+            "draw:clear" -> { confirmClearPage(); true }
+            "view:full-page" -> { setFullPageMode(true); true }
+            "view:normal" -> { setFullPageMode(false); true }
+            "view:split" -> { toggleSplitView(); true }
+            "view:zoom-lock" -> { zoomLocked = !zoomLocked; persistWorkspacePreferences(); refreshViewRibbonState(); true }
+            "view:zoom-in" -> { zoomByStep(1); true }
+            "view:zoom-out" -> { zoomByStep(-1); true }
+            "view:zoom-reset" -> { setZoomScale(1f); true }
+            "view:fit-width" -> { fitPageWidth(); true }
+            "view:toggle-title" -> { updateCurrentPageView { it.pageTitleVisible = !it.pageTitleVisible }; true }
+            "view:toggle-theme" -> { updateCurrentPageView { it.darkBackground = !it.darkBackground }; true }
+            "view:paper:A4" -> { updateCurrentPageView { it.paperSize = PaperSize.A4; it.a4PageCount = it.a4PageCount.coerceAtLeast(1) }; true }
+            "view:paper:BOUNDLESS" -> { updateCurrentPageView { it.paperSize = PaperSize.BOUNDLESS }; true }
+            "view:section-pane" -> { toggleSectionPane(); true }
+            "view:page-pane" -> { togglePagePane(); true }
+            "view:previous-page" -> { cyclePage(-1); true }
+            "view:next-page" -> { cyclePage(1); true }
+            else -> false
+        }
     }
 
     private fun buildInterface(): View {
@@ -614,6 +826,10 @@ class MainActivity : Activity() {
                     addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(44)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
                     addView(backstageNavItem("常规", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
+                    addView(
+                        backstageNavItem("快捷键", false) { dialog.setContentView(buildShortcutOptionsPage(dialog)) },
+                        LinearLayout.LayoutParams(MATCH, dp(40)),
+                    )
                     for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
                         addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
                     }
@@ -851,6 +1067,254 @@ class MainActivity : Activity() {
                 toolShelf.restoreFrom(loadedShelf)
             }
         }
+        loadRemainingPreferences(prefs)
+    }
+
+    private fun buildShortcutOptionsPage(dialog: Dialog): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(37, 37, 37))
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), 0, dp(18), 0)
+                    setBackgroundColor(NAV_BACKGROUND)
+                    addView(
+                        backstageNavItem("←  返回选项", false) { dialog.setContentView(buildOptionsPage(dialog)) },
+                        LinearLayout.LayoutParams(dp(150), dp(48)),
+                    )
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "快捷键"
+                            gravity = Gravity.CENTER_VERTICAL
+                            setTextColor(TEXT_PRIMARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        },
+                        LinearLayout.LayoutParams(0, MATCH, 1f),
+                    )
+                },
+                LinearLayout.LayoutParams(MATCH, dp(52)),
+            )
+
+            val body =
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(28), dp(18), dp(34), dp(32))
+                    addView(optionsSectionTitle("小米笔（仅 Android）"), LinearLayout.LayoutParams(MATCH, dp(38)))
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = "两个按键各自可设置单击、急促双击和按住。单击会等双击窗口结束后执行；按住在抬起时恢复原工具。首次请实机确认 PageUp / PageDown 对应的机身位置。"
+                            setTextColor(TEXT_SECONDARY)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(42)),
+                    )
+                    addView(
+                        shortcutTimingRow("双击间隔", 150, 600, xiaomiPenShortcutSettings.doubleTapMillis.toInt()) { value ->
+                            xiaomiPenShortcutSettings.doubleTapMillis = value.toLong()
+                            xiaomiGestureInterpreter.doubleTapMillis = value.toLong()
+                            persistWorkspacePreferences()
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(64)),
+                    )
+                    addView(
+                        shortcutTimingRow("按住阈值", 200, 1_200, xiaomiPenShortcutSettings.holdMillis.toInt()) { value ->
+                            xiaomiPenShortcutSettings.holdMillis = value.toLong()
+                            xiaomiGestureInterpreter.holdMillis = value.toLong()
+                            persistWorkspacePreferences()
+                        },
+                        LinearLayout.LayoutParams(MATCH, dp(64)),
+                    )
+                    XiaomiStylusKey.entries.forEach { key ->
+                        val profile = xiaomiPenShortcutSettings.profile(key)
+                        val label = if (key == XiaomiStylusKey.PAGE_UP) "按键 PageUp" else "按键 PageDown"
+                        addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(46)).apply { topMargin = dp(8) })
+                        addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
+                        addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
+                        addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, dialog), LinearLayout.LayoutParams(MATCH, dp(58)))
+                    }
+
+                    addView(optionsSectionTitle("键盘 / 外接键盘"), LinearLayout.LayoutParams(MATCH, dp(54)).apply { topMargin = dp(16) })
+                    ShortcutCategory.entries.forEach { category ->
+                        val actions = ShortcutActionCatalog.actions(toolShelf.tools).filter { it.category == category }
+                        if (actions.isEmpty()) return@forEach
+                        addView(optionsSectionTitle(category.label), LinearLayout.LayoutParams(MATCH, dp(38)))
+                        actions.forEach { descriptor ->
+                            addView(shortcutBindingRow(descriptor, dialog), LinearLayout.LayoutParams(MATCH, dp(52)))
+                        }
+                    }
+                }
+            addView(
+                ScrollView(this@MainActivity).apply { isFillViewport = true; addView(body, ViewGroup.LayoutParams(MATCH, WRAP)) },
+                LinearLayout.LayoutParams(MATCH, 0, 1f),
+            )
+        }
+
+    private fun shortcutTimingRow(title: String, minimum: Int, maximum: Int, current: Int, onChanged: (Int) -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val valueLabel =
+                TextView(this@MainActivity).apply {
+                    text = "$current ms"
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                    setTextColor(ACCENT_PURPLE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                }
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = title
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                },
+                LinearLayout.LayoutParams(dp(100), MATCH),
+            )
+            addView(
+                SeekBar(this@MainActivity).apply {
+                    max = maximum - minimum
+                    progress = current.coerceIn(minimum, maximum) - minimum
+                    setOnSeekBarChangeListener(
+                        object : SeekBar.OnSeekBarChangeListener {
+                            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                                val value = minimum + progress
+                                valueLabel.text = "$value ms"
+                                if (fromUser) onChanged(value)
+                            }
+                            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+                        },
+                    )
+                },
+                LinearLayout.LayoutParams(0, dp(42), 1f),
+            )
+            addView(valueLabel, LinearLayout.LayoutParams(dp(82), MATCH))
+        }
+
+    private fun stylusBindingSettingsRow(title: String, binding: StylusActionBinding, holdOnly: Boolean, dialog: Dialog): View =
+        settingsRow(
+            title,
+            if (holdOnly) "达到按住阈值后生效，抬起恢复。" else "选择一个立即执行的动作。",
+            settingsValueButton(stylusBindingLabel(binding)).apply {
+                setOnClickListener {
+                    showStylusBindingChooser(binding, holdOnly) { dialog.setContentView(buildShortcutOptionsPage(dialog)) }
+                }
+            },
+        )
+
+    private fun stylusBindingLabel(binding: StylusActionBinding): String =
+        when (binding.type) {
+            StylusBindingType.TOGGLE_TOOL,
+            StylusBindingType.HOLD_TOOL -> toolShelf.tools.firstOrNull { it.id == binding.toolId }?.displayName ?: binding.type.label
+            else -> binding.type.label
+        }
+
+    private fun showStylusBindingChooser(binding: StylusActionBinding, holdOnly: Boolean, refresh: () -> Unit) {
+        val types =
+            if (holdOnly) listOf(StylusBindingType.NONE, StylusBindingType.HOLD_TOOL)
+            else listOf(
+                StylusBindingType.NONE,
+                StylusBindingType.TOGGLE_TOOL,
+                StylusBindingType.UNDO,
+                StylusBindingType.REDO,
+                StylusBindingType.NEXT_TOOL,
+                StylusBindingType.PREVIOUS_TOOL,
+            )
+        AlertDialog.Builder(this)
+            .setTitle(if (holdOnly) "设置按住动作" else "设置按键动作")
+            .setItems(types.map(StylusBindingType::label).toTypedArray()) { _, which ->
+                val type = types[which]
+                if (type == StylusBindingType.TOGGLE_TOOL || type == StylusBindingType.HOLD_TOOL) {
+                    val tools = drawingRibbonTools()
+                    AlertDialog.Builder(this)
+                        .setTitle("选择工具")
+                        .setItems(tools.map(ToolPreset::displayName).toTypedArray()) { _, toolIndex ->
+                            binding.type = type
+                            binding.toolId = tools[toolIndex].id
+                            persistWorkspacePreferences()
+                            refresh()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                } else {
+                    binding.type = type
+                    binding.toolId = null
+                    persistWorkspacePreferences()
+                    refresh()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun shortcutBindingRow(descriptor: ShortcutActionDescriptor, dialog: Dialog): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(6), 0)
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = descriptor.label
+                    gravity = Gravity.CENTER_VERTICAL
+                    setTextColor(TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                },
+                LinearLayout.LayoutParams(0, MATCH, 1f),
+            )
+            val chord = keyboardShortcutSettings.bindings[descriptor.id]
+            addView(
+                settingsValueButton(chord?.displayName ?: "未设置").apply {
+                    setOnClickListener { showShortcutCaptureDialog(descriptor, dialog) }
+                },
+                LinearLayout.LayoutParams(dp(132), dp(36)),
+            )
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = "×"
+                    gravity = Gravity.CENTER
+                    setTextColor(if (chord == null) TEXT_SECONDARY else TEXT_PRIMARY)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                    isEnabled = chord != null
+                    setOnClickListener {
+                        keyboardShortcutSettings.clear(descriptor.id)
+                        persistWorkspacePreferences()
+                        dialog.setContentView(buildShortcutOptionsPage(dialog))
+                    }
+                },
+                LinearLayout.LayoutParams(dp(42), dp(36)),
+            )
+        }
+
+    private fun showShortcutCaptureDialog(descriptor: ShortcutActionDescriptor, owner: Dialog) {
+        val capture = AlertDialog.Builder(this)
+            .setTitle("设置 ${descriptor.label}")
+            .setMessage("现在按下新的组合键。已有相同组合会自动改绑到此操作。")
+            .setNegativeButton("取消", null)
+            .create()
+        capture.setOnKeyListener { _, _, event ->
+            if (event.device?.name == "Xiaomi Smart Pen Keyboard") {
+                Toast.makeText(this, "小米笔请在上方专属区域设置", Toast.LENGTH_SHORT).show()
+                return@setOnKeyListener true
+            }
+            val chord = ShortcutKeyChord.fromEvent(event) ?: return@setOnKeyListener false
+            keyboardShortcutSettings.assign(descriptor.id, chord)
+            persistWorkspacePreferences()
+            capture.dismiss()
+            owner.setContentView(buildShortcutOptionsPage(owner))
+            true
+        }
+        capture.show()
+    }
+
+    private fun loadRemainingPreferences(prefs: android.content.SharedPreferences) {
+        keyboardShortcutSettings = KeyboardShortcutSettings.fromJson(prefs.getString(KEY_KEYBOARD_SHORTCUTS, null))
+        xiaomiPenShortcutSettings =
+            XiaomiPenShortcutSettings.fromJson(prefs.getString(KEY_XIAOMI_PEN_SHORTCUTS, null))
+                .sanitized(toolShelf.tools.map(ToolPreset::id).toSet())
+        xiaomiGestureInterpreter.doubleTapMillis = xiaomiPenShortcutSettings.doubleTapMillis
+        xiaomiGestureInterpreter.holdMillis = xiaomiPenShortcutSettings.holdMillis
         val savedPenId = prefs.getString(KEY_LAST_PEN_TOOL_ID, "")
         if (!savedPenId.isNullOrEmpty() && toolShelf.tools.any { it.id == savedPenId }) {
             lastPenToolId = savedPenId
@@ -917,6 +1381,8 @@ class MainActivity : Activity() {
             .putFloat(KEY_PRESSURE_THRESHOLD, pressureEraser.pressureThreshold)
             .putLong(KEY_PRESSURE_DWELL_MILLIS, pressureEraser.dwellMillis)
             .putBoolean(KEY_ZOOM_LOCKED, zoomLocked)
+            .putString(KEY_KEYBOARD_SHORTCUTS, keyboardShortcutSettings.toJson())
+            .putString(KEY_XIAOMI_PEN_SHORTCUTS, xiaomiPenShortcutSettings.toJson())
             .putString(KEY_NOTEBOOK_LIBRARY, notebookLibrary.toJsonString())
             .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
             .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
@@ -980,7 +1446,7 @@ class MainActivity : Activity() {
 
     private fun isKnownFullPageToolId(id: String): Boolean =
         when {
-            id in setOf("draw:undo", "draw:cursor", "draw:add", "draw:pan", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
+            id in setOf("draw:undo", "draw:redo", "draw:cursor", "draw:add", "draw:pan", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
             id.startsWith("home:") -> HomeCommand.fromId(id.removePrefix("home:")) != null
             id.startsWith("tool:") -> toolShelf.tools.any { it.id == id.removePrefix("tool:") }
             else -> false
@@ -1983,11 +2449,13 @@ class MainActivity : Activity() {
         }
         tagLayer.onTagClicked = {
             dryInkView.clearSelection()
+            insertContentLayer.clearSelection()
             selectionOverlay.invalidate()
             renderToolDetails()
         }
         insertContentLayer.onDocumentChanged = pageContentRepository::save
         insertContentLayer.onObjectActivated = ::activateInsertObject
+        insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paperContainer.addView(pageSurfaceBackground, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(canvasBackgroundLayer, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -2454,17 +2922,23 @@ class MainActivity : Activity() {
     private fun installNavigationLongPressAndDrag(
         view: View,
         payload: NavigationDragPayload?,
-        onReleasedLongPress: () -> Unit,
+        onLongPress: () -> Unit,
     ) {
         val slop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
         var downX = 0f
         var downY = 0f
         val gesture = NavigationLongPressGesture()
-        val armLongPress =
+        val armDrag =
             Runnable {
-                gesture.arm()
+                gesture.armDrag()
+            }
+        val showMenu =
+            Runnable {
+                if (!gesture.showMenu()) return@Runnable
                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 view.parent?.requestDisallowInterceptTouchEvent(true)
+                view.isPressed = false
+                onLongPress()
             }
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
@@ -2472,13 +2946,19 @@ class MainActivity : Activity() {
                     downX = event.rawX
                     downY = event.rawY
                     gesture.reset()
-                    mainHandler.postDelayed(armLongPress, ViewConfiguration.getLongPressTimeout().toLong())
+                    mainHandler.postDelayed(armDrag, NAVIGATION_DRAG_ARM_MILLIS)
+                    mainHandler.postDelayed(showMenu, ViewConfiguration.getLongPressTimeout().toLong())
                     false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val distance = kotlin.math.hypot(event.rawX - downX, event.rawY - downY)
-                    if (!gesture.isArmed && distance > slop) mainHandler.removeCallbacks(armLongPress)
-                    if (gesture.isArmed && !gesture.isDragging && payload != null && distance > slop) {
+                    if (!gesture.isDragArmed && !gesture.isMenuShown && distance > slop) {
+                        mainHandler.removeCallbacks(armDrag)
+                        mainHandler.removeCallbacks(showMenu)
+                    }
+                    if (gesture.isDragArmed && !gesture.isDragging && payload != null && distance > slop) {
+                        mainHandler.removeCallbacks(showMenu)
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
                         gesture.recordDragStart(
                             view.startDragAndDrop(
                                 ClipData.newPlainText("navigation", ""),
@@ -2488,27 +2968,29 @@ class MainActivity : Activity() {
                             ),
                         )
                     }
-                    gesture.isArmed
+                    gesture.isDragArmed || gesture.isDragging || gesture.isMenuShown
                 }
                 MotionEvent.ACTION_UP -> {
-                    mainHandler.removeCallbacks(armLongPress)
+                    mainHandler.removeCallbacks(armDrag)
+                    mainHandler.removeCallbacks(showMenu)
                     view.parent?.requestDisallowInterceptTouchEvent(false)
                     val action = gesture.release()
                     if (action != NavigationReleaseAction.CLICK) view.isPressed = false
                     when (action) {
                         NavigationReleaseAction.DROP_ONLY -> Unit
-                        NavigationReleaseAction.MENU -> onReleasedLongPress()
+                        NavigationReleaseAction.CONSUMED -> Unit
                         NavigationReleaseAction.CLICK -> Unit
                     }
                     action != NavigationReleaseAction.CLICK
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    mainHandler.removeCallbacks(armLongPress)
+                    mainHandler.removeCallbacks(armDrag)
+                    mainHandler.removeCallbacks(showMenu)
                     view.parent?.requestDisallowInterceptTouchEvent(false)
                     gesture.reset()
                     false
                 }
-                else -> gesture.isArmed
+                else -> gesture.isDragArmed || gesture.isDragging || gesture.isMenuShown
             }
         }
     }
@@ -2961,6 +3443,7 @@ class MainActivity : Activity() {
     private fun fullPageToolCatalog(): List<FullPageToolDescriptor> =
         buildList {
             add(FullPageToolDescriptor("draw:undo", "撤销", "arrow_undo"))
+            add(FullPageToolDescriptor("draw:redo", "重做", "arrow_redo"))
             add(FullPageToolDescriptor("draw:cursor", "键入文本", "cursor"))
             toolShelf.tools.forEach { tool ->
                 val icon =
@@ -2973,7 +3456,7 @@ class MainActivity : Activity() {
                 add(FullPageToolDescriptor("tool:${tool.id}", tool.displayName, icon))
             }
             add(FullPageToolDescriptor("draw:add", "添加绘图工具", "add"))
-            add(FullPageToolDescriptor("draw:pan", "单指平移", "hand_left"))
+            add(FullPageToolDescriptor("draw:pan", "全景手柄（手指和笔）", "hand_left"))
             add(FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space"))
             add(FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines"))
             add(FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"))
@@ -3006,20 +3489,15 @@ class MainActivity : Activity() {
                     clearContentSelection()
                     dryInkView.undo()
                 }
+            "draw:redo" ->
+                commandButton("arrow_redo", "重做", false) {
+                    clearContentSelection()
+                    dryInkView.redo()
+                }
             "draw:cursor" -> commandButton("cursor", "键入文本", textModeEnabled) { setTextMode(!textModeEnabled) }
             "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
             "draw:pan" ->
-                commandButton("hand_left", "单指平移", singleFingerPanEnabled) {
-                    setTextMode(false, rerender = false)
-                    tagLayer.cancelPlacement()
-                    singleFingerPanEnabled = !singleFingerPanEnabled
-                    insertSpaceModeEnabled = false
-                    insertSpaceActive = false
-                    dryInkView.setInsertSpaceHoverY(null)
-                    dryInkView.setInsertSpaceGuide(null, null)
-                    transformGestureActive = false
-                    renderToolShelf()
-                }
+                commandButton("hand_left", "全景手柄（手指和笔）", singleFingerPanEnabled) { togglePanoramaMode() }
             "draw:insert_space" ->
                 commandButton("insert_space", "插入空白空间", insertSpaceModeEnabled, preserveColors = true) { anchor ->
                     handleInsertSpace(anchor)
@@ -3042,6 +3520,13 @@ class MainActivity : Activity() {
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
+        row.addView(
+            commandButton("arrow_redo", "重做", selected = false) {
+                clearContentSelection()
+                dryInkView.redo()
+            },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
         row.addView(verticalDivider())
         row.addView(
             commandButton("cursor", "键入文本", selected = textModeEnabled) {
@@ -3060,19 +3545,7 @@ class MainActivity : Activity() {
         )
         row.addView(verticalDivider())
         row.addView(
-            commandButton("hand_left", "单指平移", selected = singleFingerPanEnabled) {
-                setTextMode(false, rerender = false)
-                tagLayer.cancelPlacement()
-                singleFingerPanEnabled = !singleFingerPanEnabled
-                insertSpaceModeEnabled = false
-                insertSpaceActive = false
-                dryInkView.setInsertSpaceHoverY(null)
-                dryInkView.setInsertSpaceGuide(null, null)
-                transformGestureActive = false
-                toolDetailPopup?.dismiss()
-                toolDetailPopup = null
-                renderToolShelf()
-            },
+            commandButton("hand_left", "全景手柄（手指和笔）", selected = singleFingerPanEnabled) { togglePanoramaMode() },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
         row.addView(verticalDivider())
@@ -3355,6 +3828,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
+        if (handlePanoramaStylusGesture(event)) return
         if (insertSpaceModeEnabled && handleInsertSpaceGesture(event)) return
         if (handleFingerGesture(event)) return
         if (!hasStylusPointer(event) && activeStrokes.isEmpty()) return
@@ -3368,6 +3842,35 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_POINTER_UP -> finishStylusAction(event)
             MotionEvent.ACTION_CANCEL -> cancelStylusAction()
         }
+    }
+
+    private fun handlePanoramaStylusGesture(event: MotionEvent): Boolean {
+        if (!singleFingerPanEnabled || !hasStylusPointer(event)) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                val index = event.actionIndex
+                if (!isStylus(event.getToolType(index))) return false
+                panoramaPointerId = event.getPointerId(index)
+                beginSingleFingerPan(event, index)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val index = panoramaPointerId?.let(event::findPointerIndex) ?: -1
+                if (index >= 0) applySingleFingerPan(event.getX(index), event.getY(index))
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.getPointerId(event.actionIndex) == panoramaPointerId) {
+                    panoramaPointerId = null
+                    endTransformGesture()
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                panoramaPointerId = null
+                endTransformGesture()
+            }
+        }
+        return true
     }
 
     private fun beginStylusAction(event: MotionEvent) {
@@ -3721,16 +4224,17 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun selectedContentCount(): Int = dryInkView.selectedCount() + tagLayer.selectedCount()
+    private fun selectedContentCount(): Int = dryInkView.selectedCount() + tagLayer.selectedCount() + insertContentLayer.selectedCount()
 
     private fun clearContentSelection() {
         dryInkView.clearSelection()
         if (::tagLayer.isInitialized) tagLayer.clearSelection()
+        if (::insertContentLayer.isInitialized) insertContentLayer.clearSelection()
         if (::selectionOverlay.isInitialized) selectionOverlay.invalidate()
     }
 
     private fun deleteContentSelection(): Int {
-        val removed = dryInkView.deleteSelection() + tagLayer.deleteSelection()
+        val removed = dryInkView.deleteSelection() + tagLayer.deleteSelection() + insertContentLayer.deleteSelection()
         selectionOverlay.invalidate()
         return removed
     }
@@ -4840,6 +5344,28 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun showInsertObjectContextMenu(item: InsertObject) {
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        if (item !is InsertObject.Image) {
+            labels += if (item is InsertObject.Table) "编辑" else "打开"
+            actions += { activateInsertObject(item) }
+        }
+        labels += "复制"
+        actions += { insertContentLayer.duplicateSelection() }
+        labels += "置于顶层"
+        actions += { insertContentLayer.bringSelectionToFront() }
+        labels += "置于底层"
+        actions += { insertContentLayer.sendSelectionToBack() }
+        labels += "删除"
+        actions += { insertContentLayer.deleteSelection() }
+        AlertDialog.Builder(this)
+            .setTitle("对象操作")
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     private fun openEmbeddedAsset(assetName: String, mimeType: String) {
         val document = insertContentLayer.currentDocument() ?: return
         val file = assetStore.assetFile(document.notebookId, document.pageId, assetName)
@@ -4888,6 +5414,10 @@ class MainActivity : Activity() {
     }
 
     private fun startExport(type: PendingExport) {
+        if (type != PendingExport.SECTION_PACKAGE && workspace.selectedPageId.isEmpty()) {
+            Toast.makeText(this, "请先选择要导出的页面", Toast.LENGTH_SHORT).show()
+            return
+        }
         pendingExport = type
         val pageTitle = workspace.selectedPage()?.title ?: "页面"
         val fileName =
@@ -5164,6 +5694,8 @@ class MainActivity : Activity() {
         private const val KEY_IMAGE_IMPORT_DISPLAY_MODE = "image-import-display-mode"
         private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"
         private const val KEY_NOTEBOOK_LIBRARY = "notebook-library"
+        private const val KEY_KEYBOARD_SHORTCUTS = "keyboard-shortcuts"
+        private const val KEY_XIAOMI_PEN_SHORTCUTS = "xiaomi-pen-shortcuts"
         private const val REQUEST_ATTACHMENT = 4101
         private const val REQUEST_PDF_PRINTOUT = 4102
         private const val REQUEST_SPREADSHEET = 4103
@@ -5174,6 +5706,7 @@ class MainActivity : Activity() {
         private const val PDF_EXPORT_LONGEST_SIDE_PX = 1800f
         private const val SPLIT_FOCUS_PULSE_MILLIS = 500L
         private const val DARK_TOOLTIP_DELAY_MILLIS = 500L
+        private const val NAVIGATION_DRAG_ARM_MILLIS = 180L
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800)
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)

@@ -82,10 +82,11 @@ not which descendant pages exist in recursive page mode.
 
 Section and page rows use one mutually exclusive long-press gesture:
 
-- holding and releasing without entering drag shows that row's context menu;
-- holding and then moving beyond touch slop enters drag-and-drop ordering;
+- reaching Android's long-press threshold shows that row's context menu immediately, without
+  waiting for release;
+- after a short 180 ms drag-arm delay, moving beyond touch slop enters drag-and-drop ordering;
 - after drag has started, releasing performs only the drop and must never also open the menu;
-- movement before the long-press threshold remains ordinary list scrolling.
+- movement before the drag-arm delay remains ordinary list scrolling and cancels the menu timer.
 
 Dragging a section places it immediately before or after another visible section and adopts that
 target's parent. Dragging a page places it before or after another visible page and adopts that
@@ -134,8 +135,9 @@ Text persistence and document-coordinate pan/zoom are later storage/rendering wo
 this interaction prototype.
 
 The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
-allows one-finger panning while preserving two-finger pinch; deselecting it restores two-finger-only
-navigation. Choosing any drawing tool also exits panorama-hand mode.
+turns both one-finger input and stylus contact into panning while preserving two-finger pinch; the
+pen cannot leave ink in this mode. Deselecting it restores two-finger-only navigation. Choosing any
+drawing tool also exits panorama-hand mode.
 
 The insert space and background format group directly to the right of panorama hand provides:
 - an insert space tool toggle supporting stylus hover preview lines, drag displacement, and downward content shifting;

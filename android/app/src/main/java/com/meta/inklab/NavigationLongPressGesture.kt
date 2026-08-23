@@ -2,8 +2,8 @@ package com.meta.inklab
 
 enum class NavigationReleaseAction {
     CLICK,
-    MENU,
     DROP_ONLY,
+    CONSUMED,
 }
 
 object NavigationMenuCatalog {
@@ -31,30 +31,41 @@ object NavigationMenuCatalog {
 }
 
 class NavigationLongPressGesture {
-    var isArmed: Boolean = false
+    var isDragArmed: Boolean = false
         private set
 
     var isDragging: Boolean = false
         private set
 
+    var isMenuShown: Boolean = false
+        private set
+
     fun reset() {
-        isArmed = false
+        isDragArmed = false
         isDragging = false
+        isMenuShown = false
     }
 
-    fun arm() {
-        isArmed = true
+    fun armDrag() {
+        if (!isMenuShown) isDragArmed = true
+    }
+
+    fun showMenu(): Boolean {
+        if (isDragging || isMenuShown) return false
+        isMenuShown = true
+        isDragArmed = false
+        return true
     }
 
     fun recordDragStart(started: Boolean) {
-        if (isArmed && started) isDragging = true
+        if (isDragArmed && !isMenuShown && started) isDragging = true
     }
 
     fun release(): NavigationReleaseAction {
         val action =
             when {
                 isDragging -> NavigationReleaseAction.DROP_ONLY
-                isArmed -> NavigationReleaseAction.MENU
+                isMenuShown -> NavigationReleaseAction.CONSUMED
                 else -> NavigationReleaseAction.CLICK
             }
         reset()

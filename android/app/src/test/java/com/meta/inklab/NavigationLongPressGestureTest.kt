@@ -17,31 +17,42 @@ class NavigationLongPressGestureTest {
     }
 
     @Test
-    fun releasedLongPressWithoutDragOpensMenu() {
+    fun reachingMenuThresholdShowsMenuBeforeRelease() {
         val gesture = NavigationLongPressGesture()
 
-        gesture.arm()
+        assertEquals(true, gesture.showMenu())
 
-        assertEquals(NavigationReleaseAction.MENU, gesture.release())
+        assertEquals(NavigationReleaseAction.CONSUMED, gesture.release())
     }
 
     @Test
     fun successfulDragReleaseNeverOpensMenu() {
         val gesture = NavigationLongPressGesture()
 
-        gesture.arm()
+        gesture.armDrag()
         gesture.recordDragStart(started = true)
 
         assertEquals(NavigationReleaseAction.DROP_ONLY, gesture.release())
     }
 
     @Test
-    fun failedDragStartStillBehavesAsReleasedLongPress() {
+    fun failedEarlyDragStartStillBehavesAsClickUntilMenuThreshold() {
         val gesture = NavigationLongPressGesture()
 
-        gesture.arm()
+        gesture.armDrag()
         gesture.recordDragStart(started = false)
 
-        assertEquals(NavigationReleaseAction.MENU, gesture.release())
+        assertEquals(NavigationReleaseAction.CLICK, gesture.release())
+    }
+
+    @Test
+    fun menuAndDragAreMutuallyExclusive() {
+        val gesture = NavigationLongPressGesture()
+        gesture.armDrag()
+        assertEquals(true, gesture.showMenu())
+        gesture.recordDragStart(started = true)
+
+        assertEquals(false, gesture.isDragging)
+        assertEquals(NavigationReleaseAction.CONSUMED, gesture.release())
     }
 }

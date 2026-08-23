@@ -55,6 +55,7 @@ class DryInkView(context: Context) : View(context) {
     private var backgroundInvalidator: (() -> Unit)? = null
 
     private val strokes = mutableListOf<Stroke>()
+    private val redoStrokes = ArrayDeque<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
     private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
@@ -152,18 +153,27 @@ class DryInkView(context: Context) : View(context) {
 
     fun addStrokes(newStrokes: Collection<Stroke>) {
         selectedStrokes.clear()
+        redoStrokes.clear()
         strokes.addAll(newStrokes)
     }
 
     fun undo(): Boolean {
         if (strokes.isEmpty()) return false
-        strokes.removeAt(strokes.lastIndex)
+        redoStrokes.addLast(strokes.removeAt(strokes.lastIndex))
+        invalidate()
+        return true
+    }
+
+    fun redo(): Boolean {
+        if (redoStrokes.isEmpty()) return false
+        strokes.add(redoStrokes.removeLast())
         invalidate()
         return true
     }
 
     fun clear() {
         strokes.clear()
+        redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
         invalidate()
@@ -176,6 +186,7 @@ class DryInkView(context: Context) : View(context) {
     fun replaceStrokes(replacement: List<Stroke>) {
         strokes.clear()
         strokes.addAll(replacement)
+        redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
         invalidate()
@@ -281,6 +292,7 @@ class DryInkView(context: Context) : View(context) {
     fun deleteSelection(): Int {
         val count = selectedStrokes.size
         if (count == 0) return 0
+        redoStrokes.clear()
         strokes.removeAll(selectedStrokes)
         selectedStrokes.clear()
         invalidate()
@@ -326,6 +338,7 @@ class DryInkView(context: Context) : View(context) {
             }
         }
         if (removed > 0) invalidate()
+        if (removed > 0) redoStrokes.clear()
         return removed
     }
 

@@ -48,17 +48,29 @@ twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment
 
 ## Clean-room implementation contract
 
-### Shortcut interface only
+### Android Xiaomi shortcuts and shared command IDs
 
-`XiaomiStylusShortcutDispatcher` is a protocol boundary, not a feature binding:
+`XiaomiStylusShortcutDispatcher` is an Android-only device boundary:
 
 - accept PageUp/PageDown only when `InputDevice.name` exactly equals
   `Xiaomi Smart Pen Keyboard`;
 - preserve down/up phase, repeat count, and held duration;
-- consume recognized events even without a handler so the pen cannot accidentally scroll or
-  adjust focused controls; ordinary keyboard PageUp/PageDown still pass through;
-- do not bind eraser, lasso, undo, page navigation, or pen width until those product features and
-  user-configurable bindings exist.
+- consume recognized events so the pen cannot accidentally scroll or adjust focused controls;
+  ordinary keyboard PageUp/PageDown still pass through;
+- interpret each physical key independently as delayed single tap, rapid double tap, or hold. The
+  user owns the double-tap window (150--600 ms) and hold threshold (200--1200 ms);
+- single/double tap can toggle to a chosen tool and back, undo, redo, or move to the previous/next
+  tool in actual ribbon order. Hold can temporarily select a chosen tool and restores the prior
+  tool on release;
+- a single tap waits until the double-tap window expires. A configured double action suppresses
+  both singles; without one, the two taps retain ordinary two-single behavior;
+- consume application-delivered repeats, but do not claim that Android can override a Xiaomi
+  system gesture that the OEM handles before it reaches this process.
+
+Xiaomi device bindings are never exposed on Windows. Android and Windows instead share stable
+action IDs/categories for `文件`, `开始`, `插入`, `绘图`, and `视图`, with platform-local key assignments.
+Only concrete leaf actions are bindable: `重要` and `问题` are separate actions, while the parent
+tag chooser is not. Duplicate key combinations move to the newly assigned action.
 
 ### Touch arbitration
 
@@ -69,8 +81,9 @@ twice `ViewConfiguration.scaledTouchSlop`, with an explicit pan/scale commitment
   tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
 - The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
 - With the panorama-hand control off, one finger is consumed but does not write, pan, or zoom.
-- With the panorama hand selected, one finger pans at 1x scale; tapping the selected hand again or
-  choosing a drawing tool restores the default two-finger-only mode.
+- With the panorama hand selected, one finger or a contacting stylus/eraser pans at 1x scale and
+  cannot author ink. Tapping the selected hand again or choosing a drawing tool restores the
+  default two-finger-only mode.
 - Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
   drift below one platform touch slop and span drift below two touch slops do nothing.
 - After a candidate crosses a threshold, the whole pointer sequence commits to either pan or scale
@@ -126,8 +139,9 @@ Real-device acceptance still requires:
 - wet and dry ink remaining under the nib after zooming;
 - pressure erase not triggering on the first stroke or ordinary heavy writing;
 - eraser activation after dwell and pen restoration on lift;
-- Xiaomi pen keys causing no action until a handler is intentionally registered, without changing
-  a focused control.
+- Xiaomi PageUp/PageDown filtering, delayed single/double arbitration, temporary hold restoration,
+  user timing limits, and ordinary-keyboard separation. Physical key and OEM long-press acceptance
+  still require the tablet.
 - finger taps creating/focusing text while a hovering or contacting stylus immediately writes ink;
 - tag tap/lasso selection, whole-stroke erasure, selection drag, and all four scale handles under
   the actual tablet touch/stylus dispatcher.

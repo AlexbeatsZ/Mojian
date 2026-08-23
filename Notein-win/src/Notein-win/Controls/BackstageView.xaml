@@ -42,6 +42,7 @@
                     <RadioButton Content="共享" Style="{StaticResource BackstageNav}" IsChecked="{Binding IsBackstageShare, Mode=OneWay}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Share" />
                     <RadioButton Content="导出" Style="{StaticResource BackstageNav}" IsChecked="{Binding IsBackstageExport, Mode=OneWay}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Export" />
                     <RadioButton Content="帐户" Style="{StaticResource BackstageNav}" IsChecked="{Binding IsBackstageAccount, Mode=OneWay}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Account" Margin="8,28,8,2" />
+                    <RadioButton Content="快捷键" Style="{StaticResource BackstageNav}" IsChecked="{Binding IsBackstageShortcuts, Mode=OneWay}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Shortcuts" />
                     <RadioButton Content="选项" Style="{StaticResource BackstageNav}" IsChecked="{Binding IsBackstageOptions, Mode=OneWay}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Options" />
                 </StackPanel>
             </DockPanel>
@@ -124,6 +125,36 @@
                 <StackPanel Visibility="{Binding IsBackstageAccount, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="帐户" Foreground="{StaticResource TextPrimary}" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,22" />
                     <TextBlock Text="墨笺当前使用本地工作区，不需要登录帐户。" Foreground="{StaticResource TextSecondary}" />
+                </StackPanel>
+
+                <StackPanel Visibility="{Binding IsBackstageShortcuts, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="快捷键" Foreground="{StaticResource TextPrimary}" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
+                    <TextBlock Text="按照顶部功能区分类。这里只列出按下后可立即执行的操作；设置重复按键时，旧映射会自动清除。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" MaxWidth="720" Margin="0,0,0,18" />
+                    <TextBlock Text="鼠标预设：按住中键拖动画布；按住 Ctrl 再用中键或全景手柄拖动可连续缩放。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" MaxWidth="720" Margin="0,0,0,18" />
+                    <ItemsControl ItemsSource="{Binding ShortcutGroups}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,0,22">
+                                    <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextPrimary}" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                    <ItemsControl ItemsSource="{Binding Actions}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,0,1" Padding="8,7">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="150" /><ColumnDefinition Width="64" /><ColumnDefinition Width="64" /></Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Label}" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding GestureText}" Foreground="{StaticResource AccentPurple}" VerticalAlignment="Center" FontFamily="Cascadia Mono" />
+                                                        <Button Grid.Column="2" Content="设置" Style="{StaticResource RibbonIconButtonStyle}" Tag="{Binding}" Click="OnConfigureShortcutClick" />
+                                                        <Button Grid.Column="3" Content="清除" Style="{StaticResource RibbonIconButtonStyle}" Tag="{Binding}" Click="OnClearShortcutClick" />
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding IsBackstageOptions, Converter={StaticResource BoolToVisibility}}">

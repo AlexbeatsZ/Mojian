@@ -45,6 +45,11 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   rendering bypass the view filter.
 - Tables are page objects with an explicit row/column count and cell strings. The size picker adds
   a table and tapping that table opens its cell editor.
+- On Android, a finger double tap selects any non-background inserted object, including an image,
+  PDF printout, sticker, table, attachment, spreadsheet, or note link. A selected object can be
+  dragged or uniformly resized from any corner. Holding reaches the context menu before release;
+  its actions open/edit, duplicate, change stacking order, or delete. Immutable PDF page-background
+  objects never participate in this direct selection path.
 
 ## Placement and persistence
 

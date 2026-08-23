@@ -52,6 +52,8 @@ The normal window uses four vertical zones after the ribbon:
   content-sized floating tool strip.
 - Split view owns two independent page slots. Leaving split view keeps the right slot.
 - Backstage is a true full-screen surface with working notebook/workspace/export/options panels.
+  Its shortcut panel follows the ribbon order and lists only immediate leaf actions; Xiaomi pen
+  settings are Android-only and never appear here.
 
 ## Visual system
 
@@ -78,8 +80,13 @@ foreground. ADB screenshots of the installed Android build are the visual compar
   tilt, tool type, logical color, width, opacity, and brush profile version.
 - WPF stylus input uses real `StylusPoint.PressureFactor`; promoted mouse events must not duplicate a
   stylus stroke. Mouse drawing remains available for desktop testing.
-- Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Middle-button or hand
-  mode pans. Zoom lock blocks gesture scaling only.
+- Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
+  button or using hand mode pans; holding Ctrl while performing either drag continuously zooms.
+  A mouse side button remapped by its driver to middle button inherits this behavior. Zoom lock
+  blocks gesture scaling only.
+- Keyboard mappings are stored per workspace, categorized as `文件`, `开始`, `插入`, `绘图`, and `视图`,
+  and resolve conflicts by removing the previous owner. Standard editing, undo/redo, search,
+  full-page, delete-selection, and zoom defaults are provided.
 - Pen rendering uses pressure and speed correction with start/end taper. Logical black remaps for dark
   paper without changing the stored color.
 - Whole-stroke eraser, lasso selection/move/scale, undo/redo, insert space, tags, and persisted text are

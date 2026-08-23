@@ -68,6 +68,8 @@ public partial class MainWindow : Window
         Backstage.SwitchWorkspaceRequested += (_, _) => SwitchWorkspace();
         Backstage.ExportPdfRequested += (_, _) => ExportCurrentPagePdf();
         Backstage.ExportPackageRequested += (_, _) => ExportNotebookPackage();
+        Backstage.ConfigureShortcutRequested += ConfigureShortcut;
+        Backstage.ClearShortcutRequested += action => ViewModel.ClearShortcut(action.Id);
         UpdateZoomStatus();
     }
 
@@ -748,17 +750,108 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        var gesture = ShortcutGesture.FromEvent(e);
+        var shortcutAction = ViewModel.FindShortcutAction(gesture);
+        if (shortcutAction != null && ExecuteShortcutAction(shortcutAction))
         {
-            if (e.Key == Key.S) { ViewModel.SaveAll(); e.Handled = true; }
-            else if (e.Key == Key.Z) { FocusedCanvas.Undo(); e.Handled = true; }
-            else if (e.Key == Key.Y) { FocusedCanvas.Redo(); e.Handled = true; }
-            else if (e.Key == Key.F) { SearchPanel.Visibility = Visibility.Visible; SearchBox.Focus(); SearchBox.SelectAll(); e.Handled = true; }
+            e.Handled = true;
+            return;
         }
-        else if (e.Key == Key.Delete && FocusedTextBox() == null) { FocusedCanvas.DeleteSelection(); e.Handled = true; }
-        else if (e.Key == Key.F11) { ViewModel.ToggleFullPageCommand.Execute(null); e.Handled = true; }
-        else if (e.Key == Key.Escape && SearchPanel.Visibility == Visibility.Visible) { SearchPanel.Visibility = Visibility.Collapsed; e.Handled = true; }
+        if (e.Key == Key.Escape && SearchPanel.Visibility == Visibility.Visible) { SearchPanel.Visibility = Visibility.Collapsed; e.Handled = true; }
         else if (e.Key == Key.Escape && ViewModel.IsBackstageOpen) { ViewModel.CloseBackstageCommand.Execute(null); e.Handled = true; }
+    }
+
+    private void ConfigureShortcut(ShortcutActionDescriptor action)
+    {
+        var prompt = new TextBlock
+        {
+            Text = $"按下要绑定到“{action.Label}”的按键组合\n\nEsc 取消；重复组合会从原操作移除。",
+            Foreground = new SolidColorBrush(Color.FromRgb(244, 244, 244)),
+            FontSize = 16,
+            TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(28),
+        };
+        var dialog = new Window
+        {
+            Title = "设置快捷键",
+            Owner = this,
+            Width = 430,
+            Height = 210,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = new SolidColorBrush(Color.FromRgb(27, 27, 27)),
+            Content = prompt,
+        };
+        ShortcutGesture? captured = null;
+        dialog.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) { dialog.DialogResult = false; e.Handled = true; return; }
+            var candidate = ShortcutGesture.FromEvent(e);
+            if (!candidate.IsValid) { e.Handled = true; return; }
+            captured = candidate;
+            dialog.DialogResult = true;
+            e.Handled = true;
+        };
+        dialog.Loaded += (_, _) => { dialog.Activate(); Keyboard.Focus(dialog); };
+        if (dialog.ShowDialog() == true && captured.HasValue) ViewModel.SetShortcut(action.Id, captured.Value);
+    }
+
+    private bool ExecuteShortcutAction(string actionId)
+    {
+        if (actionId.StartsWith("tool:", StringComparison.Ordinal)) return ViewModel.SelectToolImmediate(actionId[5..]);
+        if (actionId.StartsWith("home:", StringComparison.Ordinal))
+        {
+            if (actionId == "home:tag-important") { ViewModel.PendingTagKind = CanvasTagKind.Important; return true; }
+            if (actionId == "home:tag-question") { ViewModel.PendingTagKind = CanvasTagKind.Question; return true; }
+            if (actionId == "home:find-tags") { ShowTagResults(FocusedCanvas); return true; }
+            var id = actionId[5..];
+            var command = Enum.GetValues<HomeCommand>().FirstOrDefault(item => item.GetId() == id);
+            if (command.GetId() != id) return false;
+            OnHomeCommandClick(new Button { Tag = command.ToString() }, new RoutedEventArgs());
+            return true;
+        }
+        switch (actionId)
+        {
+            case "file:backstage": ViewModel.OpenBackstageCommand.Execute(null); return true;
+            case "file:save": ViewModel.SaveAll(); return true;
+            case "file:export-page-pdf": ExportCurrentPagePdf(); return true;
+            case "file:export-notebook": ExportNotebookPackage(); return true;
+            case "insert:table": OnInsertTableClick(this, new RoutedEventArgs()); return true;
+            case "insert:attachment": OnInsertAttachmentClick(this, new RoutedEventArgs()); return true;
+            case "insert:pdf": OnInsertPdfPrintoutClick(this, new RoutedEventArgs()); return true;
+            case "insert:spreadsheet": OnInsertSpreadsheetClick(this, new RoutedEventArgs()); return true;
+            case "insert:image": OnInsertImageClick(this, new RoutedEventArgs()); return true;
+            case "insert:sticker": OnInsertStickerClick(this, new RoutedEventArgs()); return true;
+            case "insert:link": OnInsertLinkClick(this, new RoutedEventArgs()); return true;
+            case "draw:undo": FocusedCanvas.Undo(); return true;
+            case "draw:redo": FocusedCanvas.Redo(); return true;
+            case "draw:cursor": ViewModel.TextModeEnabled = !ViewModel.TextModeEnabled; return true;
+            case "draw:previous-tool": return ViewModel.CycleDrawingTool(-1);
+            case "draw:next-tool": return ViewModel.CycleDrawingTool(1);
+            case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; return true;
+            case "draw:insert-space": ViewModel.InsertSpaceModeEnabled = !ViewModel.InsertSpaceModeEnabled; return true;
+            case "draw:delete-selection": if (FocusedTextBox() != null) return false; FocusedCanvas.DeleteSelection(); return true;
+            case "draw:clear": OnClearPageClick(this, new RoutedEventArgs()); return true;
+            case "draw:background-blank": ViewModel.SetBackgroundFormat(CanvasBackgroundFormat.Blank); return true;
+            case "draw:background-grid": ViewModel.SetBackgroundFormat(CanvasBackgroundFormat.GridStandard); return true;
+            case "draw:background-ruled": ViewModel.SetBackgroundFormat(CanvasBackgroundFormat.RuledStandard); return true;
+            case "draw:background-dots": ViewModel.SetBackgroundFormat(CanvasBackgroundFormat.DotsStandard); return true;
+            case "view:search": SearchPanel.Visibility = Visibility.Visible; SearchBox.Focus(); SearchBox.SelectAll(); return true;
+            case "view:normal-page": ViewModel.IsFullPageMode = false; return true;
+            case "view:full-page": ViewModel.IsFullPageMode = true; return true;
+            case "view:split": ViewModel.ToggleSplitViewCommand.Execute(null); return true;
+            case "view:zoom-in": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale * 1.25f); return true;
+            case "view:zoom-out": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale / 1.25f); return true;
+            case "view:zoom-reset": FocusedCanvas.SetZoom(1f); return true;
+            case "view:fit-width": FocusedCanvas.FitPageWidth(); return true;
+            case "view:toggle-title": ViewModel.TogglePageTitle(); return true;
+            case "view:toggle-theme": ViewModel.TogglePageTheme(); return true;
+            case "view:previous-page": return ViewModel.CyclePage(-1);
+            case "view:next-page": return ViewModel.CyclePage(1);
+            default: return false;
+        }
     }
 
     private void OnWindowClosing(object? sender, CancelEventArgs e) => ViewModel.SaveAll();
