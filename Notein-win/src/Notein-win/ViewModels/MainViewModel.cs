@@ -60,6 +60,9 @@ public sealed class MainViewModel : ObservableObject
     public bool SelectedToolIsHighlighter => SelectedTool.Kind == DrawingToolKind.Highlighter;
     public bool SelectedToolIsEraser => SelectedTool.Kind == DrawingToolKind.Eraser;
     public bool SelectedToolIsLasso => SelectedTool.Kind == DrawingToolKind.Lasso;
+    public bool SelectedLassoIsFreeform => SelectedToolIsLasso && SelectedTool.LassoShape == LassoShape.Freeform;
+    public bool SelectedLassoIsRectangle => SelectedToolIsLasso && SelectedTool.LassoShape == LassoShape.Rectangle;
+    public PageAppearance LastPageAppearance => _settings.LastPageAppearance.Clone();
 
     public PageDocument? PrimaryDocument
     {
@@ -466,9 +469,9 @@ public sealed class MainViewModel : ObservableObject
         RefreshNavigation();
     }
 
-    public void AddPage(string title, PageAppearance appearance)
+    public NotePage? AddPage(string title, PageAppearance appearance)
     {
-        if (!CanAddPage) return;
+        if (!CanAddPage) return null;
         SaveFocusedDocument();
         var page = ActiveWorkspace.AddPage(title, appearance);
         _settings.LastPageAppearance = appearance.Clone();
@@ -478,6 +481,57 @@ public sealed class MainViewModel : ObservableObject
         SaveLibrary();
         SaveSettings();
         RefreshNavigation();
+        return page;
+    }
+
+    public PageDocument? AddPdfPage(string title, RenderedPdfPage sourcePage, string sourcePath, bool invert)
+    {
+        var rememberedPageAppearance = _settings.LastPageAppearance.Clone();
+        var appearance = new PageAppearance
+        {
+            PaperKind = PaperKind.Pdf,
+            Theme = PageTheme.Dark,
+            Background = CanvasBackgroundFormat.Blank,
+            PageColor = "#1B1B1B",
+            ShowTitle = false,
+            SheetCount = 1,
+            Width = sourcePage.WidthPoints * 96d / 72d,
+            Height = sourcePage.HeightPoints * 96d / 72d,
+        };
+        var page = AddPage(title, appearance);
+        _settings.LastPageAppearance = rememberedPageAppearance;
+        SaveSettings();
+        var document = FocusedDocument;
+        if (page == null || document == null) return null;
+
+        page.IsPdfPage = true;
+        page.PdfPageNumber = sourcePage.PageNumber;
+        page.PdfPageCount = sourcePage.PageCount;
+        page.PdfWidthPoints = sourcePage.WidthPoints;
+        page.PdfHeightPoints = sourcePage.HeightPoints;
+        var sourceAsset = _store.ImportAsset(document.NotebookId, document.PageId, sourcePath);
+        page.PdfSourceAssetName = sourceAsset;
+        page.PdfSourceDocumentName = Path.GetFileName(sourcePath);
+        var renderedAsset = _store.WriteAsset(document.NotebookId, document.PageId, ".png", sourcePage.PngBytes);
+        document.Objects.Add(new PageObject
+        {
+            Kind = PageObjectKind.PdfPrintout,
+            X = 0,
+            Y = 0,
+            Width = (float)appearance.Width,
+            Height = (float)appearance.Height,
+            DisplayName = $"{Path.GetFileName(sourcePath)} · {sourcePage.PageNumber}/{sourcePage.PageCount}",
+            AssetName = renderedAsset,
+            MimeType = "image/png",
+            ViewInverted = invert,
+            SourceAssetName = sourceAsset,
+            SourcePageNumber = sourcePage.PageNumber,
+            IsPageBackground = true,
+        });
+        _store.SavePage(document);
+        SaveLibrary();
+        RefreshNavigation();
+        return document;
     }
 
     public bool RenameSection(string sectionId, string title)
@@ -635,6 +689,9 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedToolIsPen));
         OnPropertyChanged(nameof(SelectedToolIsHighlighter));
         OnPropertyChanged(nameof(SelectedToolIsEraser));
+        OnPropertyChanged(nameof(SelectedToolIsLasso));
+        OnPropertyChanged(nameof(SelectedLassoIsFreeform));
+        OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
     public void SwitchWorkspace(string rootDirectory)
@@ -904,6 +961,14 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedTool));
     }
 
+    public void SetSelectedLassoShape(LassoShape shape)
+    {
+        if (!SelectedToolIsLasso || SelectedTool.LassoShape == shape) return;
+        SelectedTool.LassoShape = shape;
+        SaveSettings();
+        NotifySelectedToolProperties();
+    }
+
     private void DeleteSelectedTool()
     {
         var removedId = _toolShelf.SelectedId;
@@ -1153,6 +1218,8 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedToolIsHighlighter));
         OnPropertyChanged(nameof(SelectedToolIsEraser));
         OnPropertyChanged(nameof(SelectedToolIsLasso));
+        OnPropertyChanged(nameof(SelectedLassoIsFreeform));
+        OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
     private void SaveLibrary() => _store.SaveLibrary(_library);

@@ -16,6 +16,8 @@ public class InsertModelsTests
         document.Objects.Add(PageObject.Asset(PageObjectKind.Attachment, 10, 130, "file.pdf", "file.pdf", "application/pdf", 102400));
         var image = PageObject.Asset(PageObjectKind.Image, 10, 190, "photo.png", "photo.png", "image/png", 400);
         image.ViewInverted = true;
+        image.RotationQuarterTurns = 1;
+        image.FlipHorizontal = true;
         document.Objects.Add(image);
         var spreadsheet = PageObject.Asset(PageObjectKind.Spreadsheet, 10, 400, "data.xlsx", "data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 800);
         spreadsheet.PreviewRows = new List<List<string>> { new() { "Col1", "Col2" } };
@@ -31,6 +33,25 @@ public class InsertModelsTests
         Assert.Equal(PageObjectKind.Spreadsheet, restored.Objects[3].Kind);
         Assert.Equal(PageObjectKind.NoteLink, restored.Objects[4].Kind);
         Assert.True(restored.Objects[2].ViewInverted);
+        Assert.Equal(1, restored.Objects[2].RotationQuarterTurns);
+        Assert.True(restored.Objects[2].FlipHorizontal);
         Assert.Equal("Col2", restored.Objects[3].PreviewRows[0][1]);
+    }
+
+    [Fact]
+    public void CloneWithNewId_CopiesEditableStateButNeverBackgroundStatus()
+    {
+        var source = PageObject.Asset(PageObjectKind.Image, 10, 20, "photo.png", "photo.png", "image/png", 400);
+        source.IsPageBackground = true;
+        source.RotationQuarterTurns = 3;
+        source.FlipVertical = true;
+
+        var clone = source.CloneWithNewId();
+
+        Assert.NotEqual(source.Id, clone.Id);
+        Assert.Equal(34, clone.X);
+        Assert.False(clone.IsPageBackground);
+        Assert.Equal(3, clone.RotationQuarterTurns);
+        Assert.True(clone.FlipVertical);
     }
 }

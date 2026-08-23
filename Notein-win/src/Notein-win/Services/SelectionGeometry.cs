@@ -37,6 +37,42 @@ public static class SelectionGeometry
     public static Point Scale(double x, double y, double anchorX, double anchorY, double factor) =>
         new(anchorX + (x - anchorX) * factor, anchorY + (y - anchorY) * factor);
 
+    public static Point Scale(double x, double y, double anchorX, double anchorY, double factorX, double factorY) =>
+        new(anchorX + (x - anchorX) * factorX, anchorY + (y - anchorY) * factorY);
+
+    public static IReadOnlyList<Point> SelectionHandles(Rect bounds) => new[]
+    {
+        bounds.TopLeft,
+        new Point(bounds.Left + bounds.Width / 2, bounds.Top),
+        bounds.TopRight,
+        new Point(bounds.Right, bounds.Top + bounds.Height / 2),
+        bounds.BottomRight,
+        new Point(bounds.Left + bounds.Width / 2, bounds.Bottom),
+        bounds.BottomLeft,
+        new Point(bounds.Left, bounds.Top + bounds.Height / 2),
+    };
+
+    public static Rect ResizeBounds(Rect start, int handle, Point point, double minimumSize)
+    {
+        if (start.IsEmpty || handle is < 0 or > 7) return start;
+        var left = start.Left;
+        var top = start.Top;
+        var right = start.Right;
+        var bottom = start.Bottom;
+        switch (handle)
+        {
+            case 0: left = Math.Min(point.X, right - minimumSize); top = Math.Min(point.Y, bottom - minimumSize); break;
+            case 1: top = Math.Min(point.Y, bottom - minimumSize); break;
+            case 2: right = Math.Max(point.X, left + minimumSize); top = Math.Min(point.Y, bottom - minimumSize); break;
+            case 3: right = Math.Max(point.X, left + minimumSize); break;
+            case 4: right = Math.Max(point.X, left + minimumSize); bottom = Math.Max(point.Y, top + minimumSize); break;
+            case 5: bottom = Math.Max(point.Y, top + minimumSize); break;
+            case 6: left = Math.Min(point.X, right - minimumSize); bottom = Math.Max(point.Y, top + minimumSize); break;
+            case 7: left = Math.Min(point.X, right - minimumSize); break;
+        }
+        return new Rect(new Point(left, top), new Point(right, bottom));
+    }
+
     public static bool PolygonIntersectsRect(IList<Point> polygon, Rect rect)
     {
         if (polygon.Count < 3 || rect.IsEmpty) return false;

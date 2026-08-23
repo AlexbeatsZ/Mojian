@@ -74,13 +74,27 @@ public static class NotebookPackageService
             var pages = new JsonArray();
             foreach (var page in section.Pages)
             {
-                pages.Add(new JsonObject
+                var pageJson = new JsonObject
                 {
                     ["id"] = page.Id,
                     ["title"] = page.Title,
                     ["kind"] = page.IsPdfPage ? "PDF" : "PAGE",
-                    ["viewSettings"] = ViewSettingsJson(page.Appearance),
-                });
+                    ["viewSettings"] = ViewSettingsJson(page),
+                };
+                if (page.IsPdfPage)
+                {
+                    pageJson["pdf"] = new JsonObject
+                    {
+                        ["sourceOwnerPageId"] = page.Id,
+                        ["sourceAssetName"] = page.PdfSourceAssetName ?? string.Empty,
+                        ["sourceDocumentName"] = page.PdfSourceDocumentName ?? "PDF",
+                        ["pageNumber"] = page.PdfPageNumber ?? 1,
+                        ["pageCount"] = page.PdfPageCount ?? 1,
+                        ["widthPoints"] = page.PdfWidthPoints ?? page.Appearance.Width * 72d / 96d,
+                        ["heightPoints"] = page.PdfHeightPoints ?? page.Appearance.Height * 72d / 96d,
+                    };
+                }
+                pages.Add(pageJson);
             }
             result.Add(new JsonObject
             {
@@ -93,15 +107,25 @@ public static class NotebookPackageService
         return result;
     }
 
-    private static JsonObject ViewSettingsJson(PageAppearance appearance) => new()
+    private static JsonObject ViewSettingsJson(NotePage page)
     {
-        ["paperSize"] = appearance.PaperKind == PaperKind.A4 ? "A4" : "BOUNDLESS",
-        ["pageColor"] = ColorName(appearance.PageColor),
-        ["backgroundFormat"] = ToAndroidBackground(appearance.Background),
-        ["pageTitleVisible"] = appearance.ShowTitle,
-        ["darkBackground"] = appearance.Theme == PageTheme.Dark,
-        ["a4PageCount"] = Math.Max(1, appearance.SheetCount),
-    };
+        var appearance = page.Appearance;
+        var result = new JsonObject
+        {
+            ["paperSize"] = appearance.PaperKind switch { PaperKind.A4 => "A4", PaperKind.Pdf => "PDF", _ => "BOUNDLESS" },
+            ["pageColor"] = ColorName(appearance.PageColor),
+            ["backgroundFormat"] = ToAndroidBackground(appearance.Background),
+            ["pageTitleVisible"] = appearance.ShowTitle,
+            ["darkBackground"] = appearance.Theme == PageTheme.Dark,
+            ["a4PageCount"] = Math.Max(1, appearance.SheetCount),
+        };
+        if (appearance.PaperKind == PaperKind.Pdf)
+        {
+            result["customDocumentWidth"] = appearance.Width;
+            result["customDocumentHeight"] = appearance.Height;
+        }
+        return result;
+    }
 
     private static JsonObject AndroidPageJson(PageDocument document)
     {
@@ -159,11 +183,14 @@ public static class NotebookPackageService
             }
             if (item.Kind is PageObjectKind.Image or PageObjectKind.PdfPrintout or PageObjectKind.Sticker)
             {
-                result["sourceKind"] = item.Kind == PageObjectKind.PdfPrintout ? "PDF_PRINTOUT" : item.Kind == PageObjectKind.Sticker ? "STICKER" : "IMAGE";
+                result["sourceKind"] = item.Kind == PageObjectKind.PdfPrintout ? "PDF_PAGE" : item.Kind == PageObjectKind.Sticker ? "STICKER" : "IMAGE";
                 result["viewInverted"] = item.ViewInverted;
                 if (!string.IsNullOrWhiteSpace(item.SourceAssetName)) result["sourceAssetName"] = item.SourceAssetName;
                 if (item.SourcePageNumber.HasValue) result["sourcePageNumber"] = item.SourcePageNumber.Value;
-                result["pageBackground"] = false;
+                result["pageBackground"] = item.IsPageBackground;
+                result["rotationQuarterTurns"] = ((item.RotationQuarterTurns % 4) + 4) % 4;
+                result["flipHorizontal"] = item.FlipHorizontal;
+                result["flipVertical"] = item.FlipVertical;
             }
         }
         return result;

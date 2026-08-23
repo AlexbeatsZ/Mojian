@@ -9,7 +9,7 @@ public static class IdFactory
 }
 
 public enum PagePaneMode { CurrentSection, Recursive }
-public enum PaperKind { Infinite, A4 }
+public enum PaperKind { Infinite, A4, Pdf }
 public enum PageTheme { Dark, Light }
 
 public enum CanvasBackgroundFormat
@@ -78,6 +78,10 @@ public sealed class NotePage
     public bool IsPdfPage { get; set; }
     public int? PdfPageNumber { get; set; }
     public int? PdfPageCount { get; set; }
+    public double? PdfWidthPoints { get; set; }
+    public double? PdfHeightPoints { get; set; }
+    public string? PdfSourceAssetName { get; set; }
+    public string? PdfSourceDocumentName { get; set; }
 
     public NotePage() { }
 
@@ -532,6 +536,10 @@ public sealed class NotebookWorkspace
         IsPdfPage = source.IsPdfPage,
         PdfPageNumber = source.PdfPageNumber,
         PdfPageCount = source.PdfPageCount,
+        PdfWidthPoints = source.PdfWidthPoints,
+        PdfHeightPoints = source.PdfHeightPoints,
+        PdfSourceAssetName = source.PdfSourceAssetName,
+        PdfSourceDocumentName = source.PdfSourceDocumentName,
     };
 
     private static (SectionNode Section, NotePage Page)? FirstPage(IEnumerable<SectionNode> roots)

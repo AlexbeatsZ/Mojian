@@ -10,7 +10,11 @@ public sealed record PdfLayer(string Name, BitmapSource Bitmap);
 
 public static class LayeredPdfExportService
 {
-    public static void Write(string path, IReadOnlyList<PdfLayer> layers)
+    public static void Write(
+        string path,
+        IReadOnlyList<PdfLayer> layers,
+        double? mediaBoxWidthPoints = null,
+        double? mediaBoxHeightPoints = null)
     {
         if (layers.Count == 0) throw new ArgumentException("至少需要一个 PDF 图层。", nameof(layers));
         var width = layers[0].Bitmap.PixelWidth;
@@ -40,8 +44,8 @@ public static class LayeredPdfExportService
         }
 
         var contentBuilder = new StringBuilder();
-        var pageWidth = width * 72d / 96d;
-        var pageHeight = height * 72d / 96d;
+        var pageWidth = mediaBoxWidthPoints is > 0 ? mediaBoxWidthPoints.Value : width * 72d / 96d;
+        var pageHeight = mediaBoxHeightPoints is > 0 ? mediaBoxHeightPoints.Value : height * 72d / 96d;
         for (var index = 0; index < layers.Count; index++)
         {
             contentBuilder.AppendLine($"/OC{index} BDC q {pageWidth:0.###} 0 0 {pageHeight:0.###} 0 0 cm /Im{index} Do Q EMC");

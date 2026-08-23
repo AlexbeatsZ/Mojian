@@ -47,6 +47,58 @@ public class WorkspaceStoreTests
     }
 
     [Fact]
+    public void NotebookPackage_PreservesAndroidPdfPageAndImageTransformContract()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new WorkspaceStore(System.IO.Path.Combine(temp.Path, "workspace"));
+        var notebook = NotebookWorkspace.Sample();
+        var page = notebook.SelectedPage()!;
+        page.IsPdfPage = true;
+        page.PdfPageNumber = 2;
+        page.PdfPageCount = 3;
+        page.PdfWidthPoints = 612;
+        page.PdfHeightPoints = 792;
+        page.Appearance = new PageAppearance { PaperKind = PaperKind.Pdf, Width = 816, Height = 1056 };
+        page.PdfSourceAssetName = store.WriteAsset(notebook.Id, page.Id, ".pdf", "%PDF-test"u8);
+        page.PdfSourceDocumentName = "source.pdf";
+        var renderedAsset = store.WriteAsset(notebook.Id, page.Id, ".png", new byte[] { 137, 80, 78, 71 });
+        store.SavePage(new PageDocument(notebook.Id, page.Id)
+        {
+            Objects =
+            {
+                new PageObject
+                {
+                    Kind = PageObjectKind.PdfPrintout,
+                    AssetName = renderedAsset,
+                    SourceAssetName = page.PdfSourceAssetName,
+                    SourcePageNumber = 2,
+                    IsPageBackground = true,
+                    RotationQuarterTurns = 1,
+                    FlipHorizontal = true,
+                },
+            },
+        });
+        var packagePath = System.IO.Path.Combine(temp.Path, "pdf-page.mjn");
+
+        NotebookPackageService.Export(packagePath, notebook, store, page.Id);
+
+        using var archive = ZipFile.OpenRead(packagePath);
+        using var manifestReader = new StreamReader(archive.GetEntry("manifest.json")!.Open());
+        var manifestPage = JsonNode.Parse(manifestReader.ReadToEnd())!["sections"]![0]!["pages"]![0]!;
+        Assert.Equal("PDF", manifestPage["viewSettings"]!["paperSize"]!.GetValue<string>());
+        Assert.Equal(816, manifestPage["viewSettings"]!["customDocumentWidth"]!.GetValue<double>());
+        Assert.Equal(page.PdfSourceAssetName, manifestPage["pdf"]!["sourceAssetName"]!.GetValue<string>());
+        Assert.Equal(612, manifestPage["pdf"]!["widthPoints"]!.GetValue<double>());
+
+        using var pageReader = new StreamReader(archive.GetEntry($"pages/{page.Id}.json")!.Open());
+        var exportedObject = JsonNode.Parse(pageReader.ReadToEnd())!["objects"]![0]!;
+        Assert.Equal("PDF_PAGE", exportedObject["sourceKind"]!.GetValue<string>());
+        Assert.True(exportedObject["pageBackground"]!.GetValue<bool>());
+        Assert.Equal(1, exportedObject["rotationQuarterTurns"]!.GetValue<int>());
+        Assert.True(exportedObject["flipHorizontal"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public void CopyAndDeletePageData_KeepDocumentAndAssetsTogether()
     {
         using var temp = new TemporaryDirectory();

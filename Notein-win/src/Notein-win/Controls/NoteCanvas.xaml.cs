@@ -43,6 +43,7 @@ public partial class NoteCanvas : UserControl
     private Rect? _selectionBounds;
     private Point _lastPointer;
     private Point _transformPoint;
+    private Point _lassoOrigin;
     private bool _isPanning;
     private bool _isDragZooming;
     private bool _isLassoing;
@@ -101,6 +102,7 @@ public partial class NoteCanvas : UserControl
     public event EventHandler? DocumentChanged;
     public event EventHandler? ViewportChanged;
     public event EventHandler<PageObjectEventArgs>? ObjectActivated;
+    public event EventHandler<PageObjectEventArgs>? ObjectContextRequested;
 
     public NoteCanvas()
     {
@@ -170,7 +172,7 @@ public partial class NoteCanvas : UserControl
         Document.Strokes.Clear();
         Document.Tags.Clear();
         Document.TextItems.Clear();
-        Document.Objects.Clear();
+        Document.Objects.RemoveAll(item => !item.IsPageBackground);
         RebuildTextEditors();
         ClearSelection();
         MarkChanged(immediate: true);
@@ -196,6 +198,107 @@ public partial class NoteCanvas : UserControl
         if (Document == null) return;
         PushUndo();
         Document.Objects.Add(item);
+        if (!item.IsPageBackground) SelectOnlyObject(item);
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+    }
+
+    public bool RemoveObject(PageObject item)
+    {
+        if (Document == null || item.IsPageBackground || !Document.Objects.Contains(item)) return false;
+        PushUndo();
+        Document.Objects.Remove(item);
+        ClearSelection();
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    public bool MoveObjectToFront(PageObject item) => ReorderObject(item, Document?.Objects.Count - 1 ?? 0);
+    public bool MoveObjectToBack(PageObject item)
+    {
+        if (Document == null) return false;
+        var firstMovable = Document.Objects.FindIndex(candidate => !candidate.IsPageBackground);
+        return ReorderObject(item, Math.Max(0, firstMovable));
+    }
+    public bool MoveObjectForward(PageObject item) => ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) + 1);
+    public bool MoveObjectBackward(PageObject item) => ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) - 1);
+
+    public bool RotateImageObject(PageObject item, bool clockwise)
+    {
+        if (!CanMutateImage(item)) return false;
+        PushUndo();
+        var centerX = item.X + item.Width / 2;
+        var centerY = item.Y + item.Height / 2;
+        (item.Width, item.Height) = (item.Height, item.Width);
+        item.X = centerX - item.Width / 2;
+        item.Y = centerY - item.Height / 2;
+        item.RotationQuarterTurns = ((item.RotationQuarterTurns + (clockwise ? 1 : 3)) % 4 + 4) % 4;
+        FinishObjectMutation(item);
+        return true;
+    }
+
+    public bool FlipImageObject(PageObject item, bool horizontal)
+    {
+        if (!CanMutateImage(item)) return false;
+        PushUndo();
+        if (horizontal) item.FlipHorizontal = !item.FlipHorizontal;
+        else item.FlipVertical = !item.FlipVertical;
+        FinishObjectMutation(item);
+        return true;
+    }
+
+    public bool RestoreImageObjectSize(PageObject item)
+    {
+        if (!CanMutateImage(item)) return false;
+        var bitmap = LoadBitmap(item.AssetName, inverted: false);
+        if (bitmap == null) return false;
+        PushUndo();
+        var centerX = item.X + item.Width / 2;
+        var centerY = item.Y + item.Height / 2;
+        item.Width = item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelWidth : bitmap.PixelHeight;
+        item.Height = item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelHeight : bitmap.PixelWidth;
+        item.X = centerX - item.Width / 2;
+        item.Y = centerY - item.Height / 2;
+        FinishObjectMutation(item);
+        return true;
+    }
+
+    public bool SetImageObjectAsBackground(PageObject item)
+    {
+        if (!CanMutateImage(item) || Document == null) return false;
+        PushUndo();
+        item.IsPageBackground = true;
+        Document.Objects.Remove(item);
+        Document.Objects.Insert(0, item);
+        ClearSelection();
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    private bool ReorderObject(PageObject item, int targetIndex)
+    {
+        if (Document == null || item.IsPageBackground) return false;
+        var current = Document.Objects.IndexOf(item);
+        if (current < 0) return false;
+        var firstMovable = Document.Objects.FindIndex(candidate => !candidate.IsPageBackground);
+        firstMovable = Math.Max(0, firstMovable);
+        targetIndex = Math.Clamp(targetIndex, firstMovable, Document.Objects.Count - 1);
+        if (current == targetIndex) return false;
+        PushUndo();
+        Document.Objects.RemoveAt(current);
+        Document.Objects.Insert(Math.Clamp(targetIndex, firstMovable, Document.Objects.Count), item);
+        FinishObjectMutation(item);
+        return true;
+    }
+
+    private bool CanMutateImage(PageObject item) =>
+        Document != null && Document.Objects.Contains(item) && item.IsImageLike && !item.IsPageBackground;
+
+    private void FinishObjectMutation(PageObject item)
+    {
+        SelectOnlyObject(item);
         MarkChanged(immediate: true);
         InvalidateVisual();
     }
@@ -205,6 +308,7 @@ public partial class NoteCanvas : UserControl
         if (Document == null || !Document.Objects.Contains(item)) return;
         PushUndo();
         update(item);
+        if (_selectedObjects.Contains(item)) RecomputeSelectionBounds();
         MarkChanged(immediate: true);
         InvalidateVisual();
     }
@@ -294,10 +398,19 @@ public partial class NoteCanvas : UserControl
     {
         base.OnMouseDown(e);
         if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
+        if (e.ChangedButton == MouseButton.Right)
+        {
+            var item = HitObject(e.GetPosition(this));
+            if (item == null || item.IsPageBackground) return;
+            SelectOnlyObject(item);
+            ObjectContextRequested?.Invoke(this, new PageObjectEventArgs(item));
+            e.Handled = true;
+            return;
+        }
         if (e.ChangedButton is not MouseButton.Left and not MouseButton.Middle) return;
         Focus();
         var point = e.GetPosition(this);
-        if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left && (ActivateTextAt(point) || ActivateObjectAt(point))) { e.Handled = true; return; }
+        if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left && HandleDoubleClick(point)) { e.Handled = true; return; }
         BeginPointer(point, pressure: 0.65f, tiltX: 0, tiltY: 0, isStylus: false, forcePan: e.MiddleButton == MouseButtonState.Pressed || Keyboard.IsKeyDown(Key.Space), forceErase: false);
         e.Handled = true;
     }
@@ -418,11 +531,8 @@ public partial class NoteCanvas : UserControl
             !SingleFingerPanEnabled &&
             SelectedTool?.Kind == DrawingToolKind.Lasso
         ) {
-            ClearSelection();
-            _isLassoing = true;
+            BeginLasso(_viewport.ViewToDocument(e.GetTouchPoint(this).Position.X, e.GetTouchPoint(this).Position.Y));
             _touchLassoDevice = e.TouchDevice;
-            var point = e.GetTouchPoint(this).Position;
-            _lasso.Add(_viewport.ViewToDocument(point.X, point.Y));
             CaptureTouch(e.TouchDevice);
             e.Handled = true;
         }
@@ -433,7 +543,7 @@ public partial class NoteCanvas : UserControl
         base.OnTouchMove(e);
         if (_touchLassoDevice?.Id != e.TouchDevice.Id || !_isLassoing || _activeTouchDevices.Count != 1) return;
         var point = e.GetTouchPoint(this).Position;
-        _lasso.Add(_viewport.ViewToDocument(point.X, point.Y));
+        ExtendLasso(_viewport.ViewToDocument(point.X, point.Y));
         InvalidateVisual();
         e.Handled = true;
     }
@@ -506,6 +616,20 @@ public partial class NoteCanvas : UserControl
             return;
         }
 
+        if (_selectionBounds.HasValue)
+        {
+            var viewBounds = _viewport.DocumentToView(_selectionBounds.Value);
+            if (HitSelectionHandle(viewPoint, viewBounds, out var handle) || viewBounds.Contains(viewPoint))
+            {
+                PushUndo();
+                _isTransforming = true;
+                _resizeHandle = handle;
+                _transformPoint = docPoint;
+                CaptureMouse();
+                return;
+            }
+        }
+
         if (PendingTagKind.HasValue)
         {
             PushUndo();
@@ -532,20 +656,6 @@ public partial class NoteCanvas : UserControl
         }
 
         var tool = SelectedTool ?? ToolShelf.Defaults().First();
-        if (_selectionBounds.HasValue && tool.Kind == DrawingToolKind.Lasso)
-        {
-            var viewBounds = _viewport.DocumentToView(_selectionBounds.Value);
-            if (HitSelectionHandle(viewPoint, viewBounds, out var handle) || viewBounds.Contains(viewPoint))
-            {
-                PushUndo();
-                _isTransforming = true;
-                _resizeHandle = handle;
-                _transformPoint = docPoint;
-                CaptureMouse();
-                return;
-            }
-        }
-
         // Mouse remains a pointer device even while a pen/eraser preset is selected.
         // It may lasso or pan, but only a real stylus can author or erase ink.
         if (!isStylus && tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter or DrawingToolKind.Eraser)
@@ -582,9 +692,7 @@ public partial class NoteCanvas : UserControl
                 CaptureMouse();
                 break;
             case DrawingToolKind.Lasso:
-                ClearSelection();
-                _isLassoing = true;
-                _lasso.Add(docPoint);
+                BeginLasso(docPoint);
                 CaptureMouse();
                 break;
         }
@@ -626,11 +734,7 @@ public partial class NoteCanvas : UserControl
             }
             else
             {
-                var anchor = OppositeCorner(_selectionBounds.Value, _resizeHandle);
-                var previous = Math.Max(8, Distance(anchor, _transformPoint));
-                var current = Math.Max(8, Distance(anchor, docPoint));
-                ScaleSelection(anchor, Math.Clamp(current / previous, 0.2, 5));
-                RecomputeSelectionBounds();
+                ResizeSelection(docPoint);
             }
             _transformPoint = docPoint;
             InvalidateVisual();
@@ -638,7 +742,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_isLassoing)
         {
-            _lasso.Add(docPoint);
+            ExtendLasso(docPoint);
             InvalidateVisual();
             return;
         }
@@ -749,7 +853,6 @@ public partial class NoteCanvas : UserControl
         if (Document == null) return;
         Document.Strokes.RemoveAll(stroke => StrokeHitsCircle(stroke, point, radius));
         Document.Tags.RemoveAll(tag => Distance(new Point(tag.DocumentX, tag.DocumentY), point) <= radius + 14);
-        Document.Objects.RemoveAll(item => new Rect(item.X, item.Y, item.Width, item.Height).Contains(point));
         ClearSelection();
     }
 
@@ -770,9 +873,38 @@ public partial class NoteCanvas : UserControl
         _selectedStrokes.AddRange(Document.Strokes.Where(stroke => stroke.Points.Any(point => SelectionGeometry.PointInPolygon(point.X, point.Y, _lasso))));
         _selectedTags.AddRange(Document.Tags.Where(tag => SelectionGeometry.PointInPolygon(tag.DocumentX, tag.DocumentY, _lasso)));
         _selectedTextItems.AddRange(Document.TextItems.Where(text => SelectionGeometry.PolygonIntersectsRect(_lasso, new Rect(text.X, text.Y, text.Width, text.Height))));
-        _selectedObjects.AddRange(Document.Objects.Where(item => SelectionGeometry.PolygonIntersectsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
+        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground && SelectionGeometry.PolygonIntersectsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
         _lasso.Clear();
         RecomputeSelectionBounds();
+    }
+
+    private void BeginLasso(Point documentPoint)
+    {
+        ClearSelection();
+        _isLassoing = true;
+        _lassoOrigin = documentPoint;
+        _lasso.Add(documentPoint);
+    }
+
+    private void ExtendLasso(Point documentPoint)
+    {
+        if (SelectedTool?.LassoShape != LassoShape.Rectangle)
+        {
+            _lasso.Add(documentPoint);
+            return;
+        }
+        var left = Math.Min(_lassoOrigin.X, documentPoint.X);
+        var top = Math.Min(_lassoOrigin.Y, documentPoint.Y);
+        var right = Math.Max(_lassoOrigin.X, documentPoint.X);
+        var bottom = Math.Max(_lassoOrigin.Y, documentPoint.Y);
+        _lasso.Clear();
+        _lasso.AddRange(new[]
+        {
+            new Point(left, top),
+            new Point(right, top),
+            new Point(right, bottom),
+            new Point(left, bottom),
+        });
     }
 
     private void RecomputeSelectionBounds()
@@ -794,7 +926,6 @@ public partial class NoteCanvas : UserControl
             var rect = new Rect(item.X, item.Y, item.Width, item.Height);
             bounds = bounds.IsEmpty ? rect : Rect.Union(bounds, rect);
         }
-        if (!bounds.IsEmpty) bounds.Inflate(8, 8);
         _selectionBounds = bounds.IsEmpty ? null : bounds;
         UpdateTextEditorInteraction();
     }
@@ -809,36 +940,48 @@ public partial class NoteCanvas : UserControl
         UpdateTextEditorPositions();
     }
 
-    private void ScaleSelection(Point anchor, double factor)
+    private void ScaleSelection(Point anchor, double factorX, double factorY)
     {
         foreach (var stroke in _selectedStrokes)
         {
             foreach (var point in stroke.Points)
             {
-                var scaled = SelectionGeometry.Scale(point.X, point.Y, anchor.X, anchor.Y, factor);
+                var scaled = SelectionGeometry.Scale(point.X, point.Y, anchor.X, anchor.Y, factorX, factorY);
                 point.X = (float)scaled.X; point.Y = (float)scaled.Y;
             }
         }
         foreach (var tag in _selectedTags)
         {
-            var scaled = SelectionGeometry.Scale(tag.DocumentX, tag.DocumentY, anchor.X, anchor.Y, factor);
-            tag.DocumentX = (float)scaled.X; tag.DocumentY = (float)scaled.Y; tag.Scale *= (float)factor;
+            var scaled = SelectionGeometry.Scale(tag.DocumentX, tag.DocumentY, anchor.X, anchor.Y, factorX, factorY);
+            tag.DocumentX = (float)scaled.X; tag.DocumentY = (float)scaled.Y; tag.Scale *= (float)Math.Sqrt(Math.Abs(factorX * factorY));
         }
         foreach (var item in _selectedObjects)
         {
-            var scaled = SelectionGeometry.Scale(item.X, item.Y, anchor.X, anchor.Y, factor);
-            item.X = (float)scaled.X; item.Y = (float)scaled.Y; item.Width *= (float)factor; item.Height *= (float)factor;
+            var scaled = SelectionGeometry.Scale(item.X, item.Y, anchor.X, anchor.Y, factorX, factorY);
+            item.X = (float)scaled.X; item.Y = (float)scaled.Y; item.Width *= (float)factorX; item.Height *= (float)factorY;
         }
         foreach (var text in _selectedTextItems)
         {
-            var scaled = SelectionGeometry.Scale(text.X, text.Y, anchor.X, anchor.Y, factor);
+            var scaled = SelectionGeometry.Scale(text.X, text.Y, anchor.X, anchor.Y, factorX, factorY);
             text.X = (float)scaled.X;
             text.Y = (float)scaled.Y;
-            text.Width *= (float)factor;
-            text.Height *= (float)factor;
-            text.FontSize *= factor;
+            text.Width *= (float)factorX;
+            text.Height *= (float)factorY;
+            text.FontSize *= Math.Sqrt(Math.Abs(factorX * factorY));
         }
         UpdateTextEditorPositions();
+    }
+
+    private void ResizeSelection(Point documentPoint)
+    {
+        if (_selectionBounds is not { } current || _resizeHandle is < 0 or > 7) return;
+        var resized = SelectionGeometry.ResizeBounds(current, _resizeHandle, documentPoint, 24 / Math.Max(0.01, _viewport.Scale));
+        if (resized == current || current.Width <= 0 || current.Height <= 0) return;
+        var anchor = OppositeHandlePoint(current, _resizeHandle);
+        var factorX = resized.Width / current.Width;
+        var factorY = resized.Height / current.Height;
+        ScaleSelection(anchor, factorX, factorY);
+        RecomputeSelectionBounds();
     }
 
     private void InsertVerticalSpace(float startY, float deltaY)
@@ -897,6 +1040,12 @@ public partial class NoteCanvas : UserControl
             CaretBrush = Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black,
         };
         ApplyTextItemStyle(editor, item);
+        editor.PreviewMouseDoubleClick += (_, e) =>
+        {
+            if (_selectedTextItems.Count == 1 && ReferenceEquals(_selectedTextItems[0], item)) ActivateTextEditor(item);
+            else SelectOnlyText(item);
+            e.Handled = true;
+        };
         editor.TextChanged += (_, _) =>
         {
             if (_suppressEditorChange) return;
@@ -1062,7 +1211,7 @@ public partial class NoteCanvas : UserControl
                 case PageObjectKind.PdfPrintout:
                 case PageObjectKind.Sticker:
                     var bitmap = LoadBitmap(item.AssetName, item.ViewInverted && !lightExport);
-                    if (bitmap != null) dc.DrawImage(bitmap, rect);
+                    if (bitmap != null) DrawTransformedImage(dc, bitmap, rect, item);
                     else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"图片不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
                     break;
                 case PageObjectKind.Table:
@@ -1082,6 +1231,22 @@ public partial class NoteCanvas : UserControl
                     break;
             }
         }
+    }
+
+    private static void DrawTransformedImage(DrawingContext dc, BitmapSource bitmap, Rect destination, PageObject item)
+    {
+        var turns = ((item.RotationQuarterTurns % 4) + 4) % 4;
+        var center = new Point(destination.Left + destination.Width / 2, destination.Top + destination.Height / 2);
+        var local = turns % 2 == 0
+            ? new Rect(-destination.Width / 2, -destination.Height / 2, destination.Width, destination.Height)
+            : new Rect(-destination.Height / 2, -destination.Width / 2, destination.Height, destination.Width);
+        dc.PushTransform(new TranslateTransform(center.X, center.Y));
+        dc.PushTransform(new ScaleTransform(item.FlipHorizontal ? -1 : 1, item.FlipVertical ? -1 : 1));
+        dc.PushTransform(new RotateTransform(turns * 90));
+        dc.DrawImage(bitmap, local);
+        dc.Pop();
+        dc.Pop();
+        dc.Pop();
     }
 
     private void DrawTable(DrawingContext dc, PageObject item, Rect rect, bool light, Pen border)
@@ -1203,18 +1368,23 @@ public partial class NoteCanvas : UserControl
     {
         if (_isLassoing && _lasso.Count > 1)
         {
-            var pen = new Pen(new SolidColorBrush(Color.FromRgb(218, 178, 233)), 1.3) { DashStyle = DashStyles.Dash };
+            var pen = new Pen(new SolidColorBrush(Color.FromRgb(238, 238, 238)), 1.1) { DashStyle = new DashStyle(new[] { 3d, 3d }, 0) };
             var geometry = new StreamGeometry();
             using var context = geometry.Open();
             context.BeginFigure(_viewport.DocumentToView(_lasso[0].X, _lasso[0].Y), false, false);
             for (var i = 1; i < _lasso.Count; i++) context.LineTo(_viewport.DocumentToView(_lasso[i].X, _lasso[i].Y), true, false);
+            if (SelectedTool?.LassoShape == LassoShape.Rectangle && _lasso.Count >= 4) context.LineTo(_viewport.DocumentToView(_lasso[0].X, _lasso[0].Y), true, false);
             dc.DrawGeometry(null, pen, geometry);
         }
         if (_selectionBounds is { } bounds)
         {
             var view = _viewport.DocumentToView(bounds);
-            dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(25, 218, 178, 233)), new Pen(new SolidColorBrush(Color.FromRgb(218, 178, 233)), 1.2), view);
-            foreach (var point in new[] { view.TopLeft, view.TopRight, view.BottomRight, view.BottomLeft }) dc.DrawEllipse(Brushes.White, new Pen(new SolidColorBrush(Color.FromRgb(218, 178, 233)), 1.2), point, 5, 5);
+            var frame = new Pen(new SolidColorBrush(Color.FromRgb(238, 238, 238)), 1) { DashStyle = new DashStyle(new[] { 3d, 3d }, 0) };
+            dc.DrawRectangle(null, frame, view);
+            var handleFill = new SolidColorBrush(Color.FromRgb(245, 245, 245));
+            var handleStroke = new Pen(new SolidColorBrush(Color.FromRgb(86, 86, 86)), 1);
+            foreach (var point in SelectionGeometry.SelectionHandles(view))
+                dc.DrawRectangle(handleFill, handleStroke, new Rect(point.X - 4.5, point.Y - 4.5, 9, 9));
         }
         if (_eraserViewPoint is { } eraser)
         {
@@ -1268,25 +1438,46 @@ public partial class NoteCanvas : UserControl
         catch { return null; }
     }
 
-    private bool ActivateObjectAt(Point viewPoint)
+    private bool HandleDoubleClick(Point viewPoint)
     {
-        if (Document == null) return false;
-        var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
-        var item = Document.Objects.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
-        if (item == null || item.Kind is PageObjectKind.Image or PageObjectKind.Sticker or PageObjectKind.PdfPrintout or PageObjectKind.Table) return false;
-        ObjectActivated?.Invoke(this, new PageObjectEventArgs(item));
+        var text = HitText(viewPoint);
+        if (text != null)
+        {
+            if (_selectedTextItems.Count == 1 && ReferenceEquals(_selectedTextItems[0], text)) return ActivateTextEditor(text);
+            SelectOnlyText(text);
+            return true;
+        }
+        var item = HitObject(viewPoint);
+        if (item == null || item.IsPageBackground) return false;
+        if (_selectedObjects.Count == 1 && ReferenceEquals(_selectedObjects[0], item))
+        {
+            ObjectActivated?.Invoke(this, new PageObjectEventArgs(item));
+            return true;
+        }
+        SelectOnlyObject(item);
         return true;
     }
 
-    private bool ActivateTextAt(Point viewPoint)
+    private TextItem? HitText(Point viewPoint)
     {
-        if (Document == null) return false;
+        if (Document == null) return null;
         var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
-        var item = Document.TextItems.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
-        if (item == null) return false;
+        return Document.TextItems.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
+    }
+
+    private PageObject? HitObject(Point viewPoint)
+    {
+        if (Document == null) return null;
+        var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        return Document.Objects.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
+    }
+
+    private bool ActivateTextEditor(TextItem item)
+    {
         ClearSelection();
         var editor = EditorLayer.Children.OfType<TextBox>().FirstOrDefault(value => ReferenceEquals(value.Tag, item));
         if (editor == null) return false;
+        editor.IsHitTestVisible = true;
         editor.Focus();
         editor.CaretIndex = editor.Text.Length;
         return true;
@@ -1301,7 +1492,7 @@ public partial class NoteCanvas : UserControl
 
     private Rect CalculateDocumentExtent()
     {
-        var extent = Appearance.PaperKind == PaperKind.A4
+        var extent = Appearance.PaperKind != PaperKind.Infinite
             ? new Rect(0, 0, Appearance.Width, Math.Max(1, Appearance.SheetCount) * Appearance.Height + Math.Max(0, Appearance.SheetCount - 1) * 32)
             : new Rect(0, 0, Math.Max(1200, Appearance.Width), Math.Max(1600, Appearance.Height));
         if (Document == null) return extent;
@@ -1396,17 +1587,49 @@ public partial class NoteCanvas : UserControl
         UpdateTextEditorInteraction();
     }
 
+    private void SelectOnlyObject(PageObject item)
+    {
+        ClearSelection();
+        if (item.IsPageBackground) return;
+        _selectedObjects.Add(item);
+        RecomputeSelectionBounds();
+        InvalidateVisual();
+    }
+
+    private void SelectOnlyText(TextItem item)
+    {
+        ClearSelection();
+        _selectedTextItems.Add(item);
+        RecomputeSelectionBounds();
+        InvalidateVisual();
+    }
+
     private static bool HitSelectionHandle(Point point, Rect bounds, out int handle)
     {
-        var points = new[] { bounds.TopLeft, bounds.TopRight, bounds.BottomRight, bounds.BottomLeft };
-        for (var i = 0; i < points.Length; i++) if (Distance(point, points[i]) <= 10) { handle = i; return true; }
+        var points = SelectionGeometry.SelectionHandles(bounds);
+        var bestDistance = double.PositiveInfinity;
+        var bestIndex = -1;
+        for (var index = 0; index < points.Count; index++)
+        {
+            var distance = Distance(point, points[index]);
+            if (distance <= 12 && distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+        }
+        if (bestIndex >= 0) { handle = bestIndex; return true; }
         handle = bounds.Contains(point) ? -1 : int.MinValue;
         return false;
     }
 
-    private static Point OppositeCorner(Rect bounds, int handle) => handle switch
+    private static Point OppositeHandlePoint(Rect bounds, int handle) => handle switch
     {
-        0 => bounds.BottomRight, 1 => bounds.BottomLeft, 2 => bounds.TopLeft, 3 => bounds.TopRight, _ => bounds.TopLeft,
+        0 => bounds.BottomRight,
+        1 => new Point(bounds.Left + bounds.Width / 2, bounds.Bottom),
+        2 => bounds.BottomLeft,
+        3 => new Point(bounds.Left, bounds.Top + bounds.Height / 2),
+        4 => bounds.TopLeft,
+        5 => new Point(bounds.Left + bounds.Width / 2, bounds.Top),
+        6 => bounds.TopRight,
+        7 => new Point(bounds.Right, bounds.Top + bounds.Height / 2),
+        _ => bounds.TopLeft,
     };
 
     private static double Distance(Point left, Point right)

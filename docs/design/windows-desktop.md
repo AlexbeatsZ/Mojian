@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -93,16 +93,25 @@ foreground. ADB screenshots of the installed Android build are the visual compar
   full-page, delete-selection, and zoom defaults are provided.
 - Pen rendering uses pressure and speed correction with start/end taper. Logical black remaps for dark
   paper without changing the stored color.
-- Whole-stroke eraser, lasso selection/move/scale, undo/redo, insert space, tags, and persisted text are
-  document operations and participate in autosave.
+- Whole-stroke eraser, freeform/rectangle lasso selection, mixed-content move, and eight-handle
+  non-uniform scaling are document operations and participate in autosave. The eraser removes ink
+  and tags but never treats inserted objects as strokes; immutable PDF page backgrounds also survive
+  clear-page operations.
+- Existing text and non-background inserted objects remain selectable in every tool state. The first
+  double click selects them; a later double click activates editing or opening. A right click selects
+  the object and opens the shared dark command surface at the pointer.
 - Changing page or view state cannot leak content between pages.
 
 ## Insert and export
 
 - Images, attachments, spreadsheets, stickers, PDF printouts, tables, and note links all use the
   page-owned asset/object model. Clicking an embedded file opens the copied asset, never the source.
-- PDF page import uses the Windows PDF renderer and creates one page per source page while retaining
-  the original PDF.
+  Image-like objects persist quarter-turn rotation, horizontal/vertical flip, stacking order, size,
+  and background state. Cut/copy/paste reimports page-owned assets into the target page.
+- The gray-pane `+` opens one dark Page/PDF dialog. Normal pages remember their last successful paper,
+  baseline, and color without PDF imports overwriting that template. PDF page import uses the Windows
+  PDF renderer, creates one immutable-background page per source page, retains the original PDF and
+  rendered page asset, and preserves the source MediaBox dimensions in later layered export.
 - PDF export is a light-theme visual share. The private `.mjn` ZIP uses Android's existing manifest
   identifiers (`mojian-notebook` / `mojian-section`, version 1) and carries editable JSON and original
   assets. Export never substitutes for autosave.
@@ -118,3 +127,16 @@ foreground. ADB screenshots of the installed Android build are the visual compar
 5. Export a readable PDF and `.mjn`, then validate their structure.
 6. `dotnet test`, Release build/publish, XAML binding-error capture, and a real window screenshot must
    pass before delivery.
+
+### 2026-08-24 Android-parity regression acceptance
+
+- Release tests pass 37/37, including lasso-shape persistence, eight-handle geometry, image transform
+  JSON, PDF source MediaBox export, PDF-page template isolation/persistence, and Android-compatible
+  PDF-page metadata/object serialization in `.mjn`.
+- The self-contained `win-x64` Release EXE was exercised against an isolated workspace. Through the
+  real window, a page was created, a sticker inserted, selected by rectangle lasso, moved using the
+  shared frame, and recovered after a process restart with its asset and document coordinates intact.
+- The real Release window exposed readable dark Page/PDF controls, the pointer-positioned object menu,
+  and working rotation submenu without the platform-white icon gutter. The lasso remained Rectangle
+  after restart. The acceptance workspace was removed and the application preference was restored to
+  the user's original `%LOCALAPPDATA%\Mojian\Workspace`.

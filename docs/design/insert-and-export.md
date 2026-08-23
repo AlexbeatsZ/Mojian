@@ -1,6 +1,6 @@
 # Insert Objects and Export Containers
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 Read this document before changing insert commands, embedded assets, note links, sticker presets,
 spreadsheet/PDF previews, or export formats.
@@ -63,6 +63,14 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   Order and rotation are right-side submenus; unavailable link/move/crop commands remain visibly
   disabled instead of silently disappearing. Rotation quarter-turns, both flip flags, size, position,
   and background state are persisted in page JSON with backward-compatible defaults.
+- Windows mirrors this object contract with direct double-click selection, the same dotted eight-handle
+  frame, mixed freeform/rectangle lasso selection, pointer-positioned dark context menus, asset-aware
+  clipboard copies, persisted image transforms, and immutable PDF page backgrounds. The platform's
+  light menu template and icon gutter are not used.
+- Windows `.mjn` output serializes PDF page view settings as Android `PaperSize.PDF`, includes the
+  source asset/document, page number/count, source point dimensions, and custom document dimensions
+  in the manifest, and writes image objects with Android's `PDF_PAGE`, background, rotation, and flip
+  fields. Do not substitute the desktop-only `PdfPrintout` enum name into the shared container.
 
 ## Placement and persistence
 

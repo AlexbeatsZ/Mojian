@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -22,6 +23,7 @@ public partial class MainWindow : Window
     private TextBox? _lastTextBox;
     private TextStyleSnapshot? _formatPainter;
     private PageNavigationClipboard? _pageNavigationClipboard;
+    private ObjectClipboard? _objectClipboard;
     private MainViewModel ViewModel => (MainViewModel)DataContext;
     private NoteCanvas FocusedCanvas => ViewModel.FocusedSlot == CanvasSlot.Right ? RightCanvas : LeftCanvas;
 
@@ -79,6 +81,7 @@ public partial class MainWindow : Window
         canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
         canvas.ObjectActivated += OnObjectActivated;
+        canvas.ObjectContextRequested += OnObjectContextRequested;
     }
 
     private void OnObjectActivated(object? sender, PageObjectEventArgs e)
@@ -112,6 +115,99 @@ public partial class MainWindow : Window
         if (sender is not NoteCanvas canvas || canvas.Document == null || string.IsNullOrWhiteSpace(e.Value.AssetName)) return;
         var path = ViewModel.ResolveAsset(canvas.Document, e.Value.AssetName);
         if (File.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
+    private void OnObjectContextRequested(object? sender, PageObjectEventArgs e)
+    {
+        if (sender is not NoteCanvas canvas || canvas.Document == null) return;
+        var item = e.Value;
+        var menu = new ContextMenu();
+
+        AddMenuItem(menu, "剪切", () => CaptureObjectClipboard(canvas, item, cut: true));
+        AddMenuItem(menu, "复制", () => CaptureObjectClipboard(canvas, item, cut: false));
+        var paste = AddMenuItem(menu, "粘贴", PasteObject);
+        paste.IsEnabled = _objectClipboard != null;
+        menu.Items.Add(new Separator());
+
+        var saveAs = AddMenuItem(menu, "另存为…", () => SaveEmbeddedObject(canvas, item));
+        saveAs.IsEnabled = !string.IsNullOrWhiteSpace(item.AssetName);
+        AddMenuItem(menu, "复制指向所在页面的链接", () => CopyOwningPageLink(canvas));
+
+        var order = new MenuItem { Header = "层级" };
+        AddMenuItem(order, "上移一层", () => canvas.MoveObjectForward(item));
+        AddMenuItem(order, "置于顶层", () => canvas.MoveObjectToFront(item));
+        AddMenuItem(order, "下移一层", () => canvas.MoveObjectBackward(item));
+        AddMenuItem(order, "置于底层", () => canvas.MoveObjectToBack(item));
+        menu.Items.Add(order);
+
+        if (item.IsImageLike)
+        {
+            var rotate = new MenuItem { Header = "旋转" };
+            AddMenuItem(rotate, "顺时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: true));
+            AddMenuItem(rotate, "逆时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: false));
+            menu.Items.Add(rotate);
+
+            var flip = new MenuItem { Header = "翻转" };
+            AddMenuItem(flip, "水平翻转", () => canvas.FlipImageObject(item, horizontal: true));
+            AddMenuItem(flip, "垂直翻转", () => canvas.FlipImageObject(item, horizontal: false));
+            menu.Items.Add(flip);
+            AddMenuItem(menu, "还原原始大小", () => canvas.RestoreImageObjectSize(item));
+            AddMenuItem(menu, "设为背景", () => canvas.SetImageObjectAsBackground(item));
+        }
+
+        var crop = new MenuItem { Header = "裁剪", IsEnabled = false };
+        var move = new MenuItem { Header = "移动到其他页面", IsEnabled = false };
+        menu.Items.Add(crop);
+        menu.Items.Add(move);
+        menu.Items.Add(new Separator());
+        AddMenuItem(menu, "删除", () => canvas.RemoveObject(item));
+        OpenContextMenu(canvas, menu);
+    }
+
+    private void CaptureObjectClipboard(NoteCanvas canvas, PageObject item, bool cut)
+    {
+        if (canvas.Document == null) return;
+        var assetPath = string.IsNullOrWhiteSpace(item.AssetName) ? null : ViewModel.ResolveAsset(canvas.Document, item.AssetName);
+        var sourceAssetPath = string.IsNullOrWhiteSpace(item.SourceAssetName) ? null : ViewModel.ResolveAsset(canvas.Document, item.SourceAssetName);
+        _objectClipboard = new ObjectClipboard(item.CloneWithNewId(offset: 0), assetPath, sourceAssetPath, cut);
+        if (cut) canvas.RemoveObject(item);
+    }
+
+    private void PasteObject()
+    {
+        var clipboard = _objectClipboard;
+        if (clipboard == null || FocusedCanvas.Document == null) return;
+        var item = clipboard.Item.CloneWithNewId();
+        if (!string.IsNullOrWhiteSpace(clipboard.AssetPath) && File.Exists(clipboard.AssetPath))
+            item.AssetName = ViewModel.ImportAsset(clipboard.AssetPath);
+        if (!string.IsNullOrWhiteSpace(clipboard.SourceAssetPath) && File.Exists(clipboard.SourceAssetPath))
+            item.SourceAssetName = ViewModel.ImportAsset(clipboard.SourceAssetPath);
+        FocusedCanvas.AddObject(item);
+        if (clipboard.IsCut) _objectClipboard = null;
+    }
+
+    private void SaveEmbeddedObject(NoteCanvas canvas, PageObject item)
+    {
+        if (canvas.Document == null || string.IsNullOrWhiteSpace(item.AssetName)) return;
+        var source = ViewModel.ResolveAsset(canvas.Document, item.AssetName);
+        if (!File.Exists(source)) return;
+        var extension = Path.GetExtension(item.DisplayName);
+        if (string.IsNullOrWhiteSpace(extension)) extension = Path.GetExtension(source);
+        var dialog = new SaveFileDialog
+        {
+            Title = "另存嵌入文件",
+            FileName = string.IsNullOrWhiteSpace(item.DisplayName) ? $"嵌入文件{extension}" : item.DisplayName,
+            Filter = string.IsNullOrWhiteSpace(extension) ? "所有文件 (*.*)|*.*" : $"{extension} 文件 (*{extension})|*{extension}|所有文件 (*.*)|*.*",
+        };
+        if (dialog.ShowDialog(this) == true) File.Copy(source, dialog.FileName, overwrite: true);
+    }
+
+    private void CopyOwningPageLink(NoteCanvas canvas)
+    {
+        if (canvas.Document == null) return;
+        var notebook = ViewModel.ActiveWorkspace;
+        var page = notebook.FindPage(canvas.Document.PageId, out var owner);
+        if (page != null && owner != null) Clipboard.SetText($"mojian://notebook/{notebook.Id}/section/{owner.Id}/page/{page.Id}");
     }
 
     private void OnAddSectionMenuClick(object sender, RoutedEventArgs e)
@@ -297,6 +393,7 @@ public partial class MainWindow : Window
     private static void OpenContextMenu(FrameworkElement anchor, ContextMenu menu)
     {
         menu.PlacementTarget = anchor;
+        menu.Placement = PlacementMode.MousePoint;
         menu.IsOpen = true;
     }
 
@@ -307,7 +404,7 @@ public partial class MainWindow : Window
         AddMenuItem(menu, "添加钢笔", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Pen));
         AddMenuItem(menu, "添加荧光笔", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Highlighter));
         AddMenuItem(menu, "添加橡皮", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Eraser));
-        AddMenuItem(menu, "添加框选", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Lasso));
+        AddMenuItem(menu, "添加套索", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Lasso));
         menu.PlacementTarget = button;
         menu.IsOpen = true;
     }
@@ -341,11 +438,38 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnAddPageClick(object sender, RoutedEventArgs e)
+    private async void OnAddPageClick(object sender, RoutedEventArgs e)
     {
         if (!ViewModel.CanAddPage) return;
-        var title = Prompt("添加页面", "页面标题", "无标题页");
-        if (title != null) ViewModel.AddPage(title, ViewModel.ActivePageAppearance);
+        var dialog = new PageCreationDialog(ViewModel.LastPageAppearance) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        if (dialog.CreationMode == PageCreationMode.Page)
+        {
+            ViewModel.AddPage(dialog.PageTitle, dialog.PageAppearance);
+            return;
+        }
+
+        var invert = ResolveInversion(ViewModel.PdfDisplayMode, "PDF 页面");
+        if (invert == null) return;
+        try
+        {
+            Mouse.OverrideCursor = Cursors.Wait;
+            var pages = await PdfImportService.RenderAsync(dialog.PdfPath);
+            var baseTitle = Path.GetFileNameWithoutExtension(dialog.PdfPath);
+            foreach (var page in pages)
+            {
+                var title = pages.Count == 1 ? baseTitle : $"{baseTitle} {page.PageNumber}";
+                ViewModel.AddPdfPage(title, page, dialog.PdfPath, invert.Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"PDF 页面导入失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
     }
 
     private void OnBackgroundFormatClick(object sender, RoutedEventArgs e)
@@ -730,6 +854,12 @@ public partial class MainWindow : Window
         if (sender is Button button && Enum.TryParse<InkPalette>(button.Tag?.ToString(), out var color)) ViewModel.SetSelectedToolColor(color);
     }
 
+    private void OnSetLassoShapeClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleButton button && Enum.TryParse<LassoShape>(button.Tag?.ToString(), out var shape))
+            ViewModel.SetSelectedLassoShape(shape);
+    }
+
     private void OnDeleteSelectionClick(object sender, RoutedEventArgs e) => FocusedCanvas.DeleteSelection();
 
     private void OnToolSettingChanged(object sender, RoutedEventArgs e)
@@ -880,12 +1010,13 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) != true) return;
         try
         {
+            var page = ViewModel.FocusedDocument == null ? null : ViewModel.ActiveWorkspace.FindPage(ViewModel.FocusedDocument.PageId, out _);
             LayeredPdfExportService.Write(dialog.FileName, new[]
             {
                 new PdfLayer("页面背景", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.Background)),
                 new PdfLayer("插入内容", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.Inserts)),
                 new PdfLayer("墨迹与文字", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.InkAndText)),
-            });
+            }, page?.PdfWidthPoints, page?.PdfHeightPoints);
             MessageBox.Show(this, "PDF 已导出。", "墨笺", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) { MessageBox.Show(this, $"PDF 导出失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error); }
@@ -1061,4 +1192,5 @@ public partial class MainWindow : Window
     }
 
     private sealed record PageNavigationClipboard(string NotebookId, string SectionId, string PageId, bool IsCut);
+    private sealed record ObjectClipboard(PageObject Item, string? AssetPath, string? SourceAssetPath, bool IsCut);
 }

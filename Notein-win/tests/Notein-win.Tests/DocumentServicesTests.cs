@@ -33,6 +33,20 @@ public class DocumentServicesTests
     }
 
     [Fact]
+    public void LayeredPdf_UsesExplicitSourceMediaBoxForImportedPdfPages()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = System.IO.Path.Combine(temp.Path, "source-size.pdf");
+        var bitmap = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null,
+            new byte[] { 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255 }, 8);
+        bitmap.Freeze();
+
+        LayeredPdfExportService.Write(path, new[] { new PdfLayer("页面背景", bitmap) }, 612, 792);
+
+        Assert.Contains("/MediaBox [0 0 612 792]", Encoding.ASCII.GetString(File.ReadAllBytes(path)));
+    }
+
+    [Fact]
     public async Task PdfImporter_RendersAnUnpackagedLocalPdf()
     {
         using var temp = new TemporaryDirectory();

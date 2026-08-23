@@ -37,7 +37,8 @@ public class ToolShelfTests
     public void ToolShelf_JsonSerialization_RoundTripsAccurately()
     {
         var shelf = new ToolShelf();
-        shelf.Select("pen-blue");
+        shelf.Select("lasso-freeform");
+        shelf.Selected.LassoShape = LassoShape.Rectangle;
 
         var json = shelf.ToJson();
         Assert.NotNull(json);
@@ -45,6 +46,7 @@ public class ToolShelfTests
         var restored = ToolShelf.FromJson(json);
         Assert.NotNull(restored);
         Assert.Equal(shelf.Tools.Count, restored.Tools.Count);
-        Assert.Equal("pen-blue", restored.SelectedId);
+        Assert.Equal("lasso-freeform", restored.SelectedId);
+        Assert.Equal(LassoShape.Rectangle, restored.Selected.LassoShape);
     }
 }

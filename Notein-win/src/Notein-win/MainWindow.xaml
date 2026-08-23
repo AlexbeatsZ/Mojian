@@ -451,9 +451,16 @@
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding SelectedToolIsLasso, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="闭合套索可同时选择笔迹和标记" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" />
+                    <TextBlock Text="形状" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton Content="自由圈选" Tag="Freeform" IsChecked="{Binding SelectedLassoIsFreeform, Mode=OneWay}"
+                                      Style="{StaticResource RibbonToggleButtonStyle}" Height="30" MinWidth="82" Click="OnSetLassoShapeClick" />
+                        <ToggleButton Content="矩形" Tag="Rectangle" IsChecked="{Binding SelectedLassoIsRectangle, Mode=OneWay}"
+                                      Style="{StaticResource RibbonToggleButtonStyle}" Height="30" MinWidth="64" Click="OnSetLassoShapeClick" />
+                    </StackPanel>
+                    <TextBlock Text="可同时选择笔迹、标记、文本框和插入对象" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0" />
                     <Button Content="删除所选" Style="{StaticResource RibbonIconButtonStyle}" HorizontalContentAlignment="Left" Margin="0,8,0,0" Click="OnDeleteSelectionClick" />
-                    <TextBlock Text="在框内按住拖动；拖动四角缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
+                    <TextBlock Text="拖动框内移动；八个方形控点缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
                 </StackPanel>
 
                 <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,10,0,6" />

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Notein_win.Models;
 
 public enum PageObjectKind
@@ -51,6 +53,41 @@ public sealed class PageObject
     public string TargetPageId { get; set; } = string.Empty;
     public string SourceAssetName { get; set; } = string.Empty;
     public int? SourcePageNumber { get; set; }
+    public bool IsPageBackground { get; set; }
+    public int RotationQuarterTurns { get; set; }
+    public bool FlipHorizontal { get; set; }
+    public bool FlipVertical { get; set; }
+
+    [JsonIgnore]
+    public bool IsImageLike => Kind is PageObjectKind.Image or PageObjectKind.PdfPrintout or PageObjectKind.Sticker;
+
+    public PageObject CloneWithNewId(float offset = 24) => new()
+    {
+        Id = IdFactory.New("object"),
+        Kind = Kind,
+        X = X + offset,
+        Y = Y + offset,
+        Width = Width,
+        Height = Height,
+        DisplayName = DisplayName,
+        AssetName = AssetName,
+        MimeType = MimeType,
+        SizeBytes = SizeBytes,
+        ViewInverted = ViewInverted,
+        Rows = Rows,
+        Columns = Columns,
+        Cells = Cells.ToList(),
+        PreviewRows = PreviewRows.Select(row => row.ToList()).ToList(),
+        TargetNotebookId = TargetNotebookId,
+        TargetSectionId = TargetSectionId,
+        TargetPageId = TargetPageId,
+        SourceAssetName = SourceAssetName,
+        SourcePageNumber = SourcePageNumber,
+        IsPageBackground = false,
+        RotationQuarterTurns = ((RotationQuarterTurns % 4) + 4) % 4,
+        FlipHorizontal = FlipHorizontal,
+        FlipVertical = FlipVertical,
+    };
 
     public static PageObject Table(float x, float y, int rows = 3, int columns = 3) => new()
     {

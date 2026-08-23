@@ -12,6 +12,12 @@ public enum DrawingToolKind
     Lasso,
 }
 
+public enum LassoShape
+{
+    Freeform,
+    Rectangle,
+}
+
 public enum InkPalette
 {
     Black,
@@ -59,6 +65,7 @@ public class ToolPreset
     public bool PressureEraseEnabled { get; set; } = true;
     public int PressureEraseDwellMilliseconds { get; set; } = 140;
     public int PressureEraseThresholdPercent { get; set; } = 78;
+    public LassoShape LassoShape { get; set; } = LassoShape.Freeform;
 
     [JsonIgnore]
     public bool IsSelected { get; set; }
@@ -90,7 +97,7 @@ public class ToolPreset
         DrawingToolKind.Pen => $"{Color.GetLabel()}色笔",
         DrawingToolKind.Highlighter => $"{Color.GetLabel()}色荧光",
         DrawingToolKind.Eraser => "橡皮",
-        DrawingToolKind.Lasso => "框选",
+        DrawingToolKind.Lasso => "套索",
         _ => "绘图工具"
     };
 
@@ -113,7 +120,8 @@ public class ToolPreset
             ["eraserRadiusMm"] = EraserRadiusMm,
             ["pressureEraseEnabled"] = PressureEraseEnabled,
             ["pressureEraseDwellMilliseconds"] = PressureEraseDwellMilliseconds,
-            ["pressureEraseThresholdPercent"] = PressureEraseThresholdPercent
+            ["pressureEraseThresholdPercent"] = PressureEraseThresholdPercent,
+            ["lassoShape"] = LassoShape.ToString()
         };
         return obj;
     }
@@ -135,10 +143,15 @@ public class ToolPreset
             var opacityPercent = json["opacityPercent"]?.GetValue<int>() ?? 32;
             var eraserRadiusMm = json["eraserRadiusMm"]?.GetValue<float>() ?? 4.5f;
             var pressureEraseEnabled = json["pressureEraseEnabled"]?.GetValue<bool>() ?? true;
+            var lassoShapeText = json["lassoShape"]?.GetValue<string>() ?? LassoShape.Freeform.ToString();
+            var lassoShape = Enum.TryParse<LassoShape>(lassoShapeText, true, out var parsedLassoShape)
+                ? parsedLassoShape
+                : LassoShape.Freeform;
             var preset = new ToolPreset(id, kind, color, widthMm, pressurePercent, inkFlowPercent, opacityPercent, eraserRadiusMm, pressureEraseEnabled)
             {
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
+                LassoShape = lassoShape,
             };
             return preset;
         }
