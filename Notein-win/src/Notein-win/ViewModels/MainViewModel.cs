@@ -28,7 +28,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isFloatingToolbarVisible = true;
     private bool _isToolFlyoutOpen;
     private bool _singleFingerPanEnabled;
-    private bool _textModeEnabled;
+    private bool _textInsertionArmed;
     private bool _insertSpaceModeEnabled;
     private CanvasTagKind? _pendingTagKind;
     private bool _isBackstageOpen;
@@ -273,17 +273,17 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!SetField(ref _singleFingerPanEnabled, value) || !value) return;
-            TextModeEnabled = false;
+            TextInsertionArmed = false;
             InsertSpaceModeEnabled = false;
         }
     }
 
-    public bool TextModeEnabled
+    public bool TextInsertionArmed
     {
-        get => _textModeEnabled;
+        get => _textInsertionArmed;
         set
         {
-            if (!SetField(ref _textModeEnabled, value) || !value) return;
+            if (!SetField(ref _textInsertionArmed, value) || !value) return;
             SingleFingerPanEnabled = false;
             InsertSpaceModeEnabled = false;
         }
@@ -296,7 +296,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetField(ref _insertSpaceModeEnabled, value) || !value) return;
             SingleFingerPanEnabled = false;
-            TextModeEnabled = false;
+            TextInsertionArmed = false;
         }
     }
 
@@ -747,8 +747,6 @@ public sealed class MainViewModel : ObservableObject
     private void SelectRibbonTab(RibbonTab tab)
     {
         ActiveRibbonTab = tab;
-        if (tab == RibbonTab.Home) TextModeEnabled = true;
-        else if (tab == RibbonTab.Insert) TextModeEnabled = false;
     }
 
     private void SelectNotebook(string? id)
@@ -807,7 +805,7 @@ public sealed class MainViewModel : ObservableObject
         {
             IsToolFlyoutOpen = false;
             SingleFingerPanEnabled = false;
-            TextModeEnabled = false;
+            TextInsertionArmed = false;
             InsertSpaceModeEnabled = false;
             OnPropertyChanged(nameof(SelectedTool));
             NotifySelectedToolProperties();
@@ -821,7 +819,7 @@ public sealed class MainViewModel : ObservableObject
         if (!_toolShelf.Select(id)) return false;
         IsToolFlyoutOpen = false;
         SingleFingerPanEnabled = false;
-        TextModeEnabled = false;
+        TextInsertionArmed = false;
         InsertSpaceModeEnabled = false;
         RefreshTools();
         SaveSettings();
@@ -1122,7 +1120,7 @@ public sealed class MainViewModel : ObservableObject
         var catalog = new List<FullPageToolDescriptor>
         {
             new("draw:undo", "撤销", "arrow_undo"),
-            new("draw:cursor", "键入文本", "cursor"),
+            new("draw:cursor", "插入文本框", "cursor"),
         };
         catalog.AddRange(_toolShelf.Tools.Select(tool => new FullPageToolDescriptor(
             $"tool:{tool.Id}", tool.DisplayName,

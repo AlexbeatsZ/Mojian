@@ -332,7 +332,7 @@ public partial class MainWindow : Window
         switch (id)
         {
             case "draw:undo": FocusedCanvas.Undo(); break;
-            case "draw:cursor": ViewModel.TextModeEnabled = !ViewModel.TextModeEnabled; break;
+            case "draw:cursor": ViewModel.TextInsertionArmed = !ViewModel.TextInsertionArmed; break;
             case "draw:add": OnAddToolMenuClick(button, e); break;
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; break;
             case "draw:insert_space": ViewModel.InsertSpaceModeEnabled = !ViewModel.InsertSpaceModeEnabled; break;
@@ -577,7 +577,6 @@ public partial class MainWindow : Window
     private void OnHomeCommandClick(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || !Enum.TryParse<HomeCommand>(button.Tag?.ToString(), out var command)) return;
-        if (command is not HomeCommand.Tag and not HomeCommand.FindTags) ViewModel.TextModeEnabled = true;
         switch (command)
         {
             case HomeCommand.Paste: FocusedTextBox()?.Paste(); break;
@@ -827,7 +826,7 @@ public partial class MainWindow : Window
             case "insert:link": OnInsertLinkClick(this, new RoutedEventArgs()); return true;
             case "draw:undo": FocusedCanvas.Undo(); return true;
             case "draw:redo": FocusedCanvas.Redo(); return true;
-            case "draw:cursor": ViewModel.TextModeEnabled = !ViewModel.TextModeEnabled; return true;
+            case "draw:cursor": ViewModel.TextInsertionArmed = !ViewModel.TextInsertionArmed; return true;
             case "draw:previous-tool": return ViewModel.CycleDrawingTool(-1);
             case "draw:next-tool": return ViewModel.CycleDrawingTool(1);
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; return true;

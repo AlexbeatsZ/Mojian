@@ -33,6 +33,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.DragEvent
 import android.view.HapticFeedbackConstants
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -63,6 +64,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import kotlin.math.pow
 import kotlin.math.sqrt
 import org.json.JSONObject
 
@@ -223,7 +225,7 @@ class MainActivity : Activity() {
     private lateinit var assetStore: AssetStore
     private lateinit var pdfPageImporter: PdfPageImporter
     private lateinit var selectionOverlay: SelectionOverlayView
-    private lateinit var paperContainer: FrameLayout
+    private lateinit var paperContainer: CanvasInputHost
     private lateinit var splitCanvasHost: LinearLayout
     private lateinit var leftPageHost: FrameLayout
     private lateinit var rightPageHost: FrameLayout
@@ -265,7 +267,10 @@ class MainActivity : Activity() {
     private var insertSpaceActive = false
     private var insertSpaceStartDocY = 0f
     private var insertSpaceCurrentDocY = 0f
-    private var textModeEnabled = false
+    private var textInsertionArmed = false
+    private var fingerLassoPointerId: Int? = null
+    private var mouseCanvasGesture = CanvasDragIntent.NONE
+    private var lastMouseGestureY = 0f
     private var sectionPaneVisible = true
     private var pagePaneVisible = true
     private var drawingToolbarVisible = true
@@ -273,7 +278,7 @@ class MainActivity : Activity() {
     private var fullPageSectionPaneOpen = false
     private var fullPagePagePaneOpen = false
     private var activeRibbonPage = RibbonPage.DRAW
-    private var restoreTextModeAfterTagPlacement = false
+    private var restoreTextInsertionAfterTagPlacement = false
     private var darkCanvasActive = true
     private var legacyBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
     private var zoomLocked = false
@@ -409,6 +414,39 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (
+            event.action == MotionEvent.ACTION_SCROLL &&
+            event.isFromSource(InputDevice.SOURCE_MOUSE) &&
+            ::paperContainer.isInitialized
+        ) {
+            val location = IntArray(2)
+            paperContainer.getLocationOnScreen(location)
+            val localX = event.rawX - location[0]
+            val localY = event.rawY - location[1]
+            if (localX in 0f..paperContainer.width.toFloat() && localY in 0f..paperContainer.height.toFloat()) {
+                val vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                val horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
+                val decision =
+                    CanvasInputRouting.wheelDecision(
+                        vertical = vertical,
+                        horizontal = horizontal,
+                        shiftPressed = event.hasShiftModifier(),
+                        ctrlPressed = event.hasCtrlModifier(),
+                    )
+                when (decision.intent) {
+                    WheelIntent.ZOOM -> viewport.applyGesture(localX, localY, localX, localY, 1.12f.pow(decision.amount))
+                    WheelIntent.PAN_HORIZONTAL -> viewport.applyGesture(0f, 0f, decision.amount * dp(48), 0f, 1f)
+                    WheelIntent.PAN_VERTICAL -> viewport.applyGesture(0f, 0f, 0f, decision.amount * dp(48), 1f)
+                    WheelIntent.NONE -> return super.dispatchGenericMotionEvent(event)
+                }
+                applyViewportToLayers()
+                return true
+            }
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
     override fun onPause() {
         dismissDarkTooltip()
         toolDetailPopup?.dismiss()
@@ -422,12 +460,17 @@ class MainActivity : Activity() {
         pressurePointerId = null
         activeDirectTool = null
         panoramaPointerId = null
+        fingerLassoPointerId = null
+        mouseCanvasGesture = CanvasDragIntent.NONE
         transformGestureActive = false
         dryInkView.setEraserCursor(null)
         clearContentSelection()
-        textModeEnabled = false
-        restoreTextModeAfterTagPlacement = false
-        if (::textInputLayer.isInitialized) textInputLayer.setTextMode(false)
+        textInsertionArmed = false
+        restoreTextInsertionAfterTagPlacement = false
+        if (::textInputLayer.isInitialized) {
+            textInputLayer.setTextInsertionArmed(false)
+            textInputLayer.endEditing()
+        }
         if (::tagLayer.isInitialized) tagLayer.cancelPlacement()
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
@@ -532,7 +575,7 @@ class MainActivity : Activity() {
     }
 
     private fun togglePanoramaMode() {
-        setTextMode(false, rerender = false)
+        setTextInsertionArmed(false, rerender = false)
         tagLayer.cancelPlacement()
         singleFingerPanEnabled = !singleFingerPanEnabled
         insertSpaceModeEnabled = false
@@ -589,7 +632,7 @@ class MainActivity : Activity() {
             "insert:note-link" -> { showNoteLinkPicker(); true }
             "draw:undo" -> { clearContentSelection(); dryInkView.undo(); true }
             "draw:redo" -> { clearContentSelection(); dryInkView.redo(); true }
-            "draw:cursor" -> { setTextMode(!textModeEnabled); true }
+            "draw:cursor" -> { setTextInsertionArmed(!textInsertionArmed); true }
             "draw:previous-tool" -> { cycleDrawingTool(-1); true }
             "draw:next-tool" -> { cycleDrawingTool(1); true }
             "draw:pan" -> { togglePanoramaMode(); true }
@@ -1599,10 +1642,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectRibbonPage(page: RibbonPage) {
-        if (activeRibbonPage == page) {
-            if (page == RibbonPage.HOME) setTextMode(true)
-            return
-        }
+        if (activeRibbonPage == page) return
         activeRibbonPage = page
         populateRibbonTabs(ribbonTabs as LinearLayout)
         val host = drawingRibbon as FrameLayout
@@ -1617,13 +1657,13 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams(MATCH, MATCH),
         )
         when (page) {
-            RibbonPage.HOME -> setTextMode(true, rerender = false)
-            RibbonPage.INSERT -> setTextMode(false, rerender = false)
             RibbonPage.DRAW -> {
                 renderToolShelf()
                 renderToolDetails()
             }
             RibbonPage.VIEW -> refreshViewRibbonState()
+            RibbonPage.HOME,
+            RibbonPage.INSERT -> Unit
         }
     }
 
@@ -1876,10 +1916,6 @@ class MainActivity : Activity() {
         }
 
     private fun performHomeCommand(command: HomeCommand, anchor: View) {
-        if (command != HomeCommand.TAG && command != HomeCommand.FIND_TAGS) {
-            setTextMode(true, rerender = false)
-            renderFullPageToolbar()
-        }
         when (command) {
             HomeCommand.PASTE -> runTextCommand("粘贴") { textInputLayer.paste() }
             HomeCommand.CUT -> runTextCommand("剪切") { textInputLayer.cut() }
@@ -1972,8 +2008,8 @@ class MainActivity : Activity() {
     }
 
     private fun beginTagPlacement(kind: CanvasTagKind) {
-        restoreTextModeAfterTagPlacement = textModeEnabled
-        setTextMode(false, rerender = false)
+        restoreTextInsertionAfterTagPlacement = textInsertionArmed
+        setTextInsertionArmed(false, rerender = false)
         singleFingerPanEnabled = false
         transformGestureActive = false
         tagLayer.beginPlacement(kind)
@@ -2006,7 +2042,7 @@ class MainActivity : Activity() {
     }
 
     private fun handleInsertSpace(anchor: View) {
-        setTextMode(false, rerender = false)
+        setTextInsertionArmed(false, rerender = false)
         tagLayer.cancelPlacement()
         singleFingerPanEnabled = false
         transformGestureActive = false
@@ -2489,7 +2525,7 @@ class MainActivity : Activity() {
         }
 
     private fun buildPaper(): View {
-        paperContainer = FrameLayout(this).apply { setBackgroundColor(PAPER_COLOR) }
+        paperContainer = CanvasInputHost(this).apply { setBackgroundColor(PAPER_COLOR) }
         pageSurfaceBackground = PageSurfaceView(this, viewport, PageSurfaceLayer.BACKGROUND)
         pageSurfaceForeground = PageSurfaceView(this, viewport, PageSurfaceLayer.FOREGROUND)
         dryInkView = DryInkView(this)
@@ -2520,10 +2556,14 @@ class MainActivity : Activity() {
                     expandA4ForContentIfNeeded()
                     renderToolDetails()
                 }
+                onSelectionTapped = { viewX, viewY ->
+                    if (textInputLayer.beginEditingSelectionAt(viewX, viewY)) updateSelectionInteraction()
+                }
+                onPageGesture = ::handleFingerGesture
             }
         tagLayer.onPlacementFinished = { tag ->
-            if (restoreTextModeAfterTagPlacement) setTextMode(true)
-            restoreTextModeAfterTagPlacement = false
+            if (restoreTextInsertionAfterTagPlacement) setTextInsertionArmed(true)
+            restoreTextInsertionAfterTagPlacement = false
             updateSelectionInteraction()
             expandA4ForContentIfNeeded()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
@@ -2533,7 +2573,7 @@ class MainActivity : Activity() {
             dryInkView.clearSelection()
             textInputLayer.clearSelection()
             insertContentLayer.clearSelection()
-            selectionOverlay.invalidate()
+            updateSelectionInteraction()
             renderToolDetails()
         }
         insertContentLayer.onDocumentChanged = pageContentRepository::save
@@ -2544,8 +2584,8 @@ class MainActivity : Activity() {
                 dryInkView.clearSelection()
                 tagLayer.clearSelection()
                 textInputLayer.clearSelection()
-                selectionOverlay.invalidate()
             }
+            updateSelectionInteraction()
             renderToolDetails()
         }
         textInputLayer.onSelectionChanged = { count ->
@@ -2554,9 +2594,12 @@ class MainActivity : Activity() {
                 tagLayer.clearSelection()
                 insertContentLayer.clearSelection()
             }
-            selectionOverlay.invalidate()
+            updateSelectionInteraction()
             renderToolDetails()
         }
+        textInputLayer.onEditingChanged = { updateSelectionInteraction() }
+        textInputLayer.onPageGesture = ::handleFingerGesture
+        paperContainer.onPointerEventObserved = textInputLayer::observeCanvasPointerEvent
         dryInkView.setViewport(viewport.documentToViewMatrix())
         paperContainer.addView(pageSurfaceBackground, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(canvasBackgroundLayer, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -3522,7 +3565,7 @@ class MainActivity : Activity() {
         buildList {
             add(FullPageToolDescriptor("draw:undo", "撤销", "arrow_undo"))
             add(FullPageToolDescriptor("draw:redo", "重做", "arrow_redo"))
-            add(FullPageToolDescriptor("draw:cursor", "键入文本", "cursor"))
+            add(FullPageToolDescriptor("draw:cursor", "插入文本框", "cursor"))
             toolShelf.tools.forEach { tool ->
                 val icon =
                     when (tool.kind) {
@@ -3572,7 +3615,9 @@ class MainActivity : Activity() {
                     clearContentSelection()
                     dryInkView.redo()
                 }
-            "draw:cursor" -> commandButton("cursor", "键入文本", textModeEnabled) { setTextMode(!textModeEnabled) }
+            "draw:cursor" -> commandButton("cursor", "插入文本框", textInsertionArmed) {
+                setTextInsertionArmed(!textInsertionArmed)
+            }
             "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
             "draw:pan" ->
                 commandButton("hand_left", "全景手柄（手指和笔）", singleFingerPanEnabled) { togglePanoramaMode() }
@@ -3607,8 +3652,8 @@ class MainActivity : Activity() {
         )
         row.addView(verticalDivider())
         row.addView(
-            commandButton("cursor", "键入文本", selected = textModeEnabled) {
-                setTextMode(!textModeEnabled)
+            commandButton("cursor", "插入文本框", selected = textInsertionArmed) {
+                setTextInsertionArmed(!textInsertionArmed)
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
@@ -3895,7 +3940,12 @@ class MainActivity : Activity() {
             },
         )
         wetInkView.setOnTouchListener { _, event ->
-            if ((0 until event.pointerCount).any { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }) {
+            val directObjectPointer =
+                (0 until event.pointerCount).any {
+                    event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER ||
+                        event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE
+                }
+            if (directObjectPointer && !lassoToolActive()) {
                 insertContentLayer.objectManipulationEnabled = !singleFingerPanEnabled
                 insertContentLayer.onTouchEvent(event)
             }
@@ -3924,6 +3974,7 @@ class MainActivity : Activity() {
     private fun handleMotionEvent(event: MotionEvent) {
         if (handlePanoramaStylusGesture(event)) return
         if (insertSpaceModeEnabled && handleInsertSpaceGesture(event)) return
+        if (handleMouseGesture(event)) return
         if (handleFingerGesture(event)) return
         if (!hasStylusPointer(event) && activeStrokes.isEmpty()) return
         predictor.record(event)
@@ -3978,7 +4029,7 @@ class MainActivity : Activity() {
         val directPreset =
             when {
                 hardwareEraser -> null
-                textModeEnabled -> cursorModePenPreset()
+                textInsertionArmed -> insertionModePenPreset()
                 else -> toolShelf.selected
             }
         activeDirectTool = if (hardwareEraser) DrawingToolKind.ERASER else directPreset?.kind ?: DrawingToolKind.PEN
@@ -4009,8 +4060,7 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                clearContentSelection()
-                dryInkView.beginLasso(lastPressurePoint, toolShelf.selected.lassoShape)
+                beginContentLasso(event.getX(pointerIndex), event.getY(pointerIndex))
             }
             null -> Unit
         }
@@ -4060,12 +4110,7 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                val polygon = dryInkView.finishLasso()
-                tagLayer.selectInPolygon(polygon)
-                textInputLayer.selectInPolygon(polygon)
-                insertContentLayer.selectInPolygon(polygon)
-                selectionOverlay.invalidate()
-                renderToolDetails()
+                finishContentLasso()
             }
 
             DrawingToolKind.ERASER -> {
@@ -4097,8 +4142,8 @@ class MainActivity : Activity() {
         if (toolShelf.selected.kind == DrawingToolKind.PEN) lastPenToolId = toolShelf.selected.id
         persistToolShelf()
         tagLayer.cancelPlacement()
-        restoreTextModeAfterTagPlacement = false
-        setTextMode(false, rerender = false)
+        restoreTextInsertionAfterTagPlacement = false
+        setTextInsertionArmed(false, rerender = false)
         singleFingerPanEnabled = false
         insertSpaceModeEnabled = false
         insertSpaceActive = false
@@ -4117,14 +4162,14 @@ class MainActivity : Activity() {
         renderToolDetails()
     }
 
-    private fun setTextMode(enabled: Boolean, rerender: Boolean = true) {
-        if (textModeEnabled == enabled && ::textInputLayer.isInitialized) {
-            textInputLayer.setTextMode(enabled)
+    private fun setTextInsertionArmed(enabled: Boolean, rerender: Boolean = true) {
+        if (textInsertionArmed == enabled && ::textInputLayer.isInitialized) {
+            textInputLayer.setTextInsertionArmed(enabled)
             updateSelectionInteraction()
             if (rerender) renderToolShelf()
             return
         }
-        textModeEnabled = enabled
+        textInsertionArmed = enabled
         if (enabled) {
             tagLayer.cancelPlacement()
             singleFingerPanEnabled = false
@@ -4138,14 +4183,13 @@ class MainActivity : Activity() {
             mainHandler.removeCallbacks(activatePressureEraser)
             pressureEraser.cancelCandidate()
             dryInkView.setEraserCursor(null)
-            clearContentSelection()
         }
-        if (::textInputLayer.isInitialized) textInputLayer.setTextMode(enabled)
+        if (::textInputLayer.isInitialized) textInputLayer.setTextInsertionArmed(enabled)
         updateSelectionInteraction()
         if (rerender) renderToolShelf()
     }
 
-    private fun cursorModePenPreset(): ToolPreset? =
+    private fun insertionModePenPreset(): ToolPreset? =
         toolShelf.tools.firstOrNull { it.id == lastPenToolId && it.kind == DrawingToolKind.PEN }
             ?: toolShelf.tools.firstOrNull { it.kind == DrawingToolKind.PEN }?.also { lastPenToolId = it.id }
 
@@ -4184,6 +4228,13 @@ class MainActivity : Activity() {
     private fun isStylus(toolType: Int): Boolean =
         toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
 
+    private fun MotionEvent.hasCtrlModifier(): Boolean = metaState and KeyEvent.META_CTRL_ON != 0
+
+    private fun MotionEvent.hasShiftModifier(): Boolean = metaState and KeyEvent.META_SHIFT_ON != 0
+
+    private fun lassoToolActive(): Boolean =
+        !textInsertionArmed && !singleFingerPanEnabled && toolShelf.selected.kind == DrawingToolKind.LASSO
+
     private fun hasStylusPointer(event: MotionEvent): Boolean =
         (0 until event.pointerCount).any { isStylus(event.getToolType(it)) }
 
@@ -4194,9 +4245,18 @@ class MainActivity : Activity() {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (singleFingerPanEnabled && fingerIndices.size == 1) beginSingleFingerPan(event, fingerIndices[0])
+                if (lassoToolActive() && fingerIndices.size == 1) {
+                    val index = fingerIndices[0]
+                    fingerLassoPointerId = event.getPointerId(index)
+                    beginContentLasso(event.getX(index), event.getY(index))
+                } else if (singleFingerPanEnabled && fingerIndices.size == 1) {
+                    beginSingleFingerPan(event, fingerIndices[0])
+                }
             }
-            MotionEvent.ACTION_POINTER_DOWN -> if (fingerIndices.size >= 2) beginTransformGesture(event, fingerIndices)
+            MotionEvent.ACTION_POINTER_DOWN -> if (fingerIndices.size >= 2) {
+                cancelFingerLasso()
+                beginTransformGesture(event, fingerIndices)
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (fingerIndices.size >= 2) {
                     val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
@@ -4215,6 +4275,12 @@ class MainActivity : Activity() {
                                 )
                                 applyViewportToLayers()
                             }
+                    }
+                } else if (fingerLassoPointerId != null) {
+                    val index = event.findPointerIndex(requireNotNull(fingerLassoPointerId))
+                    if (index >= 0) {
+                        val point = viewport.viewToDocument(event.getX(index), event.getY(index))
+                        dryInkView.extendLasso(point)
                     }
                 } else if (singleFingerPanEnabled) {
                     val index = fingerIndices[0]
@@ -4235,10 +4301,90 @@ class MainActivity : Activity() {
                     else -> endTransformGesture()
                 }
             }
-            MotionEvent.ACTION_UP,
-            MotionEvent.ACTION_CANCEL -> endTransformGesture()
+            MotionEvent.ACTION_UP -> {
+                if (fingerLassoPointerId == event.getPointerId(event.actionIndex)) finishContentLasso()
+                fingerLassoPointerId = null
+                endTransformGesture()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                cancelFingerLasso()
+                endTransformGesture()
+            }
         }
         return true
+    }
+
+    private fun handleMouseGesture(event: MotionEvent): Boolean {
+        val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
+            ?: return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val middlePressed = event.buttonState and MotionEvent.BUTTON_TERTIARY != 0
+                val primaryPressed = event.buttonState and MotionEvent.BUTTON_PRIMARY != 0
+                mouseCanvasGesture =
+                    CanvasInputRouting.mouseDragIntent(
+                        primaryPressed = primaryPressed,
+                        middlePressed = middlePressed,
+                        ctrlPressed = event.hasCtrlModifier(),
+                        panoramaEnabled = singleFingerPanEnabled,
+                        lassoEnabled = lassoToolActive(),
+                    )
+                when (mouseCanvasGesture) {
+                    CanvasDragIntent.PAN -> beginSingleFingerPan(event, mouseIndex)
+                    CanvasDragIntent.ZOOM -> lastMouseGestureY = event.getY(mouseIndex)
+                    CanvasDragIntent.LASSO -> beginContentLasso(event.getX(mouseIndex), event.getY(mouseIndex))
+                    CanvasDragIntent.NONE -> Unit
+                }
+            }
+            MotionEvent.ACTION_MOVE -> when (mouseCanvasGesture) {
+                CanvasDragIntent.PAN -> applySingleFingerPan(event.getX(mouseIndex), event.getY(mouseIndex))
+                CanvasDragIntent.ZOOM -> {
+                    val x = event.getX(mouseIndex)
+                    val y = event.getY(mouseIndex)
+                    val factor = kotlin.math.exp((lastMouseGestureY - y) / dp(240).toFloat())
+                    viewport.applyGesture(x, y, x, y, factor)
+                    lastMouseGestureY = y
+                    applyViewportToLayers()
+                }
+                CanvasDragIntent.LASSO -> {
+                    val point = viewport.viewToDocument(event.getX(mouseIndex), event.getY(mouseIndex))
+                    dryInkView.extendLasso(point)
+                }
+                CanvasDragIntent.NONE -> Unit
+            }
+            MotionEvent.ACTION_UP -> {
+                if (mouseCanvasGesture == CanvasDragIntent.LASSO) finishContentLasso()
+                if (mouseCanvasGesture == CanvasDragIntent.PAN) endTransformGesture()
+                mouseCanvasGesture = CanvasDragIntent.NONE
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (mouseCanvasGesture == CanvasDragIntent.LASSO) dryInkView.clearSelection()
+                endTransformGesture()
+                mouseCanvasGesture = CanvasDragIntent.NONE
+            }
+        }
+        return true
+    }
+
+    private fun beginContentLasso(viewX: Float, viewY: Float) {
+        clearContentSelection()
+        dryInkView.beginLasso(viewport.viewToDocument(viewX, viewY), toolShelf.selected.lassoShape)
+    }
+
+    private fun finishContentLasso() {
+        val polygon = dryInkView.finishLasso()
+        tagLayer.selectInPolygon(polygon)
+        textInputLayer.selectInPolygon(polygon, notifySelectionChange = false)
+        insertContentLayer.selectInPolygon(polygon)
+        updateSelectionInteraction()
+        renderToolDetails()
+    }
+
+    private fun cancelFingerLasso() {
+        if (fingerLassoPointerId == null) return
+        fingerLassoPointerId = null
+        dryInkView.clearSelection()
+        updateSelectionInteraction()
     }
 
     private fun beginSingleFingerPan(event: MotionEvent, fingerIndex: Int) {
@@ -4329,9 +4475,12 @@ class MainActivity : Activity() {
     private fun clearContentSelection() {
         dryInkView.clearSelection()
         if (::tagLayer.isInitialized) tagLayer.clearSelection()
-        if (::textInputLayer.isInitialized) textInputLayer.clearSelection()
+        if (::textInputLayer.isInitialized) {
+            textInputLayer.endEditing()
+            textInputLayer.clearSelection()
+        }
         if (::insertContentLayer.isInitialized) insertContentLayer.clearSelection()
-        if (::selectionOverlay.isInitialized) selectionOverlay.invalidate()
+        if (::selectionOverlay.isInitialized) updateSelectionInteraction()
     }
 
     private fun deleteContentSelection(): Int {
@@ -4355,8 +4504,8 @@ class MainActivity : Activity() {
 
     private fun updateSelectionInteraction() {
         if (!::selectionOverlay.isInitialized) return
-        val lassoActive = !textModeEnabled && toolShelf.selected.kind == DrawingToolKind.LASSO
-        selectionOverlay.selectionEnabled = lassoActive
+        val lassoActive = !textInsertionArmed && toolShelf.selected.kind == DrawingToolKind.LASSO
+        selectionOverlay.selectionEnabled = lassoActive || (selectedContentCount() > 0 && !textInputLayer.isEditing())
         tagLayer.selectionModeEnabled = lassoActive
         insertContentLayer.selectionModeEnabled = lassoActive
         selectionOverlay.invalidate()
@@ -4694,7 +4843,7 @@ class MainActivity : Activity() {
     private fun addTool(kind: DrawingToolKind) {
         val added = toolShelf.add(kind)
         if (kind == DrawingToolKind.PEN) lastPenToolId = added.id
-        setTextMode(false, rerender = false)
+        setTextInsertionArmed(false, rerender = false)
         updateSelectionInteraction()
         rebuildBrush()
         renderToolShelf()
@@ -4743,7 +4892,7 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && !textModeEnabled && tool.id == toolShelf.selectedId
+        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && !textInsertionArmed && tool.id == toolShelf.selectedId
         return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)

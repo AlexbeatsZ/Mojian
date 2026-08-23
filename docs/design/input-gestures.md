@@ -77,17 +77,25 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 
 ### Touch arbitration
 
-- Stylus/eraser tool types author ink and take priority while a stroke is active.
-- Text cursor mode accepts finger-only MotionEvent streams. A stylus bypasses the text layer and
-  begins the most recently selected pen immediately; this does not disable finger text mode. The
-  text layer observes finger taps at its own dispatch boundary, before an enabled `EditText` can
-  consume them, so double tap selects the complete text box both during and outside editing. When
-  editing is off the layer still returns the stream to the canvas, preserving two-finger transforms.
+- Stylus/eraser tool types are the only inputs that author or erase ink and take priority while a
+  stroke is active. Finger and mouse input must never fall through to a pen/highlighter/eraser preset.
+- `插入文本框` arms only blank-canvas creation. Existing text boxes remain hit-testable regardless
+  of the selected ribbon tool. Finger double tap selects a complete text box; a later tap enters
+  editing, while a drag beyond platform slop moves the selected box and its handles resize it. A
+  confirmed blank tap exits editing and clears selection; page motion never does.
+- The canvas input host observes complete tap streams before any `EditText`, ink, lasso, or inserted
+  object child claims them. A matched text double tap is consumed at that host boundary so a lower
+  layer cannot immediately clear the new selection. Stylus events bypass text selection and use the
+  most recently selected pen while insertion is armed. A second finger cancels text/object
+  manipulation and enters the same two-finger page transform without clearing selection.
 - Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
   tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
-- Each lasso preset switches between a freeform path and a normalized drag rectangle. The completed
-  polygon selects overlapping text boxes and non-background inserted objects in addition to ink
-  and tags; the shared frame transforms every selected content type in document coordinates.
+- Each lasso preset switches between a freeform path and a normalized drag rectangle. Stylus and
+  mouse can lasso; finger lasso is accepted only as an exactly one-finger stream while the lasso
+  preset is selected. Adding a second finger cancels the incomplete lasso without selecting and
+  rebases into two-finger pan/pinch. The completed polygon selects overlapping text boxes and
+  non-background inserted objects in addition to ink and tags; the shared frame transforms every
+  selected content type in document coordinates.
 - The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
 - With the panorama-hand control off, a one-finger stream first reaches the inserted-object layer.
   A hit image/object may consume double-tap selection, selection drag/resize, activation, or long
@@ -106,6 +114,9 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 - With the panorama hand selected, one finger or a contacting stylus/eraser pans at 1x scale and
   cannot author ink. Tapping the selected hand again or choosing a drawing tool restores the
   default two-finger-only mode.
+- A mouse middle-button drag temporarily enters the exact same panorama drag state as a left-button
+  drag with the hand selected; it never toggles toolbar state. Ordinary wheel pans vertically,
+  `Shift+wheel` pans horizontally, and `Ctrl+wheel` zooms with Ctrl taking priority over Shift.
 - Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
   drift below one platform touch slop and span drift below two touch slops do nothing.
 - After a candidate crosses a threshold, it initially commits to pan or scale according to the

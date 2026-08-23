@@ -73,16 +73,20 @@ class CanvasTextInputLayer(
     context: Context,
     private val viewport: ViewportState,
 ) : FrameLayout(context) {
-    private var textModeEnabled = false
+    private var textInsertionArmed = false
     private var downX = 0f
     private var downY = 0f
     private val touchSlop = dp(8).toFloat()
     private var activeEditor: EditText? = null
+    private var consumeSelectionSequence = false
+    private var pageGestureActive = false
     private var capturedFormat: CapturedTextFormat? = null
     private var darkBackground = true
     private val selectedEditors = linkedSetOf<EditText>()
 
     var onSelectionChanged: ((Int) -> Unit)? = null
+    var onEditingChanged: ((Boolean) -> Unit)? = null
+    var onPageGesture: ((MotionEvent) -> Unit)? = null
 
     private val selectionGestureDetector =
         GestureDetector(
@@ -92,16 +96,24 @@ class CanvasTextInputLayer(
 
                 override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
                     val editor = editorAt(event.x, event.y)
+                    if (editor != null && editor in selectedEditors && activeEditor !== editor) {
+                        beginEditing(editor, showIme = true)
+                        return true
+                    }
                     if (selectedEditors.isNotEmpty() && editor !in selectedEditors) {
+                        endEditing()
                         clearSelection()
                         return true
                     }
+                    if (editor == null && activeEditor != null) endEditing()
                     return editor != null
                 }
 
                 override fun onDoubleTap(event: MotionEvent): Boolean {
                     val editor = editorAt(event.x, event.y) ?: return false
+                    endEditing()
                     selectOnly(editor)
+                    consumeSelectionSequence = true
                     return true
                 }
             },
@@ -113,10 +125,45 @@ class CanvasTextInputLayer(
         clipToPadding = false
     }
 
-    fun setTextMode(enabled: Boolean) {
-        textModeEnabled = enabled
-        forEachEditor { it.isEnabled = enabled }
-        if (!enabled) hideKeyboard()
+    fun setTextInsertionArmed(enabled: Boolean) {
+        textInsertionArmed = enabled
+    }
+
+    /**
+     * Receives the stream from [CanvasInputHost], before any drawing or object layer can claim it.
+     * A disarmed text layer deliberately does not consume the canvas, so observing here is required
+     * for finger double taps to retain both ACTION_DOWN and ACTION_UP.
+     */
+    fun observeCanvasPointerEvent(event: MotionEvent): Boolean {
+        if (isFingerOnlyEvent(event) && event.pointerCount == 1 && !pageGestureActive) {
+            selectionGestureDetector.onTouchEvent(event)
+        }
+        val consume = consumeSelectionSequence
+        if (consume && (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)) {
+            consumeSelectionSequence = false
+        }
+        return consume
+    }
+
+    fun isEditing(): Boolean = activeEditor?.hasFocus() == true
+
+    fun beginEditingSelectionAt(viewX: Float, viewY: Float): Boolean {
+        val editor = editorAt(viewX, viewY)?.takeIf { it in selectedEditors }
+            ?: selectedEditors.singleOrNull()
+            ?: return false
+        selectOnly(editor)
+        onSelectionChanged?.invoke(1)
+        beginEditing(editor, showIme = true)
+        return true
+    }
+
+    fun endEditing() {
+        val editor = activeEditor ?: return
+        activeEditor = null
+        editor.clearFocus()
+        editor.isEnabled = false
+        hideKeyboard()
+        onEditingChanged?.invoke(false)
     }
 
     fun setDarkBackground(enabled: Boolean) {
@@ -125,8 +172,8 @@ class CanvasTextInputLayer(
     }
 
     fun clearAll() {
+        endEditing()
         removeAllViews()
-        activeEditor = null
         capturedFormat = null
         selectedEditors.clear()
         onSelectionChanged?.invoke(0)
@@ -142,10 +189,12 @@ class CanvasTextInputLayer(
     fun clearSelection() {
         if (selectedEditors.isEmpty()) return
         selectedEditors.clear()
+        refreshEditorInteraction()
         onSelectionChanged?.invoke(0)
     }
 
-    fun selectInPolygon(polygon: List<DocumentPoint>): Int {
+    fun selectInPolygon(polygon: List<DocumentPoint>, notifySelectionChange: Boolean = true): Int {
+        endEditing()
         selectedEditors.clear()
         if (polygon.size >= 3) {
             forEachEditor { editor ->
@@ -160,6 +209,8 @@ class CanvasTextInputLayer(
                 }
             }
         }
+        refreshEditorInteraction()
+        if (notifySelectionChange) onSelectionChanged?.invoke(selectedEditors.size)
         return selectedEditors.size
     }
 
@@ -334,24 +385,39 @@ class CanvasTextInputLayer(
         }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        val fingerEvent = isFingerEvent(event)
-        if (fingerEvent) {
-            // Observe at the text layer boundary: when editing is enabled, the EditText child
-            // consumes the stream and the ink layer below never receives the double tap.
-            selectionGestureDetector.onTouchEvent(event)
+        val fingerEvent = isFingerOnlyEvent(event)
+        val mouseEvent = isMouseOnlyEvent(event)
+        if (fingerEvent && (pageGestureActive || event.pointerCount > 1)) {
+            if (!pageGestureActive) {
+                pageGestureActive = true
+                endEditing()
+            }
+            onPageGesture?.invoke(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                pageGestureActive = false
+            }
+            return true
         }
-        if (!textModeEnabled || !fingerEvent) return false
+        if (!fingerEvent && !mouseEvent) return false
+
+        val editor = editorAt(event.x, event.y)
+        if (mouseEvent && event.actionMasked == MotionEvent.ACTION_DOWN && editor != null) {
+            selectOnly(editor)
+            beginEditing(editor, showIme = false)
+        }
+        if (activeEditor != null && editor === activeEditor) return super.dispatchTouchEvent(event)
+        if (!textInsertionArmed || editor != null) return false
         return super.dispatchTouchEvent(event)
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled || !isFingerEvent(event)) return false
+        if (!textInsertionArmed || !acceptsTextInput(event)) return false
         if (event.actionMasked != MotionEvent.ACTION_DOWN) return false
         return editorAt(event.x, event.y) == null
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled || !isFingerEvent(event)) return false
+        if (!textInsertionArmed || !acceptsTextInput(event)) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
@@ -360,7 +426,9 @@ class CanvasTextInputLayer(
             }
             MotionEvent.ACTION_UP -> {
                 performClick()
-                if (hypot(event.x - downX, event.y - downY) <= touchSlop) addEditor(event.x, event.y)
+                if (hypot(event.x - downX, event.y - downY) <= touchSlop) {
+                    addEditor(event.x, event.y, showIme = isFingerOnlyEvent(event))
+                }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> return true
@@ -379,17 +447,15 @@ class CanvasTextInputLayer(
         applyViewport()
     }
 
-    private fun addEditor(touchX: Float, touchY: Float) {
+    private fun addEditor(touchX: Float, touchY: Float, showIme: Boolean) {
         val editorWidth = dp(300)
         val editor = createEditor()
         val point = viewport.viewToDocument(touchX - dp(2), touchY - dp(18))
         editor.tag = TextBoxState(point.x, point.y)
         addView(editor, LayoutParams(editorWidth, ViewGroup.LayoutParams.WRAP_CONTENT))
-        activeEditor = editor
-        editor.requestFocus()
+        beginEditing(editor, showIme)
         editor.post {
             applyEditorTransform(editor)
-            showKeyboard(editor)
         }
     }
 
@@ -405,11 +471,15 @@ class CanvasTextInputLayer(
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             isSingleLine = false
             isFocusableInTouchMode = true
-            isEnabled = textModeEnabled
+            isEnabled = false
             setOnFocusChangeListener { view, focused ->
                 if (focused) {
                     activeEditor = view as EditText
-                    if (textModeEnabled) showKeyboard(view)
+                    onEditingChanged?.invoke(true)
+                } else if (activeEditor === view) {
+                    activeEditor = null
+                    view.isEnabled = false
+                    onEditingChanged?.invoke(false)
                 }
             }
         }
@@ -521,7 +591,24 @@ class CanvasTextInputLayer(
         if (selectedEditors.size == 1 && editor in selectedEditors) return
         selectedEditors.clear()
         selectedEditors += editor
+        refreshEditorInteraction()
         onSelectionChanged?.invoke(1)
+    }
+
+    private fun beginEditing(editor: EditText, showIme: Boolean) {
+        if (activeEditor !== editor) activeEditor?.let { previous ->
+            previous.clearFocus()
+            previous.isEnabled = false
+        }
+        activeEditor = editor
+        editor.isEnabled = true
+        editor.requestFocus()
+        if (showIme) editor.post { showKeyboard(editor) }
+        onEditingChanged?.invoke(true)
+    }
+
+    private fun refreshEditorInteraction() {
+        forEachEditor { editor -> editor.isEnabled = editor === activeEditor }
     }
 
     private fun state(editor: EditText): TextBoxState =
@@ -562,10 +649,23 @@ class CanvasTextInputLayer(
         return null
     }
 
-    private fun isFingerEvent(event: MotionEvent): Boolean =
+    private fun acceptsTextInput(event: MotionEvent): Boolean =
         InputModality.acceptsTextInput(
             pointerToolTypes = (0 until event.pointerCount).map(event::getToolType),
             fingerToolType = MotionEvent.TOOL_TYPE_FINGER,
+            mouseToolType = MotionEvent.TOOL_TYPE_MOUSE,
+        )
+
+    private fun isFingerOnlyEvent(event: MotionEvent): Boolean =
+        InputModality.isFingerOnly(
+            pointerToolTypes = (0 until event.pointerCount).map(event::getToolType),
+            fingerToolType = MotionEvent.TOOL_TYPE_FINGER,
+        )
+
+    private fun isMouseOnlyEvent(event: MotionEvent): Boolean =
+        InputModality.isMouseOnly(
+            pointerToolTypes = (0 until event.pointerCount).map(event::getToolType),
+            mouseToolType = MotionEvent.TOOL_TYPE_MOUSE,
         )
 
     private fun forEachEditor(action: (EditText) -> Unit) {

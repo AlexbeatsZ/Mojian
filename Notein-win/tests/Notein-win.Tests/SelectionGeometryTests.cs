@@ -40,4 +40,13 @@ public class SelectionGeometryTests
         Assert.Equal(30.0, scaled.X);
         Assert.Equal(30.0, scaled.Y);
     }
+
+    [Fact]
+    public void PolygonIntersectsRect_SelectsPartialTextOrImageOverlap()
+    {
+        var polygon = new List<Point> { new(0, 0), new(40, 0), new(40, 40), new(0, 40) };
+
+        Assert.True(SelectionGeometry.PolygonIntersectsRect(polygon, new Rect(30, 30, 40, 40)));
+        Assert.False(SelectionGeometry.PolygonIntersectsRect(polygon, new Rect(60, 60, 20, 20)));
+    }
 }

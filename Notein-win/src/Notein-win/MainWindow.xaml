@@ -157,7 +157,7 @@
                             <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="撤销" Command="{Binding UndoCommand}"><Path Data="{StaticResource Fluent_arrow_undo}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="键入文本" IsChecked="{Binding TextModeEnabled}"><Path Data="{StaticResource Fluent_cursor}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入文本框" IsChecked="{Binding TextInsertionArmed}"><Path Data="{StaticResource Fluent_cursor}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <ItemsControl ItemsSource="{Binding LassoTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_lasso}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <ItemsControl ItemsSource="{Binding EraserTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_eraser}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
@@ -294,13 +294,13 @@
 
                     <Border Grid.Column="0" PreviewMouseDown="OnLeftCanvasFocus">
                         <controls:NoteCanvas x:Name="LeftCanvas" Document="{Binding PrimaryDocument}" Appearance="{Binding PrimaryPageAppearance}" PageTitle="{Binding PrimaryPageTitle}"
-                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextModeEnabled="{Binding TextModeEnabled}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextInsertionArmed="{Binding TextInsertionArmed}"
                                              InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
                     <Border Grid.Column="1" Width="7" Background="#2A2A2A" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1,0" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}" />
                     <Border Grid.Column="2" PreviewMouseDown="OnRightCanvasFocus" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}">
                         <controls:NoteCanvas x:Name="RightCanvas" Document="{Binding SecondaryDocument}" Appearance="{Binding SecondaryPageAppearance}" PageTitle="{Binding SecondaryPageTitle}"
-                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextModeEnabled="{Binding TextModeEnabled}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextInsertionArmed="{Binding TextInsertionArmed}"
                                              InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
 

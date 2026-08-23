@@ -79,11 +79,15 @@ foreground. ADB screenshots of the installed Android build are the visual compar
 - Persist all completed ink in document coordinates with position, elapsed time, normalized pressure,
   tilt, tool type, logical color, width, opacity, and brush profile version.
 - WPF stylus input uses real `StylusPoint.PressureFactor`; promoted mouse events must not duplicate a
-  stylus stroke. Mouse drawing remains available for desktop testing.
+  stylus stroke. Only a real stylus authors/erases ink. Mouse remains a pointer and may edit existing
+  text, transform selected content, lasso, or pan.
 - Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
   button or using hand mode pans; holding Ctrl while performing either drag continuously zooms.
   A mouse side button remapped by its driver to middle button inherits this behavior. Zoom lock
   blocks gesture scaling only.
+- `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not
+  user-configurable shortcut entries. `插入文本框` only controls blank-canvas creation. Persisted
+  text remains editable in every ribbon/tool state, and lasso selection includes text and inserts.
 - Keyboard mappings are stored per workspace, categorized as `文件`, `开始`, `插入`, `绘图`, and `视图`,
   and resolve conflicts by removing the previous owner. Standard editing, undo/redo, search,
   full-page, delete-selection, and zoom defaults are provided.

@@ -26,7 +26,11 @@ class SelectionOverlayView(
     var selectionEnabled = false
         set(value) {
             field = value
-            if (!value) gestureMode = GestureMode.NONE
+            if (!value) {
+                gestureMode = GestureMode.NONE
+                gestureCommitted = false
+                pageGestureActive = false
+            }
             invalidate()
         }
     var selectionVisible = true
@@ -38,11 +42,17 @@ class SelectionOverlayView(
     var onTranslateSelection: ((Float, Float) -> Unit)? = null
     var onScaleSelection: ((Float, Float, Float) -> Unit)? = null
     var onTransformFinished: (() -> Unit)? = null
+    var onSelectionTapped: ((Float, Float) -> Unit)? = null
+    var onPageGesture: ((MotionEvent) -> Unit)? = null
 
     private var gestureMode = GestureMode.NONE
+    private var gestureCommitted = false
+    private var pageGestureActive = false
+    private var downPoint = DocumentPoint(0f, 0f)
     private var lastPoint = DocumentPoint(0f, 0f)
     private var scaleAnchor = DocumentPoint(0f, 0f)
     private var lastScaleDistance = 1f
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val selectionPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(218, 178, 233)
@@ -70,6 +80,19 @@ class SelectionOverlayView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!selectionEnabled) return false
+        if (pageGestureActive || event.pointerCount > 1) {
+            if (!pageGestureActive) {
+                pageGestureActive = true
+                gestureMode = GestureMode.NONE
+                gestureCommitted = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            onPageGesture?.invoke(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                pageGestureActive = false
+            }
+            return true
+        }
         val point = viewport.viewToDocument(event.x, event.y).let { DocumentPoint(it.x, it.y) }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -77,7 +100,7 @@ class SelectionOverlayView(
                 val padding = dp(8f) / viewport.scale
                 val displayBounds = RectF(bounds).apply { inset(-padding, -padding) }
                 val corners = corners(displayBounds)
-                val hitRadius = dp(15f) / viewport.scale
+                val hitRadius = dp(24f) / viewport.scale
                 val handleIndex =
                     corners.indices.minByOrNull { index ->
                         SelectionGeometry.squaredDistance(point.x, point.y, corners[index].x, corners[index].y)
@@ -92,11 +115,18 @@ class SelectionOverlayView(
                     if (!displayBounds.contains(point.x, point.y)) return false
                     gestureMode = GestureMode.MOVE
                 }
+                gestureCommitted = false
+                downPoint = point
                 lastPoint = point
-                parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (!gestureCommitted) {
+                    val viewDistance = hypot(point.x - downPoint.x, point.y - downPoint.y) * viewport.scale
+                    if (viewDistance < touchSlop) return true
+                    gestureCommitted = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
                 when (gestureMode) {
                     GestureMode.MOVE -> {
                         onTranslateSelection?.invoke(point.x - lastPoint.x, point.y - lastPoint.y)
@@ -116,17 +146,24 @@ class SelectionOverlayView(
             }
             MotionEvent.ACTION_UP -> {
                 if (gestureMode == GestureMode.NONE) return false
-                performClick()
+                if (gestureCommitted) {
+                    onTransformFinished?.invoke()
+                } else {
+                    performClick()
+                    onSelectionTapped?.invoke(event.x, event.y)
+                }
                 gestureMode = GestureMode.NONE
+                gestureCommitted = false
                 parent?.requestDisallowInterceptTouchEvent(false)
-                onTransformFinished?.invoke()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
                 if (gestureMode == GestureMode.NONE) return false
+                val transformed = gestureCommitted
                 gestureMode = GestureMode.NONE
+                gestureCommitted = false
                 parent?.requestDisallowInterceptTouchEvent(false)
-                onTransformFinished?.invoke()
+                if (transformed) onTransformFinished?.invoke()
                 return true
             }
         }

@@ -58,7 +58,7 @@ object ShortcutActionCatalog {
 
             add(ShortcutCategory.DRAW, "draw:undo", "撤销")
             add(ShortcutCategory.DRAW, "draw:redo", "重做")
-            add(ShortcutCategory.DRAW, "draw:cursor", "键入文本")
+            add(ShortcutCategory.DRAW, "draw:cursor", "插入文本框")
             tools
                 .sortedWith(
                     compareBy<ToolPreset> {

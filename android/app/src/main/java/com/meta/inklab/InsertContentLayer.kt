@@ -535,7 +535,10 @@ class InsertContentLayer(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.pointerCount != 1 || event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) {
+        val directPointer =
+            event.pointerCount == 1 &&
+                (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE)
+        if (!directPointer) {
             gestureDetector.onTouchEvent(event)
             if (event.pointerCount > 1) gestureArbiter.addPointer()
             finishObjectGesture(persistMutation = true)
