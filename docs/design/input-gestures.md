@@ -79,9 +79,14 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 
 - Stylus/eraser tool types author ink and take priority while a stroke is active.
 - Text cursor mode accepts finger-only MotionEvent streams. A stylus bypasses the text layer and
-  begins the most recently selected pen immediately; this does not disable finger text mode.
+  begins the most recently selected pen immediately; this does not disable finger text mode. When
+  text editing is off, the canvas observer may confirm a finger double tap on a text box without
+  withholding that first pointer from the two-finger page-transform path.
 - Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
   tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
+- Each lasso preset switches between a freeform path and a normalized drag rectangle. The completed
+  polygon selects overlapping text boxes and non-background inserted objects in addition to ink
+  and tags; the shared frame transforms every selected content type in document coordinates.
 - The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
 - With the panorama-hand control off, a one-finger stream first reaches the inserted-object layer.
   A hit image/object may consume double-tap selection, selection drag/resize, activation, or long
@@ -123,8 +128,9 @@ scale and translation:
 - stylus MotionEvents enter AndroidX Ink through the inverse view-to-document matrix;
 - wet ink uses AndroidX Ink's world/stroke transforms so it matches the dry renderer;
 - eraser hit testing converts the pointer through the same inverse matrix.
-- lasso selection bounds, tag hit testing, move deltas, and corner scaling all use the same document
-  coordinate space; the overlay converts only touch and rendering at its boundary.
+- lasso selection bounds, text-box and inserted-object bounds, tag hit testing, move deltas, and
+  corner scaling all use the same document coordinate space; the overlay converts only touch and
+  rendering at its boundary.
 
 Zoom is anchored at the two-finger centroid, not the screen center. The lab range is 50–800%. This
 is a safe prototype limit, not a claim about Notein's full runtime range.

@@ -54,6 +54,9 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - Overlapping handle hit regions resolve to the nearest handle, not the first handle in drawing
   order. Body move and resize commit only after platform touch slop. Canvas pan/pinch keeps the
   object selected; a confirmed single tap elsewhere is the sole deselection gesture.
+- The lasso's rectangle and freeform variants select every non-background inserted object whose
+  document bounds overlap the completed polygon. Images can therefore join ink, tags, and text
+  boxes in one shared move/scale/delete selection; immutable PDF page backgrounds remain excluded.
 - Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
   four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise
   90-degree rotation, horizontal/vertical flip, restore original pixel size, and set-as-background.

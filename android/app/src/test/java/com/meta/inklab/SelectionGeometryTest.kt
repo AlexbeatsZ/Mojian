@@ -43,4 +43,33 @@ class SelectionGeometryTest {
         assertEquals(1, SelectionGeometry.nearestPointIndexWithinRadius(15f, 2f, handles, radius = 24f))
         assertEquals(-1, SelectionGeometry.nearestPointIndexWithinRadius(70f, 0f, handles, radius = 24f))
     }
+
+    @Test
+    fun rectangleLassoNormalizesDragDirection() {
+        val polygon = SelectionGeometry.rectanglePolygon(DocumentPoint(90f, 70f), DocumentPoint(20f, 10f))
+
+        assertEquals(DocumentPoint(20f, 10f), polygon[0])
+        assertEquals(DocumentPoint(90f, 70f), polygon[2])
+    }
+
+    @Test
+    fun lassoSelectsOverlappingBoxesAndRejectsOutsideBoxes() {
+        val polygon =
+            listOf(
+                DocumentPoint(0f, 0f),
+                DocumentPoint(100f, 0f),
+                DocumentPoint(100f, 100f),
+                DocumentPoint(0f, 100f),
+            )
+
+        assertTrue(SelectionGeometry.polygonIntersectsRect(polygon, DocumentRect(80f, 80f, 130f, 130f)))
+        assertTrue(SelectionGeometry.polygonIntersectsRect(polygon, DocumentRect(25f, 25f, 75f, 75f)))
+        assertTrue(
+            SelectionGeometry.polygonIntersectsRect(
+                listOf(DocumentPoint(-20f, 45f), DocumentPoint(120f, 45f), DocumentPoint(120f, 55f), DocumentPoint(-20f, 55f)),
+                DocumentRect(40f, 20f, 60f, 80f),
+            ),
+        )
+        assertFalse(SelectionGeometry.polygonIntersectsRect(polygon, DocumentRect(120f, 120f, 150f, 150f)))
+    }
 }

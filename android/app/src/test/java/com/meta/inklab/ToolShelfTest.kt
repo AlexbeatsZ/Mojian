@@ -54,6 +54,9 @@ class ToolShelfTest {
         val eraser = shelf.tools.first { it.kind == DrawingToolKind.ERASER }
         eraser.eraserRadiusMm = 6.5f
 
+        val lasso = shelf.tools.first { it.kind == DrawingToolKind.LASSO }
+        lasso.lassoShape = LassoShape.RECTANGLE
+
         shelf.select(added.id)
 
         val json = shelf.toJson()
@@ -76,6 +79,9 @@ class ToolShelfTest {
 
         val restoredEraser = restored.tools.first { it.kind == DrawingToolKind.ERASER }
         assertEquals(6.5f, restoredEraser.eraserRadiusMm, 0.001f)
+
+        val restoredLasso = restored.tools.first { it.kind == DrawingToolKind.LASSO }
+        assertEquals(LassoShape.RECTANGLE, restoredLasso.lassoShape)
     }
 
     @Test

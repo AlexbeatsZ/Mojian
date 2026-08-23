@@ -58,6 +58,8 @@ class DryInkView(context: Context) : View(context) {
     private val redoStrokes = ArrayDeque<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
+    private var lassoShape = LassoShape.FREEFORM
+    private var lassoStartPoint: DocumentPoint? = null
     private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
     private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
     private val dotPaint =
@@ -176,6 +178,7 @@ class DryInkView(context: Context) : View(context) {
         redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
+        lassoStartPoint = null
         invalidate()
     }
 
@@ -189,6 +192,7 @@ class DryInkView(context: Context) : View(context) {
         redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
+        lassoStartPoint = null
         invalidate()
     }
 
@@ -246,14 +250,23 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun beginLasso(point: PointF) {
+    fun beginLasso(point: PointF, shape: LassoShape = LassoShape.FREEFORM) {
         selectedStrokes.clear()
         lassoPoints.clear()
-        lassoPoints += DocumentPoint(point.x, point.y)
+        lassoShape = shape
+        lassoStartPoint = DocumentPoint(point.x, point.y)
+        lassoPoints += requireNotNull(lassoStartPoint)
         invalidate()
     }
 
     fun extendLasso(point: PointF) {
+        if (lassoShape == LassoShape.RECTANGLE) {
+            val start = lassoStartPoint ?: DocumentPoint(point.x, point.y)
+            lassoPoints.clear()
+            lassoPoints += SelectionGeometry.rectanglePolygon(start, DocumentPoint(point.x, point.y))
+            invalidate()
+            return
+        }
         val previous = lassoPoints.lastOrNull()
         if (previous == null || SelectionGeometry.squaredDistance(previous.x, previous.y, point.x, point.y) >= 4f) {
             lassoPoints += DocumentPoint(point.x, point.y)
@@ -277,6 +290,7 @@ class DryInkView(context: Context) : View(context) {
             }
         }
         lassoPoints.clear()
+        lassoStartPoint = null
         invalidate()
         return polygon
     }
@@ -286,6 +300,7 @@ class DryInkView(context: Context) : View(context) {
     fun clearSelection() {
         selectedStrokes.clear()
         lassoPoints.clear()
+        lassoStartPoint = null
         invalidate()
     }
 
@@ -505,6 +520,7 @@ class DryInkView(context: Context) : View(context) {
         val path = Path().apply {
             moveTo(lassoPoints.first().x, lassoPoints.first().y)
             for (index in 1 until lassoPoints.size) lineTo(lassoPoints[index].x, lassoPoints[index].y)
+            if (lassoShape == LassoShape.RECTANGLE && lassoPoints.size >= 3) close()
         }
         canvas.drawPath(path, lassoPaint)
     }

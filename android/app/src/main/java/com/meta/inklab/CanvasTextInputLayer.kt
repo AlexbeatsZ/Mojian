@@ -2,6 +2,7 @@ package com.meta.inklab
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.InputType
 import android.text.Layout
@@ -22,6 +23,7 @@ import android.text.style.TypefaceSpan
 import android.text.style.UnderlineSpan
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -40,12 +42,19 @@ enum class FormatPainterResult {
 
 data class CanvasTextSnapshot(
     val text: CharSequence,
-    val left: Int,
-    val top: Int,
+    val documentX: Float,
+    val documentY: Float,
     val width: Int,
     val height: Int,
+    val contentScale: Float,
     val lineSpacingExtra: Float,
     val lineSpacingMultiplier: Float,
+)
+
+private data class TextBoxState(
+    var documentX: Float,
+    var documentY: Float,
+    var contentScale: Float = 1f,
 )
 
 private data class CapturedTextFormat(
@@ -60,7 +69,10 @@ private data class CapturedTextFormat(
 )
 
 /** Session-only rich text boxes placed directly on the visible page. */
-class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
+class CanvasTextInputLayer(
+    context: Context,
+    private val viewport: ViewportState,
+) : FrameLayout(context) {
     private var textModeEnabled = false
     private var downX = 0f
     private var downY = 0f
@@ -68,6 +80,32 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
     private var activeEditor: EditText? = null
     private var capturedFormat: CapturedTextFormat? = null
     private var darkBackground = true
+    private val selectedEditors = linkedSetOf<EditText>()
+
+    var onSelectionChanged: ((Int) -> Unit)? = null
+
+    private val selectionGestureDetector =
+        GestureDetector(
+            context,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(event: MotionEvent): Boolean = true
+
+                override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
+                    val editor = editorAt(event.x, event.y)
+                    if (selectedEditors.isNotEmpty() && editor !in selectedEditors) {
+                        clearSelection()
+                        return true
+                    }
+                    return editor != null
+                }
+
+                override fun onDoubleTap(event: MotionEvent): Boolean {
+                    val editor = editorAt(event.x, event.y) ?: return false
+                    selectOnly(editor)
+                    return true
+                }
+            },
+        )
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
@@ -90,19 +128,102 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         removeAllViews()
         activeEditor = null
         capturedFormat = null
+        selectedEditors.clear()
+        onSelectionChanged?.invoke(0)
     }
+
+    fun applyViewport() {
+        forEachEditor(::applyEditorTransform)
+        invalidate()
+    }
+
+    fun observeSelectionTouch(event: MotionEvent): Boolean {
+        if (textModeEnabled || !isFingerEvent(event)) return false
+        return selectionGestureDetector.onTouchEvent(event)
+    }
+
+    fun selectedCount(): Int = selectedEditors.size
+
+    fun clearSelection() {
+        if (selectedEditors.isEmpty()) return
+        selectedEditors.clear()
+        onSelectionChanged?.invoke(0)
+    }
+
+    fun selectInPolygon(polygon: List<DocumentPoint>): Int {
+        selectedEditors.clear()
+        if (polygon.size >= 3) {
+            forEachEditor { editor ->
+                val bounds = documentBounds(editor)
+                if (
+                    SelectionGeometry.polygonIntersectsRect(
+                        polygon,
+                        DocumentRect(bounds.left, bounds.top, bounds.right, bounds.bottom),
+                    )
+                ) {
+                    selectedEditors += editor
+                }
+            }
+        }
+        return selectedEditors.size
+    }
+
+    fun selectedBounds(): RectF? =
+        selectedEditors
+            .map(::documentBounds)
+            .reduceOrNull { combined, bounds -> combined.apply { union(bounds) } }
+
+    fun translateSelection(deltaX: Float, deltaY: Float) {
+        selectedEditors.forEach { editor ->
+            state(editor).apply {
+                documentX += deltaX
+                documentY += deltaY
+            }
+            applyEditorTransform(editor)
+        }
+    }
+
+    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+        selectedEditors.forEach { editor ->
+            state(editor).apply {
+                val scaled = SelectionGeometry.scale(documentX, documentY, anchorX, anchorY, factor)
+                documentX = scaled.x
+                documentY = scaled.y
+                contentScale = (contentScale * factor).coerceIn(0.2f, 8f)
+            }
+            applyEditorTransform(editor)
+        }
+    }
+
+    fun deleteSelection(): Int {
+        val count = selectedEditors.size
+        if (count == 0) return 0
+        selectedEditors.toList().forEach(::removeView)
+        if (activeEditor in selectedEditors) activeEditor = null
+        selectedEditors.clear()
+        onSelectionChanged?.invoke(0)
+        return count
+    }
+
+    fun contentBottom(): Float =
+        (0 until childCount)
+            .mapNotNull { index -> (getChildAt(index) as? EditText)?.let(::documentBounds)?.bottom }
+            .maxOrNull()
+            ?: 0f
 
     fun snapshotEditors(): List<CanvasTextSnapshot> =
         buildList {
             forEachEditor { editor ->
                 val params = editor.layoutParams as LayoutParams
+                val state = state(editor)
                 add(
                     CanvasTextSnapshot(
                         text = SpannableString(editor.text),
-                        left = params.leftMargin,
-                        top = params.topMargin,
-                        width = params.width,
-                        height = params.height,
+                        documentX = state.documentX,
+                        documentY = state.documentY,
+                        width = editor.width.takeIf { it > 0 } ?: params.width.takeIf { it > 0 } ?: dp(300),
+                        height = editor.height.takeIf { it > 0 } ?: params.height.takeIf { it > 0 } ?: dp(32),
+                        contentScale = state.contentScale,
                         lineSpacingExtra = editor.lineSpacingExtra,
                         lineSpacingMultiplier = editor.lineSpacingMultiplier,
                     ),
@@ -116,14 +237,13 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
             val editor = createEditor().apply {
                 setText(snapshot.text)
                 setLineSpacing(snapshot.lineSpacingExtra, snapshot.lineSpacingMultiplier)
+                tag = TextBoxState(snapshot.documentX, snapshot.documentY, snapshot.contentScale)
             }
             addView(
                 editor,
-                LayoutParams(snapshot.width, snapshot.height).apply {
-                    leftMargin = snapshot.left
-                    topMargin = snapshot.top
-                },
+                LayoutParams(snapshot.width, snapshot.height),
             )
+            editor.post { applyEditorTransform(editor) }
         }
     }
 
@@ -255,25 +375,21 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0 || h <= 0) return
-        forEachEditor { editor ->
-            val params = editor.layoutParams as LayoutParams
-            val editorWidth = if (editor.width > 0) editor.width else dp(300)
-            val editorHeight = if (editor.height > 0) editor.height else dp(32)
-            params.leftMargin = params.leftMargin.coerceIn(0, (w - editorWidth).coerceAtLeast(0))
-            params.topMargin = params.topMargin.coerceIn(0, (h - editorHeight).coerceAtLeast(0))
-            editor.layoutParams = params
-        }
+        applyViewport()
     }
 
     private fun addEditor(touchX: Float, touchY: Float) {
         val editorWidth = dp(300)
         val editor = createEditor()
-        val left = (touchX - dp(2)).roundToInt().coerceIn(0, (width - editorWidth).coerceAtLeast(0))
-        val top = (touchY - dp(18)).roundToInt().coerceIn(0, (height - dp(40)).coerceAtLeast(0))
-        addView(editor, LayoutParams(editorWidth, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = left; topMargin = top })
+        val point = viewport.viewToDocument(touchX - dp(2), touchY - dp(18))
+        editor.tag = TextBoxState(point.x, point.y)
+        addView(editor, LayoutParams(editorWidth, ViewGroup.LayoutParams.WRAP_CONTENT))
         activeEditor = editor
         editor.requestFocus()
-        editor.post { showKeyboard(editor) }
+        editor.post {
+            applyEditorTransform(editor)
+            showKeyboard(editor)
+        }
     }
 
     private fun createEditor(): EditText =
@@ -400,10 +516,47 @@ class CanvasTextInputLayer(context: Context) : FrameLayout(context) {
         if (format.subscript) text.setSpan(SubscriptSpan(), start, end, flag)
     }
 
+    private fun selectOnly(editor: EditText) {
+        if (selectedEditors.size == 1 && editor in selectedEditors) return
+        selectedEditors.clear()
+        selectedEditors += editor
+        onSelectionChanged?.invoke(1)
+    }
+
+    private fun state(editor: EditText): TextBoxState =
+        (editor.tag as? TextBoxState)
+            ?: viewport.viewToDocument(editor.x, editor.y).let { point ->
+                TextBoxState(point.x, point.y).also { editor.tag = it }
+            }
+
+    private fun documentBounds(editor: EditText): RectF {
+        val params = editor.layoutParams as? LayoutParams
+        val width = editor.width.takeIf { it > 0 } ?: params?.width?.takeIf { it > 0 } ?: dp(300)
+        val height = editor.height.takeIf { it > 0 } ?: params?.height?.takeIf { it > 0 } ?: dp(32)
+        val state = state(editor)
+        return RectF(
+            state.documentX,
+            state.documentY,
+            state.documentX + width * state.contentScale,
+            state.documentY + height * state.contentScale,
+        )
+    }
+
+    private fun applyEditorTransform(editor: EditText) {
+        val state = state(editor)
+        editor.pivotX = 0f
+        editor.pivotY = 0f
+        editor.scaleX = viewport.scale * state.contentScale
+        editor.scaleY = viewport.scale * state.contentScale
+        editor.x = viewport.translationX + state.documentX * viewport.scale
+        editor.y = viewport.translationY + state.documentY * viewport.scale
+    }
+
     private fun editorAt(x: Float, y: Float): EditText? {
+        val point = viewport.viewToDocument(x, y)
         for (index in childCount - 1 downTo 0) {
             val child = getChildAt(index) as? EditText ?: continue
-            if (x >= child.left && x <= child.right && y >= child.top && y <= child.bottom) return child
+            if (documentBounds(child).contains(point.x, point.y)) return child
         }
         return null
     }

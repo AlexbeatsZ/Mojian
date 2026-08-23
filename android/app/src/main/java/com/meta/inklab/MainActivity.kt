@@ -2498,19 +2498,25 @@ class MainActivity : Activity() {
         wetInkView = InProgressStrokesView(this)
         insertContentLayer = InsertContentLayer(this, viewport, pageContentRepository)
         tagLayer = CanvasTagLayer(this, viewport)
-        textInputLayer = CanvasTextInputLayer(this)
+        textInputLayer = CanvasTextInputLayer(this, viewport)
         selectionOverlay =
             SelectionOverlayView(this, viewport).apply {
                 selectionBoundsProvider = ::combinedSelectionBounds
                 onTranslateSelection = { deltaX, deltaY ->
                     dryInkView.translateSelection(deltaX, deltaY)
                     tagLayer.translateSelection(deltaX, deltaY)
+                    textInputLayer.translateSelection(deltaX, deltaY)
+                    insertContentLayer.translateSelection(deltaX, deltaY)
                 }
                 onScaleSelection = { anchorX, anchorY, factor ->
                     dryInkView.scaleSelection(anchorX, anchorY, factor)
                     tagLayer.scaleSelection(anchorX, anchorY, factor)
+                    textInputLayer.scaleSelection(anchorX, anchorY, factor)
+                    insertContentLayer.scaleSelection(anchorX, anchorY, factor)
                 }
                 onTransformFinished = {
+                    insertContentLayer.finishSelectionTransform()
+                    saveBoundPageSession()
                     expandA4ForContentIfNeeded()
                     renderToolDetails()
                 }
@@ -2525,6 +2531,7 @@ class MainActivity : Activity() {
         }
         tagLayer.onTagClicked = {
             dryInkView.clearSelection()
+            textInputLayer.clearSelection()
             insertContentLayer.clearSelection()
             selectionOverlay.invalidate()
             renderToolDetails()
@@ -2536,8 +2543,18 @@ class MainActivity : Activity() {
             if (selected != null) {
                 dryInkView.clearSelection()
                 tagLayer.clearSelection()
+                textInputLayer.clearSelection()
                 selectionOverlay.invalidate()
             }
+            renderToolDetails()
+        }
+        textInputLayer.onSelectionChanged = { count ->
+            if (count > 0) {
+                dryInkView.clearSelection()
+                tagLayer.clearSelection()
+                insertContentLayer.clearSelection()
+            }
+            selectionOverlay.invalidate()
             renderToolDetails()
         }
         dryInkView.setViewport(viewport.documentToViewMatrix())
@@ -3762,11 +3779,23 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                addToolDetailLine(detailHint("闭合套索可同时选择笔迹和标记"))
+                addToolDetailLine(
+                    detailChip("自由圈选", tool.lassoShape == LassoShape.FREEFORM) {
+                        tool.lassoShape = LassoShape.FREEFORM
+                        persistToolShelf()
+                        renderToolDetails()
+                    },
+                    detailChip("矩形", tool.lassoShape == LassoShape.RECTANGLE) {
+                        tool.lassoShape = LassoShape.RECTANGLE
+                        persistToolShelf()
+                        renderToolDetails()
+                    },
+                )
+                addToolDetailLine(detailHint("选择笔迹、标记、文字框和图片"))
                 addToolDetailLine(
                     detailChip("删除所选 ${selectedContentCount()}", selectedContentCount() > 0) {
                         val removed = deleteContentSelection()
-                        if (removed == 0) Toast.makeText(this, "请先选择笔迹或标记", Toast.LENGTH_SHORT).show()
+                        if (removed == 0) Toast.makeText(this, "请先选择内容", Toast.LENGTH_SHORT).show()
                         renderToolDetails()
                     },
                 )
@@ -3869,6 +3898,7 @@ class MainActivity : Activity() {
             if ((0 until event.pointerCount).any { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }) {
                 insertContentLayer.objectManipulationEnabled = !singleFingerPanEnabled
                 insertContentLayer.onTouchEvent(event)
+                textInputLayer.observeSelectionTouch(event)
             }
             handleMotionEvent(event)
             true
@@ -3980,9 +4010,8 @@ class MainActivity : Activity() {
             }
 
             DrawingToolKind.LASSO -> {
-                tagLayer.clearSelection()
-                selectionOverlay.invalidate()
-                dryInkView.beginLasso(lastPressurePoint)
+                clearContentSelection()
+                dryInkView.beginLasso(lastPressurePoint, toolShelf.selected.lassoShape)
             }
             null -> Unit
         }
@@ -4034,6 +4063,8 @@ class MainActivity : Activity() {
             DrawingToolKind.LASSO -> {
                 val polygon = dryInkView.finishLasso()
                 tagLayer.selectInPolygon(polygon)
+                textInputLayer.selectInPolygon(polygon)
+                insertContentLayer.selectInPolygon(polygon)
                 selectionOverlay.invalidate()
                 renderToolDetails()
             }
@@ -4236,6 +4267,7 @@ class MainActivity : Activity() {
         pageSurfaceBackground.invalidate()
         pageSurfaceForeground.invalidate()
         insertContentLayer.invalidate()
+        textInputLayer.applyViewport()
         tagLayer.invalidate()
         selectionOverlay.invalidate()
         refreshViewRibbonState()
@@ -4289,34 +4321,45 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun selectedContentCount(): Int = dryInkView.selectedCount() + tagLayer.selectedCount() + insertContentLayer.selectedCount()
+    private fun selectedContentCount(): Int =
+        dryInkView.selectedCount() +
+            tagLayer.selectedCount() +
+            textInputLayer.selectedCount() +
+            insertContentLayer.selectedCount()
 
     private fun clearContentSelection() {
         dryInkView.clearSelection()
         if (::tagLayer.isInitialized) tagLayer.clearSelection()
+        if (::textInputLayer.isInitialized) textInputLayer.clearSelection()
         if (::insertContentLayer.isInitialized) insertContentLayer.clearSelection()
         if (::selectionOverlay.isInitialized) selectionOverlay.invalidate()
     }
 
     private fun deleteContentSelection(): Int {
-        val removed = dryInkView.deleteSelection() + tagLayer.deleteSelection() + insertContentLayer.deleteSelection()
+        val removed =
+            dryInkView.deleteSelection() +
+                tagLayer.deleteSelection() +
+                textInputLayer.deleteSelection() +
+                insertContentLayer.deleteSelection()
+        saveBoundPageSession()
         selectionOverlay.invalidate()
         return removed
     }
 
-    private fun combinedSelectionBounds(): RectF? {
-        val strokeBounds = dryInkView.selectedBounds()
-        val tagBounds = tagLayer.selectedBounds()
-        if (strokeBounds == null) return tagBounds?.let(::RectF)
-        if (tagBounds == null) return RectF(strokeBounds)
-        return RectF(strokeBounds).apply { union(tagBounds) }
-    }
+    private fun combinedSelectionBounds(): RectF? =
+        listOfNotNull(
+            dryInkView.selectedBounds(),
+            tagLayer.selectedBounds(),
+            textInputLayer.selectedBounds(),
+            insertContentLayer.selectedBounds(),
+        ).map(::RectF).reduceOrNull { combined, bounds -> combined.apply { union(bounds) } }
 
     private fun updateSelectionInteraction() {
         if (!::selectionOverlay.isInitialized) return
         val lassoActive = !textModeEnabled && toolShelf.selected.kind == DrawingToolKind.LASSO
         selectionOverlay.selectionEnabled = lassoActive
         tagLayer.selectionModeEnabled = lassoActive
+        insertContentLayer.selectionModeEnabled = lassoActive
         selectionOverlay.invalidate()
     }
 
@@ -4402,7 +4445,13 @@ class MainActivity : Activity() {
     private fun ensureA4Capacity(page: NotePage? = workspace.selectedPage()): Boolean {
         val targetPage = page ?: return false
         if (targetPage.viewSettings.paperSize != PaperSize.A4) return false
-        val contentBottom = maxOf(dryInkView.contentBottom(), tagLayer.contentBottom())
+        val contentBottom =
+            maxOf(
+                dryInkView.contentBottom(),
+                tagLayer.contentBottom(),
+                textInputLayer.contentBottom(),
+                insertContentLayer.contentBottom(),
+            )
         val required = A4PageLayout.requiredPageCount(contentBottom, targetPage.viewSettings.a4PageCount)
         if (required == targetPage.viewSettings.a4PageCount) return false
         targetPage.viewSettings.a4PageCount = required
@@ -4616,7 +4665,7 @@ class MainActivity : Activity() {
                 MojianCommandMenu.Item("添加钢笔", "pen", action = { addTool(DrawingToolKind.PEN) }),
                 MojianCommandMenu.Item("添加荧光笔", "highlight", action = { addTool(DrawingToolKind.HIGHLIGHTER) }),
                 MojianCommandMenu.Item("添加橡皮", "eraser", action = { addTool(DrawingToolKind.ERASER) }),
-                MojianCommandMenu.Item("添加框选", "lasso", action = { addTool(DrawingToolKind.LASSO) }),
+                MojianCommandMenu.Item("添加套索", "lasso", action = { addTool(DrawingToolKind.LASSO) }),
             ),
             widthDp = 220,
         )

@@ -29,11 +29,13 @@ class InsertContentLayer(
     private var document: PageInsertDocument? = null
     private var pressedObject: InsertObject? = null
     private var selectedObject: InsertObject? = null
+    private val lassoSelectedObjects = linkedSetOf<InsertObject>()
     private var gestureObject: InsertObject? = null
     private var resizeHandle = -1
     private var lastDocumentPoint = DocumentPoint(0f, 0f)
     private var resizeStartBounds = RectF()
     private var objectMutated = false
+    private var selectionTransformMutated = false
     private val gestureArbiter = InsertObjectGestureArbiter(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
     private val bitmapCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -71,6 +73,11 @@ class InsertContentLayer(
     var onSelectionChanged: ((InsertObject?) -> Unit)? = null
     var onDocumentChanged: ((PageInsertDocument) -> Unit)? = null
     var objectManipulationEnabled: Boolean = true
+    var selectionModeEnabled: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private val gestureDetector =
         GestureDetector(
@@ -81,7 +88,7 @@ class InsertContentLayer(
                 override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
                     val item = hitSelectable(event.x, event.y)
                     var handled = false
-                    if (selectedObject != null && selectedObject !== item) {
+                    if (selectedCount() > 0 && item !in selectedItems()) {
                         select(null)
                         invalidate()
                         handled = true
@@ -127,24 +134,80 @@ class InsertContentLayer(
 
     fun currentDocument(): PageInsertDocument? = document
 
-    fun selectedCount(): Int = if (selectedObject != null) 1 else 0
+    fun contentBottom(): Float = document?.objects?.maxOfOrNull { it.documentY + it.height } ?: 0f
 
-    fun selectedBounds(): RectF? = selectedObject?.let(::bounds)
+    fun selectedCount(): Int = selectedItems().size
+
+    fun selectedBounds(): RectF? =
+        selectedItems()
+            .map(::bounds)
+            .reduceOrNull { combined, itemBounds -> combined.apply { union(itemBounds) } }
 
     fun clearSelection() {
-        if (selectedObject == null) return
+        if (selectedCount() == 0) return
         select(null)
         gestureArbiter.end()
         invalidate()
     }
 
+    fun selectInPolygon(polygon: List<DocumentPoint>): Int {
+        selectedObject = null
+        lassoSelectedObjects.clear()
+        selectionTransformMutated = false
+        if (polygon.size >= 3) {
+            document?.objects?.forEach { item ->
+                if (item is InsertObject.Image && item.pageBackground) return@forEach
+                val itemBounds = bounds(item)
+                if (
+                    SelectionGeometry.polygonIntersectsRect(
+                        polygon,
+                        DocumentRect(itemBounds.left, itemBounds.top, itemBounds.right, itemBounds.bottom),
+                    )
+                ) {
+                    lassoSelectedObjects += item
+                }
+            }
+        }
+        invalidate()
+        return lassoSelectedObjects.size
+    }
+
+    fun translateSelection(deltaX: Float, deltaY: Float) {
+        selectedItems().forEach { item ->
+            item.documentX += deltaX
+            item.documentY += deltaY
+        }
+        if (selectedCount() > 0) selectionTransformMutated = true
+        invalidate()
+    }
+
+    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+        selectedItems().forEach { item ->
+            val scaled = SelectionGeometry.scale(item.documentX, item.documentY, anchorX, anchorY, factor)
+            item.documentX = scaled.x
+            item.documentY = scaled.y
+            item.width = (item.width * factor).coerceAtLeast(dp(24f) / viewport.scale.coerceAtLeast(0.01f))
+            item.height = (item.height * factor).coerceAtLeast(dp(24f) / viewport.scale.coerceAtLeast(0.01f))
+        }
+        if (selectedCount() > 0) selectionTransformMutated = true
+        invalidate()
+    }
+
+    fun finishSelectionTransform() {
+        if (!selectionTransformMutated) return
+        selectionTransformMutated = false
+        document?.let(::changed)
+    }
+
     fun deleteSelection(): Int {
         val target = document ?: return 0
-        val selected = selectedObject ?: return 0
-        if (!target.objects.remove(selected)) return 0
+        val selected = selectedItems()
+        if (selected.isEmpty()) return 0
+        val removed = selected.count(target.objects::remove)
+        if (removed == 0) return 0
         select(null)
         changed(target)
-        return 1
+        return removed
     }
 
     fun duplicateSelection(): InsertObject? {
@@ -169,7 +232,7 @@ class InsertContentLayer(
 
     fun moveSelectionBackward(): Boolean = moveSelectionBy(-1)
 
-    fun selectedImage(): InsertObject.Image? = selectedObject as? InsertObject.Image
+    fun selectedImage(): InsertObject.Image? = selectedItems().singleOrNull() as? InsertObject.Image
 
     fun rotateSelectedImage(clockwise: Boolean): Boolean {
         val target = document ?: return false
@@ -253,6 +316,7 @@ class InsertContentLayer(
         } else {
             target.objects.clear()
         }
+        select(null)
         bitmapCache.evictAll()
         changed(target)
     }
@@ -316,6 +380,7 @@ class InsertContentLayer(
     }
 
     private fun drawSelection(canvas: Canvas) {
+        if (selectionModeEnabled) return
         val item = selectedObject ?: return
         val box = bounds(item)
         val scale = viewport.scale.coerceAtLeast(0.01f)
@@ -631,10 +696,15 @@ class InsertContentLayer(
     }
 
     private fun select(item: InsertObject?) {
-        if (selectedObject === item) return
+        if (selectedObject === item && lassoSelectedObjects.isEmpty()) return
+        lassoSelectedObjects.clear()
         selectedObject = item
+        selectionTransformMutated = false
         onSelectionChanged?.invoke(item)
     }
+
+    private fun selectedItems(): Set<InsertObject> =
+        if (lassoSelectedObjects.isNotEmpty()) lassoSelectedObjects else selectedObject?.let(::setOf).orEmpty()
 
     private fun bounds(item: InsertObject): RectF =
         RectF(item.documentX, item.documentY, item.documentX + item.width, item.documentY + item.height)

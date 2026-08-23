@@ -7,7 +7,12 @@ enum class DrawingToolKind(val label: String) {
     PEN("钢笔"),
     HIGHLIGHTER("荧光笔"),
     ERASER("橡皮"),
-    LASSO("框选"),
+    LASSO("套索"),
+}
+
+enum class LassoShape(val label: String) {
+    FREEFORM("自由圈选"),
+    RECTANGLE("矩形"),
 }
 
 enum class InkPalette(val label: String, val argb: Int) {
@@ -26,6 +31,7 @@ data class ToolPreset(
     var opacityPercent: Int = 32,
     var eraserRadiusMm: Float = 4.5f,
     var pressureEraseEnabled: Boolean = true,
+    var lassoShape: LassoShape = LassoShape.FREEFORM,
 ) {
     val displayName: String
         get() =
@@ -33,7 +39,7 @@ data class ToolPreset(
                 DrawingToolKind.PEN -> "${color.label}色笔"
                 DrawingToolKind.HIGHLIGHTER -> "${color.label}色荧光"
                 DrawingToolKind.ERASER -> "橡皮"
-                DrawingToolKind.LASSO -> "框选"
+                DrawingToolKind.LASSO -> "套索"
             }
 
     fun toJson(): JSONObject =
@@ -47,6 +53,7 @@ data class ToolPreset(
             put("opacityPercent", opacityPercent)
             put("eraserRadiusMm", eraserRadiusMm.toDouble())
             put("pressureEraseEnabled", pressureEraseEnabled)
+            put("lassoShape", lassoShape.name)
         }
 
     companion object {
@@ -62,6 +69,9 @@ data class ToolPreset(
                 val opacityPercent = json.optInt("opacityPercent", 32)
                 val eraserRadiusMm = json.optDouble("eraserRadiusMm", 4.5).toFloat()
                 val pressureEraseEnabled = json.optBoolean("pressureEraseEnabled", true)
+                val lassoShape =
+                    runCatching { LassoShape.valueOf(json.optString("lassoShape", LassoShape.FREEFORM.name)) }
+                        .getOrDefault(LassoShape.FREEFORM)
                 ToolPreset(
                     id = id,
                     kind = kind,
@@ -72,6 +82,7 @@ data class ToolPreset(
                     opacityPercent = opacityPercent,
                     eraserRadiusMm = eraserRadiusMm,
                     pressureEraseEnabled = pressureEraseEnabled,
+                    lassoShape = lassoShape,
                 )
             } catch (_: Exception) {
                 null
@@ -220,4 +231,3 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
             )
     }
 }
-

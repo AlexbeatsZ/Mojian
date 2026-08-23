@@ -112,8 +112,10 @@ Required working tools:
   ink-flow/speed response, and optional stationary pressure eraser;
 - highlighter with the same restricted black/blue/red palette, width, and opacity;
 - whole-stroke eraser with its own radius;
-- freeform lasso that selects intersecting complete strokes and enclosed page tags, can delete the
-  selection, supports dragging from inside the selection frame, and scales from any corner handle.
+- lasso with per-preset `自由圈选` and `矩形` shapes. Either shape selects intersecting complete
+  strokes, enclosed page tags, overlapping text boxes, and overlapping non-background inserted
+  objects such as images. Mixed content shares one selection frame, can be deleted together, moves
+  by dragging inside the frame, and scales from any corner handle.
 
 The drawing ribbon is icon-only. A first tap on an unselected tool selects it without interruption;
 tapping the already selected tool opens its own flyout. The flyout shows only parameters meaningful
@@ -127,12 +129,13 @@ density-independent pixel. Keep icons and selected frames compact and do not res
 tool labels.
 
 The cursor is a working session-only, finger-only text mode. Selecting it suppresses finger drawing;
-tapping the paper with a finger creates a transparent multi-line editor at that point, shows a
-visible caret, and requests the Android keyboard. Stylus events bypass the text layer and author
-with the most recently selected pen immediately, without requiring the user to leave cursor mode;
-the hardware eraser still erases. Choosing a drawing tool or the panorama hand exits text mode.
-Text persistence and document-coordinate pan/zoom are later storage/rendering work, not implied by
-this interaction prototype.
+tapping the paper with a finger creates a transparent multi-line text box at that document point,
+shows a visible caret, and requests the Android keyboard. Text boxes follow document pan/zoom. When
+text editing is off, a finger double tap selects a complete text box; the lasso can also include one
+or more text boxes in a mixed selection for move, scale, or deletion. Stylus events bypass the text
+layer and author with the most recently selected pen immediately, without requiring the user to
+leave cursor mode; the hardware eraser still erases. Choosing a drawing tool or the panorama hand
+exits text mode. Text remains session-only until it joins the durable page storage model.
 
 The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
 turns both one-finger input and stylus contact into panning while preserving two-finger pinch; the
@@ -234,8 +237,9 @@ asset, filter, and export behavior is owned by `docs/design/insert-and-export.md
 - Stylus input authors the selected pen or highlighter; while finger text mode is active it authors
   with the most recently selected pen.
 - The explicit eraser and hardware eraser erase complete intersecting strokes and page tags.
-- The lasso consumes stylus motion without creating ink, and its selection frame owns move/scale
-  gestures while the lasso tool remains active.
+- The lasso consumes stylus motion without creating ink. Its rectangle/freeform geometry selects
+  ink, tags, text boxes, and inserted objects into one frame whose move/scale gestures remain active
+  while the lasso tool is selected.
 - One finger does not write or move the page; two fingers pan/zoom only when no stylus stroke is
   active.
 - Prediction, undo, clear-with-confirmation, pressure erasing, viewport transforms, Xiaomi shortcut
