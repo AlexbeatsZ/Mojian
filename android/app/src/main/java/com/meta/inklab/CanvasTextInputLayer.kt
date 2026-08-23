@@ -137,11 +137,6 @@ class CanvasTextInputLayer(
         invalidate()
     }
 
-    fun observeSelectionTouch(event: MotionEvent): Boolean {
-        if (textModeEnabled || !isFingerEvent(event)) return false
-        return selectionGestureDetector.onTouchEvent(event)
-    }
-
     fun selectedCount(): Int = selectedEditors.size
 
     fun clearSelection() {
@@ -339,7 +334,13 @@ class CanvasTextInputLayer(
         }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (!textModeEnabled || !isFingerEvent(event)) return false
+        val fingerEvent = isFingerEvent(event)
+        if (fingerEvent) {
+            // Observe at the text layer boundary: when editing is enabled, the EditText child
+            // consumes the stream and the ink layer below never receives the double tap.
+            selectionGestureDetector.onTouchEvent(event)
+        }
+        if (!textModeEnabled || !fingerEvent) return false
         return super.dispatchTouchEvent(event)
     }
 

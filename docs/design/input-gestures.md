@@ -79,9 +79,10 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 
 - Stylus/eraser tool types author ink and take priority while a stroke is active.
 - Text cursor mode accepts finger-only MotionEvent streams. A stylus bypasses the text layer and
-  begins the most recently selected pen immediately; this does not disable finger text mode. When
-  text editing is off, the canvas observer may confirm a finger double tap on a text box without
-  withholding that first pointer from the two-finger page-transform path.
+  begins the most recently selected pen immediately; this does not disable finger text mode. The
+  text layer observes finger taps at its own dispatch boundary, before an enabled `EditText` can
+  consume them, so double tap selects the complete text box both during and outside editing. When
+  editing is off the layer still returns the stream to the canvas, preserving two-finger transforms.
 - Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
   tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
 - Each lasso preset switches between a freeform path and a normalized drag rectangle. The completed

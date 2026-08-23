@@ -3898,7 +3898,6 @@ class MainActivity : Activity() {
             if ((0 until event.pointerCount).any { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }) {
                 insertContentLayer.objectManipulationEnabled = !singleFingerPanEnabled
                 insertContentLayer.onTouchEvent(event)
-                textInputLayer.observeSelectionTouch(event)
             }
             handleMotionEvent(event)
             true
