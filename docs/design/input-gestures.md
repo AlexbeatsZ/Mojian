@@ -84,6 +84,17 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 - With the panorama-hand control off, a one-finger stream first reaches the inserted-object layer.
   A hit image/object may consume double-tap selection, selection drag/resize, activation, or long
   press. A miss continues to the ordinary canvas arbiter and does not write, pan, or zoom.
+- Observing an inserted object never withholds the pointer stream from the canvas arbiter. The first
+  finger `DOWN` must reach both layers so a later second pointer can establish a complete pan/pinch
+  baseline even when the gesture starts over a selected image.
+- Object-body move and handle resize remain candidates until movement exceeds the platform touch
+  slop. A stationary hold may open the object menu; motion beyond slop permanently suppresses that
+  menu for the sequence. When the panorama hand is active, object manipulation stays observational:
+  sliding over an image pans the page, while a stationary hold can still open the image menu.
+- A second finger cancels any pending object move/resize and hands the unchanged selection to the
+  two-finger transform arbiter. Page pan/zoom never clears the selected image. Only Android's
+  confirmed single-tap callback on a different object or blank canvas clears it; raw `DOWN`, drag,
+  pointer-count changes, and pinch do not.
 - With the panorama hand selected, one finger or a contacting stylus/eraser pans at 1x scale and
   cannot author ink. Tapping the selected hand again or choosing a drawing tool restores the
   default two-finger-only mode.
@@ -150,3 +161,5 @@ Real-device acceptance still requires:
   the actual tablet touch/stylus dispatcher.
 - inserted-image finger double tap, eight-handle resize, image drag, immediate long-press menu, and
   stylus authoring above an image under the actual tablet dispatcher.
+- selected-image two-finger pinch beginning on the image, panorama-hand swipe beginning on the image,
+  stationary long press versus moving swipe, and selection retention after page pan/zoom.

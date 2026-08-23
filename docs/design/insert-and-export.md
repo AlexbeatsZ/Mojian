@@ -51,6 +51,9 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   handle keeps an approximately 48 dp invisible touch target; corner handles change two
   axes and edge handles change one axis. Holding reaches the context menu before release.
   Immutable PDF page-background objects never participate in this direct selection path.
+- Overlapping handle hit regions resolve to the nearest handle, not the first handle in drawing
+  order. Body move and resize commit only after platform touch slop. Canvas pan/pinch keeps the
+  object selected; a confirmed single tap elsewhere is the sole deselection gesture.
 - Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
   four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise
   90-degree rotation, horizontal/vertical flip, restore original pixel size, and set-as-background.

@@ -3866,12 +3866,9 @@ class MainActivity : Activity() {
             },
         )
         wetInkView.setOnTouchListener { _, event ->
-            if (
-                event.pointerCount == 1 &&
-                event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER &&
+            if ((0 until event.pointerCount).any { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }) {
+                insertContentLayer.objectManipulationEnabled = !singleFingerPanEnabled
                 insertContentLayer.onTouchEvent(event)
-            ) {
-                return@setOnTouchListener true
             }
             handleMotionEvent(event)
             true

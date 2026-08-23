@@ -37,4 +37,19 @@ object SelectionGeometry {
         val deltaY = y1 - y2
         return deltaX * deltaX + deltaY * deltaY
     }
+
+    fun nearestPointIndexWithinRadius(
+        x: Float,
+        y: Float,
+        points: List<DocumentPoint>,
+        radius: Float,
+    ): Int {
+        val radiusSquared = radius * radius
+        return points
+            .mapIndexed { index, point -> index to squaredDistance(point.x, point.y, x, y) }
+            .minByOrNull { it.second }
+            ?.takeIf { it.second <= radiusSquared }
+            ?.first
+            ?: -1
+    }
 }

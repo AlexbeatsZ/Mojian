@@ -35,4 +35,12 @@ class SelectionGeometryTest {
         assertEquals(25f, scaled.x, 0.001f)
         assertEquals(40f, scaled.y, 0.001f)
     }
+
+    @Test
+    fun overlappingHandleTargetsChooseTheNearestVisibleHandle() {
+        val handles = listOf(DocumentPoint(0f, 0f), DocumentPoint(18f, 0f), DocumentPoint(36f, 0f))
+
+        assertEquals(1, SelectionGeometry.nearestPointIndexWithinRadius(15f, 2f, handles, radius = 24f))
+        assertEquals(-1, SelectionGeometry.nearestPointIndexWithinRadius(70f, 0f, handles, radius = 24f))
+    }
 }
