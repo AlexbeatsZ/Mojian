@@ -26,10 +26,10 @@
     </UserControl.Resources>
 
     <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="124" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition x:Name="BackstageNavigationColumn" Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="{StaticResource TitleBarBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0">
             <DockPanel Margin="0,14">
-                <Button DockPanel.Dock="Top" Command="{Binding CloseBackstageCommand}" Style="{StaticResource RibbonIconButtonStyle}" HorizontalAlignment="Left" Margin="8,0,0,8" Width="100" Height="42" ToolTip="返回">
+                <Button DockPanel.Dock="Top" Command="{Binding CloseBackstageCommand}" Style="{StaticResource RibbonIconButtonStyle}" HorizontalAlignment="Left" Margin="8,0,0,8" Width="136" Height="42" ToolTip="返回">
                     <Path Data="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" Fill="{StaticResource TextPrimary}" Width="18" Height="18" />
                 </Button>
                 <StackPanel>
@@ -130,7 +130,7 @@
                 <StackPanel Visibility="{Binding IsBackstageShortcuts, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="快捷键" Foreground="{StaticResource TextPrimary}" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,8" />
                     <TextBlock Text="按照顶部功能区分类。这里只列出按下后可立即执行的操作；设置重复按键时，旧映射会自动清除。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" MaxWidth="720" Margin="0,0,0,18" />
-                    <TextBlock Text="鼠标预设：按住中键拖动画布；按住 Ctrl 再用中键或全景手柄拖动可连续缩放。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" MaxWidth="720" Margin="0,0,0,18" />
+                    <TextBlock Text="鼠标/笔预设：按住中键移动画布；同时按 Ctrl 后向右下放大、向左上缩小；按住右键拖动临时套索。" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" MaxWidth="720" Margin="0,0,0,18" />
                     <ItemsControl ItemsSource="{Binding ShortcutGroups}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>

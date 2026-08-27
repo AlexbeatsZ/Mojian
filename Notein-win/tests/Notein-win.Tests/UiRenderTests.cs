@@ -105,6 +105,9 @@ public class UiRenderTests
                 // 7. Backstage Options
                 vm.SelectBackstageTabCommand.Execute("Options");
                 CaptureVisual(window, 1440, 900, "win_7_backstage_options.png");
+                var backstage = Assert.IsType<BackstageView>(window.FindName("Backstage"));
+                var backstageNavigationColumn = Assert.IsType<ColumnDefinition>(backstage.FindName("BackstageNavigationColumn"));
+                Assert.Equal(160, backstageNavigationColumn.ActualWidth);
 
                 // 8. Backstage Shortcuts
                 vm.SelectBackstageTabCommand.Execute("Shortcuts");

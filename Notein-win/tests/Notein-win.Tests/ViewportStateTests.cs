@@ -37,29 +37,27 @@ public class ViewportStateTests
     }
 
     [Fact]
-    public void RadialDragZoom_UsesCanvasCenterInsteadOfScreenAxis()
+    public void DiagonalDragZoom_UsesFixedScreenDirectionInsteadOfCanvasCenter()
     {
-        var center = new Point(500, 400);
-        var previous = new Point(650, 400);
+        var previous = new Point(650, 200);
 
-        Assert.True(ViewportState.RadialDragZoomFactor(center, previous, new Point(600, 400)) < 1);
-        Assert.True(ViewportState.RadialDragZoomFactor(center, previous, new Point(700, 400)) > 1);
-        Assert.Equal(1f, ViewportState.RadialDragZoomFactor(center, previous, new Point(500, 550)), precision: 5);
+        Assert.True(ViewportState.DiagonalDragZoomFactor(previous, new Point(750, 300)) > 1);
+        Assert.True(ViewportState.DiagonalDragZoomFactor(previous, new Point(550, 100)) < 1);
+        Assert.Equal(1f, ViewportState.DiagonalDragZoomFactor(previous, new Point(750, 100)), precision: 5);
     }
 
     [Fact]
-    public void RadialDragZoom_AwayFromCenterIncreasesViewportScale()
+    public void DiagonalDragZoom_DownRightIncreasesAndUpLeftDecreasesViewportScale()
     {
         var viewport = new ViewportState();
-        var center = new Point(500, 400);
         var start = new Point(600, 500);
-        var outward = new Point(700, 600);
+        var downRight = new Point(700, 600);
 
-        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.RadialDragZoomFactor(center, start, outward));
+        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.DiagonalDragZoomFactor(start, downRight));
         Assert.True(viewport.Scale > 1f);
 
         viewport.Reset();
-        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.RadialDragZoomFactor(center, start, new Point(550, 450)));
+        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.DiagonalDragZoomFactor(start, new Point(550, 450)));
         Assert.True(viewport.Scale < 1f);
     }
 
@@ -120,5 +118,13 @@ public class ViewportStateTests
         Assert.False(CanvasPointerFeedback.NavigationUsesRadialZoom(false, false));
         Assert.True(CanvasPointerFeedback.NavigationUsesRadialZoom(true, false));
         Assert.False(CanvasPointerFeedback.NavigationUsesRadialZoom(true, true));
+    }
+
+    [Fact]
+    public void RightButtonDragStartsTemporaryLassoButStationaryRightClickDoesNot()
+    {
+        Assert.False(CanvasPointerFeedback.RightButtonMovementStartsLasso(3.9, 4));
+        Assert.True(CanvasPointerFeedback.RightButtonMovementStartsLasso(4, 4));
+        Assert.True(CanvasPointerFeedback.RightButtonMovementStartsLasso(12, 4));
     }
 }

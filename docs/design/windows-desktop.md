@@ -57,6 +57,7 @@ The normal window uses four vertical zones after the ribbon:
   raster-checked against the button center rather than trusting WPF's nominal layout bounds.
 - Split view owns two independent page slots. Leaving split view keeps the right slot.
 - Backstage is a true full-screen surface with working notebook/workspace/export/options panels.
+  Its left navigation column is 160 px so every Chinese command label remains fully readable.
   Its shortcut panel follows the ribbon order and lists only immediate leaf actions; Xiaomi pen
   settings are Android-only and never appear here.
 
@@ -92,12 +93,12 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   it, and every other primary drag creates a containment marquee even when it starts over an object.
 - Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
   button pans; holding Ctrl with middle drag continuously zooms.
-  Ctrl-drag is radial around the canvas center: dragging toward the center zooms out and dragging
-  toward an edge zooms in, with the original contact point kept as the content anchor.
+  Ctrl-drag uses a fixed screen diagonal: down-right zooms in and up-left zooms out regardless of
+  canvas center or starting quadrant, with the original contact point kept as the content anchor.
   A mouse or stylus side button remapped by its driver to middle button inherits this behavior.
   Holding middle is the only trigger required: moving the stylus while it is still in-air immediately
   pans. Pressing Ctrl while middle remains held immediately switches that same in-air movement to
-  radial zoom; releasing Ctrl returns to pan without another middle click. No nib contact or second
+  diagonal zoom; releasing Ctrl returns to pan without another middle click. No nib contact or second
   click is required.
   On this Windows Ink device the promoted mouse-compatible coordinates are the sole driver for that
   in-air navigation. After nib contact, the high-resolution stylus stream takes over and consumes only
@@ -107,6 +108,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 - Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
   A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
   mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.
+- Right-button movement beyond the system drag threshold is a temporary freeform lasso for both the
+  mouse and a stylus side button mapped to right-click. The stylus may lasso while still in-air; no
+  nib contact is required. A stationary right-click opens the existing context menu on release, while
+  a completed right-drag never also opens that menu. Native text-editor right-click remains native.
 - Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
   stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not

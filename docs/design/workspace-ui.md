@@ -260,7 +260,7 @@ global motion-prediction toggle and the global page-pane mode (`本层` or `递�
 shown as a permanent workspace control.
 
 The shortcut panel is a peer of `常规` inside that same Backstage/options shell: it keeps the same
-150 dp navigation column, heading rhythm, dividers, row density, and value buttons. The device
+160 dp navigation column, heading rhythm, dividers, row density, and value buttons. The device
 section is named `触控笔`; product-facing text does not expose Xiaomi implementation names or
 platform qualifiers, and the single/double/hold rows do not carry redundant descriptive captions.
 The exact input-device name remains an internal filtering boundary only.

@@ -45,7 +45,6 @@ public partial class NoteCanvas : UserControl
     private StrokeRecord? _activeStroke;
     private Rect? _selectionBounds;
     private Point _lastPointer;
-    private Point _dragZoomCenter;
     private Point _dragZoomAnchor;
     private Point _transformPoint;
     private Point _lassoOrigin;
@@ -65,6 +64,10 @@ public partial class NoteCanvas : UserControl
     private bool _stylusEraserActive;
     private bool _middleNavigationActive;
     private bool _middleNavigationUsesStylus;
+    private bool _rightLassoArmed;
+    private bool _rightLassoActive;
+    private bool _rightLassoUsesStylus;
+    private Point _rightLassoStartView;
     private TouchDevice? _directTouchDevice;
     private bool _touchInsertSpaceActive;
     private DirectGestureMode _directGestureMode;
@@ -457,13 +460,16 @@ public partial class NoteCanvas : UserControl
             e.Handled = true;
             return;
         }
-        if (CanvasPointerFeedback.SuppressMouseStream(_stylusActive, promotedByStylus, stylusDrivenMiddleNavigation: false) || Environment.TickCount64 < _ignoreMouseUntil) return;
         if (e.ChangedButton == MouseButton.Right)
         {
             if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
-            e.Handled = ShowDirectContextMenu(e.GetPosition(this));
+            Focus();
+            if (_stylusActive) CancelStylusToolActionForNavigation();
+            BeginRightButtonLasso(e.GetPosition(this), promotedByStylus);
+            e.Handled = true;
             return;
         }
+        if (CanvasPointerFeedback.SuppressMouseStream(_stylusActive, promotedByStylus, stylusDrivenMiddleNavigation: false) || Environment.TickCount64 < _ignoreMouseUntil) return;
         if (e.ChangedButton != MouseButton.Left) return;
         Focus();
         var point = e.GetPosition(this);
@@ -486,6 +492,14 @@ public partial class NoteCanvas : UserControl
             _hoverViewPoint = e.GetPosition(this);
             UpdatePointerCursor();
             InvalidateVisual();
+        }
+        if (_rightLassoArmed &&
+            ((_rightLassoUsesStylus && promotedByStylus && !_stylusActive) ||
+             (!_rightLassoUsesStylus && !promotedByStylus)))
+        {
+            ContinueRightButtonLasso(e.GetPosition(this));
+            e.Handled = true;
+            return;
         }
         if (CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(
                 promotedByStylus,
@@ -529,7 +543,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseLeave(MouseEventArgs e)
     {
         base.OnMouseLeave(e);
-        if (IsMouseCaptured || _stylusActive) return;
+        if (IsMouseCaptured || _stylusActive || _rightLassoArmed) return;
         _hoverViewPoint = null;
         UpdatePointerCursor();
         InvalidateVisual();
@@ -539,6 +553,12 @@ public partial class NoteCanvas : UserControl
     {
         base.OnMouseUp(e);
         if (Document == null) return;
+        if (e.ChangedButton == MouseButton.Right && _rightLassoArmed)
+        {
+            EndRightButtonLasso();
+            e.Handled = true;
+            return;
+        }
         if (e.ChangedButton == MouseButton.Middle && _middleNavigationActive)
         {
             EndPointer(isStylus: _middleNavigationUsesStylus);
@@ -574,6 +594,11 @@ public partial class NoteCanvas : UserControl
         var point = points.Count > 0 ? points[^1] : default;
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
+        if (_rightLassoArmed && _rightLassoUsesStylus)
+        {
+            e.Handled = true;
+            return;
+        }
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
             e.Handled = true;
@@ -592,6 +617,12 @@ public partial class NoteCanvas : UserControl
         {
             _hoverViewPoint = points[^1].ToPoint();
             UpdatePointerCursor();
+        }
+        if (_rightLassoArmed && _rightLassoUsesStylus)
+        {
+            if (_stylusActive && points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
+            e.Handled = true;
+            return;
         }
         if (CanvasPointerFeedback.ContactStylusDrivesMiddleNavigation(
                 _stylusActive,
@@ -647,6 +678,16 @@ public partial class NoteCanvas : UserControl
     private void HandleStylusUp(object sender, StylusEventArgs e)
     {
         if (!_stylusActive) return;
+        if (_rightLassoArmed && _rightLassoUsesStylus)
+        {
+            _stylusActive = false;
+            _stylusEraserActive = false;
+            _ignoreMouseUntil = Environment.TickCount64 + 250;
+            UpdatePointerCursor();
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
             _stylusActive = false;
@@ -995,7 +1036,6 @@ public partial class NoteCanvas : UserControl
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
                 ZoomLocked);
             _isPanning = !_isDragZooming;
-            _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
             _dragZoomAnchor = viewPoint;
             CaptureInput(isStylus);
             return;
@@ -1064,7 +1104,6 @@ public partial class NoteCanvas : UserControl
         {
             _isDragZooming = useZoom;
             _isPanning = !useZoom;
-            _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
             _dragZoomAnchor = viewPoint;
             _lastPointer = viewPoint;
         }
@@ -1088,7 +1127,7 @@ public partial class NoteCanvas : UserControl
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         if (_isDragZooming)
         {
-            var factor = ViewportState.RadialDragZoomFactor(_dragZoomCenter, _lastPointer, viewPoint);
+            var factor = ViewportState.DiagonalDragZoomFactor(_lastPointer, viewPoint);
             _viewport.ZoomAt((float)_dragZoomAnchor.X, (float)_dragZoomAnchor.Y, factor);
             _lastPointer = viewPoint;
             UpdateTextEditorPositions();
@@ -1346,6 +1385,51 @@ public partial class NoteCanvas : UserControl
     private void BeginLasso(Point documentPoint)
     {
         BeginLasso(documentPoint, SelectedTool?.LassoShape ?? LassoShape.Freeform);
+    }
+
+    private void BeginRightButtonLasso(Point viewPoint, bool usesStylus)
+    {
+        _rightLassoArmed = true;
+        _rightLassoActive = false;
+        _rightLassoUsesStylus = usesStylus;
+        _rightLassoStartView = viewPoint;
+        _hoverViewPoint = viewPoint;
+        CaptureInput(usesStylus);
+        UpdatePointerCursor();
+        InvalidateVisual();
+    }
+
+    private void ContinueRightButtonLasso(Point viewPoint)
+    {
+        if (!_rightLassoArmed) return;
+        _hoverViewPoint = viewPoint;
+        if (!_rightLassoActive)
+        {
+            var threshold = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance);
+            if (!CanvasPointerFeedback.RightButtonMovementStartsLasso(Distance(viewPoint, _rightLassoStartView), threshold)) return;
+            _rightLassoActive = true;
+            BeginLasso(_viewport.ViewToDocument(_rightLassoStartView.X, _rightLassoStartView.Y), LassoShape.Freeform);
+        }
+        ExtendLasso(_viewport.ViewToDocument(viewPoint.X, viewPoint.Y));
+        InvalidateVisual();
+    }
+
+    private void EndRightButtonLasso()
+    {
+        var showContextMenu = !_rightLassoActive;
+        var contextPoint = _rightLassoStartView;
+        ReleaseInput(_rightLassoUsesStylus);
+        if (_rightLassoActive)
+        {
+            _isLassoing = false;
+            ComputeLassoSelection();
+        }
+        _rightLassoArmed = false;
+        _rightLassoActive = false;
+        _rightLassoUsesStylus = false;
+        UpdatePointerCursor();
+        InvalidateVisual();
+        if (showContextMenu) ShowDirectContextMenu(contextPoint);
     }
 
     private void BeginLasso(Point documentPoint, LassoShape shape)
@@ -1923,6 +2007,11 @@ public partial class NoteCanvas : UserControl
 
     private void UpdatePointerCursor()
     {
+        if (_rightLassoArmed)
+        {
+            Cursor = Cursors.Cross;
+            return;
+        }
         Cursor = CurrentPointerCursorMode() switch
         {
             CanvasPointerCursorMode.Hand => Cursors.Hand,
@@ -2123,6 +2212,8 @@ public partial class NoteCanvas : UserControl
         _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
         _middleNavigationActive = false; _middleNavigationUsesStylus = false;
+        if (_rightLassoArmed) ReleaseInput(_rightLassoUsesStylus);
+        _rightLassoArmed = false; _rightLassoActive = false; _rightLassoUsesStylus = false;
         _pressureCandidate = false; _temporaryPressureEraser = false; _pressureTimer.Stop(); _eraserViewPoint = null;
         ClearSelection();
     }

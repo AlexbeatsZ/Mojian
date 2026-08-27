@@ -35,6 +35,9 @@ public static class CanvasPointerFeedback
     public static bool NavigationUsesRadialZoom(bool controlPressed, bool zoomLocked) =>
         controlPressed && !zoomLocked;
 
+    public static bool RightButtonMovementStartsLasso(double movementDistance, double dragThreshold) =>
+        movementDistance >= Math.Max(0, dragThreshold);
+
     public static bool SuppressMouseStream(
         bool stylusContactActive,
         bool promotedByStylus,
