@@ -6,7 +6,7 @@
 
 # Current State
 
-- Repository was initialized with feasibility commit `817787a`; it has no remote.
+- Repository was initialized with feasibility commit `817787a`; `master` now tracks the private GitHub remote `https://github.com/AlexbeatsZ/Mojian`.
 - The tablet keeps Android wireless debugging enabled (Xiaomi `23046RP50C`, Android 15 / API 35, arm64), but its ADB connection port changes. A user-supplied endpoint such as the last verified `192.168.31.243:45337` is current-session information only: connect to it immediately when supplied, never treat it as a fixed port, and never reuse an older recorded port without verification. When no current port is available, check existing `adb devices` connections and retry `adb mdns services`; an empty mDNS result does not mean the tablet is offline or wireless debugging is disabled.
 - Installed China package: `com.orion.notein`, `v2.0.10.0` (`versionCode=343`, `minSdk=26`, `targetSdk=35`), single 114,190,617-byte APK, installed from Xiaomi Market.
 - APK is non-debuggable and app-private `/data/user/0/com.orion.notein` cannot be read with `run-as`.
