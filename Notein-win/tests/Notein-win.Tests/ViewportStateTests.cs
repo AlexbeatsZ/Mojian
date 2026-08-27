@@ -101,4 +101,24 @@ public class ViewportStateTests
         Assert.False(CanvasPointerFeedback.RefreshHoverFromPromotedMouse(false, false));
         Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, true, false));
     }
+
+    [Fact]
+    public void HoldingMiddleLetsInAirStylusMotionDriveNavigationWithoutASecondContact()
+    {
+        Assert.True(CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(true, false, true, true));
+        Assert.False(CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(true, true, true, true));
+        Assert.False(CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(true, false, false, true));
+        Assert.False(CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(false, false, true, true));
+
+        Assert.True(CanvasPointerFeedback.ContactStylusDrivesMiddleNavigation(true, true, true));
+        Assert.False(CanvasPointerFeedback.ContactStylusDrivesMiddleNavigation(false, true, true));
+    }
+
+    [Fact]
+    public void CtrlCanSwitchHeldMiddleNavigationBetweenPanAndZoomWithoutAnotherClick()
+    {
+        Assert.False(CanvasPointerFeedback.NavigationUsesRadialZoom(false, false));
+        Assert.True(CanvasPointerFeedback.NavigationUsesRadialZoom(true, false));
+        Assert.False(CanvasPointerFeedback.NavigationUsesRadialZoom(true, true));
+    }
 }

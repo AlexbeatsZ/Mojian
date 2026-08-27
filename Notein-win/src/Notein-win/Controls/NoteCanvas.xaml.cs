@@ -487,6 +487,16 @@ public partial class NoteCanvas : UserControl
             UpdatePointerCursor();
             InvalidateVisual();
         }
+        if (CanvasPointerFeedback.PromotedHoverDrivesMiddleNavigation(
+                promotedByStylus,
+                _stylusActive,
+                _middleNavigationActive,
+                _middleNavigationUsesStylus))
+        {
+            ContinueMiddleNavigation(_hoverViewPoint ?? e.GetPosition(this), 0.65f, 0, 0);
+            e.Handled = true;
+            return;
+        }
         if (CanvasPointerFeedback.SuppressMouseStream(
                 _stylusActive,
                 promotedByStylus,
@@ -583,10 +593,20 @@ public partial class NoteCanvas : UserControl
             _hoverViewPoint = points[^1].ToPoint();
             UpdatePointerCursor();
         }
-        if (_middleNavigationActive && _middleNavigationUsesStylus && points.Count > 0)
+        if (CanvasPointerFeedback.ContactStylusDrivesMiddleNavigation(
+                _stylusActive,
+                _middleNavigationActive,
+                _middleNavigationUsesStylus) && points.Count > 0)
         {
             var latest = points[^1];
-            ContinuePointer(latest.ToPoint(), latest.PressureFactor, Tilt(latest, StylusPointProperties.XTiltOrientation), Tilt(latest, StylusPointProperties.YTiltOrientation), isStylus: true);
+            ContinueMiddleNavigation(latest.ToPoint(), latest.PressureFactor, Tilt(latest, StylusPointProperties.XTiltOrientation), Tilt(latest, StylusPointProperties.YTiltOrientation));
+            e.Handled = true;
+            return;
+        }
+        if (_middleNavigationActive && _middleNavigationUsesStylus)
+        {
+            // In-air navigation is driven by the promoted mouse coordinates on
+            // this Windows Ink device; using both streams would apply it twice.
             e.Handled = true;
             return;
         }
@@ -971,7 +991,9 @@ public partial class NoteCanvas : UserControl
 
         if (forcePan || (isStylus && SingleFingerPanEnabled))
         {
-            _isDragZooming = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && !ZoomLocked;
+            _isDragZooming = CanvasPointerFeedback.NavigationUsesRadialZoom(
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+                ZoomLocked);
             _isPanning = !_isDragZooming;
             _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
             _dragZoomAnchor = viewPoint;
@@ -1017,13 +1039,7 @@ public partial class NoteCanvas : UserControl
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
                 Document.Strokes.Add(_activeStroke);
                 CaptureInput(isStylus);
-                if (isStylus && tool.Kind == DrawingToolKind.Pen && tool.PressureEraseEnabled && _pressureEraseArmed && pressure * 100 >= tool.PressureEraseThresholdPercent)
-                {
-                    _pressureCandidate = true;
-                    _pressureStartView = viewPoint;
-                    _pressureStartedAt = DateTime.UtcNow;
-                    _pressureTimer.Start();
-                }
+                UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
                 break;
             case DrawingToolKind.Eraser:
                 PushUndo();
@@ -1037,6 +1053,22 @@ public partial class NoteCanvas : UserControl
                 break;
         }
         InvalidateVisual();
+    }
+
+    private void ContinueMiddleNavigation(Point viewPoint, float pressure, float tiltX, float tiltY)
+    {
+        var useZoom = CanvasPointerFeedback.NavigationUsesRadialZoom(
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+            ZoomLocked);
+        if (useZoom != _isDragZooming)
+        {
+            _isDragZooming = useZoom;
+            _isPanning = !useZoom;
+            _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
+            _dragZoomAnchor = viewPoint;
+            _lastPointer = viewPoint;
+        }
+        ContinuePointer(viewPoint, pressure, tiltX, tiltY, isStylus: true);
     }
 
     private void BeginInsertSpace(Point viewPoint)
@@ -1106,6 +1138,8 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeStroke != null)
         {
+            var tool = SelectedTool;
+            if (tool != null) UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
             if (_pressureCandidate && Distance(viewPoint, _pressureStartView) > 2)
             {
                 _pressureStartedAt = DateTime.UtcNow;
@@ -1226,14 +1260,47 @@ public partial class NoteCanvas : UserControl
     private void CheckPressureEraseActivation()
     {
         var tool = SelectedTool;
-        if (!_pressureCandidate || _activeStroke == null || tool == null) return;
-        if ((DateTime.UtcNow - _pressureStartedAt).TotalMilliseconds < tool.PressureEraseDwellMilliseconds) return;
-        Document?.Strokes.Remove(_activeStroke);
+        var activeStroke = _activeStroke;
+        if (tool == null || !PressureEraserPolicy.ShouldActivate(
+                _pressureCandidate,
+                activeStroke != null,
+                (DateTime.UtcNow - _pressureStartedAt).TotalMilliseconds,
+                tool.PressureEraseDwellMilliseconds)) return;
+        if (activeStroke == null) return;
+        Document?.Strokes.Remove(activeStroke);
         _activeStroke = null;
         _pressureCandidate = false;
+        _pressureTimer.Stop();
         _temporaryPressureEraser = true;
         _eraserViewPoint = _pressureStartView;
+        var documentPoint = _viewport.ViewToDocument(_pressureStartView.X, _pressureStartView.Y);
+        PerformErase(documentPoint, Math.Max(2.5f, tool.EraserRadiusMm) * UnitsPerMillimeter);
         InvalidateVisual();
+    }
+
+    private void UpdatePressureEraseCandidate(Point viewPoint, float pressure, bool isStylus, ToolPreset tool)
+    {
+        var eligible = PressureEraserPolicy.CanStartCandidate(
+            isStylus,
+            _pressureEraseArmed,
+            tool.Kind,
+            tool.PressureEraseEnabled,
+            pressure,
+            tool.PressureEraseThresholdPercent);
+        if (!eligible)
+        {
+            if (_pressureCandidate)
+            {
+                _pressureCandidate = false;
+                _pressureTimer.Stop();
+            }
+            return;
+        }
+        if (_pressureCandidate) return;
+        _pressureCandidate = true;
+        _pressureStartView = viewPoint;
+        _pressureStartedAt = DateTime.UtcNow;
+        _pressureTimer.Start();
     }
 
     private void AddStrokePoint(StrokeRecord stroke, Point documentPoint, float pressure, float tiltX, float tiltY)

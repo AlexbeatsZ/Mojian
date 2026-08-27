@@ -38,6 +38,19 @@ public class HandwritingEngineTests
         Assert.Equal(12, HandwritingEngine.SmoothedPoint(points, 1).Y, 3);
     }
 
+    [Fact]
+    public void PressureEraserCanArmAfterPressureRisesDuringContactAndActivatesAtDwell()
+    {
+        Assert.False(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Pen, true, 0.25f, 78));
+        Assert.True(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Pen, true, 0.82f, 78));
+        Assert.False(PressureEraserPolicy.CanStartCandidate(false, true, DrawingToolKind.Pen, true, 0.82f, 78));
+        Assert.False(PressureEraserPolicy.CanStartCandidate(true, false, DrawingToolKind.Pen, true, 0.82f, 78));
+
+        Assert.False(PressureEraserPolicy.ShouldActivate(true, true, 139, 140));
+        Assert.True(PressureEraserPolicy.ShouldActivate(true, true, 140, 140));
+        Assert.False(PressureEraserPolicy.ShouldActivate(true, false, 200, 140));
+    }
+
     private static StrokeRecord Stroke(float firstPressure, float secondPressure) => new()
     {
         WidthMm = 0.4f,

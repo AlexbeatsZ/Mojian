@@ -16,6 +16,25 @@ public static class CanvasPointerFeedback
         bool stylusContactActive) =>
         promotedByStylus && !stylusContactActive;
 
+    public static bool PromotedHoverDrivesMiddleNavigation(
+        bool promotedByStylus,
+        bool stylusContactActive,
+        bool middleNavigationActive,
+        bool middleNavigationUsesStylus) =>
+        promotedByStylus &&
+        !stylusContactActive &&
+        middleNavigationActive &&
+        middleNavigationUsesStylus;
+
+    public static bool ContactStylusDrivesMiddleNavigation(
+        bool stylusContactActive,
+        bool middleNavigationActive,
+        bool middleNavigationUsesStylus) =>
+        stylusContactActive && middleNavigationActive && middleNavigationUsesStylus;
+
+    public static bool NavigationUsesRadialZoom(bool controlPressed, bool zoomLocked) =>
+        controlPressed && !zoomLocked;
+
     public static bool SuppressMouseStream(
         bool stylusContactActive,
         bool promotedByStylus,
