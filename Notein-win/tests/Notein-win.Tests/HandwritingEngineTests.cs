@@ -43,6 +43,9 @@ public class HandwritingEngineTests
     {
         Assert.False(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Pen, true, 0.25f, 78));
         Assert.True(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Pen, true, 0.82f, 78));
+        Assert.True(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Highlighter, true, 0.82f, 78));
+        Assert.False(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Lasso, true, 0.82f, 78));
+        Assert.False(PressureEraserPolicy.CanStartCandidate(true, true, DrawingToolKind.Eraser, true, 0.82f, 78));
         Assert.False(PressureEraserPolicy.CanStartCandidate(false, true, DrawingToolKind.Pen, true, 0.82f, 78));
         Assert.False(PressureEraserPolicy.CanStartCandidate(true, false, DrawingToolKind.Pen, true, 0.82f, 78));
 

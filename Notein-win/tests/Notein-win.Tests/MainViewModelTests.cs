@@ -96,6 +96,58 @@ public class MainViewModelTests
         Assert.True(Assert.Single(reloaded.Objects).IsPageBackground);
     }
 
+    [Fact]
+    public void SpringLoadedEraserAndPanoramaExposeRealToolbarStateThenRestoreSelection()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+        Assert.True(viewModel.SelectToolImmediate("highlighter-blue"));
+        var original = viewModel.SelectedTool;
+        var eraser = viewModel.PressureEraserTool;
+        eraser.EraserRadiusMm = ToolPreset.MinimumEraserRadiusMm;
+
+        Assert.Same(eraser, viewModel.BeginSpringLoadedTool(SpringLoadedToolKind.Eraser));
+        Assert.Same(eraser, viewModel.SelectedTool);
+        Assert.True(eraser.IsSelected);
+        viewModel.EndSpringLoadedTool(SpringLoadedToolKind.Eraser);
+        Assert.Same(original, viewModel.SelectedTool);
+
+        Assert.Null(viewModel.BeginSpringLoadedTool(SpringLoadedToolKind.PanoramaHand));
+        Assert.True(viewModel.SingleFingerPanEnabled);
+        Assert.DoesNotContain(viewModel.Tools, tool => tool.IsSelected);
+        viewModel.EndSpringLoadedTool(SpringLoadedToolKind.PanoramaHand);
+        Assert.False(viewModel.SingleFingerPanEnabled);
+        Assert.Same(original, viewModel.SelectedTool);
+    }
+
+    [Fact]
+    public void LegacyPenPressureSettingsMigrateIntoEraserAndPanoramaSensitivityPersists()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var store = new WorkspaceStore(workspace);
+        var shelf = new ToolShelf();
+        var pen = shelf.Tools.First(tool => tool.Kind == DrawingToolKind.Pen);
+        pen.PressureEraseEnabled = true;
+        pen.PressureEraseThresholdPercent = 66;
+        pen.PressureEraseDwellMilliseconds = 230;
+        store.SaveSettings(new WorkspaceSettings { Version = 2, ToolShelfJson = shelf.ToJson() });
+        var preferencesPath = Path.Combine(temp.Path, "preferences.json");
+
+        var viewModel = new MainViewModel(workspace, new PreferencesStore(preferencesPath));
+        Assert.True(viewModel.PressureEraserTool.PressureEraseEnabled);
+        Assert.Equal(66, viewModel.PressureEraserTool.PressureEraseThresholdPercent);
+        Assert.Equal(230, viewModel.PressureEraserTool.PressureEraseDwellMilliseconds);
+        viewModel.PanoramaSensitivity = 2.25;
+        viewModel.SaveAll();
+
+        var reloaded = new MainViewModel(workspace, new PreferencesStore(preferencesPath));
+        Assert.Equal(2.25, reloaded.PanoramaSensitivity, 3);
+        Assert.Equal(3, new WorkspaceStore(workspace).LoadSettings().Version);
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), ".agents", "mojian-win-tests", Guid.NewGuid().ToString("N"));

@@ -78,6 +78,9 @@ public partial class MainWindow : Window
     private void ConfigureCanvas(NoteCanvas canvas)
     {
         canvas.ResolveAssetPath = name => canvas.Document == null ? string.Empty : ViewModel.ResolveAsset(canvas.Document, name);
+        canvas.ResolvePressureEraserTool = () => ViewModel.PressureEraserTool;
+        canvas.BeginSpringLoadedTool = ViewModel.BeginSpringLoadedTool;
+        canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
         canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
         canvas.ObjectContextRequested += OnObjectContextRequested;
@@ -416,6 +419,20 @@ public partial class MainWindow : Window
         if (sender is not ToggleButton button || button.DataContext is not ToolPreset tool) return;
         ToolFlyoutPopup.PlacementTarget = button;
         ViewModel.SelectToolCommand.Execute(tool.Id);
+    }
+
+    private void OnPanoramaToolClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton button) return;
+        if (!ViewModel.SingleFingerPanEnabled)
+        {
+            ViewModel.SingleFingerPanEnabled = true;
+            PanoramaFlyoutPopup.IsOpen = false;
+            return;
+        }
+
+        PanoramaFlyoutPopup.PlacementTarget = button;
+        PanoramaFlyoutPopup.IsOpen = !PanoramaFlyoutPopup.IsOpen;
     }
 
     private void OnFullPageToolClick(object sender, RoutedEventArgs e)

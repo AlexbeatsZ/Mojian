@@ -18,7 +18,26 @@ data class WheelDecision(
     val amount: Float,
 )
 
+data class PanFocus(
+    val x: Float,
+    val y: Float,
+)
+
 object CanvasInputRouting {
+    fun scaledPanFocus(
+        previousX: Float,
+        previousY: Float,
+        focusX: Float,
+        focusY: Float,
+        sensitivity: Float,
+    ): PanFocus {
+        val factor = sensitivity.coerceIn(0.25f, 3f)
+        return PanFocus(
+            previousX + (focusX - previousX) * factor,
+            previousY + (focusY - previousY) * factor,
+        )
+    }
+
     fun mouseDragIntent(
         middlePressed: Boolean,
         ctrlPressed: Boolean,

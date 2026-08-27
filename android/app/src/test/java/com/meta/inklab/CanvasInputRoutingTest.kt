@@ -40,4 +40,11 @@ class CanvasInputRoutingTest {
             CanvasInputRouting.wheelDecision(1f, 0f, shiftPressed = true, ctrlPressed = true),
         )
     }
+
+    @Test
+    fun panoramaSensitivityScalesOnlyTheSinglePointerPanDelta() {
+        assertEquals(PanFocus(130f, 70f), CanvasInputRouting.scaledPanFocus(100f, 100f, 120f, 80f, 1.5f))
+        assertEquals(PanFocus(105f, 95f), CanvasInputRouting.scaledPanFocus(100f, 100f, 120f, 80f, 0.25f))
+        assertEquals(PanFocus(160f, 40f), CanvasInputRouting.scaledPanFocus(100f, 100f, 120f, 80f, 9f))
+    }
 }

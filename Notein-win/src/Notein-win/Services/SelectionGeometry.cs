@@ -4,6 +4,8 @@ namespace Notein_win.Services;
 
 public static class SelectionGeometry
 {
+    public static bool HasVisibleText(string? text) => !string.IsNullOrWhiteSpace(text);
+
     public static bool PointInPolygon(double px, double py, IList<Point> polygon)
     {
         if (polygon.Count < 3) return false;

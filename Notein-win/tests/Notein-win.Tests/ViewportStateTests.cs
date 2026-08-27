@@ -127,4 +127,16 @@ public class ViewportStateTests
         Assert.True(CanvasPointerFeedback.RightButtonMovementStartsLasso(4, 4));
         Assert.True(CanvasPointerFeedback.RightButtonMovementStartsLasso(12, 4));
     }
+
+    [Fact]
+    public void DriverPromotedRightButtonUsesHoveringStylusAndNeverStartsInkInAir()
+    {
+        Assert.True(CanvasPointerFeedback.RightButtonUsesStylus(false, true, false));
+        Assert.True(CanvasPointerFeedback.RightButtonUsesStylus(false, false, true));
+        Assert.False(CanvasPointerFeedback.RightButtonUsesStylus(false, false, false));
+
+        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: true, rightButtonGestureArmed: false));
+        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureArmed: true));
+        Assert.True(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureArmed: false));
+    }
 }

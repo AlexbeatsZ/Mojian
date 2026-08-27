@@ -94,6 +94,11 @@ public class UiRenderTests
                     Height = 420
                 };
                 addPageDlg.Show();
+                Assert.False(addPageDlg.AllowsTransparency);
+                Assert.True(addPageDlg.UseLayoutRounding);
+                Assert.True(addPageDlg.SnapsToDevicePixels);
+                Assert.Equal(TextFormattingMode.Display, TextOptions.GetTextFormattingMode(addPageDlg));
+                Assert.Equal(TextRenderingMode.ClearType, TextOptions.GetTextRenderingMode(addPageDlg));
                 CaptureVisual(addPageDlg, 540, 420, "win_5_addpage.png");
                 addPageDlg.Close();
 
@@ -123,11 +128,15 @@ public class UiRenderTests
                 var canvasActions = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("CanvasActions"));
                 var enterFullPage = Assert.IsType<Button>(window.FindName("EnterFullPageButton"));
                 var exitFullPage = Assert.IsType<Button>(window.FindName("ExitFullPageButton"));
+                var addSection = Assert.IsType<Button>(window.FindName("AddSectionButton"));
+                var addPage = Assert.IsType<Button>(window.FindName("AddPageButton"));
 
                 Assert.Equal(0, workspaceLayout.ColumnDefinitions[0].ActualWidth);
                 Assert.False(sectionPane.IsVisible);
                 Assert.False(pagePane.IsVisible);
                 Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(canvasActions));
+                Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(addSection));
+                Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(addPage));
                 Assert.Equal(new Thickness(6), enterFullPage.Padding);
                 Assert.Equal(new Thickness(6), exitFullPage.Padding);
                 Assert.Equal(34, exitFullPage.ActualWidth);
@@ -138,6 +147,12 @@ public class UiRenderTests
                 CaptureVisual(window, 1440, 900, "win_10_fullpage_panes.png");
                 Assert.Equal(196, sectionPane.ActualWidth);
                 Assert.Equal(196, pagePane.ActualWidth);
+                var eraserSlider = Assert.IsType<Slider>(window.FindName("EraserSlider"));
+                Assert.Equal(ToolPreset.MinimumEraserRadiusMm, eraserSlider.Minimum);
+                Assert.Equal(ToolPreset.MaximumEraserRadiusMm, eraserSlider.Maximum);
+                var panoramaSlider = Assert.IsType<Slider>(window.FindName("PanoramaSensitivitySlider"));
+                Assert.Equal(MainViewModel.MinimumPanoramaSensitivity, panoramaSlider.Minimum);
+                Assert.Equal(MainViewModel.MaximumPanoramaSensitivity, panoramaSlider.Maximum);
             }
             catch (Exception ex)
             {

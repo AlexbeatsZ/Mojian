@@ -78,4 +78,25 @@ class PressureEraserControllerTest {
 
         assertTrue(controller.activate(1_140L))
     }
+
+    @Test
+    fun onlyWritingToolsCanUseTheEraserOwnedPressureSetting() {
+        assertTrue(PressureEraserPolicy.canTrigger(DrawingToolKind.PEN, eraserEnabled = true))
+        assertTrue(PressureEraserPolicy.canTrigger(DrawingToolKind.HIGHLIGHTER, eraserEnabled = true))
+        assertFalse(PressureEraserPolicy.canTrigger(DrawingToolKind.LASSO, eraserEnabled = true))
+        assertFalse(PressureEraserPolicy.canTrigger(DrawingToolKind.ERASER, eraserEnabled = true))
+        assertFalse(PressureEraserPolicy.canTrigger(DrawingToolKind.PEN, eraserEnabled = false))
+    }
+
+    @Test
+    fun cancellationRestoresTemporaryEraserState() {
+        val controller = PressureEraserController(pressureThreshold = 0.75f, dwellMillis = 100L)
+        controller.onStylusLift(completedInk = true)
+        controller.updateSample(0.9f, 0f, 0f, 10L)
+        assertTrue(controller.activate(110L))
+
+        controller.cancelGesture()
+
+        assertFalse(controller.isErasing)
+    }
 }

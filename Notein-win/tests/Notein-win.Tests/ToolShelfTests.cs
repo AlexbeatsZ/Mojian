@@ -16,6 +16,7 @@ public class ToolShelfTests
         Assert.Contains(shelf.Tools, t => t.Kind == DrawingToolKind.Highlighter);
         Assert.Contains(shelf.Tools, t => t.Kind == DrawingToolKind.Eraser);
         Assert.Contains(shelf.Tools, t => t.Kind == DrawingToolKind.Lasso);
+        Assert.True(shelf.Tools.Single(t => t.Kind == DrawingToolKind.Eraser).PressureEraseEnabled);
     }
 
     [Fact]
@@ -49,5 +50,25 @@ public class ToolShelfTests
         Assert.Equal(shelf.Tools.Count, restored.Tools.Count);
         Assert.Equal("lasso-freeform", restored.SelectedId);
         Assert.Equal(LassoShape.Rectangle, restored.Selected.LassoShape);
+    }
+
+    [Fact]
+    public void EraserRadiusJsonIsClampedToExpandedCrossPlatformRange()
+    {
+        var tooSmall = ToolPreset.FromJson(new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = "eraser-small",
+            ["kind"] = "Eraser",
+            ["eraserRadiusMm"] = 0.01f,
+        });
+        var tooLarge = ToolPreset.FromJson(new System.Text.Json.Nodes.JsonObject
+        {
+            ["id"] = "eraser-large",
+            ["kind"] = "Eraser",
+            ["eraserRadiusMm"] = 100f,
+        });
+
+        Assert.Equal(ToolPreset.MinimumEraserRadiusMm, tooSmall!.EraserRadiusMm);
+        Assert.Equal(ToolPreset.MaximumEraserRadiusMm, tooLarge!.EraserRadiusMm);
     }
 }

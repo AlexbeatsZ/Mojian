@@ -1,6 +1,6 @@
 # Handwriting Engine Research and Tablet Lab
 
-Last verified: 2026-08-22
+Last verified: 2026-08-28
 
 ## Objective
 
@@ -173,6 +173,9 @@ must not be attributed to the brush algorithm without a controlled capture.
 
 Viewport, touch arbitration, Xiaomi shortcut input, and pressure-erasing behavior are specified in
 `docs/design/input-gestures.md` and must preserve the same wet/dry document transform.
+Pressure erasing is product-level tool switching, not part of the fountain brush: its configuration
+belongs to one real eraser preset, can be triggered by pen or highlighter authoring, and must expose
+the temporary eraser selection/cursor before restoring the source tool on lift.
 
 ### Interface direction
 

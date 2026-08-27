@@ -68,6 +68,9 @@ public partial class NoteCanvas : UserControl
     private bool _rightLassoActive;
     private bool _rightLassoUsesStylus;
     private Point _rightLassoStartView;
+    private Point _rightLassoLastView;
+    private bool _stylusBarrelButtonDown;
+    private bool _panoramaSpringLoaded;
     private TouchDevice? _directTouchDevice;
     private bool _touchInsertSpaceActive;
     private DirectGestureMode _directGestureMode;
@@ -86,6 +89,8 @@ public partial class NoteCanvas : UserControl
     private bool _pressureEraseArmed;
     private bool _pressureCandidate;
     private bool _temporaryPressureEraser;
+    private ToolPreset? _pressureCandidateEraserTool;
+    private ToolPreset? _activePressureEraserTool;
     private Point _pressureStartView;
     private DateTime _pressureStartedAt;
     private bool _suppressEditorChange;
@@ -108,6 +113,8 @@ public partial class NoteCanvas : UserControl
         nameof(ZoomLocked), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false));
     public static readonly DependencyProperty PredictionEnabledProperty = DependencyProperty.Register(
         nameof(PredictionEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(true));
+    public static readonly DependencyProperty PanoramaSensitivityProperty = DependencyProperty.Register(
+        nameof(PanoramaSensitivity), typeof(double), typeof(NoteCanvas), new PropertyMetadata(1d));
 
     public PageDocument? Document { get => (PageDocument?)GetValue(DocumentProperty); set => SetValue(DocumentProperty, value); }
     public PageAppearance Appearance { get => (PageAppearance)GetValue(AppearanceProperty); set => SetValue(AppearanceProperty, value); }
@@ -118,8 +125,12 @@ public partial class NoteCanvas : UserControl
     public CanvasTagKind? PendingTagKind { get => (CanvasTagKind?)GetValue(PendingTagKindProperty); set => SetValue(PendingTagKindProperty, value); }
     public bool ZoomLocked { get => (bool)GetValue(ZoomLockedProperty); set => SetValue(ZoomLockedProperty, value); }
     public bool PredictionEnabled { get => (bool)GetValue(PredictionEnabledProperty); set => SetValue(PredictionEnabledProperty, value); }
+    public double PanoramaSensitivity { get => (double)GetValue(PanoramaSensitivityProperty); set => SetValue(PanoramaSensitivityProperty, value); }
     public ViewportState Viewport => _viewport;
     public Func<string, string>? ResolveAssetPath { get; set; }
+    public Func<ToolPreset?>? ResolvePressureEraserTool { get; set; }
+    public Func<SpringLoadedToolKind, ToolPreset?>? BeginSpringLoadedTool { get; set; }
+    public Action<SpringLoadedToolKind>? EndSpringLoadedTool { get; set; }
 
     public event EventHandler? DocumentChanged;
     public event EventHandler? ViewportChanged;
@@ -142,6 +153,8 @@ public partial class NoteCanvas : UserControl
         AddHandler(Stylus.StylusDownEvent, new StylusDownEventHandler(HandleStylusDown), handledEventsToo: true);
         AddHandler(Stylus.StylusMoveEvent, new StylusEventHandler(HandleStylusMove), handledEventsToo: true);
         AddHandler(Stylus.StylusUpEvent, new StylusEventHandler(HandleStylusUp), handledEventsToo: true);
+        AddHandler(Stylus.StylusButtonDownEvent, new StylusButtonEventHandler(HandleStylusButtonDown), handledEventsToo: true);
+        AddHandler(Stylus.StylusButtonUpEvent, new StylusButtonEventHandler(HandleStylusButtonUp), handledEventsToo: true);
         AddHandler(UIElement.PreviewTouchDownEvent, new EventHandler<TouchEventArgs>(ObservePreviewTouchDown), handledEventsToo: true);
         AddHandler(UIElement.PreviewTouchUpEvent, new EventHandler<TouchEventArgs>(ObservePreviewTouchUp), handledEventsToo: true);
     }
@@ -447,6 +460,7 @@ public partial class NoteCanvas : UserControl
         {
             Focus();
             if (_stylusActive) CancelStylusToolActionForNavigation();
+            BeginPanoramaSpringLoadedTool();
             _middleNavigationActive = true;
             _middleNavigationUsesStylus = promotedByStylus || _stylusInRange;
             BeginPointer(
@@ -465,7 +479,11 @@ public partial class NoteCanvas : UserControl
             if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
             Focus();
             if (_stylusActive) CancelStylusToolActionForNavigation();
-            BeginRightButtonLasso(e.GetPosition(this), promotedByStylus);
+            var rightPoint = e.GetPosition(this);
+            var hoverTolerance = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance) * 2;
+            var matchesStylusHover = _stylusInRange && _hoverViewPoint is { } hover && Distance(rightPoint, hover) <= hoverTolerance;
+            var usesStylus = CanvasPointerFeedback.RightButtonUsesStylus(promotedByStylus, _stylusBarrelButtonDown, matchesStylusHover);
+            BeginRightButtonLasso(rightPoint, usesStylus);
             e.Handled = true;
             return;
         }
@@ -493,9 +511,7 @@ public partial class NoteCanvas : UserControl
             UpdatePointerCursor();
             InvalidateVisual();
         }
-        if (_rightLassoArmed &&
-            ((_rightLassoUsesStylus && promotedByStylus && !_stylusActive) ||
-             (!_rightLassoUsesStylus && !promotedByStylus)))
+        if (_rightLassoArmed)
         {
             ContinueRightButtonLasso(e.GetPosition(this));
             e.Handled = true;
@@ -564,6 +580,7 @@ public partial class NoteCanvas : UserControl
             EndPointer(isStylus: _middleNavigationUsesStylus);
             _middleNavigationActive = false;
             _middleNavigationUsesStylus = false;
+            EndPanoramaSpringLoadedTool();
             e.Handled = true;
             return;
         }
@@ -586,19 +603,23 @@ public partial class NoteCanvas : UserControl
     private void HandleStylusDown(object sender, StylusDownEventArgs e)
     {
         if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
-        _stylusActive = true;
         _stylusInRange = true;
-        _stylusEraserActive = e.StylusDevice.Inverted;
-        _ignoreMouseUntil = Environment.TickCount64 + 250;
         var points = e.GetStylusPoints(this);
         var point = points.Count > 0 ? points[^1] : default;
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
-        if (_rightLassoArmed && _rightLassoUsesStylus)
+        var rightGestureArmed = _rightLassoArmed && _rightLassoUsesStylus;
+        if (!CanvasPointerFeedback.StylusDownStartsDrawing(e.InAir, rightGestureArmed))
         {
-            e.Handled = true;
+            _stylusActive = !e.InAir;
+            _stylusEraserActive = false;
+            if (rightGestureArmed) e.Handled = true;
+            InvalidateVisual();
             return;
         }
+        _stylusActive = true;
+        _stylusEraserActive = e.StylusDevice.Inverted;
+        _ignoreMouseUntil = Environment.TickCount64 + 250;
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
             e.Handled = true;
@@ -620,7 +641,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
-            if (_stylusActive && points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
+            if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
             e.Handled = true;
             return;
         }
@@ -659,6 +680,16 @@ public partial class NoteCanvas : UserControl
         e.Handled = true;
     }
 
+    private void HandleStylusButtonDown(object sender, StylusButtonEventArgs e)
+    {
+        if (IsBarrelButton(e.StylusButton)) _stylusBarrelButtonDown = true;
+    }
+
+    private void HandleStylusButtonUp(object sender, StylusButtonEventArgs e)
+    {
+        if (IsBarrelButton(e.StylusButton)) _stylusBarrelButtonDown = false;
+    }
+
     protected override void OnStylusLeave(StylusEventArgs e)
     {
         base.OnStylusLeave(e);
@@ -668,6 +699,7 @@ public partial class NoteCanvas : UserControl
             EndPointer(isStylus: true);
             _middleNavigationActive = false;
             _middleNavigationUsesStylus = false;
+            EndPanoramaSpringLoadedTool();
         }
         _stylusInRange = false;
         _hoverViewPoint = null;
@@ -1084,7 +1116,8 @@ public partial class NoteCanvas : UserControl
             case DrawingToolKind.Eraser:
                 PushUndo();
                 _eraserViewPoint = viewPoint;
-                PerformErase(docPoint, (forceErase ? Math.Max(2.5f, tool.EraserRadiusMm) : tool.EraserRadiusMm) * UnitsPerMillimeter);
+                var eraserTool = forceErase ? ResolvePressureEraserTool?.Invoke() ?? tool : tool;
+                PerformErase(docPoint, eraserTool.EraserRadiusMm * UnitsPerMillimeter);
                 CaptureInput(isStylus);
                 break;
             case DrawingToolKind.Lasso:
@@ -1108,6 +1141,22 @@ public partial class NoteCanvas : UserControl
             _lastPointer = viewPoint;
         }
         ContinuePointer(viewPoint, pressure, tiltX, tiltY, isStylus: true);
+    }
+
+    private void BeginPanoramaSpringLoadedTool()
+    {
+        if (_panoramaSpringLoaded) return;
+        _panoramaSpringLoaded = true;
+        BeginSpringLoadedTool?.Invoke(SpringLoadedToolKind.PanoramaHand);
+        UpdatePointerCursor();
+    }
+
+    private void EndPanoramaSpringLoadedTool()
+    {
+        if (!_panoramaSpringLoaded) return;
+        _panoramaSpringLoaded = false;
+        EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.PanoramaHand);
+        UpdatePointerCursor();
     }
 
     private void BeginInsertSpace(Point viewPoint)
@@ -1136,7 +1185,10 @@ public partial class NoteCanvas : UserControl
         }
         if (_isPanning)
         {
-            _viewport.Pan((float)(viewPoint.X - _lastPointer.X), (float)(viewPoint.Y - _lastPointer.Y));
+            var sensitivity = Math.Clamp(PanoramaSensitivity, 0.25d, 3d);
+            _viewport.Pan(
+                (float)((viewPoint.X - _lastPointer.X) * sensitivity),
+                (float)((viewPoint.Y - _lastPointer.Y) * sensitivity));
             _lastPointer = viewPoint;
             UpdateTextEditorPositions();
             InvalidateVisual();
@@ -1171,7 +1223,7 @@ public partial class NoteCanvas : UserControl
         if (_temporaryPressureEraser)
         {
             _eraserViewPoint = viewPoint;
-            PerformErase(docPoint, 4.5 * UnitsPerMillimeter);
+            PerformErase(docPoint, (_activePressureEraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter);
             InvalidateVisual();
             return;
         }
@@ -1191,7 +1243,8 @@ public partial class NoteCanvas : UserControl
         if (_eraserViewPoint.HasValue && (SelectedTool?.Kind == DrawingToolKind.Eraser || _stylusEraserActive))
         {
             _eraserViewPoint = viewPoint;
-            PerformErase(docPoint, Math.Max(2.5f, SelectedTool?.EraserRadiusMm ?? 4.5f) * UnitsPerMillimeter);
+            var eraserTool = SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool : ResolvePressureEraserTool?.Invoke();
+            PerformErase(docPoint, (eraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter);
             InvalidateVisual();
         }
     }
@@ -1244,10 +1297,14 @@ public partial class NoteCanvas : UserControl
         }
         if (_eraserViewPoint.HasValue) changed = true;
         _eraserViewPoint = null;
+        var endPressureEraserTool = _temporaryPressureEraser;
         _pressureCandidate = false;
+        _pressureCandidateEraserTool = null;
         _temporaryPressureEraser = false;
+        _activePressureEraserTool = null;
         _pressureTimer.Stop();
         if (changed) MarkChanged(immediate: true);
+        if (endPressureEraserTool) EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
         InvalidateVisual();
     }
 
@@ -1263,6 +1320,8 @@ public partial class NoteCanvas : UserControl
         _activeStroke = null;
         _eraserViewPoint = null;
         _temporaryPressureEraser = false;
+        _pressureCandidateEraserTool = null;
+        _activePressureEraserTool = null;
         _pressureCandidate = false;
         _pressureTimer.Stop();
         _isLassoing = false;
@@ -1271,6 +1330,7 @@ public partial class NoteCanvas : UserControl
         _insertSpaceUndoPushed = false;
         if (IsStylusCaptured) ReleaseStylusCapture();
 
+        EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
         if (snapshot != null) RestoreSnapshot(snapshot);
         else InvalidateVisual();
     }
@@ -1296,36 +1356,42 @@ public partial class NoteCanvas : UserControl
     private static bool IsPhysicalStylus(StylusDevice? device) =>
         device?.TabletDevice.Type == TabletDeviceType.Stylus;
 
+    private static bool IsBarrelButton(StylusButton button) =>
+        button.Guid == StylusPointProperties.BarrelButton.Id;
+
     private void CheckPressureEraseActivation()
     {
-        var tool = SelectedTool;
+        var eraserTool = _pressureCandidateEraserTool;
         var activeStroke = _activeStroke;
-        if (tool == null || !PressureEraserPolicy.ShouldActivate(
+        if (eraserTool == null || !PressureEraserPolicy.ShouldActivate(
                 _pressureCandidate,
                 activeStroke != null,
                 (DateTime.UtcNow - _pressureStartedAt).TotalMilliseconds,
-                tool.PressureEraseDwellMilliseconds)) return;
+                eraserTool.PressureEraseDwellMilliseconds)) return;
         if (activeStroke == null) return;
         Document?.Strokes.Remove(activeStroke);
         _activeStroke = null;
         _pressureCandidate = false;
+        _pressureCandidateEraserTool = null;
         _pressureTimer.Stop();
+        _activePressureEraserTool = BeginSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser) ?? eraserTool;
         _temporaryPressureEraser = true;
         _eraserViewPoint = _pressureStartView;
         var documentPoint = _viewport.ViewToDocument(_pressureStartView.X, _pressureStartView.Y);
-        PerformErase(documentPoint, Math.Max(2.5f, tool.EraserRadiusMm) * UnitsPerMillimeter);
+        PerformErase(documentPoint, _activePressureEraserTool.EraserRadiusMm * UnitsPerMillimeter);
         InvalidateVisual();
     }
 
     private void UpdatePressureEraseCandidate(Point viewPoint, float pressure, bool isStylus, ToolPreset tool)
     {
+        var eraserTool = ResolvePressureEraserTool?.Invoke();
         var eligible = PressureEraserPolicy.CanStartCandidate(
             isStylus,
             _pressureEraseArmed,
             tool.Kind,
-            tool.PressureEraseEnabled,
+            eraserTool?.PressureEraseEnabled == true,
             pressure,
-            tool.PressureEraseThresholdPercent);
+            eraserTool?.PressureEraseThresholdPercent ?? 100);
         if (!eligible)
         {
             if (_pressureCandidate)
@@ -1333,10 +1399,12 @@ public partial class NoteCanvas : UserControl
                 _pressureCandidate = false;
                 _pressureTimer.Stop();
             }
+            _pressureCandidateEraserTool = null;
             return;
         }
         if (_pressureCandidate) return;
         _pressureCandidate = true;
+        _pressureCandidateEraserTool = eraserTool;
         _pressureStartView = viewPoint;
         _pressureStartedAt = DateTime.UtcNow;
         _pressureTimer.Start();
@@ -1389,10 +1457,12 @@ public partial class NoteCanvas : UserControl
 
     private void BeginRightButtonLasso(Point viewPoint, bool usesStylus)
     {
+        if (_rightLassoArmed) return;
         _rightLassoArmed = true;
         _rightLassoActive = false;
         _rightLassoUsesStylus = usesStylus;
         _rightLassoStartView = viewPoint;
+        _rightLassoLastView = viewPoint;
         _hoverViewPoint = viewPoint;
         CaptureInput(usesStylus);
         UpdatePointerCursor();
@@ -1402,6 +1472,8 @@ public partial class NoteCanvas : UserControl
     private void ContinueRightButtonLasso(Point viewPoint)
     {
         if (!_rightLassoArmed) return;
+        if (Distance(viewPoint, _rightLassoLastView) < 0.05) return;
+        _rightLassoLastView = viewPoint;
         _hoverViewPoint = viewPoint;
         if (!_rightLassoActive)
         {
@@ -1473,6 +1545,7 @@ public partial class NoteCanvas : UserControl
         }
         foreach (var text in _selectedTextItems)
         {
+            if (!SelectionGeometry.HasVisibleText(text.Text)) continue;
             var rect = new Rect(text.X, text.Y, text.Width, text.Height);
             bounds = bounds.IsEmpty ? rect : Rect.Union(bounds, rect);
         }
@@ -1640,6 +1713,7 @@ public partial class NoteCanvas : UserControl
             }
             item.Text = editor.Text;
             item.Height = (float)Math.Max(32, editor.ActualHeight);
+            if (_selectedTextItems.Contains(item)) RecomputeSelectionBounds();
             MarkChanged();
         };
         editor.LostKeyboardFocus += (_, _) =>
@@ -1980,7 +2054,8 @@ public partial class NoteCanvas : UserControl
         }
         if (_eraserViewPoint is { } eraser)
         {
-            var radius = (SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool.EraserRadiusMm : 4.5) * UnitsPerMillimeter * _viewport.Scale;
+            var eraserTool = _activePressureEraserTool ?? (SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool : ResolvePressureEraserTool?.Invoke());
+            var radius = (eraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter * _viewport.Scale;
             dc.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromRgb(185, 185, 185)), 1.2), eraser, radius, radius);
         }
         if (!InsertSpaceModeEnabled && _hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
@@ -2212,9 +2287,11 @@ public partial class NoteCanvas : UserControl
         _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
         _middleNavigationActive = false; _middleNavigationUsesStylus = false;
+        EndPanoramaSpringLoadedTool();
         if (_rightLassoArmed) ReleaseInput(_rightLassoUsesStylus);
         _rightLassoArmed = false; _rightLassoActive = false; _rightLassoUsesStylus = false;
-        _pressureCandidate = false; _temporaryPressureEraser = false; _pressureTimer.Stop(); _eraserViewPoint = null;
+        if (_temporaryPressureEraser) EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
+        _pressureCandidate = false; _pressureCandidateEraserTool = null; _temporaryPressureEraser = false; _activePressureEraserTool = null; _pressureTimer.Stop(); _eraserViewPoint = null;
         ClearSelection();
     }
 

@@ -13,7 +13,7 @@ public static class PressureEraserPolicy
         int thresholdPercent) =>
         isStylus &&
         armedAfterCompletedStroke &&
-        toolKind == DrawingToolKind.Pen &&
+        toolKind is DrawingToolKind.Pen or DrawingToolKind.Highlighter &&
         enabled &&
         pressure * 100 >= thresholdPercent;
 

@@ -1,6 +1,6 @@
 # Workspace Navigation and Drawing UI
 
-Last verified: 2026-08-23
+Last verified: 2026-08-28
 
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
@@ -110,9 +110,10 @@ button, and persisted presets are never silently discarded.
 Required working tools:
 
 - fountain pen with logical black, blue, or red color plus independent width, pressure response,
-  ink-flow/speed response, and optional stationary pressure eraser;
+  and ink-flow/speed response;
 - highlighter with the same restricted black/blue/red palette, width, and opacity;
-- whole-stroke eraser with its own radius;
+- whole-stroke eraser with its own 0.25–40 mm radius and the sole pressure-erase switch, threshold,
+  and dwell settings. Any pen/highlighter may spring-load this eraser; lasso and panorama hand may not;
 - pen lasso with per-preset `自由圈选` and `矩形` shapes. Either shape uses complete containment for
   stroke geometry, page tags, text boxes, and non-background inserted objects such as images. Mixed
   content shares one selection frame, can be deleted together, moves
@@ -141,7 +142,9 @@ independent from the selected stylus tool.
 The Fluent palm icon after add-tool is a working stylus panorama hand, not a shell. It changes only
 stylus contact into panning, so the pen cannot leave ink in this mode. Finger and mouse behavior do
 not inherit this state: one direct pointer still selects/edits/marquees content and two fingers always
-pan/zoom. Choosing a drawing tool exits the stylus panorama state.
+pan/zoom. Choosing a drawing tool exits the stylus panorama state. Its second-tap flyout persists
+25–300% movement sensitivity. Middle-button navigation spring-loads the same visible Hand state and
+restores the prior drawing/insert-space state on release instead of running a hidden duplicate mode.
 
 The insert space and background format group directly to the right of panorama hand provides:
 - an insert-space exception supporting finger or stylus drag displacement and downward content
@@ -244,7 +247,7 @@ asset, filter, and export behavior is owned by `docs/design/insert-and-export.md
   over unselected content. All content types share one dotted eight-handle frame.
 - One finger never writes or pans the page. Two fingers always preempt the pending one-finger action
   and pan/zoom, even when the first finger began over a text editor or inserted object.
-- Prediction, undo, clear-with-confirmation, pressure erasing, viewport transforms, Xiaomi shortcut
+- Prediction, undo, clear-with-confirmation, eraser-owned pressure erasing, viewport transforms, Xiaomi shortcut
   filtering, and wet/dry coordinate parity remain available.
 
 ## File and options surface

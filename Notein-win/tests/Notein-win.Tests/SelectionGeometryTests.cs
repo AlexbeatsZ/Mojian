@@ -81,4 +81,12 @@ public class SelectionGeometryTests
         Assert.Equal(66, clamped.Left);
         Assert.Equal(24, clamped.Width);
     }
+
+    [Fact]
+    public void EmptyOrWhitespaceTextDoesNotOwnASelectionFrame()
+    {
+        Assert.False(SelectionGeometry.HasVisibleText(null));
+        Assert.False(SelectionGeometry.HasVisibleText("  \r\n"));
+        Assert.True(SelectionGeometry.HasVisibleText("字"));
+    }
 }

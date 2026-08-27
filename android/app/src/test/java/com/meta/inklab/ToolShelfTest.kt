@@ -14,6 +14,7 @@ class ToolShelfTest {
         assertTrue(shelf.tools.any { it.kind == DrawingToolKind.HIGHLIGHTER })
         assertTrue(shelf.tools.any { it.kind == DrawingToolKind.ERASER })
         assertTrue(shelf.tools.any { it.kind == DrawingToolKind.LASSO })
+        assertTrue(shelf.pressureEraser.pressureEraseEnabled)
     }
 
     @Test
@@ -51,6 +52,8 @@ class ToolShelfTest {
 
         val eraser = shelf.tools.first { it.kind == DrawingToolKind.ERASER }
         eraser.eraserRadiusMm = 6.5f
+        eraser.pressureEraseThresholdPercent = 64
+        eraser.pressureEraseDwellMillis = 220L
 
         val lasso = shelf.tools.first { it.kind == DrawingToolKind.LASSO }
         lasso.lassoShape = LassoShape.RECTANGLE
@@ -77,6 +80,8 @@ class ToolShelfTest {
 
         val restoredEraser = restored.tools.first { it.kind == DrawingToolKind.ERASER }
         assertEquals(6.5f, restoredEraser.eraserRadiusMm, 0.001f)
+        assertEquals(64, restoredEraser.pressureEraseThresholdPercent)
+        assertEquals(220L, restoredEraser.pressureEraseDwellMillis)
 
         val restoredLasso = restored.tools.first { it.kind == DrawingToolKind.LASSO }
         assertEquals(LassoShape.RECTANGLE, restoredLasso.lassoShape)
@@ -94,5 +99,28 @@ class ToolShelfTest {
         assertEquals(source.tools.size, target.tools.size)
         assertEquals(pen.id, target.selectedId)
         assertEquals(0.8f, target.tools.first { it.id == pen.id }.widthMm, 0.001f)
+    }
+
+    @Test
+    fun selectingAnotherEraserChangesThePersistedPressureEraserSource() {
+        val shelf = ToolShelf()
+        val eraser = shelf.add(DrawingToolKind.ERASER)
+        eraser.eraserRadiusMm = ToolPreset.MINIMUM_ERASER_RADIUS_MM
+        eraser.pressureEraseThresholdPercent = 61
+
+        val restored = ToolShelf.fromJson(shelf.toJson())!!
+
+        assertEquals(eraser.id, restored.pressureEraserId)
+        assertEquals(ToolPreset.MINIMUM_ERASER_RADIUS_MM, restored.pressureEraser.eraserRadiusMm, 0.001f)
+        assertEquals(61, restored.pressureEraser.pressureEraseThresholdPercent)
+    }
+
+    @Test
+    fun eraserRadiusMigrationClampsToExpandedRange() {
+        val tiny = ToolPreset.fromJson(org.json.JSONObject("""{"id":"tiny","kind":"ERASER","eraserRadiusMm":0.01}"""))!!
+        val huge = ToolPreset.fromJson(org.json.JSONObject("""{"id":"huge","kind":"ERASER","eraserRadiusMm":100}"""))!!
+
+        assertEquals(ToolPreset.MINIMUM_ERASER_RADIUS_MM, tiny.eraserRadiusMm, 0.001f)
+        assertEquals(ToolPreset.MAXIMUM_ERASER_RADIUS_MM, huge.eraserRadiusMm, 0.001f)
     }
 }

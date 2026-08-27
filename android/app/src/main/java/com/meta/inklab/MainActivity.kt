@@ -61,6 +61,7 @@ import androidx.input.motionprediction.MotionEventPredictor
 import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -263,6 +264,10 @@ class MainActivity : Activity() {
     private var activeDirectTool: DrawingToolKind? = null
     private var lastPenToolId: String = toolShelf.tools.first { it.kind == DrawingToolKind.PEN }.id
     private var singleFingerPanEnabled = false
+    private var panoramaSensitivity = 1f
+    private var springLoadedPanorama = false
+    private var springLoadedPanoramaRestore = false
+    private var springLoadedInsertSpaceRestore = false
     private var insertSpaceModeEnabled = false
     private var insertSpaceActive = false
     private var insertSpacePointerId: Int? = null
@@ -332,7 +337,9 @@ class MainActivity : Activity() {
             val pointerId = pressurePointerId ?: return@Runnable
             if (!pressureEraser.activate(SystemClock.uptimeMillis())) return@Runnable
             activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
-            eraseAt(lastPressurePoint, dp(18) / viewport.scale)
+            renderToolShelf()
+            renderToolDetails()
+            eraseAt(lastPressurePoint, pressureEraserRadius())
         }
 
     private val dispatchXiaomiGestureDeadline =
@@ -592,6 +599,32 @@ class MainActivity : Activity() {
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
+        renderToolShelf()
+    }
+
+    private fun handlePanoramaToolClick(anchor: View) {
+        if (!singleFingerPanEnabled) {
+            togglePanoramaMode()
+            return
+        }
+        showPanoramaDetails(anchor)
+    }
+
+    private fun beginSpringLoadedPanorama() {
+        if (springLoadedPanorama) return
+        springLoadedPanorama = true
+        springLoadedPanoramaRestore = singleFingerPanEnabled
+        springLoadedInsertSpaceRestore = insertSpaceModeEnabled
+        singleFingerPanEnabled = true
+        insertSpaceModeEnabled = false
+        renderToolShelf()
+    }
+
+    private fun endSpringLoadedPanorama() {
+        if (!springLoadedPanorama) return
+        springLoadedPanorama = false
+        singleFingerPanEnabled = springLoadedPanoramaRestore
+        insertSpaceModeEnabled = springLoadedInsertSpaceRestore
         renderToolShelf()
     }
 
@@ -1109,8 +1142,7 @@ class MainActivity : Activity() {
                 .getOrDefault(ImageImportDisplayMode.ASK)
         sectionPaneVisible = prefs.getBoolean(KEY_SECTION_PANE_VISIBLE, true)
         pagePaneVisible = prefs.getBoolean(KEY_PAGE_PANE_VISIBLE, true)
-        pressureEraser.pressureThreshold = prefs.getFloat(KEY_PRESSURE_THRESHOLD, 0.78f)
-        pressureEraser.dwellMillis = prefs.getLong(KEY_PRESSURE_DWELL_MILLIS, 140L)
+        panoramaSensitivity = prefs.getFloat(KEY_PANORAMA_SENSITIVITY, 1f).coerceIn(MINIMUM_PANORAMA_SENSITIVITY, MAXIMUM_PANORAMA_SENSITIVITY)
         zoomLocked = prefs.getBoolean(KEY_ZOOM_LOCKED, false)
 
         val modeStr = prefs.getString(KEY_PAGE_PANE_MODE, PagePaneMode.CURRENT_SECTION.name)
@@ -1121,6 +1153,14 @@ class MainActivity : Activity() {
         if (!shelfJson.isNullOrBlank()) {
             ToolShelf.fromJson(shelfJson)?.let { loadedShelf ->
                 toolShelf.restoreFrom(loadedShelf)
+            }
+            val oldShelfVersion = runCatching { JSONObject(shelfJson).optInt("version", 1) }.getOrDefault(1)
+            if (oldShelfVersion < 2) {
+                toolShelf.pressureEraser.apply {
+                    pressureEraseThresholdPercent = (prefs.getFloat(KEY_PRESSURE_THRESHOLD, 0.78f) * 100).roundToInt().coerceIn(40, 100)
+                    pressureEraseDwellMillis = prefs.getLong(KEY_PRESSURE_DWELL_MILLIS, 140L).coerceIn(50L, 500L)
+                }
+                prefs.edit().putString(KEY_TOOL_SHELF, toolShelf.toJson()).apply()
             }
         }
         loadRemainingPreferences(prefs)
@@ -1498,8 +1538,7 @@ class MainActivity : Activity() {
             .putBoolean(KEY_SECTION_PANE_VISIBLE, sectionPaneVisible)
             .putBoolean(KEY_PAGE_PANE_VISIBLE, pagePaneVisible)
             .putString(KEY_PAGE_PANE_MODE, workspace.pagePaneMode.name)
-            .putFloat(KEY_PRESSURE_THRESHOLD, pressureEraser.pressureThreshold)
-            .putLong(KEY_PRESSURE_DWELL_MILLIS, pressureEraser.dwellMillis)
+            .putFloat(KEY_PANORAMA_SENSITIVITY, panoramaSensitivity)
             .putBoolean(KEY_ZOOM_LOCKED, zoomLocked)
             .putString(KEY_KEYBOARD_SHORTCUTS, keyboardShortcutSettings.toJson())
             .putString(KEY_XIAOMI_PEN_SHORTCUTS, xiaomiPenShortcutSettings.toJson())
@@ -3632,7 +3671,7 @@ class MainActivity : Activity() {
                 }
             "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
             "draw:pan" ->
-                commandButton("hand_left", "触控笔抓手", singleFingerPanEnabled) { togglePanoramaMode() }
+                commandButton("hand_left", "触控笔抓手", singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) }
             "draw:insert_space" ->
                 commandButton("insert_space", "插入空白空间", insertSpaceModeEnabled, preserveColors = true) { anchor ->
                     handleInsertSpace(anchor)
@@ -3674,7 +3713,7 @@ class MainActivity : Activity() {
         )
         row.addView(verticalDivider())
         row.addView(
-            commandButton("hand_left", "触控笔抓手", selected = singleFingerPanEnabled) { togglePanoramaMode() },
+            commandButton("hand_left", "触控笔抓手", selected = singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
         row.addView(verticalDivider())
@@ -3699,7 +3738,7 @@ class MainActivity : Activity() {
 
     private fun renderToolDetails() {
         toolDetailRow.removeAllViews()
-        val tool = toolShelf.selected
+        val tool = effectiveDrawingTool()
         toolDetailRow.addView(
             LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -3760,28 +3799,6 @@ class MainActivity : Activity() {
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
-                addToolDetailLine(
-                    detailChip(if (tool.pressureEraseEnabled) "压感橡皮 开" else "压感橡皮 关", tool.pressureEraseEnabled) {
-                        tool.pressureEraseEnabled = !tool.pressureEraseEnabled
-                        persistToolShelf()
-                        syncPressureEraserWithTool()
-                        renderToolDetails()
-                    },
-                )
-                toolDetailRow.addView(
-                    parameterControl("按压力度", ((pressureEraser.pressureThreshold * 100).roundToInt() - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
-                        pressureEraser.pressureThreshold = (it + 40) / 100f
-                        persistWorkspacePreferences()
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
-                )
-                toolDetailRow.addView(
-                    parameterControl("按压时间", ((pressureEraser.dwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
-                        pressureEraser.dwellMillis = (50 + it * 10).toLong()
-                        persistWorkspacePreferences()
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
-                )
             }
 
             DrawingToolKind.HIGHLIGHTER -> {
@@ -3806,23 +3823,33 @@ class MainActivity : Activity() {
 
             DrawingToolKind.ERASER -> {
                 toolDetailRow.addView(
-                    parameterControl("大小", ((tool.eraserRadiusMm - 2f) * 2f).roundToInt().coerceIn(0, 28), 28, { "${2f + it / 2f} mm" }) {
-                        tool.eraserRadiusMm = 2f + it / 2f
+                    parameterControl("大小", eraserRadiusToStep(tool.eraserRadiusMm), ERASER_RADIUS_STEPS, { eraserRadiusLabel(stepToEraserRadius(it)) }) {
+                        tool.eraserRadiusMm = stepToEraserRadius(it)
                         persistToolShelf()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
+                addToolDetailLine(
+                    detailChip(if (tool.pressureEraseEnabled) "书写压感切换 开" else "书写压感切换 关", tool.pressureEraseEnabled) {
+                        tool.pressureEraseEnabled = !tool.pressureEraseEnabled
+                        persistToolShelf()
+                        syncPressureEraserWithTool()
+                        renderToolDetails()
+                    },
+                )
                 toolDetailRow.addView(
-                    parameterControl("按压力度", ((pressureEraser.pressureThreshold * 100).roundToInt() - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
-                        pressureEraser.pressureThreshold = (it + 40) / 100f
-                        persistWorkspacePreferences()
+                    parameterControl("按压力度", (tool.pressureEraseThresholdPercent - 40).coerceIn(0, 60), 60, { "${it + 40}%" }) {
+                        tool.pressureEraseThresholdPercent = it + 40
+                        persistToolShelf()
+                        syncPressureEraserWithTool()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
                 toolDetailRow.addView(
-                    parameterControl("按压时间", ((pressureEraser.dwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
-                        pressureEraser.dwellMillis = (50 + it * 10).toLong()
-                        persistWorkspacePreferences()
+                    parameterControl("按压时间", ((tool.pressureEraseDwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
+                        tool.pressureEraseDwellMillis = (50 + it * 10).toLong()
+                        persistToolShelf()
+                        syncPressureEraserWithTool()
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
@@ -3902,6 +3929,70 @@ class MainActivity : Activity() {
         popup.showAtLocation(anchor, Gravity.TOP or Gravity.START, x, location[1] + anchor.height + dp(2))
         toolDetailPopup = popup
     }
+
+    private fun showPanoramaDetails(anchor: View) {
+        toolDetailPopup?.dismiss()
+        val content =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                addView(
+                    TextView(this@MainActivity).apply {
+                        text = "全景手柄"
+                        setTextColor(TEXT_PRIMARY)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        gravity = Gravity.CENTER_VERTICAL
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(38)),
+                )
+                addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
+                addView(
+                    parameterControl(
+                        "移动灵敏度",
+                        ((panoramaSensitivity * 100).roundToInt() - 25).coerceIn(0, 275),
+                        275,
+                        { "${it + 25}%" },
+                    ) {
+                        panoramaSensitivity = ((it + 25) / 100f).coerceIn(MINIMUM_PANORAMA_SENSITIVITY, MAXIMUM_PANORAMA_SENSITIVITY)
+                        persistWorkspacePreferences()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
+                addView(
+                    detailHint("同时作用于全景手柄和中键临时平移"),
+                    LinearLayout.LayoutParams(MATCH, dp(36)),
+                )
+            }
+        val popup =
+            PopupWindow(content, dp(316), WRAP, true).apply {
+                isOutsideTouchable = true
+                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+                elevation = dp(10).toFloat()
+                setOnDismissListener { if (toolDetailPopup === this) toolDetailPopup = null }
+            }
+        val location = IntArray(2)
+        anchor.getLocationOnScreen(location)
+        val maxX = (resources.displayMetrics.widthPixels - dp(316) - dp(8)).coerceAtLeast(dp(8))
+        val x = (location[0] - dp(8)).coerceIn(dp(8), maxX)
+        popup.showAtLocation(anchor, Gravity.TOP or Gravity.START, x, location[1] + anchor.height + dp(2))
+        toolDetailPopup = popup
+    }
+
+    private fun effectiveDrawingTool(): ToolPreset =
+        if (pressureEraser.isErasing) toolShelf.pressureEraser else toolShelf.selected
+
+    private fun eraserRadiusToStep(radiusMm: Float): Int =
+        ((radiusMm.coerceIn(ToolPreset.MINIMUM_ERASER_RADIUS_MM, ToolPreset.MAXIMUM_ERASER_RADIUS_MM) - ToolPreset.MINIMUM_ERASER_RADIUS_MM) * 4f)
+            .roundToInt()
+            .coerceIn(0, ERASER_RADIUS_STEPS)
+
+    private fun stepToEraserRadius(step: Int): Float =
+        (ToolPreset.MINIMUM_ERASER_RADIUS_MM + step.coerceIn(0, ERASER_RADIUS_STEPS) / 4f)
+            .coerceAtMost(ToolPreset.MAXIMUM_ERASER_RADIUS_MM)
+
+    private fun eraserRadiusLabel(radiusMm: Float): String =
+        String.format(Locale.ROOT, if (radiusMm < 1f) "%.2f mm" else "%.1f mm", radiusMm)
 
     @SuppressLint("ClickableViewAccessibility")
     private fun bindInkPipeline() {
@@ -4008,8 +4099,7 @@ class MainActivity : Activity() {
         when (activeDirectTool) {
             DrawingToolKind.PEN,
             DrawingToolKind.HIGHLIGHTER -> {
-                pressureEraser.enabled =
-                    activeDirectTool == DrawingToolKind.PEN && (directPreset?.pressureEraseEnabled ?: false)
+                pressureEraser.enabled = PressureEraserPolicy.canTrigger(requireNotNull(activeDirectTool), toolShelf.pressureEraser.pressureEraseEnabled)
                 activeStrokes[pointerId] =
                     wetInkView.startStroke(
                         event = event,
@@ -4026,7 +4116,7 @@ class MainActivity : Activity() {
             DrawingToolKind.ERASER -> {
                 mainHandler.removeCallbacks(activatePressureEraser)
                 pressureEraser.cancelCandidate()
-                eraseAt(lastPressurePoint, selectedEraserRadius())
+                eraseAt(lastPressurePoint, pressureEraserRadius())
             }
 
             DrawingToolKind.LASSO -> {
@@ -4043,12 +4133,12 @@ class MainActivity : Activity() {
         lastPressurePoint = viewport.viewToDocument(event.getX(pressureIndex), event.getY(pressureIndex))
 
         when (activeDirectTool) {
-            DrawingToolKind.ERASER -> eraseAt(lastPressurePoint, selectedEraserRadius())
+            DrawingToolKind.ERASER -> eraseAt(lastPressurePoint, pressureEraserRadius())
             DrawingToolKind.LASSO -> dryInkView.extendLasso(lastPressurePoint)
             DrawingToolKind.PEN,
             DrawingToolKind.HIGHLIGHTER -> {
                 if (pressureEraser.isErasing) {
-                    eraseAt(lastPressurePoint, dp(18) / viewport.scale)
+                    eraseAt(lastPressurePoint, pressureEraserRadius())
                 } else {
                     val prediction = if (predictionEnabled) predictor.predict() else null
                     for ((pointerId, strokeId) in activeStrokes) {
@@ -4077,6 +4167,10 @@ class MainActivity : Activity() {
                 mainHandler.removeCallbacks(activatePressureEraser)
                 pressureEraser.onStylusLift(completedInk = !wasErasing && strokeId != null)
                 dryInkView.setEraserCursor(null)
+                if (wasErasing) {
+                    renderToolShelf()
+                    renderToolDetails()
+                }
             }
 
             DrawingToolKind.LASSO -> {
@@ -4096,17 +4190,23 @@ class MainActivity : Activity() {
     }
 
     private fun cancelStylusAction() {
+        val wasErasing = pressureEraser.isErasing
         mainHandler.removeCallbacks(activatePressureEraser)
-        pressureEraser.cancelCandidate()
+        pressureEraser.cancelGesture()
         pressurePointerId = null
         activeDirectTool = null
         dryInkView.setEraserCursor(null)
         wetInkView.cancelUnfinishedStrokes()
         activeStrokes.clear()
+        if (wasErasing) {
+            renderToolShelf()
+            renderToolDetails()
+        }
         syncPressureEraserWithTool()
     }
 
     private fun selectTool(id: String) {
+        endSpringLoadedPanorama()
         if (!toolShelf.select(id)) return
         if (toolShelf.selected.kind == DrawingToolKind.PEN) lastPenToolId = toolShelf.selected.id
         persistToolShelf()
@@ -4155,7 +4255,10 @@ class MainActivity : Activity() {
         }
 
     private fun syncPressureEraserWithTool() {
-        pressureEraser.enabled = toolShelf.selected.kind == DrawingToolKind.PEN && toolShelf.selected.pressureEraseEnabled
+        val eraser = toolShelf.pressureEraser
+        pressureEraser.pressureThreshold = eraser.pressureEraseThresholdPercent / 100f
+        pressureEraser.dwellMillis = eraser.pressureEraseDwellMillis
+        pressureEraser.enabled = PressureEraserPolicy.canTrigger(toolShelf.selected.kind, eraser.pressureEraseEnabled)
         if (!pressureEraser.enabled) {
             mainHandler.removeCallbacks(activatePressureEraser)
             pressureEraser.cancelCandidate()
@@ -4230,6 +4333,7 @@ class MainActivity : Activity() {
                         middlePressed = middlePressed,
                         ctrlPressed = event.hasCtrlModifier(),
                     )
+                if (mouseCanvasGesture != CanvasDragIntent.NONE) beginSpringLoadedPanorama()
                 when (mouseCanvasGesture) {
                     CanvasDragIntent.PAN -> beginSingleFingerPan(event, mouseIndex)
                     CanvasDragIntent.ZOOM -> lastMouseGestureY = event.getY(mouseIndex)
@@ -4251,10 +4355,12 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_UP -> {
                 if (mouseCanvasGesture == CanvasDragIntent.PAN) endTransformGesture()
                 mouseCanvasGesture = CanvasDragIntent.NONE
+                endSpringLoadedPanorama()
             }
             MotionEvent.ACTION_CANCEL -> {
                 endTransformGesture()
                 mouseCanvasGesture = CanvasDragIntent.NONE
+                endSpringLoadedPanorama()
             }
         }
         return true
@@ -4404,11 +4510,12 @@ class MainActivity : Activity() {
     }
 
     private fun applySingleFingerPan(focusX: Float, focusY: Float) {
+        val adjusted = CanvasInputRouting.scaledPanFocus(lastGestureFocusX, lastGestureFocusY, focusX, focusY, panoramaSensitivity)
         viewport.applyGesture(
             previousFocusX = lastGestureFocusX,
             previousFocusY = lastGestureFocusY,
-            focusX = focusX,
-            focusY = focusY,
+            focusX = adjusted.x,
+            focusY = adjusted.y,
             requestedScaleFactor = 1f,
         )
         lastGestureFocusX = focusX
@@ -4458,11 +4565,9 @@ class MainActivity : Activity() {
         mainHandler.postDelayed(activatePressureEraser, remaining.coerceAtLeast(1L))
     }
 
-    private fun selectedEraserRadius(): Float {
-        val preset = toolShelf.selected
-        val radiusMm = if (preset.kind == DrawingToolKind.ERASER) preset.eraserRadiusMm else 4.5f
-        return radiusMm * INTERNAL_UNITS_PER_MM
-    }
+    private fun pressureEraserRadius(): Float =
+        toolShelf.pressureEraser.eraserRadiusMm
+            .coerceIn(ToolPreset.MINIMUM_ERASER_RADIUS_MM, ToolPreset.MAXIMUM_ERASER_RADIUS_MM) * INTERNAL_UNITS_PER_MM
 
     private fun eraseAt(point: PointF, radius: Float) {
         dryInkView.setEraserCursor(point, radius)
@@ -4850,6 +4955,7 @@ class MainActivity : Activity() {
     private fun addTool(kind: DrawingToolKind) {
         val added = toolShelf.add(kind)
         if (kind == DrawingToolKind.PEN) lastPenToolId = added.id
+        persistToolShelf()
         textInputLayer.abandonTemporaryEditors()
         updateSelectionInteraction()
         rebuildBrush()
@@ -4899,7 +5005,7 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && tool.id == toolShelf.selectedId
+        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && tool.id == effectiveDrawingTool().id
         return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
@@ -6068,6 +6174,9 @@ class MainActivity : Activity() {
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val INTERNAL_UNITS_PER_MM = 12.16225f
+        private const val MINIMUM_PANORAMA_SENSITIVITY = 0.25f
+        private const val MAXIMUM_PANORAMA_SENSITIVITY = 3f
+        private const val ERASER_RADIUS_STEPS = 159
         private const val OPTIONS_PREFERENCES = "workspace-options"
         private const val FULL_PAGE_TOOLBAR_KEY = "full-page-toolbar"
         private const val KEY_TOOL_SHELF = "tool-shelf"
@@ -6078,6 +6187,7 @@ class MainActivity : Activity() {
         private const val KEY_PAGE_PANE_MODE = "page-pane-mode"
         private const val KEY_PRESSURE_THRESHOLD = "pressure-threshold"
         private const val KEY_PRESSURE_DWELL_MILLIS = "pressure-dwell-millis"
+        private const val KEY_PANORAMA_SENSITIVITY = "panorama-sensitivity"
         private const val KEY_ACTIVE_NOTEBOOK_ID = "active-notebook-id"
         private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
         private const val KEY_SELECTED_PAGE_ID = "selected-page-id"

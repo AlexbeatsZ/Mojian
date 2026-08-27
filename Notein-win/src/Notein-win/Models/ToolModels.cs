@@ -12,6 +12,12 @@ public enum DrawingToolKind
     Lasso,
 }
 
+public enum SpringLoadedToolKind
+{
+    Eraser,
+    PanoramaHand,
+}
+
 public enum LassoShape
 {
     Freeform,
@@ -54,6 +60,9 @@ public static class InkPaletteExtensions
 
 public class ToolPreset
 {
+    public const float MinimumEraserRadiusMm = 0.25f;
+    public const float MaximumEraserRadiusMm = 40f;
+
     public string Id { get; set; }
     public DrawingToolKind Kind { get; set; }
     public InkPalette Color { get; set; } = InkPalette.Black;
@@ -62,7 +71,7 @@ public class ToolPreset
     public int InkFlowPercent { get; set; } = 100;
     public int OpacityPercent { get; set; } = 32;
     public float EraserRadiusMm { get; set; } = 4.5f;
-    public bool PressureEraseEnabled { get; set; } = true;
+    public bool PressureEraseEnabled { get; set; }
     public int PressureEraseDwellMilliseconds { get; set; } = 140;
     public int PressureEraseThresholdPercent { get; set; } = 78;
     public LassoShape LassoShape { get; set; } = LassoShape.Freeform;
@@ -79,7 +88,7 @@ public class ToolPreset
         int inkFlowPercent = 100,
         int opacityPercent = 32,
         float eraserRadiusMm = 4.5f,
-        bool pressureEraseEnabled = true)
+        bool pressureEraseEnabled = false)
     {
         Id = id;
         Kind = kind;
@@ -141,8 +150,11 @@ public class ToolPreset
             var pressurePercent = json["pressurePercent"]?.GetValue<int>() ?? 200;
             var inkFlowPercent = json["inkFlowPercent"]?.GetValue<int>() ?? 100;
             var opacityPercent = json["opacityPercent"]?.GetValue<int>() ?? 32;
-            var eraserRadiusMm = json["eraserRadiusMm"]?.GetValue<float>() ?? 4.5f;
-            var pressureEraseEnabled = json["pressureEraseEnabled"]?.GetValue<bool>() ?? true;
+            var eraserRadiusMm = Math.Clamp(
+                json["eraserRadiusMm"]?.GetValue<float>() ?? 4.5f,
+                MinimumEraserRadiusMm,
+                MaximumEraserRadiusMm);
+            var pressureEraseEnabled = json["pressureEraseEnabled"]?.GetValue<bool>() ?? false;
             var lassoShapeText = json["lassoShape"]?.GetValue<string>() ?? LassoShape.Freeform.ToString();
             var lassoShape = Enum.TryParse<LassoShape>(lassoShapeText, true, out var parsedLassoShape)
                 ? parsedLassoShape
@@ -210,7 +222,7 @@ public class ToolShelf
                 id: NextId("eraser"),
                 kind: kind,
                 eraserRadiusMm: 4.5f,
-                pressureEraseEnabled: false
+                pressureEraseEnabled: true
             ),
             DrawingToolKind.Lasso => new ToolPreset(
                 id: NextId("lasso"),
@@ -328,7 +340,7 @@ public class ToolShelf
             id: "eraser-stroke",
             kind: DrawingToolKind.Eraser,
             eraserRadiusMm: 4.5f,
-            pressureEraseEnabled: false
+            pressureEraseEnabled: true
         ),
         new(
             id: "lasso-freeform",

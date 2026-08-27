@@ -65,4 +65,17 @@ class PressureEraserController(
     fun cancelCandidate() {
         candidateSinceMillis = null
     }
+
+    fun cancelGesture() {
+        isErasing = false
+        candidateSinceMillis = null
+    }
+}
+
+object PressureEraserPolicy {
+    fun supportsPressureErase(kind: DrawingToolKind): Boolean =
+        kind == DrawingToolKind.PEN || kind == DrawingToolKind.HIGHLIGHTER
+
+    fun canTrigger(kind: DrawingToolKind, eraserEnabled: Boolean): Boolean =
+        eraserEnabled && supportsPressureErase(kind)
 }

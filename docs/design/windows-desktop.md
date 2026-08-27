@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-08-27
+Last verified: 2026-08-28
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -52,7 +52,8 @@ The normal window uses four vertical zones after the ribbon:
   closed, leaves independent section/page recovery buttons, and keeps their open state transient so
   entering or leaving full page never rewrites the normal-workspace pane preferences. Its top
   controls remain clickable inside the 34 px native caption region and stay clear of DWM caption
-  buttons. The 34 px canvas actions preserve the Android 24 x 24 icon viewport inside their border
+  buttons. When either pane is open in full-page mode, its header `+` is explicitly opted into
+  `WindowChrome` hit testing so notebook/section/page creation remains clickable. The 34 px canvas actions preserve the Android 24 x 24 icon viewport inside their border
   instead of clipping path geometry to the content box; the visible enter/exit glyph bounds are
   raster-checked against the button center rather than trusting WPF's nominal layout bounds.
 - Split view owns two independent page slots. Leaving split view keeps the right slot.
@@ -74,6 +75,11 @@ menus, scrollbars, pointer cursors, and accessibility. The 34 px top row reserve
 caption hit zone and uses the OS-owned minimize/maximize/close glyphs; it must not simulate them with
 text or custom vectors. These adaptations must not reorder the Android product's navigation or
 replace its established visual language.
+
+The Page/PDF creation window is an opaque WPF window with layout rounding, device-pixel snapping,
+Display text formatting, and ClearType text. Do not restore `AllowsTransparency` or a window-level
+blurred shadow: a layered transparent window disables subpixel text rendering and makes the complete
+dialog appear soft at desktop DPI scaling.
 
 Icon resources are generated mechanically from `android/app/src/main/res/drawable` rather than
 redrawn from memory. Every source path keeps its full geometry; literal per-path colors remain a
@@ -105,6 +111,9 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   its newest coalesced sample; the mouse-compatible copy is then ignored so it cannot execute the
   motion twice. The same coordinates continue to refresh the nib position. Stylus Hand follows the
   same direction rule. Zoom lock blocks gesture scaling only.
+- Middle-button navigation spring-loads the same Hand state exposed by the toolbar, including its
+  cursor and selected frame, and restores the previous drawing/insert-space state on release. Its
+  persisted 25–300% sensitivity scales pan deltas only; Ctrl-middle diagonal zoom keeps its fixed rule.
 - Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
   A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
   mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.
@@ -112,12 +121,16 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   mouse and a stylus side button mapped to right-click. The stylus may lasso while still in-air; no
   nib contact is required. A stationary right-click opens the existing context menu on release, while
   a completed right-drag never also opens that menu. Native text-editor right-click remains native.
+  Driver-promoted right-click events may omit their stylus association, so recent stylus hover and
+  barrel-button state are part of source classification; an in-air stylus-down never authors ink.
 - Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
   stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not
   user-configurable shortcut entries. The old cursor/text-insertion mode does not exist. A blank
   primary click/tap creates an uncommitted caret; the first valid character commits it, while focus
   loss, another operation, or page navigation removes an empty temporary box without Undo.
+  Empty/whitespace temporary text also owns no visible selection frame; the frame appears only after
+  the first valid character and disappears again if committed text is cleared.
 - Keyboard mappings are stored per workspace, categorized as `文件`, `开始`, `插入`, `绘图`, and `视图`,
   and resolve conflicts by removing the previous owner. Standard editing, undo/redo, search,
   full-page, delete-selection, and zoom defaults are provided. Outside native text editing,
@@ -129,6 +142,11 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   non-uniform scaling are document operations and participate in autosave. The eraser removes ink
   and tags but never treats inserted objects as strokes; immutable PDF page backgrounds also survive
   clear-page operations.
+- Pressure erasing is a spring-loaded use of the designated real eraser preset, not a second canvas
+  implementation. The eraser alone owns the enable switch, 40–100% threshold, 50–500 ms dwell, and
+  0.25–40 mm radius. Pen and highlighter may trigger it; Lasso and Hand may not. Toolbar selection,
+  cursor radius, immediate activation erase, release restoration, persistence, and legacy migration
+  must all use that same preset.
 - Existing text, ink, tags, and non-background inserted objects remain directly selectable regardless
   of Pen tool state. Text follows Select -> Edit through ordinary clicks; canvas double-click is
   reserved. Right click selects the target and opens the same context surface as touch long press.

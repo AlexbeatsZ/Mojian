@@ -30,7 +30,9 @@ data class ToolPreset(
     var inkFlowPercent: Int = 100,
     var opacityPercent: Int = 32,
     var eraserRadiusMm: Float = 4.5f,
-    var pressureEraseEnabled: Boolean = true,
+    var pressureEraseEnabled: Boolean = false,
+    var pressureEraseThresholdPercent: Int = 78,
+    var pressureEraseDwellMillis: Long = 140L,
     var lassoShape: LassoShape = LassoShape.FREEFORM,
 ) {
     val displayName: String
@@ -53,6 +55,8 @@ data class ToolPreset(
             put("opacityPercent", opacityPercent)
             put("eraserRadiusMm", eraserRadiusMm.toDouble())
             put("pressureEraseEnabled", pressureEraseEnabled)
+            put("pressureEraseThresholdPercent", pressureEraseThresholdPercent)
+            put("pressureEraseDwellMillis", pressureEraseDwellMillis)
             put("lassoShape", lassoShape.name)
         }
 
@@ -68,7 +72,10 @@ data class ToolPreset(
                 val inkFlowPercent = json.optInt("inkFlowPercent", 100)
                 val opacityPercent = json.optInt("opacityPercent", 32)
                 val eraserRadiusMm = json.optDouble("eraserRadiusMm", 4.5).toFloat()
-                val pressureEraseEnabled = json.optBoolean("pressureEraseEnabled", true)
+                    .coerceIn(MINIMUM_ERASER_RADIUS_MM, MAXIMUM_ERASER_RADIUS_MM)
+                val pressureEraseEnabled = json.optBoolean("pressureEraseEnabled", false)
+                val pressureEraseThresholdPercent = json.optInt("pressureEraseThresholdPercent", 78).coerceIn(40, 100)
+                val pressureEraseDwellMillis = json.optLong("pressureEraseDwellMillis", 140L).coerceIn(50L, 500L)
                 val lassoShape =
                     runCatching { LassoShape.valueOf(json.optString("lassoShape", LassoShape.FREEFORM.name)) }
                         .getOrDefault(LassoShape.FREEFORM)
@@ -82,12 +89,17 @@ data class ToolPreset(
                     opacityPercent = opacityPercent,
                     eraserRadiusMm = eraserRadiusMm,
                     pressureEraseEnabled = pressureEraseEnabled,
+                    pressureEraseThresholdPercent = pressureEraseThresholdPercent,
+                    pressureEraseDwellMillis = pressureEraseDwellMillis,
                     lassoShape = lassoShape,
                 )
             } catch (_: Exception) {
                 null
             }
         }
+
+        const val MINIMUM_ERASER_RADIUS_MM = 0.25f
+        const val MAXIMUM_ERASER_RADIUS_MM = 40f
     }
 }
 
@@ -99,15 +111,23 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
     var selectedId: String = mutableTools.firstOrNull()?.id ?: defaults().first().id
         private set
 
+    var pressureEraserId: String = mutableTools.first { it.kind == DrawingToolKind.ERASER }.id
+        private set
+
     val tools: List<ToolPreset>
         get() = mutableTools
 
     val selected: ToolPreset
         get() = mutableTools.firstOrNull { it.id == selectedId } ?: mutableTools.first()
 
+    val pressureEraser: ToolPreset
+        get() = mutableTools.firstOrNull { it.id == pressureEraserId && it.kind == DrawingToolKind.ERASER }
+            ?: mutableTools.first { it.kind == DrawingToolKind.ERASER }
+
     fun select(id: String): Boolean {
         if (mutableTools.none { it.id == id }) return false
         selectedId = id
+        if (mutableTools.first { it.id == id }.kind == DrawingToolKind.ERASER) pressureEraserId = id
         return true
     }
 
@@ -134,7 +154,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                         id = nextId("eraser"),
                         kind = kind,
                         eraserRadiusMm = 4.5f,
-                        pressureEraseEnabled = false,
+                        pressureEraseEnabled = true,
                     )
                 DrawingToolKind.LASSO ->
                     ToolPreset(
@@ -145,6 +165,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
             }
         mutableTools.add(preset)
         selectedId = preset.id
+        if (kind == DrawingToolKind.ERASER) pressureEraserId = preset.id
         return preset
     }
 
@@ -154,11 +175,18 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
         mutableTools.restoreMissingDefaults()
         sequence = (mutableTools.mapNotNull { it.id.substringAfterLast("-", "").toIntOrNull() }.maxOrNull() ?: mutableTools.size) + 1
         selectedId = if (mutableTools.any { it.id == other.selectedId }) other.selectedId else mutableTools.first().id
+        pressureEraserId = if (mutableTools.any { it.id == other.pressureEraserId && it.kind == DrawingToolKind.ERASER }) {
+            other.pressureEraserId
+        } else {
+            mutableTools.first { it.kind == DrawingToolKind.ERASER }.id
+        }
     }
 
     fun toJson(): String {
         val root = JSONObject()
+        root.put("version", 2)
         root.put("selectedId", selectedId)
+        root.put("pressureEraserId", pressureEraserId)
         val array = JSONArray()
         for (tool in mutableTools) {
             array.put(tool.toJson())
@@ -192,9 +220,17 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                 }
                 if (list.isEmpty()) return null
                 val shelf = ToolShelf(list)
+                if (root.optInt("version", 1) < 2) {
+                    shelf.pressureEraser.pressureEraseEnabled =
+                        list.any { it.kind in setOf(DrawingToolKind.PEN, DrawingToolKind.HIGHLIGHTER) && it.pressureEraseEnabled }
+                }
                 val selectedId = root.optString("selectedId", "")
                 if (selectedId.isNotEmpty() && list.any { it.id == selectedId }) {
                     shelf.select(selectedId)
+                }
+                val pressureEraserId = root.optString("pressureEraserId", "")
+                if (list.any { it.id == pressureEraserId && it.kind == DrawingToolKind.ERASER }) {
+                    shelf.pressureEraserId = pressureEraserId
                 }
                 shelf
             } catch (_: Exception) {
@@ -219,7 +255,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                     id = "eraser-stroke",
                     kind = DrawingToolKind.ERASER,
                     eraserRadiusMm = 4.5f,
-                    pressureEraseEnabled = false,
+                    pressureEraseEnabled = true,
                 ),
                 ToolPreset(
                     id = "lasso-freeform",

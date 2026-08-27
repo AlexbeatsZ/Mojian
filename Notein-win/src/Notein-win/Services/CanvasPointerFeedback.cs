@@ -38,6 +38,15 @@ public static class CanvasPointerFeedback
     public static bool RightButtonMovementStartsLasso(double movementDistance, double dragThreshold) =>
         movementDistance >= Math.Max(0, dragThreshold);
 
+    public static bool RightButtonUsesStylus(
+        bool promotedByStylus,
+        bool barrelButtonDown,
+        bool matchesStylusHover) =>
+        promotedByStylus || barrelButtonDown || matchesStylusHover;
+
+    public static bool StylusDownStartsDrawing(bool inAir, bool rightButtonGestureArmed) =>
+        !inAir && !rightButtonGestureArmed;
+
     public static bool SuppressMouseStream(
         bool stylusContactActive,
         bool promotedByStylus,

@@ -184,7 +184,8 @@
                                 <ItemsControl ItemsSource="{Binding PenTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnToolPresetClick"><Path Data="{StaticResource Fluent_pen}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0,0,3,0" ToolTip="添加" Click="OnAddToolMenuClick"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="触控笔抓手" IsChecked="{Binding SingleFingerPanEnabled}"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ToggleButton x:Name="PanoramaToolButton" Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="触控笔抓手（再次点击设置）"
+                                              IsChecked="{Binding SingleFingerPanEnabled, Mode=OneWay}" Click="OnPanoramaToolClick"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入空白空间" IsChecked="{Binding InsertSpaceModeEnabled}"><Image Source="{StaticResource FluentDrawing_insert_space}" Width="21" Height="21" Stretch="Uniform" /></ToggleButton>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="设置背景格式" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
@@ -247,7 +248,8 @@
                     <DockPanel>
                         <Grid DockPanel.Dock="Top" Height="44">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <Button Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Margin="0,0,7,0" Padding="8" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
+                            <Button x:Name="AddSectionButton" Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Margin="0,0,7,0" Padding="8"
+                                    WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
                         </Grid>
                         <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding NotebookRows}">
                             <ItemsControl.ItemTemplate>
@@ -314,8 +316,8 @@
                         Visibility="{Binding IsPagePaneOpen, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
                         <Grid DockPanel.Dock="Top" Height="48">
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Padding="8" HorizontalAlignment="Right" Margin="0,0,6,0"
-                                    ToolTip="新建页面" IsEnabled="{Binding CanAddPage}" Click="OnAddPageClick">
+                            <Button x:Name="AddPageButton" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Padding="8" HorizontalAlignment="Right" Margin="0,0,6,0"
+                                    WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="新建页面" IsEnabled="{Binding CanAddPage}" Click="OnAddPageClick">
                                 <Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox>
                             </Button>
                         </Grid>
@@ -379,13 +381,13 @@
                     <Border Grid.Column="0" PreviewMouseDown="OnLeftCanvasFocus">
                         <controls:NoteCanvas x:Name="LeftCanvas" Document="{Binding PrimaryDocument}" Appearance="{Binding PrimaryPageAppearance}" PageTitle="{Binding PrimaryPageTitle}"
                                              SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}"
-                                             InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
+                                             PanoramaSensitivity="{Binding PanoramaSensitivity}" InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
                     <Border Grid.Column="1" Width="7" Background="#2A2A2A" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1,0" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}" />
                     <Border Grid.Column="2" PreviewMouseDown="OnRightCanvasFocus" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}">
                         <controls:NoteCanvas x:Name="RightCanvas" Document="{Binding SecondaryDocument}" Appearance="{Binding SecondaryPageAppearance}" PageTitle="{Binding SecondaryPageTitle}"
                                              SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}"
-                                             InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
+                                             PanoramaSensitivity="{Binding PanoramaSensitivity}" InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
 
                     <StackPanel x:Name="FullPagePaneButtons" Grid.ColumnSpan="3" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
@@ -507,11 +509,6 @@
                     <Slider x:Name="PressureSlider" Minimum="0" Maximum="400" TickFrequency="10" Value="{Binding SelectedTool.PressurePercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                     <DockPanel Margin="0,8,0,0"><TextBlock Text="出墨" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=FlowSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="FlowSlider" Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding SelectedTool.InkFlowPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
-                    <CheckBox Content="压感橡皮" IsChecked="{Binding SelectedTool.PressureEraseEnabled, Mode=TwoWay}" Foreground="{StaticResource TextPrimary}" Margin="0,10,0,2" Click="OnToolSettingChanged" />
-                    <DockPanel><TextBlock Text="按压力度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PenThresholdSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="PenThresholdSlider" Minimum="40" Maximum="100" TickFrequency="2" Value="{Binding SelectedTool.PressureEraseThresholdPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
-                    <DockPanel Margin="0,8,0,0"><TextBlock Text="按压时间" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PenDwellSlider, Path=Value, StringFormat={}{0:F0} ms}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="PenDwellSlider" Minimum="50" Maximum="500" TickFrequency="10" Value="{Binding SelectedTool.PressureEraseDwellMilliseconds, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}">
@@ -529,7 +526,10 @@
 
                 <StackPanel Visibility="{Binding SelectedToolIsEraser, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel><TextBlock Text="大小" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="EraserSlider" Minimum="2" Maximum="16" TickFrequency="0.5" Value="{Binding SelectedTool.EraserRadiusMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <Slider x:Name="EraserSlider" Maximum="40" Minimum="0.25"
+                            SmallChange="0.25" LargeChange="2" TickFrequency="0.25" Value="{Binding SelectedTool.EraserRadiusMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <CheckBox Content="书写工具用力按压时临时切换到此橡皮" IsChecked="{Binding SelectedTool.PressureEraseEnabled, Mode=TwoWay}"
+                              Foreground="{StaticResource TextPrimary}" Margin="0,10,0,2" Click="OnToolSettingChanged" />
                     <DockPanel Margin="0,8,0,0"><TextBlock Text="按压力度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserThresholdSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="EraserThresholdSlider" Minimum="40" Maximum="100" TickFrequency="2" Value="{Binding SelectedTool.PressureEraseThresholdPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                     <DockPanel Margin="0,8,0,0"><TextBlock Text="按压时间" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserDwellSlider, Path=Value, StringFormat={}{0:F0} ms}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
@@ -551,6 +551,23 @@
 
             </StackPanel>
         </Border>
+        </Popup>
+
+        <Popup x:Name="PanoramaFlyoutPopup" AllowsTransparency="True" StaysOpen="False" Placement="Bottom"
+               HorizontalOffset="-8" VerticalOffset="2">
+            <Border Width="300" Background="#232323" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="3" Padding="12,10">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Height="34">
+                        <Path Data="{StaticResource Fluent_hand_left}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" Margin="0,0,9,0" />
+                        <TextBlock Text="全景手柄" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,8" />
+                    <DockPanel><TextBlock Text="移动灵敏度" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PanoramaSensitivitySlider, Path=Value, StringFormat={}{0:P0}}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="PanoramaSensitivitySlider" Minimum="{x:Static vm:MainViewModel.MinimumPanoramaSensitivity}" Maximum="{x:Static vm:MainViewModel.MaximumPanoramaSensitivity}"
+                            SmallChange="0.05" LargeChange="0.25" TickFrequency="0.05" Value="{Binding PanoramaSensitivity, Mode=TwoWay}" />
+                    <TextBlock Text="同时作用于全景手柄和中键 / 笔侧键临时平移" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
         </Popup>
 
         <controls:BackstageView x:Name="Backstage" Visibility="{Binding IsBackstageOpen, Converter={StaticResource BoolToVisibility}}" />

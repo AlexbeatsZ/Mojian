@@ -10,6 +10,9 @@ public enum CanvasSlot { Left, Right }
 
 public sealed class MainViewModel : ObservableObject
 {
+    public const double MinimumPanoramaSensitivity = 0.25d;
+    public const double MaximumPanoramaSensitivity = 3d;
+
     private readonly PreferencesStore _preferencesStore;
     private AppPreferences _preferences;
     private WorkspaceStore _store;
@@ -31,6 +34,10 @@ public sealed class MainViewModel : ObservableObject
     private bool _isToolFlyoutOpen;
     private bool _singleFingerPanEnabled;
     private bool _insertSpaceModeEnabled;
+    private SpringLoadedToolKind? _springLoadedToolKind;
+    private ToolPreset? _springLoadedEraserTool;
+    private bool _springLoadedRestorePan;
+    private bool _springLoadedRestoreInsertSpace;
     private CanvasTagKind? _pendingTagKind;
     private bool _isBackstageOpen;
     private string _backstageTab = "Info";
@@ -56,7 +63,12 @@ public sealed class MainViewModel : ObservableObject
     public string WorkspaceRoot => _store.RootDirectory;
     public ToolShelf ToolShelf => _toolShelf;
     public FullPageToolbarConfig FullPageConfig => _fullPageConfig;
-    public ToolPreset SelectedTool => _toolShelf.Selected;
+    public ToolPreset SelectedTool => _springLoadedEraserTool ?? _toolShelf.Selected;
+    public ToolPreset PressureEraserTool =>
+        _toolShelf.Tools.FirstOrDefault(tool =>
+            tool.Kind == DrawingToolKind.Eraser &&
+            tool.Id == _settings.PressureEraserToolId) ??
+        _toolShelf.Tools.First(tool => tool.Kind == DrawingToolKind.Eraser);
     public bool SelectedToolIsInk => SelectedTool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter;
     public bool SelectedToolIsPen => SelectedTool.Kind == DrawingToolKind.Pen;
     public bool SelectedToolIsHighlighter => SelectedTool.Kind == DrawingToolKind.Highlighter;
@@ -358,7 +370,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetField(ref _singleFingerPanEnabled, value)) return;
             if (value) InsertSpaceModeEnabled = false;
-            RefreshFullPageToolbarCatalog();
+            RefreshTools();
         }
     }
 
@@ -369,7 +381,20 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!SetField(ref _insertSpaceModeEnabled, value)) return;
             if (value) SingleFingerPanEnabled = false;
-            RefreshFullPageToolbarCatalog();
+            RefreshTools();
+        }
+    }
+
+    public double PanoramaSensitivity
+    {
+        get => Math.Clamp(_settings.PanoramaSensitivity, MinimumPanoramaSensitivity, MaximumPanoramaSensitivity);
+        set
+        {
+            var normalized = Math.Clamp(value, MinimumPanoramaSensitivity, MaximumPanoramaSensitivity);
+            if (Math.Abs(_settings.PanoramaSensitivity - normalized) < 0.0001d) return;
+            _settings.PanoramaSensitivity = normalized;
+            OnPropertyChanged();
+            SaveSettings();
         }
     }
 
@@ -475,7 +500,9 @@ public sealed class MainViewModel : ObservableObject
         _settings = _store.LoadSettings();
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
+        var settingsMigrated = MigrateWorkspaceSettings();
         _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
+        if (settingsMigrated) SaveSettings();
         _preferences.WorkspaceRoot = _store.RootDirectory;
         _preferencesStore.Save(_preferences);
 
@@ -753,6 +780,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void SaveToolSettings()
     {
+        if (SelectedToolIsEraser) _settings.PressureEraserToolId = SelectedTool.Id;
         SaveSettings();
         OnPropertyChanged(nameof(SelectedTool));
         OnPropertyChanged(nameof(SelectedToolIsInk));
@@ -772,7 +800,9 @@ public sealed class MainViewModel : ObservableObject
         _settings = _store.LoadSettings();
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
+        var settingsMigrated = MigrateWorkspaceSettings();
         _fullPageConfig = new FullPageToolbarConfig(_settings.QuickToolbarIds);
+        if (settingsMigrated) SaveSettings();
         _preferences.WorkspaceRoot = _store.RootDirectory;
         _preferencesStore.Save(_preferences);
         FocusedSlot = CanvasSlot.Left;
@@ -936,9 +966,12 @@ public sealed class MainViewModel : ObservableObject
     private void SelectTool(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return;
+        CancelSpringLoadedTool();
         if (_toolShelf.SelectedId == id) IsToolFlyoutOpen = !IsToolFlyoutOpen;
         else if (_toolShelf.Select(id))
         {
+            if (_toolShelf.Selected.Kind == DrawingToolKind.Eraser)
+                _settings.PressureEraserToolId = _toolShelf.Selected.Id;
             IsToolFlyoutOpen = false;
             SingleFingerPanEnabled = false;
             InsertSpaceModeEnabled = false;
@@ -951,7 +984,10 @@ public sealed class MainViewModel : ObservableObject
 
     public bool SelectToolImmediate(string id)
     {
+        CancelSpringLoadedTool();
         if (!_toolShelf.Select(id)) return false;
+        if (_toolShelf.Selected.Kind == DrawingToolKind.Eraser)
+            _settings.PressureEraserToolId = _toolShelf.Selected.Id;
         IsToolFlyoutOpen = false;
         SingleFingerPanEnabled = false;
         InsertSpaceModeEnabled = false;
@@ -1022,7 +1058,8 @@ public sealed class MainViewModel : ObservableObject
 
     private void AddTool(DrawingToolKind kind)
     {
-        _toolShelf.Add(kind);
+        var added = _toolShelf.Add(kind);
+        if (kind == DrawingToolKind.Eraser) _settings.PressureEraserToolId = added.Id;
         RefreshTools();
         OnPropertyChanged(nameof(SelectedTool));
         NotifySelectedToolProperties();
@@ -1044,6 +1081,42 @@ public sealed class MainViewModel : ObservableObject
         SelectedTool.LassoShape = shape;
         SaveSettings();
         NotifySelectedToolProperties();
+    }
+
+    public ToolPreset? BeginSpringLoadedTool(SpringLoadedToolKind kind)
+    {
+        if (_springLoadedToolKind == kind)
+            return kind == SpringLoadedToolKind.Eraser ? _springLoadedEraserTool : null;
+        CancelSpringLoadedTool();
+
+        _springLoadedRestorePan = SingleFingerPanEnabled;
+        _springLoadedRestoreInsertSpace = InsertSpaceModeEnabled;
+        _springLoadedToolKind = kind;
+        _springLoadedEraserTool = kind == SpringLoadedToolKind.Eraser ? PressureEraserTool : null;
+        _singleFingerPanEnabled = kind == SpringLoadedToolKind.PanoramaHand;
+        _insertSpaceModeEnabled = false;
+        IsToolFlyoutOpen = false;
+        OnPropertyChanged(nameof(SingleFingerPanEnabled));
+        OnPropertyChanged(nameof(InsertSpaceModeEnabled));
+        RefreshTools();
+        return _springLoadedEraserTool;
+    }
+
+    public void EndSpringLoadedTool(SpringLoadedToolKind kind)
+    {
+        if (_springLoadedToolKind != kind) return;
+        _springLoadedToolKind = null;
+        _springLoadedEraserTool = null;
+        _singleFingerPanEnabled = _springLoadedRestorePan;
+        _insertSpaceModeEnabled = _springLoadedRestoreInsertSpace;
+        OnPropertyChanged(nameof(SingleFingerPanEnabled));
+        OnPropertyChanged(nameof(InsertSpaceModeEnabled));
+        RefreshTools();
+    }
+
+    private void CancelSpringLoadedTool()
+    {
+        if (_springLoadedToolKind is { } kind) EndSpringLoadedTool(kind);
     }
 
     private void ToggleSplitView()
@@ -1210,7 +1283,7 @@ public sealed class MainViewModel : ObservableObject
         PenTools.Clear();
         foreach (var tool in _toolShelf.Tools)
         {
-            tool.IsSelected = tool.Id == _toolShelf.SelectedId;
+            tool.IsSelected = tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled;
             switch (tool.Kind)
             {
                 case DrawingToolKind.Lasso: LassoTools.Add(tool); break;
@@ -1263,7 +1336,7 @@ public sealed class MainViewModel : ObservableObject
             $"tool:{tool.Id}", tool.DisplayName,
             tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", _ => "lasso" },
             tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4",
-            IsSelected: tool.Id == _toolShelf.SelectedId && !SingleFingerPanEnabled && !InsertSpaceModeEnabled)));
+            IsSelected: tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled)));
         catalog.AddRange(new[]
         {
             new FullPageToolDescriptor("draw:add", "添加绘图工具", "add"),
@@ -1297,6 +1370,39 @@ public sealed class MainViewModel : ObservableObject
 
     private void SaveLibrary() => _store.SaveLibrary(_library);
 
+    private bool MigrateWorkspaceSettings()
+    {
+        var changed = false;
+        var eraser = _toolShelf.Tools.First(tool => tool.Kind == DrawingToolKind.Eraser);
+        if (_settings.Version < 3)
+        {
+            var legacySource = _toolShelf.Tools
+                .Where(tool => tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter)
+                .OrderByDescending(tool => tool.Id == _toolShelf.SelectedId)
+                .FirstOrDefault(tool => tool.PressureEraseEnabled);
+            if (legacySource != null)
+            {
+                eraser.PressureEraseEnabled = true;
+                eraser.PressureEraseThresholdPercent = legacySource.PressureEraseThresholdPercent;
+                eraser.PressureEraseDwellMilliseconds = legacySource.PressureEraseDwellMilliseconds;
+            }
+            _settings.Version = 3;
+            changed = true;
+        }
+        if (_toolShelf.Tools.All(tool => tool.Id != _settings.PressureEraserToolId || tool.Kind != DrawingToolKind.Eraser))
+        {
+            _settings.PressureEraserToolId = eraser.Id;
+            changed = true;
+        }
+        var sensitivity = Math.Clamp(_settings.PanoramaSensitivity, MinimumPanoramaSensitivity, MaximumPanoramaSensitivity);
+        if (Math.Abs(sensitivity - _settings.PanoramaSensitivity) > 0.0001d)
+        {
+            _settings.PanoramaSensitivity = sensitivity;
+            changed = true;
+        }
+        return changed;
+    }
+
     private void SaveSettings()
     {
         _settings.ToolShelfJson = _toolShelf.ToJson();
@@ -1322,6 +1428,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(PredictionEnabled));
         OnPropertyChanged(nameof(ImageDisplayMode));
         OnPropertyChanged(nameof(PdfDisplayMode));
+        OnPropertyChanged(nameof(PanoramaSensitivity));
         OnPropertyChanged(nameof(SelectedTool));
         OnPropertyChanged(nameof(PrimaryPageAppearance));
         OnPropertyChanged(nameof(SecondaryPageAppearance));
