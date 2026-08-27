@@ -78,8 +78,10 @@ public class ViewportStateTests
     }
 
     [Fact]
-    public void StylusViewportGesturesUseOneStreamAndOnlyTheLatestCoalescedSample()
+    public void StylusRemainsTheDriverForMiddlePanAndCtrlMiddleZoomWhileMouseCopiesAreIgnored()
     {
+        // These true results make the physical stylus continue the active
+        // viewport gesture with its newest sample. They do not disable it.
         Assert.True(CanvasPointerFeedback.SuppressMouseStream(true, false, false));
         Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, true, false));
         Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, false, true));
@@ -89,5 +91,14 @@ public class ViewportStateTests
         Assert.True(CanvasPointerFeedback.UseLatestStylusSample(false, true, false));
         Assert.True(CanvasPointerFeedback.UseLatestStylusSample(false, false, true));
         Assert.False(CanvasPointerFeedback.UseLatestStylusSample(false, false, false));
+    }
+
+    [Fact]
+    public void PromotedStylusMouseMoveStillRefreshesHoverWithoutDrivingASecondGesture()
+    {
+        Assert.True(CanvasPointerFeedback.RefreshHoverFromPromotedMouse(true, false));
+        Assert.False(CanvasPointerFeedback.RefreshHoverFromPromotedMouse(true, true));
+        Assert.False(CanvasPointerFeedback.RefreshHoverFromPromotedMouse(false, false));
+        Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, true, false));
     }
 }

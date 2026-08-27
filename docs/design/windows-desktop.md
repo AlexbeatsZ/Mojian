@@ -95,9 +95,12 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   Ctrl-drag is radial around the canvas center: dragging toward the center zooms out and dragging
   toward an edge zooms in, with the original contact point kept as the content anchor.
   A mouse or stylus side button remapped by its driver to middle button inherits this behavior.
-  Stylus-driven middle drag consumes only the latest coalesced stylus sample and suppresses its
-  promoted mouse stream, so the same movement is never applied twice. Zoom lock blocks gesture
-  scaling only.
+  The physical stylus remains the action driver after middle is held: its contact movement pans, or
+  performs radial zoom while Ctrl is also held. Stylus Hand follows the same rule. Each movement uses
+  only the newest coalesced stylus sample. Windows' extra mouse-compatible copy of that same movement
+  is ignored for content and viewport actions so it cannot execute the motion twice, but it still
+  refreshes the nib position because some Windows Ink drivers expose in-air motion only through that
+  path. Zoom lock blocks gesture scaling only.
 - Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
   A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
   mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.

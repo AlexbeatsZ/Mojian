@@ -11,6 +11,11 @@ public enum CanvasPointerCursorMode
 
 public static class CanvasPointerFeedback
 {
+    public static bool RefreshHoverFromPromotedMouse(
+        bool promotedByStylus,
+        bool stylusContactActive) =>
+        promotedByStylus && !stylusContactActive;
+
     public static bool SuppressMouseStream(
         bool stylusContactActive,
         bool promotedByStylus,

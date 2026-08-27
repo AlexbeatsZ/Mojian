@@ -479,9 +479,17 @@ public partial class NoteCanvas : UserControl
     {
         base.OnMouseMove(e);
         if (Document == null) return;
+        var promotedByStylus = IsPhysicalStylus(e.StylusDevice);
+        if (CanvasPointerFeedback.RefreshHoverFromPromotedMouse(promotedByStylus, _stylusActive))
+        {
+            _stylusInRange = true;
+            _hoverViewPoint = e.GetPosition(this);
+            UpdatePointerCursor();
+            InvalidateVisual();
+        }
         if (CanvasPointerFeedback.SuppressMouseStream(
                 _stylusActive,
-                IsPhysicalStylus(e.StylusDevice),
+                promotedByStylus,
                 _middleNavigationActive && _middleNavigationUsesStylus))
         {
             if (_middleNavigationActive && _middleNavigationUsesStylus) e.Handled = true;
@@ -502,6 +510,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseEnter(MouseEventArgs e)
     {
         base.OnMouseEnter(e);
+        if (IsPhysicalStylus(e.StylusDevice)) _stylusInRange = true;
         _hoverViewPoint = e.GetPosition(this);
         UpdatePointerCursor();
         InvalidateVisual();
