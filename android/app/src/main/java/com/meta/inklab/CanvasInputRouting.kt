@@ -6,6 +6,11 @@ enum class CanvasDragIntent {
     ZOOM,
 }
 
+enum class SecondaryReleaseIntent {
+    OPEN_CONTEXT_MENU,
+    COMMIT_LASSO,
+}
+
 enum class WheelIntent {
     NONE,
     PAN_HORIZONTAL,
@@ -24,6 +29,19 @@ data class PanFocus(
 )
 
 object CanvasInputRouting {
+    fun mouseSecondaryStartsLasso(
+        deltaX: Float,
+        deltaY: Float,
+        touchSlop: Float,
+    ): Boolean = deltaX * deltaX + deltaY * deltaY >= touchSlop * touchSlop
+
+    fun stylusShortcutReleaseIntent(
+        heldMillis: Long,
+        holdMillis: Long,
+    ): SecondaryReleaseIntent =
+        if (heldMillis >= holdMillis) SecondaryReleaseIntent.COMMIT_LASSO
+        else SecondaryReleaseIntent.OPEN_CONTEXT_MENU
+
     fun scaledPanFocus(
         previousX: Float,
         previousY: Float,

@@ -236,6 +236,7 @@ class KeyboardShortcutSettings(initial: Map<String, ShortcutKeyChord> = defaults
 enum class StylusBindingType(val label: String) {
     NONE("未设置"),
     TOGGLE_TOOL("切换到工具，再按恢复"),
+    LASSO_CONTEXT("套索/菜单（短按/按住）"),
     HOLD_TOOL("按住切换到工具"),
     UNDO("撤销"),
     REDO("重做"),

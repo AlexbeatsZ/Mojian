@@ -1,4 +1,5 @@
 using Notein_win.Services;
+using Notein_win.Models;
 using System.Windows.Input;
 using Xunit;
 
@@ -42,6 +43,16 @@ public class DirectInputPolicyTests
         Assert.False(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Finger));
         Assert.True(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Mouse));
         Assert.True(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Pen));
+    }
+
+    [Fact]
+    public void PenAndHighlighterDragAnExistingSelectionButOutsideContactWrites()
+    {
+        Assert.True(DirectInputPolicy.PenContactTransformsSelection(DrawingToolKind.Pen, false, true));
+        Assert.True(DirectInputPolicy.PenContactTransformsSelection(DrawingToolKind.Highlighter, false, true));
+        Assert.False(DirectInputPolicy.PenContactTransformsSelection(DrawingToolKind.Pen, false, false));
+        Assert.False(DirectInputPolicy.PenContactTransformsSelection(DrawingToolKind.Lasso, false, true));
+        Assert.False(DirectInputPolicy.PenContactTransformsSelection(DrawingToolKind.Pen, true, true));
     }
 
     [Theory]

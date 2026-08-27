@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private void ConfigureCanvas(NoteCanvas canvas)
     {
         canvas.ResolveAssetPath = name => canvas.Document == null ? string.Empty : ViewModel.ResolveAsset(canvas.Document, name);
+        canvas.ImportAssetPath = ViewModel.ImportAsset;
         canvas.ResolvePressureEraserTool = () => ViewModel.PressureEraserTool;
         canvas.BeginSpringLoadedTool = ViewModel.BeginSpringLoadedTool;
         canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
@@ -168,6 +169,7 @@ public partial class MainWindow : Window
         menu.Items.Add(move);
         menu.Items.Add(new Separator());
         AddMenuItem(menu, "删除", () => canvas.RemoveObject(item));
+        canvas.AttachRightButtonLassoDismissal(menu);
         OpenContextMenu(canvas, menu);
     }
 

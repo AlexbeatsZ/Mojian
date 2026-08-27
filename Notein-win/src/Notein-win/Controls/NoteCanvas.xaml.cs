@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,6 +28,9 @@ public partial class NoteCanvas : UserControl
     private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private const double UnitsPerMillimeter = 96d / 25.4d;
 
+    [DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
     private readonly ViewportState _viewport = new();
     private readonly Stack<string> _undo = new();
     private readonly Stack<string> _redo = new();
@@ -40,6 +44,9 @@ public partial class NoteCanvas : UserControl
     private readonly DispatcherTimer _saveTimer;
     private readonly DispatcherTimer _pressureTimer;
     private readonly DispatcherTimer _directLongPressTimer;
+    private readonly DispatcherTimer _rightLassoHoldTimer;
+    private readonly DispatcherTimer _stylusContextMenuTimer;
+    private static SelectionClipboardData? _selectionClipboard;
     private readonly Stopwatch _strokeClock = new();
 
     private StrokeRecord? _activeStroke;
@@ -52,6 +59,8 @@ public partial class NoteCanvas : UserControl
     private bool _isDragZooming;
     private bool _isLassoing;
     private bool _isTransforming;
+    private bool _stylusSelectionTransformActive;
+    private bool _stylusSelectionTransformMoved;
     private int _resizeHandle = -1;
     private bool _isInsertingSpace;
     private bool _insertSpaceUndoPushed;
@@ -67,8 +76,11 @@ public partial class NoteCanvas : UserControl
     private bool _rightLassoArmed;
     private bool _rightLassoActive;
     private bool _rightLassoUsesStylus;
+    private bool _rightLassoHasStylusContact;
     private Point _rightLassoStartView;
     private Point _rightLassoLastView;
+    private long _rightLassoArmedAtTick;
+    private Point _pendingStylusContextMenuPoint;
     private bool _stylusBarrelButtonDown;
     private bool _panoramaSpringLoaded;
     private TouchDevice? _directTouchDevice;
@@ -128,6 +140,7 @@ public partial class NoteCanvas : UserControl
     public double PanoramaSensitivity { get => (double)GetValue(PanoramaSensitivityProperty); set => SetValue(PanoramaSensitivityProperty, value); }
     public ViewportState Viewport => _viewport;
     public Func<string, string>? ResolveAssetPath { get; set; }
+    public Func<string, string>? ImportAssetPath { get; set; }
     public Func<ToolPreset?>? ResolvePressureEraserTool { get; set; }
     public Func<SpringLoadedToolKind, ToolPreset?>? BeginSpringLoadedTool { get; set; }
     public Action<SpringLoadedToolKind>? EndSpringLoadedTool { get; set; }
@@ -149,6 +162,19 @@ public partial class NoteCanvas : UserControl
         {
             _directLongPressTimer.Stop();
             if (_directGestureFromTouch && !_directGestureCommitted) ShowDirectContextMenu(_directDownView);
+        };
+        _rightLassoHoldTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1) };
+        _rightLassoHoldTimer.Tick += (_, _) =>
+        {
+            _rightLassoHoldTimer.Stop();
+            ActivateTimedStylusRightLasso();
+        };
+        _stylusContextMenuTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+        _stylusContextMenuTimer.Tick += (_, _) =>
+        {
+            _stylusContextMenuTimer.Stop();
+            if (_rightLassoArmed || Document == null) return;
+            ShowDirectContextMenu(_pendingStylusContextMenuPoint);
         };
         AddHandler(Stylus.StylusDownEvent, new StylusDownEventHandler(HandleStylusDown), handledEventsToo: true);
         AddHandler(Stylus.StylusMoveEvent, new StylusEventHandler(HandleStylusMove), handledEventsToo: true);
@@ -250,6 +276,203 @@ public partial class NoteCanvas : UserControl
         MarkChanged(immediate: true);
         InvalidateVisual();
         return true;
+    }
+
+    public bool CopySelection(bool cut = false)
+    {
+        if (Document == null || !HasContentSelection()) return false;
+        _selectionClipboard = new SelectionClipboardData(
+            Document.NotebookId,
+            Document.PageId,
+            _selectedStrokes.Select(item => CloneStroke(item)).ToList(),
+            _selectedTags.Select(item => CloneTag(item)).ToList(),
+            _selectedTextItems.Select(item => CloneText(item)).ToList(),
+            _selectedObjects.Select(item => new SelectionObjectClipboard(
+                item.CloneWithNewId(offset: 0),
+                string.IsNullOrWhiteSpace(item.AssetName) ? null : ResolveAssetPath?.Invoke(item.AssetName),
+                string.IsNullOrWhiteSpace(item.SourceAssetName) ? null : ResolveAssetPath?.Invoke(item.SourceAssetName))).ToList());
+        if (cut) DeleteSelection();
+        return true;
+    }
+
+    public bool PasteSelection()
+    {
+        var clipboard = _selectionClipboard;
+        if (Document == null || clipboard == null) return false;
+        PushUndo();
+        ClearSelection();
+        const float offset = 24;
+
+        foreach (var source in clipboard.Strokes)
+        {
+            var item = CloneStroke(source, offset);
+            Document.Strokes.Add(item);
+            _selectedStrokes.Add(item);
+        }
+        foreach (var source in clipboard.Tags)
+        {
+            var item = CloneTag(source, offset);
+            Document.Tags.Add(item);
+            _selectedTags.Add(item);
+        }
+        foreach (var source in clipboard.TextItems)
+        {
+            var item = CloneText(source, offset);
+            Document.TextItems.Add(item);
+            _selectedTextItems.Add(item);
+        }
+        foreach (var source in clipboard.Objects)
+        {
+            var item = source.Item.CloneWithNewId(offset);
+            var samePage = clipboard.NotebookId == Document.NotebookId && clipboard.PageId == Document.PageId;
+            if (!samePage && !string.IsNullOrWhiteSpace(source.AssetPath) && File.Exists(source.AssetPath))
+                item.AssetName = ImportAssetPath?.Invoke(source.AssetPath) ?? item.AssetName;
+            if (!samePage && !string.IsNullOrWhiteSpace(source.SourceAssetPath) && File.Exists(source.SourceAssetPath))
+                item.SourceAssetName = ImportAssetPath?.Invoke(source.SourceAssetPath) ?? item.SourceAssetName;
+            Document.Objects.Add(item);
+            _selectedObjects.Add(item);
+        }
+
+        RebuildTextEditors();
+        RecomputeSelectionBounds();
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    public bool DuplicateSelection()
+    {
+        if (!CopySelection()) return false;
+        return PasteSelection();
+    }
+
+    public bool ApplySelectionColor(InkPalette color)
+    {
+        if (Document == null || (_selectedStrokes.Count == 0 && _selectedTextItems.Count == 0)) return false;
+        PushUndo();
+        foreach (var stroke in _selectedStrokes) stroke.Color = color;
+        foreach (var text in _selectedTextItems)
+        {
+            text.Color = color;
+            text.ForegroundHex = string.Empty;
+        }
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    public bool MoveSelectedObjectsOneLayer(bool forward)
+    {
+        if (Document == null || _selectedObjects.Count == 0) return false;
+        PushUndo();
+        var selected = _selectedObjects.ToHashSet();
+        if (forward)
+        {
+            for (var i = Document.Objects.Count - 2; i >= 0; i--)
+            {
+                if (!selected.Contains(Document.Objects[i]) || selected.Contains(Document.Objects[i + 1])) continue;
+                (Document.Objects[i], Document.Objects[i + 1]) = (Document.Objects[i + 1], Document.Objects[i]);
+            }
+        }
+        else
+        {
+            for (var i = 1; i < Document.Objects.Count; i++)
+            {
+                if (!selected.Contains(Document.Objects[i]) || selected.Contains(Document.Objects[i - 1])) continue;
+                (Document.Objects[i], Document.Objects[i - 1]) = (Document.Objects[i - 1], Document.Objects[i]);
+            }
+        }
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    public bool MoveSelectedObjectsToEdge(bool front)
+    {
+        if (Document == null || _selectedObjects.Count == 0) return false;
+        PushUndo();
+        var selected = Document.Objects.Where(_selectedObjects.Contains).ToList();
+        var unselected = Document.Objects.Where(item => !_selectedObjects.Contains(item)).ToList();
+        Document.Objects.Clear();
+        Document.Objects.AddRange(front ? unselected.Concat(selected) : selected.Concat(unselected));
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+        return true;
+    }
+
+    public bool SelectAllContent()
+    {
+        if (Document == null) return false;
+        ClearSelection();
+        _selectedStrokes.AddRange(Document.Strokes);
+        _selectedTags.AddRange(Document.Tags);
+        _selectedTextItems.AddRange(Document.TextItems.Where(item => SelectionGeometry.HasVisibleText(item.Text)));
+        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground));
+        RecomputeSelectionBounds();
+        InvalidateVisual();
+        return HasContentSelection();
+    }
+
+    public void AttachRightButtonLassoDismissal(ContextMenu menu)
+    {
+        menu.AddHandler(Stylus.StylusButtonDownEvent, new StylusButtonEventHandler((_, e) =>
+        {
+            if (!IsBarrelButton(e.StylusButton)) return;
+            var point = ContextMenuPointToCanvas(menu, e.GetPosition(menu));
+            menu.IsOpen = false;
+            Focus();
+            _stylusInRange = true;
+            _stylusBarrelButtonDown = true;
+            BeginRightButtonLasso(point, usesStylus: true, hasStylusContact: !e.StylusDevice.InAir);
+            e.Handled = true;
+        }), handledEventsToo: true);
+        menu.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler((_, e) =>
+        {
+            var point = ContextMenuPointToCanvas(menu, e.GetPosition(menu));
+            if (e.ChangedButton == MouseButton.Middle)
+            {
+                menu.IsOpen = false;
+                Focus();
+                if (_rightLassoArmed) CancelRightButtonLasso();
+                BeginPanoramaSpringLoadedTool();
+                _middleNavigationActive = true;
+                _middleNavigationUsesStylus = IsPhysicalStylus(e.StylusDevice) || _stylusInRange;
+                BeginPointer(
+                    point,
+                    pressure: 0.65f,
+                    tiltX: 0,
+                    tiltY: 0,
+                    isStylus: _middleNavigationUsesStylus,
+                    forcePan: true,
+                    forceErase: false);
+                e.Handled = true;
+                return;
+            }
+            if (e.ChangedButton != MouseButton.Right) return;
+            var usesStylus = IsPhysicalStylus(e.StylusDevice) ||
+                             HasPressedBarrelButton(e.StylusDevice) ||
+                             _stylusInRange;
+            menu.IsOpen = false;
+            Focus();
+            if (usesStylus) _stylusInRange = true;
+            BeginRightButtonLasso(
+                point,
+                usesStylus,
+                hasStylusContact: usesStylus && e.StylusDevice?.InAir == false);
+            e.Handled = true;
+        }), handledEventsToo: true);
+    }
+
+    private Point ContextMenuPointToCanvas(ContextMenu menu, Point menuPoint)
+    {
+        try
+        {
+            return PointFromScreen(menu.PointToScreen(menuPoint));
+        }
+        catch (InvalidOperationException)
+        {
+            return _hoverViewPoint ?? _rightLassoLastView;
+        }
     }
 
     public void AddObject(PageObject item)
@@ -461,6 +684,7 @@ public partial class NoteCanvas : UserControl
         if (e.ChangedButton == MouseButton.Middle)
         {
             Focus();
+            if (_rightLassoArmed) CancelRightButtonLasso();
             if (_stylusActive) CancelStylusToolActionForNavigation();
             BeginPanoramaSpringLoadedTool();
             _middleNavigationActive = true;
@@ -480,12 +704,23 @@ public partial class NoteCanvas : UserControl
         {
             if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
             Focus();
-            if (_stylusActive) CancelStylusToolActionForNavigation();
             var rightPoint = e.GetPosition(this);
             var hoverTolerance = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance) * 2;
             var matchesStylusHover = _stylusInRange && _hoverViewPoint is { } hover && Distance(rightPoint, hover) <= hoverTolerance;
+            var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
+            if (CanvasPointerFeedback.IgnoreStalePromotedStylusRightDown(
+                    promotedByStylus,
+                    _rightLassoArmed,
+                    _stylusBarrelButtonDown,
+                    barrelButtonPressedInSnapshot))
+            {
+                e.Handled = true;
+                return;
+            }
             var usesStylus = CanvasPointerFeedback.RightButtonUsesStylus(promotedByStylus, _stylusBarrelButtonDown, matchesStylusHover);
-            BeginRightButtonLasso(rightPoint, usesStylus);
+            var hasStylusContact = usesStylus && e.StylusDevice?.InAir == false;
+            if (_stylusActive) CancelStylusToolActionForNavigation();
+            BeginRightButtonLasso(rightPoint, usesStylus, hasStylusContact);
             e.Handled = true;
             return;
         }
@@ -515,12 +750,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_rightLassoArmed)
         {
-            if (CanvasPointerFeedback.RightButtonGestureIsHeld(
-                    e.RightButton == MouseButtonState.Pressed,
-                    _rightLassoUsesStylus && _stylusBarrelButtonDown))
-                ContinueRightButtonLasso(e.GetPosition(this));
-            else
-                FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
+            ContinueRightButtonLasso(e.GetPosition(this));
             e.Handled = true;
             return;
         }
@@ -633,12 +863,13 @@ public partial class NoteCanvas : UserControl
         var point = points.Count > 0 ? points[^1] : default;
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
+        var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
         var rightGestureIntent = CanvasPointerFeedback.RightButtonGestureIntent(
             _rightLassoArmed,
             _stylusBarrelButtonDown,
-            Mouse.RightButton == MouseButtonState.Pressed);
-        if (rightGestureIntent && !_rightLassoArmed)
-            BeginRightButtonLasso(point.ToPoint(), usesStylus: true);
+            barrelButtonPressedInSnapshot);
+        if (rightGestureIntent)
+            BeginRightButtonLasso(point.ToPoint(), usesStylus: true, hasStylusContact: true);
         if (!CanvasPointerFeedback.StylusDownStartsDrawing(e.InAir, rightGestureIntent))
         {
             _stylusActive = false;
@@ -671,16 +902,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
-            if (CanvasPointerFeedback.RightButtonGestureIsHeld(
-                    Mouse.RightButton == MouseButtonState.Pressed,
-                    _stylusBarrelButtonDown))
-            {
-                if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
-            }
-            else
-            {
-                FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
-            }
+            if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
             e.Handled = true;
             return;
         }
@@ -726,7 +948,10 @@ public partial class NoteCanvas : UserControl
         if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
         Focus();
         if (_stylusActive) CancelStylusToolActionForNavigation();
-        BeginRightButtonLasso(e.GetPosition(this), usesStylus: true);
+        BeginRightButtonLasso(
+            e.GetPosition(this),
+            usesStylus: true,
+            hasStylusContact: !e.StylusDevice.InAir);
         e.Handled = true;
     }
 
@@ -734,6 +959,9 @@ public partial class NoteCanvas : UserControl
     {
         if (!IsBarrelButton(e.StylusButton)) return;
         _stylusBarrelButtonDown = false;
+        // Wacom starts this gesture through a promoted MouseRightDown, but ends it
+        // through the raw barrel-button-up event and never sends MouseRightUp here.
+        // Once classified as a stylus gesture, the raw release is authoritative.
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
             EndRightButtonLasso();
@@ -744,11 +972,6 @@ public partial class NoteCanvas : UserControl
     protected override void OnStylusLeave(StylusEventArgs e)
     {
         base.OnStylusLeave(e);
-        if (_rightLassoArmed && _rightLassoUsesStylus &&
-            !CanvasPointerFeedback.RightButtonGestureIsHeld(
-                Mouse.RightButton == MouseButtonState.Pressed,
-                _stylusBarrelButtonDown))
-            FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
         if (_stylusActive) return;
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
@@ -765,6 +988,17 @@ public partial class NoteCanvas : UserControl
 
     private void HandleStylusUp(object sender, StylusEventArgs e)
     {
+        var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
+        if (CanvasPointerFeedback.StylusUpEndsRightButtonGesture(
+                _rightLassoArmed,
+                _rightLassoUsesStylus,
+                barrelButtonPressedInSnapshot))
+        {
+            EndRightButtonLasso();
+            _ignoreMouseUntil = Environment.TickCount64 + 250;
+            e.Handled = true;
+            return;
+        }
         if (!_stylusActive) return;
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
@@ -1084,6 +1318,16 @@ public partial class NoteCanvas : UserControl
     private bool ShowDirectContextMenu(Point viewPoint)
     {
         if (Document == null) return false;
+        var documentPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        var hasSelection =
+            _selectedStrokes.Count > 0 ||
+            _selectedTags.Count > 0 ||
+            _selectedTextItems.Count > 0 ||
+            _selectedObjects.Count > 0;
+        if (hasSelection && _selectionBounds is { } selectionBounds && selectionBounds.Contains(documentPoint))
+        {
+            return OpenCurrentSelectionContextMenu(viewPoint);
+        }
         var item = HitObject(viewPoint);
         if (item is { IsPageBackground: false })
         {
@@ -1097,19 +1341,126 @@ public partial class NoteCanvas : UserControl
         var text = HitText(viewPoint);
         var tag = HitTag(viewPoint);
         var stroke = HitStroke(viewPoint);
-        if (text == null && tag == null && stroke == null) return false;
+        if (text == null && tag == null && stroke == null)
+        {
+            AbandonTemporaryText();
+            Focus();
+            ClearSelection();
+            return OpenCanvasContextMenu(viewPoint);
+        }
         AbandonTemporaryText();
         Focus();
         if (text != null) SelectOnlyText(text);
         else if (tag != null) SelectOnlyTag(tag);
         else if (stroke != null) SelectOnlyStroke(stroke);
-        var menu = new ContextMenu { Placement = PlacementMode.Relative, PlacementTarget = this, HorizontalOffset = viewPoint.X, VerticalOffset = viewPoint.Y };
+        return OpenSelectionContextMenu(viewPoint);
+    }
+
+    private bool OpenCurrentSelectionContextMenu(Point viewPoint)
+    {
+        if (_selectedObjects.Count == 1 &&
+            _selectedStrokes.Count == 0 &&
+            _selectedTags.Count == 0 &&
+            _selectedTextItems.Count == 0)
+        {
+            ObjectContextRequested?.Invoke(this, new PageObjectEventArgs(_selectedObjects[0]));
+            _directLongPressTriggered = true;
+            return true;
+        }
+        return OpenSelectionContextMenu(viewPoint);
+    }
+
+    private bool OpenCanvasContextMenu(Point viewPoint)
+    {
+        if (Document == null) return false;
+        var menu = CreateContextMenu(viewPoint);
+        var paste = new MenuItem { Header = "粘贴", IsEnabled = _selectionClipboard != null };
+        paste.Click += (_, _) => PasteSelection();
+        menu.Items.Add(paste);
+        var selectAll = new MenuItem
+        {
+            Header = "全选",
+            IsEnabled = Document.Strokes.Count > 0 || Document.Tags.Count > 0 ||
+                        Document.TextItems.Any(item => SelectionGeometry.HasVisibleText(item.Text)) ||
+                        Document.Objects.Any(item => !item.IsPageBackground),
+        };
+        selectAll.Click += (_, _) => SelectAllContent();
+        menu.Items.Add(selectAll);
+        menu.IsOpen = true;
+        _directLongPressTriggered = true;
+        return true;
+    }
+
+    private bool OpenSelectionContextMenu(Point viewPoint)
+    {
+        var menu = CreateContextMenu(viewPoint);
+        var cut = new MenuItem { Header = "剪切" };
+        cut.Click += (_, _) => CopySelection(cut: true);
+        menu.Items.Add(cut);
+        var copy = new MenuItem { Header = "复制" };
+        copy.Click += (_, _) => CopySelection();
+        menu.Items.Add(copy);
+        var paste = new MenuItem { Header = "粘贴", IsEnabled = _selectionClipboard != null };
+        paste.Click += (_, _) => PasteSelection();
+        menu.Items.Add(paste);
+        var duplicate = new MenuItem { Header = "副本" };
+        duplicate.Click += (_, _) => DuplicateSelection();
+        menu.Items.Add(duplicate);
+
+        if (_selectedStrokes.Count > 0 || _selectedTextItems.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+            var colors = new MenuItem { Header = "修改颜色" };
+            foreach (var color in Enum.GetValues<InkPalette>())
+            {
+                var captured = color;
+                var item = new MenuItem { Header = captured.GetLabel() };
+                item.Click += (_, _) => ApplySelectionColor(captured);
+                colors.Items.Add(item);
+            }
+            menu.Items.Add(colors);
+        }
+        if (_selectedObjects.Count > 0)
+        {
+            var layers = new MenuItem { Header = "顺序" };
+            var forward = new MenuItem { Header = "上移一层" };
+            forward.Click += (_, _) => MoveSelectedObjectsOneLayer(forward: true);
+            layers.Items.Add(forward);
+            var front = new MenuItem { Header = "置于顶层" };
+            front.Click += (_, _) => MoveSelectedObjectsToEdge(front: true);
+            layers.Items.Add(front);
+            var backward = new MenuItem { Header = "下移一层" };
+            backward.Click += (_, _) => MoveSelectedObjectsOneLayer(forward: false);
+            layers.Items.Add(backward);
+            var back = new MenuItem { Header = "置于底层" };
+            back.Click += (_, _) => MoveSelectedObjectsToEdge(front: false);
+            layers.Items.Add(back);
+            menu.Items.Add(layers);
+        }
+
+        menu.Items.Add(new Separator());
+        var selectAll = new MenuItem { Header = "全选" };
+        selectAll.Click += (_, _) => SelectAllContent();
+        menu.Items.Add(selectAll);
         var delete = new MenuItem { Header = "删除" };
         delete.Click += (_, _) => DeleteSelection();
         menu.Items.Add(delete);
         menu.IsOpen = true;
         _directLongPressTriggered = true;
         return true;
+    }
+
+    private ContextMenu CreateContextMenu(Point viewPoint)
+    {
+        var menu = new ContextMenu
+        {
+            Placement = PlacementMode.Relative,
+            PlacementTarget = this,
+            HorizontalOffset = viewPoint.X,
+            VerticalOffset = viewPoint.Y,
+        };
+        AttachRightButtonLassoDismissal(menu);
+        return menu;
     }
 
     private void BeginPointer(Point viewPoint, float pressure, float tiltX, float tiltY, bool isStylus, bool forcePan, bool forceErase)
@@ -1153,10 +1504,27 @@ public partial class NoteCanvas : UserControl
             return;
         }
 
+        if (isStylus && DirectInputPolicy.PenContactTransformsSelection(
+                tool.Kind,
+                forceErase,
+                _selectionBounds is { } selectedBounds && selectedBounds.Contains(docPoint)))
+        {
+            PushUndo();
+            _isTransforming = true;
+            _stylusSelectionTransformActive = true;
+            _stylusSelectionTransformMoved = false;
+            _resizeHandle = -1;
+            _transformPoint = docPoint;
+            CaptureInput(isStylus: true);
+            InvalidateVisual();
+            return;
+        }
+
         switch (forceErase ? DrawingToolKind.Eraser : tool.Kind)
         {
             case DrawingToolKind.Pen:
             case DrawingToolKind.Highlighter:
+                ClearSelection();
                 PushUndo();
                 _strokeClock.Restart();
                 _activeStroke = new StrokeRecord(IdFactory.New("stroke"), tool.Kind, tool.Color, tool.WidthMm, tool.OpacityPercent)
@@ -1260,7 +1628,13 @@ public partial class NoteCanvas : UserControl
         {
             if (_resizeHandle < 0)
             {
-                TranslateSelection(docPoint.X - _transformPoint.X, docPoint.Y - _transformPoint.Y);
+                var dx = docPoint.X - _transformPoint.X;
+                var dy = docPoint.Y - _transformPoint.Y;
+                if (Math.Abs(dx) > 0.001 || Math.Abs(dy) > 0.001)
+                {
+                    TranslateSelection(dx, dy);
+                    if (_stylusSelectionTransformActive) _stylusSelectionTransformMoved = true;
+                }
             }
             else
             {
@@ -1332,7 +1706,16 @@ public partial class NoteCanvas : UserControl
         {
             _isTransforming = false;
             RecomputeSelectionBounds();
-            changed = true;
+            if (_stylusSelectionTransformActive && !_stylusSelectionTransformMoved)
+            {
+                if (_undo.Count > 0) _undo.Pop();
+            }
+            else
+            {
+                changed = true;
+            }
+            _stylusSelectionTransformActive = false;
+            _stylusSelectionTransformMoved = false;
         }
         if (_isLassoing)
         {
@@ -1370,7 +1753,8 @@ public partial class NoteCanvas : UserControl
             _activeStroke != null ||
             _eraserViewPoint.HasValue ||
             _temporaryPressureEraser ||
-            _isInsertingSpace;
+            _isInsertingSpace ||
+            _stylusSelectionTransformActive;
         var snapshot = restoreDocument && _undo.Count > 0 ? _undo.Pop() : null;
 
         _activeStroke = null;
@@ -1384,6 +1768,9 @@ public partial class NoteCanvas : UserControl
         _lasso.Clear();
         _isInsertingSpace = false;
         _insertSpaceUndoPushed = false;
+        _isTransforming = false;
+        _stylusSelectionTransformActive = false;
+        _stylusSelectionTransformMoved = false;
         if (IsStylusCaptured) ReleaseStylusCapture();
 
         EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
@@ -1414,6 +1801,10 @@ public partial class NoteCanvas : UserControl
 
     private static bool IsBarrelButton(StylusButton button) =>
         button.Guid == StylusPointProperties.BarrelButton.Id;
+
+    private static bool HasPressedBarrelButton(StylusDevice? device) =>
+        device?.StylusButtons.Cast<StylusButton>()
+            .Any(button => IsBarrelButton(button) && button.StylusButtonState == StylusButtonState.Down) == true;
 
     private void CheckPressureEraseActivation()
     {
@@ -1511,30 +1902,94 @@ public partial class NoteCanvas : UserControl
         BeginLasso(documentPoint, SelectedTool?.LassoShape ?? LassoShape.Freeform);
     }
 
-    private void BeginRightButtonLasso(Point viewPoint, bool usesStylus)
+    private void BeginRightButtonLasso(Point viewPoint, bool usesStylus, bool hasStylusContact = false)
     {
-        if (_rightLassoArmed) return;
+        _stylusContextMenuTimer.Stop();
+        if (_rightLassoArmed)
+        {
+            if (usesStylus && hasStylusContact && !_rightLassoHasStylusContact)
+                ActivateRightButtonStylusContact(viewPoint);
+            return;
+        }
         _rightLassoArmed = true;
         _rightLassoActive = false;
         _rightLassoUsesStylus = usesStylus;
+        _rightLassoHasStylusContact = usesStylus && hasStylusContact;
+        _rightLassoStartView = viewPoint;
+        _rightLassoLastView = viewPoint;
+        _rightLassoArmedAtTick = Environment.TickCount64;
+        _hoverViewPoint = viewPoint;
+        CaptureInput(usesStylus);
+        if (_rightLassoHasStylusContact) ActivateRightButtonStylusContact(viewPoint);
+        UpdatePointerCursor();
+        InvalidateVisual();
+    }
+
+    private void ActivateRightButtonStylusContact(Point viewPoint)
+    {
+        _rightLassoHasStylusContact = true;
         _rightLassoStartView = viewPoint;
         _rightLassoLastView = viewPoint;
         _hoverViewPoint = viewPoint;
-        CaptureInput(usesStylus);
-        UpdatePointerCursor();
+        _isLassoing = true;
+        _activeLassoShape = LassoShape.Freeform;
+        _lasso.Clear();
+        _lassoOrigin = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        _lasso.Add(_lassoOrigin);
+        ArmStylusRightLassoHoldTimer();
+        InvalidateVisual();
+    }
+
+    private void ArmStylusRightLassoHoldTimer()
+    {
+        _rightLassoHoldTimer.Stop();
+        var clickWindow = (int)Math.Max(1u, GetDoubleClickTime());
+        var elapsed = Math.Max(0, Environment.TickCount64 - _rightLassoArmedAtTick);
+        if (CanvasPointerFeedback.StylusBarrelHoldStartsLasso(
+                hasStylusContact: _rightLassoHasStylusContact,
+                elapsedMilliseconds: elapsed,
+                clickWindowMilliseconds: clickWindow))
+        {
+            ActivateTimedStylusRightLasso();
+            return;
+        }
+        _rightLassoHoldTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(1, clickWindow - elapsed));
+        _rightLassoHoldTimer.Start();
+    }
+
+    private void ActivateTimedStylusRightLasso()
+    {
+        if (!_rightLassoArmed || !_rightLassoUsesStylus || !_rightLassoHasStylusContact || _rightLassoActive) return;
+        _rightLassoActive = true;
+        ClearSelection(keepLasso: true);
         InvalidateVisual();
     }
 
     private void ContinueRightButtonLasso(Point viewPoint)
     {
         if (!_rightLassoArmed) return;
+        if (_rightLassoUsesStylus && !_rightLassoHasStylusContact)
+        {
+            _rightLassoLastView = viewPoint;
+            _hoverViewPoint = viewPoint;
+            return;
+        }
         if (Distance(viewPoint, _rightLassoLastView) < 0.05) return;
         _rightLassoLastView = viewPoint;
         _hoverViewPoint = viewPoint;
+        if (_rightLassoUsesStylus)
+        {
+            ExtendLasso(_viewport.ViewToDocument(viewPoint.X, viewPoint.Y));
+            InvalidateVisual();
+            return;
+        }
         if (!_rightLassoActive)
         {
-            var threshold = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance);
-            if (!CanvasPointerFeedback.RightButtonMovementStartsLasso(Distance(viewPoint, _rightLassoStartView), threshold)) return;
+            var systemThreshold = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance);
+            var startsLasso = CanvasPointerFeedback.RightButtonMovementStartsLasso(
+                Distance(viewPoint, _rightLassoStartView),
+                systemThreshold);
+            if (!startsLasso) return;
             _rightLassoActive = true;
             BeginLasso(_viewport.ViewToDocument(_rightLassoStartView.X, _rightLassoStartView.Y), LassoShape.Freeform);
         }
@@ -1562,8 +2017,10 @@ public partial class NoteCanvas : UserControl
         // Clear the state before releasing capture: WPF raises Lost*Capture
         // synchronously, and that callback must not re-enter this gesture.
         _rightLassoArmed = false;
+        _rightLassoHoldTimer.Stop();
         _rightLassoActive = false;
         _rightLassoUsesStylus = false;
+        _rightLassoHasStylusContact = false;
         _stylusBarrelButtonDown = false;
         _isLassoing = false;
         if (usesStylus)
@@ -1577,7 +2034,19 @@ public partial class NoteCanvas : UserControl
         ReleaseInput(usesStylus);
         UpdatePointerCursor();
         InvalidateVisual();
-        if (showContextMenu && !wasActive) ShowDirectContextMenu(contextPoint);
+        if (showContextMenu && !wasActive)
+        {
+            if (usesStylus)
+            {
+                _pendingStylusContextMenuPoint = contextPoint;
+                _stylusContextMenuTimer.Stop();
+                _stylusContextMenuTimer.Start();
+            }
+            else
+            {
+                ShowDirectContextMenu(contextPoint);
+            }
+        }
     }
 
     private void BeginLasso(Point documentPoint, LassoShape shape)
@@ -2356,6 +2825,8 @@ public partial class NoteCanvas : UserControl
     private void ClearTransientState()
     {
         CancelRightButtonLasso();
+        _rightLassoHoldTimer.Stop();
+        _stylusContextMenuTimer.Stop();
         AbandonTemporaryText();
         _directLongPressTimer.Stop();
         _directTouchDevice = null;
@@ -2363,6 +2834,7 @@ public partial class NoteCanvas : UserControl
         _insertSpaceUndoPushed = false;
         _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
+        _stylusSelectionTransformActive = false; _stylusSelectionTransformMoved = false;
         _middleNavigationActive = false; _middleNavigationUsesStylus = false;
         EndPanoramaSpringLoadedTool();
         if (_temporaryPressureEraser) EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
@@ -2376,6 +2848,74 @@ public partial class NoteCanvas : UserControl
         if (!keepLasso) _lasso.Clear();
         UpdateTextEditorInteraction();
     }
+
+    private bool HasContentSelection() =>
+        _selectedStrokes.Count > 0 ||
+        _selectedTags.Count > 0 ||
+        _selectedTextItems.Count > 0 ||
+        _selectedObjects.Count > 0;
+
+    private static StrokeRecord CloneStroke(StrokeRecord source, float offset = 0) => new()
+    {
+        Id = IdFactory.New("stroke"),
+        Kind = source.Kind,
+        Color = source.Color,
+        WidthMm = source.WidthMm,
+        PressurePercent = source.PressurePercent,
+        InkFlowPercent = source.InkFlowPercent,
+        OpacityPercent = source.OpacityPercent,
+        BrushProfile = source.BrushProfile,
+        Points = source.Points.Select(point => new InkPoint(
+            point.X + offset,
+            point.Y + offset,
+            point.Pressure,
+            point.TiltX,
+            point.TiltY,
+            point.ElapsedMilliseconds)).ToList(),
+    };
+
+    private static CanvasTag CloneTag(CanvasTag source, float offset = 0) => new()
+    {
+        Id = IdFactory.New("tag"),
+        Kind = source.Kind,
+        DocumentX = source.DocumentX + offset,
+        DocumentY = source.DocumentY + offset,
+        Scale = source.Scale,
+    };
+
+    private static TextItem CloneText(TextItem source, float offset = 0) => new()
+    {
+        Id = IdFactory.New("text"),
+        X = source.X + offset,
+        Y = source.Y + offset,
+        Width = source.Width,
+        Height = source.Height,
+        Text = source.Text,
+        FontFamily = source.FontFamily,
+        FontSize = source.FontSize,
+        Bold = source.Bold,
+        Italic = source.Italic,
+        Underline = source.Underline,
+        Strikethrough = source.Strikethrough,
+        Subscript = source.Subscript,
+        Color = source.Color,
+        ForegroundHex = source.ForegroundHex,
+        BackgroundHex = source.BackgroundHex,
+        IndentLevel = source.IndentLevel,
+        Alignment = source.Alignment,
+        LineSpacing = source.LineSpacing,
+        StyleName = source.StyleName,
+    };
+
+    private sealed record SelectionClipboardData(
+        string NotebookId,
+        string PageId,
+        List<StrokeRecord> Strokes,
+        List<CanvasTag> Tags,
+        List<TextItem> TextItems,
+        List<SelectionObjectClipboard> Objects);
+
+    private sealed record SelectionObjectClipboard(PageObject Item, string? AssetPath, string? SourceAssetPath);
 
     private void SelectOnlyObject(PageObject item)
     {

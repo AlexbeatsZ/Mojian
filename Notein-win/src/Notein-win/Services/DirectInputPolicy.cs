@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using Notein_win.Models;
 
 namespace Notein_win.Services;
 
@@ -28,6 +29,14 @@ public static class DirectInputPolicy
 
     public static bool ShowsInsertSpaceHover(DirectInputDevice device) =>
         device is DirectInputDevice.Mouse or DirectInputDevice.Pen;
+
+    public static bool PenContactTransformsSelection(
+        DrawingToolKind toolKind,
+        bool forceErase,
+        bool selectionBoundsHit) =>
+        !forceErase &&
+        selectionBoundsHit &&
+        toolKind is DrawingToolKind.Pen or DrawingToolKind.Highlighter;
 
     public static DirectPointerDownIntent PointerDownIntent(
         int pointerCount,

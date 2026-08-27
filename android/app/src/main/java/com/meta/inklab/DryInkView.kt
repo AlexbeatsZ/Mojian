@@ -252,6 +252,10 @@ class DryInkView(context: Context) : View(context) {
 
     fun beginLasso(point: PointF, shape: LassoShape = LassoShape.FREEFORM) {
         selectedStrokes.clear()
+        beginLassoPreview(point, shape)
+    }
+
+    fun beginLassoPreview(point: PointF, shape: LassoShape = LassoShape.FREEFORM) {
         lassoPoints.clear()
         lassoShape = shape
         lassoStartPoint = DocumentPoint(point.x, point.y)
@@ -295,7 +299,20 @@ class DryInkView(context: Context) : View(context) {
         return polygon
     }
 
+    fun cancelLassoPreview() {
+        lassoPoints.clear()
+        lassoStartPoint = null
+        invalidate()
+    }
+
     fun selectedCount(): Int = selectedStrokes.size
+
+    fun selectAll(): Int {
+        selectedStrokes.clear()
+        selectedStrokes.addAll(strokes)
+        invalidate()
+        return selectedStrokes.size
+    }
 
     fun isSelectedAtDocument(x: Float, y: Float, radius: Float): Boolean =
         selectedStrokes.any { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }

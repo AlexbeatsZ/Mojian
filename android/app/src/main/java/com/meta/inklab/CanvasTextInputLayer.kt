@@ -167,6 +167,17 @@ class CanvasTextInputLayer(
 
     fun selectedCount(): Int = selectedEditors.size
 
+    fun selectAll(notifySelectionChange: Boolean = true): Int {
+        endEditing()
+        selectedEditors.clear()
+        forEachEditor { editor ->
+            if (editor.text.isNotBlank()) selectedEditors += editor
+        }
+        refreshEditorInteraction()
+        if (notifySelectionChange) onSelectionChanged?.invoke(selectedEditors.size)
+        return selectedEditors.size
+    }
+
     fun clearSelection() {
         if (selectedEditors.isEmpty()) return
         selectedEditors.clear()

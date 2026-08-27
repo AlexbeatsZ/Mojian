@@ -12,4 +12,14 @@ class CanvasInputHost(context: Context) : FrameLayout(context) {
         if (onPointerEventObserved?.invoke(event) == true) return true
         return super.dispatchTouchEvent(event)
     }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (onPointerEventObserved?.invoke(event) == true) return true
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchHoverEvent(event: MotionEvent): Boolean {
+        onPointerEventObserved?.invoke(event)
+        return super.dispatchHoverEvent(event)
+    }
 }

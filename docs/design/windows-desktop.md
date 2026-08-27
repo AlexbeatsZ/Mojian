@@ -117,10 +117,20 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 - Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
   A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
   mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.
-- Right-button movement beyond the system drag threshold is a temporary freeform lasso for both the
-  mouse and a stylus side button mapped to right-click. The stylus may lasso while still in-air; no
-  nib contact is required. A stationary right-click opens the existing context menu on release, while
-  a completed right-drag never also opens that menu. Native text-editor right-click remains native.
+- Mouse right-button movement beyond the system drag threshold is a temporary freeform lasso. A
+  stylus side button mapped to right-click uses no movement threshold: release inside the Windows
+  system double-click time is always a context click, independent of contact jitter. Nib contact
+  displays the temporary lasso path immediately; an in-window release discards that preview without
+  changing selection, while holding beyond the time window makes the same path committable. An in-air
+  side-button click opens the same context menu, but cannot start a lasso without nib contact. A
+  completed lasso never also opens a menu. Stylus menus are deferred until the driver's promoted
+  mouse stream drains so the same click cannot immediately dismiss them. Native text-editor
+  right-click remains native.
+  If an app-owned context menu is already open, the next barrel/right down closes it and rearms the
+  same timed gesture so holding can transition directly into lasso instead of being consumed by the
+  popup.
+  Middle-button down also closes an app-owned context menu and immediately resumes the normal
+  middle-pan or Ctrl+middle-zoom route.
   Driver-promoted right-click events may omit their stylus association, so recent stylus hover and
   barrel-button state are part of source classification; an in-air stylus-down never authors ink.
   The barrel-button state used after classification is edge-latched from WPF button down/up events;
@@ -129,6 +139,8 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   The temporary path exists only while right/barrel is physically held. Raw barrel release, promoted
   right release, lost mouse/stylus capture, focus loss, document change, and tool change share one
   idempotent cleanup path that clears the lasso overlay before releasing WPF capture.
+- Pen/highlighter contact inside the current mixed-selection frame drags that selection instead of
+  authoring ink. Contact outside the frame clears the selection and writes normally.
 - Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
   stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not

@@ -89,6 +89,14 @@ class CanvasTagLayer(
 
     fun selectedCount(): Int = selectedTags.size
 
+    fun selectAll(): Int {
+        selectedTags.clear()
+        selectedTags.addAll(tags)
+        focusedIndex = null
+        invalidate()
+        return selectedTags.size
+    }
+
     fun clearSelection() {
         selectedTags.clear()
         invalidate()

@@ -5,6 +5,24 @@ import org.junit.Test
 
 class CanvasInputRoutingTest {
     @Test
+    fun mouseSecondaryUsesMovementOnlyToChooseLasso() {
+        assertEquals(false, CanvasInputRouting.mouseSecondaryStartsLasso(5f, 5f, 8f))
+        assertEquals(true, CanvasInputRouting.mouseSecondaryStartsLasso(8f, 0f, 8f))
+    }
+
+    @Test
+    fun stylusShortcutUsesOnlyThePressReleaseTimeWindow() {
+        assertEquals(
+            SecondaryReleaseIntent.OPEN_CONTEXT_MENU,
+            CanvasInputRouting.stylusShortcutReleaseIntent(449, 450),
+        )
+        assertEquals(
+            SecondaryReleaseIntent.COMMIT_LASSO,
+            CanvasInputRouting.stylusShortcutReleaseIntent(450, 450),
+        )
+    }
+
+    @Test
     fun middleButtonReusesPanoramaDragAndCtrlPromotesItToZoom() {
         assertEquals(
             CanvasDragIntent.PAN,

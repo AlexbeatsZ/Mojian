@@ -79,6 +79,17 @@ class InsertContentLayer(
 
     fun selectedCount(): Int = selectedItems().size
 
+    fun selectAll(): Int {
+        selectedObject = null
+        lassoSelectedObjects.clear()
+        document?.objects?.forEach { item ->
+            if (item !is InsertObject.Image || !item.pageBackground) lassoSelectedObjects += item
+        }
+        selectionTransformMutated = false
+        invalidate()
+        return lassoSelectedObjects.size
+    }
+
     fun selectedBounds(): RectF? =
         selectedItems()
             .map(::bounds)

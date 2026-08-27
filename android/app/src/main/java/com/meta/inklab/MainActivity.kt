@@ -82,6 +82,12 @@ private enum class PendingExport {
     SECTION_PACKAGE,
 }
 
+private enum class MouseSecondaryGesture {
+    NONE,
+    PENDING,
+    LASSO,
+}
+
 private enum class PageCreationTab {
     PAGE,
     PDF,
@@ -276,6 +282,15 @@ class MainActivity : Activity() {
     private var directPageGestureCaptured = false
     private var mouseCanvasGesture = CanvasDragIntent.NONE
     private var lastMouseGestureY = 0f
+    private var mouseSecondaryGesture = MouseSecondaryGesture.NONE
+    private var mouseSecondaryStart = PointF()
+    private val mouseSecondarySlop by lazy { ViewConfiguration.get(this).scaledTouchSlop.toFloat() }
+    private var lastStylusCanvasPoint: PointF? = null
+    private var xiaomiSecondaryKey: XiaomiStylusKey? = null
+    private var xiaomiSecondaryDownAt = 0L
+    private var xiaomiSecondaryPointerId: Int? = null
+    private var xiaomiSecondaryPreviewActive = false
+    private var xiaomiSecondaryCommitted = false
     private var sectionPaneVisible = true
     private var pagePaneVisible = true
     private var drawingToolbarVisible = true
@@ -477,6 +492,8 @@ class MainActivity : Activity() {
         panoramaPointerId = null
         directPageGestureCaptured = false
         mouseCanvasGesture = CanvasDragIntent.NONE
+        resetMouseSecondaryGesture(cancelPreview = true)
+        resetXiaomiSecondaryGesture(cancelPreview = true)
         transformGestureActive = false
         dryInkView.setEraserCursor(null)
         clearContentSelection()
@@ -491,12 +508,74 @@ class MainActivity : Activity() {
     }
 
     private fun handleXiaomiStylusSignal(signal: StylusShortcutSignal): Boolean {
+        if (xiaomiProfileUsesSecondaryLasso(signal.key)) return handleXiaomiSecondarySignal(signal)
         mainHandler.removeCallbacks(dispatchXiaomiGestureDeadline)
         xiaomiGestureInterpreter.doubleTapMillis = xiaomiPenShortcutSettings.doubleTapMillis
         xiaomiGestureInterpreter.holdMillis = xiaomiPenShortcutSettings.holdMillis
         applyXiaomiGestureDecisions(xiaomiGestureInterpreter.acceptAt(signal, signal.eventTime))
         scheduleXiaomiGestureDeadline()
         return true
+    }
+
+    private fun xiaomiProfileUsesSecondaryLasso(key: XiaomiStylusKey): Boolean {
+        val binding = xiaomiPenShortcutSettings.profile(key).single
+        if (binding.type == StylusBindingType.LASSO_CONTEXT) return true
+        if (binding.type != StylusBindingType.TOGGLE_TOOL) return false
+        return toolShelf.tools.firstOrNull { it.id == binding.toolId }?.kind == DrawingToolKind.LASSO
+    }
+
+    private fun handleXiaomiSecondarySignal(signal: StylusShortcutSignal): Boolean {
+        when (signal.phase) {
+            StylusKeyPhase.DOWN -> {
+                if (signal.repeatCount > 0) return true
+                if (xiaomiSecondaryKey != null) resetXiaomiSecondaryGesture(cancelPreview = true)
+                MojianCommandMenu.dismissActive()
+                xiaomiSecondaryKey = signal.key
+                xiaomiSecondaryDownAt = signal.eventTime
+                xiaomiSecondaryCommitted = false
+
+                val activePointer = pressurePointerId
+                val activePoint = lastStylusCanvasPoint?.let { point -> PointF(point.x, point.y) }
+                if (activePointer != null && activePoint != null) {
+                    cancelStylusAction()
+                    dryInkView.cancelLassoPreview()
+                    xiaomiSecondaryPointerId = activePointer
+                    beginXiaomiSecondaryPreview(activePoint.x, activePoint.y)
+                }
+            }
+            StylusKeyPhase.UP -> {
+                if (xiaomiSecondaryKey != signal.key) return true
+                val heldMillis = maxOf(signal.heldMillis, signal.eventTime - xiaomiSecondaryDownAt)
+                when (CanvasInputRouting.stylusShortcutReleaseIntent(heldMillis, xiaomiPenShortcutSettings.holdMillis)) {
+                    SecondaryReleaseIntent.COMMIT_LASSO -> {
+                        if (xiaomiSecondaryPreviewActive && !xiaomiSecondaryCommitted) {
+                            finishContentLasso()
+                            xiaomiSecondaryPreviewActive = false
+                            xiaomiSecondaryCommitted = true
+                        }
+                    }
+                    SecondaryReleaseIntent.OPEN_CONTEXT_MENU -> {
+                        if (!xiaomiSecondaryCommitted) {
+                            if (xiaomiSecondaryPreviewActive) dryInkView.cancelLassoPreview()
+                            xiaomiSecondaryPreviewActive = false
+                            val point = lastStylusCanvasPoint ?: PointF(paperContainer.width / 2f, paperContainer.height / 2f)
+                            showCanvasContextMenuAt(point.x, point.y)
+                        }
+                    }
+                }
+                resetXiaomiSecondaryGesture(cancelPreview = false)
+            }
+        }
+        return true
+    }
+
+    private fun resetXiaomiSecondaryGesture(cancelPreview: Boolean) {
+        if (cancelPreview && xiaomiSecondaryPreviewActive && ::dryInkView.isInitialized) dryInkView.cancelLassoPreview()
+        xiaomiSecondaryKey = null
+        xiaomiSecondaryDownAt = 0L
+        xiaomiSecondaryPointerId = null
+        xiaomiSecondaryPreviewActive = false
+        xiaomiSecondaryCommitted = false
     }
 
     private fun scheduleXiaomiGestureDeadline() {
@@ -538,6 +617,7 @@ class MainActivity : Activity() {
     private fun executeStylusBinding(key: XiaomiStylusKey, binding: StylusActionBinding) {
         when (binding.type) {
             StylusBindingType.NONE,
+            StylusBindingType.LASSO_CONTEXT,
             StylusBindingType.HOLD_TOOL -> Unit
             StylusBindingType.TOGGLE_TOOL -> {
                 val target = binding.toolId ?: return
@@ -1221,9 +1301,9 @@ class MainActivity : Activity() {
                         val profile = xiaomiPenShortcutSettings.profile(key)
                         val label = if (key == XiaomiStylusKey.PAGE_UP) "PageUp" else "PageDown"
                         addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
-                        addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
-                        addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
-                        addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
+                        addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, allowLassoContext = true, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
+                        addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, allowLassoContext = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
+                        addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, allowLassoContext = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
                     }
 
                     addView(optionsSectionTitle("键盘"), LinearLayout.LayoutParams(MATCH, dp(54)).apply { topMargin = dp(16) })
@@ -1284,7 +1364,13 @@ class MainActivity : Activity() {
             addView(valueLabel, LinearLayout.LayoutParams(dp(82), MATCH))
         }
 
-    private fun stylusBindingSettingsRow(title: String, binding: StylusActionBinding, holdOnly: Boolean, dialog: Dialog): View =
+    private fun stylusBindingSettingsRow(
+        title: String,
+        binding: StylusActionBinding,
+        holdOnly: Boolean,
+        allowLassoContext: Boolean,
+        dialog: Dialog,
+    ): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1301,7 +1387,7 @@ class MainActivity : Activity() {
             addView(
                 settingsValueButton(stylusBindingLabel(binding)).apply {
                     setOnClickListener {
-                        showStylusBindingChooser(this, binding, holdOnly) { dialog.setContentView(buildShortcutOptionsPage(dialog)) }
+                        showStylusBindingChooser(this, binding, holdOnly, allowLassoContext) { dialog.setContentView(buildShortcutOptionsPage(dialog)) }
                     }
                 },
                 LinearLayout.LayoutParams(dp(170), dp(36)),
@@ -1310,22 +1396,32 @@ class MainActivity : Activity() {
 
     private fun stylusBindingLabel(binding: StylusActionBinding): String =
         when (binding.type) {
-            StylusBindingType.TOGGLE_TOOL,
+            StylusBindingType.TOGGLE_TOOL -> {
+                val tool = toolShelf.tools.firstOrNull { it.id == binding.toolId }
+                if (tool?.kind == DrawingToolKind.LASSO) "套索（短按菜单）" else tool?.displayName ?: binding.type.label
+            }
             StylusBindingType.HOLD_TOOL -> toolShelf.tools.firstOrNull { it.id == binding.toolId }?.displayName ?: binding.type.label
             else -> binding.type.label
         }
 
-    private fun showStylusBindingChooser(anchor: View, binding: StylusActionBinding, holdOnly: Boolean, refresh: () -> Unit) {
+    private fun showStylusBindingChooser(
+        anchor: View,
+        binding: StylusActionBinding,
+        holdOnly: Boolean,
+        allowLassoContext: Boolean,
+        refresh: () -> Unit,
+    ) {
         val types =
             if (holdOnly) listOf(StylusBindingType.NONE, StylusBindingType.HOLD_TOOL)
-            else listOf(
-                StylusBindingType.NONE,
-                StylusBindingType.TOGGLE_TOOL,
-                StylusBindingType.UNDO,
-                StylusBindingType.REDO,
-                StylusBindingType.NEXT_TOOL,
-                StylusBindingType.PREVIOUS_TOOL,
-            )
+            else buildList {
+                add(StylusBindingType.NONE)
+                add(StylusBindingType.TOGGLE_TOOL)
+                if (allowLassoContext) add(StylusBindingType.LASSO_CONTEXT)
+                add(StylusBindingType.UNDO)
+                add(StylusBindingType.REDO)
+                add(StylusBindingType.NEXT_TOOL)
+                add(StylusBindingType.PREVIOUS_TOOL)
+            }
         val tools = drawingRibbonTools()
         val items = types.map { type ->
             val toolSubmenu =
@@ -1354,6 +1450,7 @@ class MainActivity : Activity() {
                 icon = when (type) {
                     StylusBindingType.NONE -> "eye_off"
                     StylusBindingType.TOGGLE_TOOL, StylusBindingType.HOLD_TOOL -> "pen"
+                    StylusBindingType.LASSO_CONTEXT -> "lasso"
                     StylusBindingType.UNDO, StylusBindingType.PREVIOUS_TOOL -> "arrow_undo"
                     StylusBindingType.REDO, StylusBindingType.NEXT_TOOL -> "arrow_redo"
                 },
@@ -4012,6 +4109,7 @@ class MainActivity : Activity() {
             true
         }
         wetInkView.setOnHoverListener { _, event ->
+            rememberStylusCanvasPoint(event)
             val hoverToolType = event.getToolType(event.actionIndex.coerceIn(0, event.pointerCount - 1))
             val hoverDevice =
                 when {
@@ -4038,6 +4136,8 @@ class MainActivity : Activity() {
     }
 
     private fun handleMotionEvent(event: MotionEvent) {
+        rememberStylusCanvasPoint(event)
+        if (handleXiaomiSecondaryStylusEvent(event)) return
         if (handlePanoramaStylusGesture(event)) return
         if (insertSpaceModeEnabled && handleInsertSpaceGesture(event)) return
         if (handleMouseGesture(event)) return
@@ -4371,6 +4471,11 @@ class MainActivity : Activity() {
         dryInkView.beginLasso(viewport.viewToDocument(viewX, viewY), shape)
     }
 
+    private fun beginXiaomiSecondaryPreview(viewX: Float, viewY: Float) {
+        dryInkView.beginLassoPreview(viewport.viewToDocument(viewX, viewY), LassoShape.FREEFORM)
+        xiaomiSecondaryPreviewActive = true
+    }
+
     private fun finishContentLasso() {
         val polygon = dryInkView.finishLasso()
         tagLayer.selectInPolygon(polygon)
@@ -4381,11 +4486,190 @@ class MainActivity : Activity() {
     }
 
     private fun cancelDirectMarquee() {
-        dryInkView.clearSelection()
+        dryInkView.cancelLassoPreview()
         updateSelectionInteraction()
     }
 
+    private fun rememberStylusCanvasPoint(event: MotionEvent) {
+        val index =
+            (0 until event.pointerCount).firstOrNull { pointerIndex -> isStylus(event.getToolType(pointerIndex)) }
+                ?: return
+        lastStylusCanvasPoint = PointF(event.getX(index), event.getY(index))
+    }
+
+    private fun handleXiaomiSecondaryStylusEvent(event: MotionEvent): Boolean {
+        if (xiaomiSecondaryKey == null) return false
+        val actionIndex = event.actionIndex.coerceIn(0, event.pointerCount - 1)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (!isStylus(event.getToolType(actionIndex))) return false
+                xiaomiSecondaryPointerId = event.getPointerId(actionIndex)
+                lastStylusCanvasPoint = PointF(event.getX(actionIndex), event.getY(actionIndex))
+                if (!xiaomiSecondaryPreviewActive && !xiaomiSecondaryCommitted) {
+                    beginXiaomiSecondaryPreview(event.getX(actionIndex), event.getY(actionIndex))
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val pointerIndex =
+                    xiaomiSecondaryPointerId?.let(event::findPointerIndex)?.takeIf { it >= 0 }
+                        ?: (0 until event.pointerCount).firstOrNull { isStylus(event.getToolType(it)) }
+                        ?: return true
+                lastStylusCanvasPoint = PointF(event.getX(pointerIndex), event.getY(pointerIndex))
+                if (!xiaomiSecondaryPreviewActive && !xiaomiSecondaryCommitted) {
+                    xiaomiSecondaryPointerId = event.getPointerId(pointerIndex)
+                    beginXiaomiSecondaryPreview(event.getX(pointerIndex), event.getY(pointerIndex))
+                } else if (xiaomiSecondaryPreviewActive) {
+                    dryInkView.extendLasso(viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex)))
+                }
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP -> {
+                val pointerId = event.getPointerId(actionIndex)
+                if (pointerId != xiaomiSecondaryPointerId) return true
+                lastStylusCanvasPoint = PointF(event.getX(actionIndex), event.getY(actionIndex))
+                if (xiaomiSecondaryPreviewActive) {
+                    dryInkView.extendLasso(viewport.viewToDocument(event.getX(actionIndex), event.getY(actionIndex)))
+                    val heldMillis = (event.eventTime - xiaomiSecondaryDownAt).coerceAtLeast(0L)
+                    if (
+                        CanvasInputRouting.stylusShortcutReleaseIntent(heldMillis, xiaomiPenShortcutSettings.holdMillis) ==
+                            SecondaryReleaseIntent.COMMIT_LASSO
+                    ) {
+                        finishContentLasso()
+                        xiaomiSecondaryPreviewActive = false
+                        xiaomiSecondaryCommitted = true
+                    }
+                }
+                xiaomiSecondaryPointerId = null
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (xiaomiSecondaryPreviewActive) dryInkView.cancelLassoPreview()
+                xiaomiSecondaryPreviewActive = false
+                xiaomiSecondaryPointerId = null
+            }
+        }
+        return true
+    }
+
+    private fun handleCanvasMousePointerEvent(event: MotionEvent, viewX: Float, viewY: Float): Boolean {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
+        val action = event.actionMasked
+        val pressedButton =
+            when (action) {
+                MotionEvent.ACTION_BUTTON_PRESS -> event.actionButton
+                MotionEvent.ACTION_DOWN -> event.buttonState
+                else -> 0
+            }
+        val releasedButton = if (action == MotionEvent.ACTION_BUTTON_RELEASE) event.actionButton else 0
+
+        if (pressedButton and MotionEvent.BUTTON_TERTIARY != 0) {
+            MojianCommandMenu.dismissActive()
+            resetMouseSecondaryGesture(cancelPreview = true)
+            mouseCanvasGesture = CanvasInputRouting.mouseDragIntent(middlePressed = true, ctrlPressed = event.hasCtrlModifier())
+            beginSpringLoadedPanorama()
+            if (mouseCanvasGesture == CanvasDragIntent.PAN) {
+                transformGestureActive = true
+                transformGestureArbiter.cancel()
+                lastGestureFocusX = viewX
+                lastGestureFocusY = viewY
+            } else {
+                lastMouseGestureY = viewY
+            }
+            return true
+        }
+        if (pressedButton and MotionEvent.BUTTON_SECONDARY != 0) {
+            if (textInputLayer.isEditingAt(viewX, viewY)) return false
+            MojianCommandMenu.dismissActive()
+            if (mouseCanvasGesture != CanvasDragIntent.NONE) endMouseCanvasGesture()
+            resetMouseSecondaryGesture(cancelPreview = true)
+            mouseSecondaryGesture = MouseSecondaryGesture.PENDING
+            mouseSecondaryStart = PointF(viewX, viewY)
+            return true
+        }
+
+        if (action == MotionEvent.ACTION_MOVE && mouseCanvasGesture != CanvasDragIntent.NONE) {
+            when (mouseCanvasGesture) {
+                CanvasDragIntent.PAN -> applySingleFingerPan(viewX, viewY)
+                CanvasDragIntent.ZOOM -> {
+                    val factor = kotlin.math.exp((lastMouseGestureY - viewY) / dp(240).toFloat())
+                    viewport.applyGesture(viewX, viewY, viewX, viewY, factor)
+                    lastMouseGestureY = viewY
+                    applyViewportToLayers()
+                }
+                CanvasDragIntent.NONE -> Unit
+            }
+            return true
+        }
+        if (
+            mouseCanvasGesture != CanvasDragIntent.NONE &&
+            (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL || releasedButton and MotionEvent.BUTTON_TERTIARY != 0)
+        ) {
+            endMouseCanvasGesture()
+            return true
+        }
+
+        if (action == MotionEvent.ACTION_MOVE && mouseSecondaryGesture != MouseSecondaryGesture.NONE) {
+            if (
+                mouseSecondaryGesture == MouseSecondaryGesture.PENDING &&
+                CanvasInputRouting.mouseSecondaryStartsLasso(
+                    viewX - mouseSecondaryStart.x,
+                    viewY - mouseSecondaryStart.y,
+                    mouseSecondarySlop,
+                )
+            ) {
+                beginContentLasso(mouseSecondaryStart.x, mouseSecondaryStart.y, LassoShape.FREEFORM)
+                mouseSecondaryGesture = MouseSecondaryGesture.LASSO
+            }
+            if (mouseSecondaryGesture == MouseSecondaryGesture.LASSO) {
+                dryInkView.extendLasso(viewport.viewToDocument(viewX, viewY))
+            }
+            return true
+        }
+        if (
+            mouseSecondaryGesture != MouseSecondaryGesture.NONE &&
+            (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL || releasedButton and MotionEvent.BUTTON_SECONDARY != 0)
+        ) {
+            val completed = action != MotionEvent.ACTION_CANCEL
+            when (mouseSecondaryGesture) {
+                MouseSecondaryGesture.PENDING -> if (completed) showCanvasContextMenuAt(viewX, viewY)
+                MouseSecondaryGesture.LASSO -> if (completed) {
+                    dryInkView.extendLasso(viewport.viewToDocument(viewX, viewY))
+                    finishContentLasso()
+                } else {
+                    dryInkView.cancelLassoPreview()
+                }
+                MouseSecondaryGesture.NONE -> Unit
+            }
+            resetMouseSecondaryGesture(cancelPreview = false)
+            return true
+        }
+        return false
+    }
+
+    private fun endMouseCanvasGesture() {
+        if (mouseCanvasGesture == CanvasDragIntent.PAN) endTransformGesture()
+        mouseCanvasGesture = CanvasDragIntent.NONE
+        endSpringLoadedPanorama()
+    }
+
+    private fun resetMouseSecondaryGesture(cancelPreview: Boolean) {
+        if (cancelPreview && mouseSecondaryGesture == MouseSecondaryGesture.LASSO && ::dryInkView.isInitialized) {
+            dryInkView.cancelLassoPreview()
+        }
+        mouseSecondaryGesture = MouseSecondaryGesture.NONE
+    }
+
+    private fun handleCanvasMenuPointerEvent(event: MotionEvent): Boolean {
+        val location = IntArray(2)
+        paperContainer.getLocationOnScreen(location)
+        return handleCanvasMousePointerEvent(event, event.rawX - location[0], event.rawY - location[1])
+    }
+
     private fun observeCanvasPointerEvent(event: MotionEvent): Boolean {
+        rememberStylusCanvasPoint(event)
+        if (handleXiaomiSecondaryStylusEvent(event)) return true
+        val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
+        if (mouseIndex != null && handleCanvasMousePointerEvent(event, event.getX(mouseIndex), event.getY(mouseIndex))) return true
         val fingerCount = (0 until event.pointerCount).count { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
         if (fingerCount >= 2 || directPageGestureCaptured) {
             if (!directPageGestureCaptured) {
@@ -4456,7 +4740,25 @@ class MainActivity : Activity() {
         updateSelectionInteraction()
     }
 
-    private fun handleDirectLongPress(viewX: Float, viewY: Float): Boolean {
+    private fun handleDirectLongPress(viewX: Float, viewY: Float): Boolean =
+        showCanvasContextMenuAt(viewX, viewY, performHaptic = true)
+
+    private fun showCanvasContextMenuAt(viewX: Float, viewY: Float, performHaptic: Boolean = false): Boolean {
+        val documentPoint = viewport.viewToDocument(viewX, viewY)
+        val selectionBounds = combinedSelectionBounds()
+        if (selectionBounds?.contains(documentPoint.x, documentPoint.y) == true) {
+            val onlyInsertObjectSelected =
+                insertContentLayer.selectedCount() == 1 &&
+                    dryInkView.selectedCount() == 0 &&
+                    tagLayer.selectedCount() == 0 &&
+                    textInputLayer.selectedCount() == 0
+            if (onlyInsertObjectSelected && insertContentLayer.hasSelectableAtView(viewX, viewY)) {
+                return insertContentLayer.requestContextMenuAt(viewX, viewY)
+            }
+            showSelectionContextMenuAt(viewX, viewY)
+            if (performHaptic) selectionOverlay.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            return true
+        }
         if (insertContentLayer.hasSelectableAtView(viewX, viewY)) {
             if (!insertContentLayer.isSelectedAtView(viewX, viewY)) {
                 clearContentSelection()
@@ -4464,7 +4766,6 @@ class MainActivity : Activity() {
             }
             return insertContentLayer.requestContextMenuAt(viewX, viewY)
         }
-        val point = viewport.viewToDocument(viewX, viewY)
         val hitRadius = dp(12).toFloat() / viewport.scale
         when {
             textInputLayer.hasEditorAt(viewX, viewY) -> {
@@ -4479,15 +4780,28 @@ class MainActivity : Activity() {
                     tagLayer.selectAtView(viewX, viewY)
                 }
             }
-            dryInkView.hasStrokeAtDocument(point.x, point.y, hitRadius) -> {
-                if (!dryInkView.isSelectedAtDocument(point.x, point.y, hitRadius)) {
+            dryInkView.hasStrokeAtDocument(documentPoint.x, documentPoint.y, hitRadius) -> {
+                if (!dryInkView.isSelectedAtDocument(documentPoint.x, documentPoint.y, hitRadius)) {
                     clearContentSelection()
-                    dryInkView.selectAtDocument(point.x, point.y, hitRadius)
+                    dryInkView.selectAtDocument(documentPoint.x, documentPoint.y, hitRadius)
                 }
             }
-            else -> return false
+            else -> {
+                textInputLayer.abandonTemporaryEditors()
+                textInputLayer.endEditing()
+                clearContentSelection()
+                showCanvasBackgroundContextMenuAt(viewX, viewY)
+                if (performHaptic) selectionOverlay.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                return true
+            }
         }
         updateSelectionInteraction()
+        showSelectionContextMenuAt(viewX, viewY)
+        if (performHaptic) selectionOverlay.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        return true
+    }
+
+    private fun showSelectionContextMenuAt(viewX: Float, viewY: Float) {
         val location = IntArray(2)
         selectionOverlay.getLocationOnScreen(location)
         MojianCommandMenu.showAt(
@@ -4495,11 +4809,42 @@ class MainActivity : Activity() {
             selectionOverlay,
             location[0] + viewX.roundToInt(),
             location[1] + viewY.roundToInt(),
-            listOf(MojianCommandMenu.Item("删除", "delete", action = { deleteContentSelection() })),
-            widthDp = 176,
+            listOf(
+                MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+                MojianCommandMenu.Item("全选", "lasso", dividerBefore = true, action = ::selectAllContent),
+                MojianCommandMenu.Item("删除", "delete_dismiss", destructive = true, action = { deleteContentSelection() }),
+            ),
+            widthDp = 196,
+            pointerButtonHandler = ::handleCanvasMenuPointerEvent,
         )
-        selectionOverlay.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-        return true
+    }
+
+    private fun showCanvasBackgroundContextMenuAt(viewX: Float, viewY: Float) {
+        val location = IntArray(2)
+        selectionOverlay.getLocationOnScreen(location)
+        MojianCommandMenu.showAt(
+            this,
+            selectionOverlay,
+            location[0] + viewX.roundToInt(),
+            location[1] + viewY.roundToInt(),
+            listOf(
+                MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+                MojianCommandMenu.Item("全选", "lasso", action = ::selectAllContent),
+            ),
+            widthDp = 196,
+            pointerButtonHandler = ::handleCanvasMenuPointerEvent,
+        )
+    }
+
+    private fun selectAllContent() {
+        textInputLayer.abandonTemporaryEditors()
+        textInputLayer.endEditing()
+        dryInkView.selectAll()
+        tagLayer.selectAll()
+        textInputLayer.selectAll(notifySelectionChange = false)
+        insertContentLayer.selectAll()
+        updateSelectionInteraction()
+        renderToolDetails()
     }
 
     private fun beginSingleFingerPan(event: MotionEvent, fingerIndex: Int) {
@@ -5742,6 +6087,7 @@ class MainActivity : Activity() {
             location[1] + viewY.roundToInt(),
             items,
             widthDp = 236,
+            pointerButtonHandler = ::handleCanvasMenuPointerEvent,
         )
     }
 

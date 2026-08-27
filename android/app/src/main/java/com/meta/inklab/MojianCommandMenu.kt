@@ -7,6 +7,8 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -21,6 +23,7 @@ class MojianCommandMenu private constructor(
     private val context: Context,
     private val items: List<Item>,
     private val width: Int,
+    private val pointerButtonHandler: ((MotionEvent) -> Boolean)?,
 ) {
     data class Item(
         val label: String,
@@ -41,6 +44,7 @@ class MojianCommandMenu private constructor(
         dismiss()
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
+        activeMenu = this
         val location = IntArray(2)
         anchor.getLocationOnScreen(location)
         val metrics = context.resources.displayMetrics
@@ -55,6 +59,7 @@ class MojianCommandMenu private constructor(
         dismiss()
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
+        activeMenu = this
         val metrics = context.resources.displayMetrics
         val expectedHeight = menuHeight(items)
         val x = screenX.coerceIn(dp(8), (metrics.widthPixels - width - dp(8)).coerceAtLeast(dp(8)))
@@ -67,6 +72,7 @@ class MojianCommandMenu private constructor(
         childPopup = null
         rootPopup?.dismiss()
         rootPopup = null
+        if (activeMenu === this) activeMenu = null
     }
 
     private fun createPopup(menuItems: List<Item>, isRoot: Boolean): PopupWindow {
@@ -80,6 +86,7 @@ class MojianCommandMenu private constructor(
                     childPopup?.dismiss()
                     childPopup = null
                     rootPopup = null
+                    if (activeMenu === this@MojianCommandMenu) activeMenu = null
                 }
             }
         }
@@ -90,6 +97,8 @@ class MojianCommandMenu private constructor(
             orientation = LinearLayout.VERTICAL
             setPadding(dp(5), dp(6), dp(5), dp(6))
             background = rounded(MENU_BACKGROUND, dp(5).toFloat(), MENU_BORDER)
+            setOnGenericMotionListener { _, event -> forwardPointerButton(event) }
+            setOnTouchListener { _, event -> forwardPointerButton(event) }
             menuItems.forEach { item ->
                 if (item.dividerBefore) {
                     addView(
@@ -103,6 +112,20 @@ class MojianCommandMenu private constructor(
             }
         }
 
+    private fun forwardPointerButton(event: MotionEvent): Boolean {
+        if (!event.isFromSource(InputDevice.SOURCE_MOUSE)) return false
+        val buttonMask = MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY
+        val isButtonEvent =
+            when (event.actionMasked) {
+                MotionEvent.ACTION_BUTTON_PRESS,
+                MotionEvent.ACTION_BUTTON_RELEASE -> event.actionButton and buttonMask != 0
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_MOVE -> event.buttonState and buttonMask != 0
+                else -> false
+            }
+        return isButtonEvent && pointerButtonHandler?.invoke(event) == true
+    }
+
     private fun commandRow(item: Item): View =
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -111,6 +134,8 @@ class MojianCommandMenu private constructor(
             isEnabled = item.enabled
             alpha = if (item.enabled) 1f else 0.38f
             background = selectableBackground()
+            setOnGenericMotionListener { _, event -> forwardPointerButton(event) }
+            setOnTouchListener { _, event -> forwardPointerButton(event) }
 
             addView(
                 ImageView(context).apply {
@@ -232,12 +257,29 @@ class MojianCommandMenu private constructor(
         private val ACCENT = Color.rgb(218, 178, 233)
         private val DESTRUCTIVE = Color.rgb(238, 92, 92)
 
-        fun show(context: Context, anchor: View, items: List<Item>, widthDp: Int = 232): MojianCommandMenu =
-            MojianCommandMenu(
+        private var activeMenu: MojianCommandMenu? = null
+
+        fun dismissActive(): Boolean {
+            val menu = activeMenu ?: return false
+            menu.dismiss()
+            return true
+        }
+
+        fun show(
+            context: Context,
+            anchor: View,
+            items: List<Item>,
+            widthDp: Int = 232,
+            pointerButtonHandler: ((MotionEvent) -> Boolean)? = null,
+        ): MojianCommandMenu {
+            dismissActive()
+            return MojianCommandMenu(
                 context,
                 items,
                 TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, widthDp.toFloat(), context.resources.displayMetrics).toInt(),
+                pointerButtonHandler,
             ).also { it.show(anchor) }
+        }
 
         fun showAt(
             context: Context,
@@ -246,11 +288,15 @@ class MojianCommandMenu private constructor(
             screenY: Int,
             items: List<Item>,
             widthDp: Int = 232,
-        ): MojianCommandMenu =
-            MojianCommandMenu(
+            pointerButtonHandler: ((MotionEvent) -> Boolean)? = null,
+        ): MojianCommandMenu {
+            dismissActive()
+            return MojianCommandMenu(
                 context,
                 items,
                 TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, widthDp.toFloat(), context.resources.displayMetrics).toInt(),
+                pointerButtonHandler,
             ).also { it.showAt(anchor, screenX, screenY) }
+        }
     }
 }
