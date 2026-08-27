@@ -117,7 +117,9 @@ public sealed class SectionNode
     }
 }
 
-public sealed class SectionRow
+public interface INotebookTreeRow;
+
+public sealed class SectionRow : INotebookTreeRow
 {
     private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
 
@@ -138,7 +140,7 @@ public sealed class SectionRow
     }
 }
 
-public sealed class NotebookPaneRow
+public sealed class NotebookPaneRow : INotebookTreeRow
 {
     private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
 

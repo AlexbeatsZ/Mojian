@@ -123,6 +123,9 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   a completed right-drag never also opens that menu. Native text-editor right-click remains native.
   Driver-promoted right-click events may omit their stylus association, so recent stylus hover and
   barrel-button state are part of source classification; an in-air stylus-down never authors ink.
+  The barrel-button state used after classification is edge-latched from WPF button down/up events;
+  do not poll `StylusButtonState` on a later pen contact because this device can retain the released
+  button as `Down` and incorrectly start another lasso.
   The temporary path exists only while right/barrel is physically held. Raw barrel release, promoted
   right release, lost mouse/stylus capture, focus loss, document change, and tool change share one
   idempotent cleanup path that clears the lasso overlay before releasing WPF capture.

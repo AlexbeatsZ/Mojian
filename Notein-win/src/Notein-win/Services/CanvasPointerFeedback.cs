@@ -46,12 +46,12 @@ public static class CanvasPointerFeedback
 
     public static bool RightButtonGestureIntent(
         bool gestureArmed,
-        bool barrelButtonDown,
+        bool barrelButtonDownEventLatched,
         bool mouseRightButtonDown) =>
-        gestureArmed || barrelButtonDown || mouseRightButtonDown;
+        gestureArmed || barrelButtonDownEventLatched || mouseRightButtonDown;
 
-    public static bool RightButtonGestureIsHeld(bool mouseRightButtonDown, bool barrelButtonDown) =>
-        mouseRightButtonDown || barrelButtonDown;
+    public static bool RightButtonGestureIsHeld(bool mouseRightButtonDown, bool barrelButtonDownEventLatched) =>
+        mouseRightButtonDown || barrelButtonDownEventLatched;
 
     public static bool StylusDownStartsDrawing(bool inAir, bool rightButtonGestureIntent) =>
         !inAir && !rightButtonGestureIntent;

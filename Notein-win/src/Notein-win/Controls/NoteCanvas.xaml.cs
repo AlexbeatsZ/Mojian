@@ -635,7 +635,7 @@ public partial class NoteCanvas : UserControl
         UpdatePointerCursor();
         var rightGestureIntent = CanvasPointerFeedback.RightButtonGestureIntent(
             _rightLassoArmed,
-            _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice),
+            _stylusBarrelButtonDown,
             Mouse.RightButton == MouseButtonState.Pressed);
         if (rightGestureIntent && !_rightLassoArmed)
             BeginRightButtonLasso(point.ToPoint(), usesStylus: true);
@@ -673,7 +673,7 @@ public partial class NoteCanvas : UserControl
         {
             if (CanvasPointerFeedback.RightButtonGestureIsHeld(
                     Mouse.RightButton == MouseButtonState.Pressed,
-                    _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice)))
+                    _stylusBarrelButtonDown))
             {
                 if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
             }
@@ -747,7 +747,7 @@ public partial class NoteCanvas : UserControl
         if (_rightLassoArmed && _rightLassoUsesStylus &&
             !CanvasPointerFeedback.RightButtonGestureIsHeld(
                 Mouse.RightButton == MouseButtonState.Pressed,
-                _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice)))
+                _stylusBarrelButtonDown))
             FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
         if (_stylusActive) return;
         if (_middleNavigationActive && _middleNavigationUsesStylus)
@@ -1414,10 +1414,6 @@ public partial class NoteCanvas : UserControl
 
     private static bool IsBarrelButton(StylusButton button) =>
         button.Guid == StylusPointProperties.BarrelButton.Id;
-
-    private static bool IsBarrelButtonPressed(StylusDevice device) =>
-        device.StylusButtons.Cast<StylusButton>().Any(button =>
-            IsBarrelButton(button) && button.StylusButtonState == StylusButtonState.Down);
 
     private void CheckPressureEraseActivation()
     {

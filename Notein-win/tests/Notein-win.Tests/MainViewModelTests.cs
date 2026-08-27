@@ -44,17 +44,40 @@ public class MainViewModelTests
         var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
         var viewModel = new MainViewModel(workspace, preferences);
 
-        var notebookRow = Assert.Single(viewModel.NotebookRows);
+        var notebookRow = Assert.Single(viewModel.NotebookTreeRows.OfType<NotebookPaneRow>());
         Assert.True(notebookRow.IsActive);
         Assert.Equal("#7719AA", notebookRow.AccentHex);
-        Assert.NotEmpty(viewModel.SectionRows);
+        Assert.NotEmpty(viewModel.NotebookTreeRows.OfType<SectionRow>());
 
         viewModel.ToggleNotebookExpandCommand.Execute(notebookRow.Id);
-        Assert.Empty(viewModel.SectionRows);
+        Assert.Empty(viewModel.NotebookTreeRows.OfType<SectionRow>());
         viewModel.SelectNotebookCommand.Execute(notebookRow.Id);
 
         Assert.Null(viewModel.ActiveWorkspace.FocusedSectionId);
         Assert.Empty(viewModel.PagePaneRows);
+    }
+
+    [Fact]
+    public void ActiveNotebookSectionsAreInsertedImmediatelyBelowTheirNotebookRow()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+
+        viewModel.AddNotebook("Middle");
+        var middleId = viewModel.ActiveWorkspace.Id;
+        var middleSectionId = Assert.Single(viewModel.ActiveWorkspace.Sections).Id;
+        viewModel.AddNotebook("Last");
+        var lastId = viewModel.ActiveWorkspace.Id;
+
+        viewModel.SelectNotebookCommand.Execute(middleId);
+
+        var rows = viewModel.NotebookTreeRows.ToList();
+        var middleIndex = rows.FindIndex(row => row is NotebookPaneRow notebook && notebook.Id == middleId);
+        Assert.True(middleIndex >= 0);
+        Assert.Equal(middleSectionId, Assert.IsType<SectionRow>(rows[middleIndex + 1]).Section.Id);
+        Assert.Equal(lastId, Assert.IsType<NotebookPaneRow>(rows[middleIndex + 2]).Id);
     }
 
     [Fact]

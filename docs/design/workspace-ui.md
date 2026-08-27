@@ -42,6 +42,8 @@ The two left panes have deliberately non-overlapping responsibilities.
 ### Black pane: sections only
 
 - Display notebook nodes in the black tree; expanding a notebook reveals only its section tree.
+- Render each expanded notebook's section rows immediately beneath that notebook row; never append
+  the active notebook's section tree after later sibling notebooks.
 - Selecting a notebook switches the active workspace and therefore the gray page pane and canvas
   header. Do not copy OneNote's repeated per-notebook `新建分区` row.
 - Do not copy the desktop notebook picker footer entries `更多笔记本` or `快速笔记`. The prototype

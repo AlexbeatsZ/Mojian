@@ -135,9 +135,9 @@ public class ViewportStateTests
         Assert.True(CanvasPointerFeedback.RightButtonUsesStylus(false, false, true));
         Assert.False(CanvasPointerFeedback.RightButtonUsesStylus(false, false, false));
 
-        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: true, mouseRightButtonDown: false));
-        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: false, mouseRightButtonDown: true));
-        Assert.False(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: false, mouseRightButtonDown: false));
+        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDownEventLatched: true, mouseRightButtonDown: false));
+        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDownEventLatched: false, mouseRightButtonDown: true));
+        Assert.False(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDownEventLatched: false, mouseRightButtonDown: false));
 
         Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: true, rightButtonGestureIntent: false));
         Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureIntent: true));
@@ -154,5 +154,28 @@ public class ViewportStateTests
         bool expected)
     {
         Assert.Equal(expected, CanvasPointerFeedback.RightButtonGestureIsHeld(mouseRightButtonDown, barrelButtonDown));
+    }
+
+    [Fact]
+    public void ExplicitBarrelReleaseLetsTheNextPenContactDraw()
+    {
+        var gestureArmed = true;
+        var barrelButtonDownEventLatched = true;
+
+        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(
+            gestureArmed,
+            barrelButtonDownEventLatched,
+            mouseRightButtonDown: false));
+
+        gestureArmed = false;
+        barrelButtonDownEventLatched = false;
+
+        Assert.False(CanvasPointerFeedback.RightButtonGestureIntent(
+            gestureArmed,
+            barrelButtonDownEventLatched,
+            mouseRightButtonDown: false));
+        Assert.True(CanvasPointerFeedback.StylusDownStartsDrawing(
+            inAir: false,
+            rightButtonGestureIntent: false));
     }
 }

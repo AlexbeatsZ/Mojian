@@ -44,8 +44,7 @@ public sealed class MainViewModel : ObservableObject
     private string _searchQuery = string.Empty;
     private string _saveStateText = "已保存";
 
-    public ObservableCollection<NotebookPaneRow> NotebookRows { get; } = new();
-    public ObservableCollection<SectionRow> SectionRows { get; } = new();
+    public ObservableCollection<INotebookTreeRow> NotebookTreeRows { get; } = new();
     public ObservableCollection<PagePaneRow> PagePaneRows { get; } = new();
     public ObservableCollection<ToolPreset> Tools { get; } = new();
     public ObservableCollection<ToolPreset> LassoTools { get; } = new();
@@ -1266,15 +1265,15 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshSectionRows()
     {
-        NotebookRows.Clear();
+        NotebookTreeRows.Clear();
         for (var index = 0; index < _library.Notebooks.Count; index++)
         {
             var notebook = _library.Notebooks[index];
-            NotebookRows.Add(new NotebookPaneRow(notebook, index, notebook.Id == _library.ActiveNotebookId));
+            var isActive = notebook.Id == _library.ActiveNotebookId;
+            NotebookTreeRows.Add(new NotebookPaneRow(notebook, index, isActive));
+            if (isActive && notebook.Expanded)
+                foreach (var row in notebook.FlattenSections()) NotebookTreeRows.Add(row);
         }
-        SectionRows.Clear();
-        if (ActiveWorkspace.Expanded)
-            foreach (var row in ActiveWorkspace.FlattenSections()) SectionRows.Add(row);
     }
 
     private void RefreshPagePaneRows()

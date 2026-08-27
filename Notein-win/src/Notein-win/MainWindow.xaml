@@ -253,9 +253,10 @@
                             <Button x:Name="AddSectionButton" Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Margin="0,0,7,0" Padding="8"
                                     WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
                         </Grid>
-                        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding NotebookRows}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding NotebookTreeRows}">
+                                <ItemsControl.Resources>
+                                    <DataTemplate DataType="{x:Type models:NotebookPaneRow}">
                                     <Border Style="{StaticResource NotebookPaneRow}" Padding="5,0,7,0">
                                         <Grid Background="Transparent">
                                             <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" /></Grid.InputBindings>
@@ -279,13 +280,8 @@
                                             </DockPanel>
                                         </Grid>
                                     </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding SectionRows}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
+                                    </DataTemplate>
+                                    <DataTemplate DataType="{x:Type models:SectionRow}">
                                         <Border Style="{StaticResource PaneRow}" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" /></Grid.InputBindings>
@@ -308,7 +304,7 @@
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
-                                </ItemsControl.ItemTemplate>
+                                </ItemsControl.Resources>
                             </ItemsControl>
                         </ScrollViewer>
                     </DockPanel>
