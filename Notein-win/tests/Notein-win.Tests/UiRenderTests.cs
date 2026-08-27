@@ -2,8 +2,10 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using Notein_win.Controls;
 using Notein_win.Models;
 using Notein_win.Services;
@@ -21,14 +23,11 @@ public class UiRenderTests
         {
             try
             {
-                if (Application.Current == null)
-                {
-                    _ = new Application();
-                }
-                Application.Current.Resources.MergedDictionaries.Clear();
-                Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/DarkColors.xaml", UriKind.Relative)));
-                Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/IconResources.xaml", UriKind.Relative)));
-                Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/ControlStyles.xaml", UriKind.Relative)));
+                var application = Application.Current ?? new Application();
+                application.Resources.MergedDictionaries.Clear();
+                application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/DarkColors.xaml", UriKind.Relative)));
+                application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/IconResources.xaml", UriKind.Relative)));
+                application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/ControlStyles.xaml", UriKind.Relative)));
 
                 var window = new MainWindow
                 {
@@ -81,6 +80,12 @@ public class UiRenderTests
                 // 4. View tab
                 vm.ActiveRibbonTab = RibbonTab.View;
                 CaptureVisual(window, 1440, 900, "win_4_view.png");
+                var normalFullPageButton = Assert.IsType<Button>(window.FindName("EnterFullPageButton"));
+                AssertRenderedIconIsCentered(normalFullPageButton);
+                var leftCanvas = Assert.IsType<NoteCanvas>(window.FindName("LeftCanvas"));
+                vm.SingleFingerPanEnabled = true;
+                Assert.Same(System.Windows.Input.Cursors.Hand, leftCanvas.Cursor);
+                vm.SingleFingerPanEnabled = false;
 
                 // 5. Add Page dialog
                 var addPageDlg = new PageCreationDialog(vm.LastPageAppearance)
@@ -104,6 +109,32 @@ public class UiRenderTests
                 // 8. Backstage Shortcuts
                 vm.SelectBackstageTabCommand.Execute("Shortcuts");
                 CaptureVisual(window, 1440, 900, "win_8_backstage_shortcuts.png");
+
+                // 9. Full-page chrome: transient panes start closed and the rail leaves no dead column.
+                vm.IsBackstageOpen = false;
+                vm.IsFullPageMode = true;
+                CaptureVisual(window, 1440, 900, "win_9_fullpage.png");
+                var workspaceLayout = Assert.IsType<Grid>(window.FindName("WorkspaceLayout"));
+                var sectionPane = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("SectionPane"));
+                var pagePane = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("PagePane"));
+                var canvasActions = Assert.IsAssignableFrom<FrameworkElement>(window.FindName("CanvasActions"));
+                var enterFullPage = Assert.IsType<Button>(window.FindName("EnterFullPageButton"));
+                var exitFullPage = Assert.IsType<Button>(window.FindName("ExitFullPageButton"));
+
+                Assert.Equal(0, workspaceLayout.ColumnDefinitions[0].ActualWidth);
+                Assert.False(sectionPane.IsVisible);
+                Assert.False(pagePane.IsVisible);
+                Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(canvasActions));
+                Assert.Equal(new Thickness(6), enterFullPage.Padding);
+                Assert.Equal(new Thickness(6), exitFullPage.Padding);
+                Assert.Equal(34, exitFullPage.ActualWidth);
+                AssertRenderedIconIsCentered(exitFullPage);
+
+                vm.ToggleSectionPaneCommand.Execute(null);
+                vm.TogglePagePaneCommand.Execute(null);
+                CaptureVisual(window, 1440, 900, "win_10_fullpage_panes.png");
+                Assert.Equal(196, sectionPane.ActualWidth);
+                Assert.Equal(196, pagePane.ActualWidth);
             }
             catch (Exception ex)
             {
@@ -126,4 +157,31 @@ public class UiRenderTests
             Assert.Fail("Render error: " + err);
         }
     }
+
+    private static void AssertRenderedIconIsCentered(Button button)
+    {
+        var width = (int)Math.Round(button.ActualWidth);
+        var height = (int)Math.Round(button.ActualHeight);
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+            drawing.DrawRectangle(new VisualBrush(button), null, new Rect(0, 0, width, height));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var pixels = new byte[width * height * 4];
+        bitmap.CopyPixels(pixels, width * 4, 0);
+        var lit = new List<Point>();
+        for (var y = 2; y < height - 2; y++)
+        for (var x = 2; x < width - 2; x++)
+        {
+            var offset = (y * width + x) * 4;
+            if (pixels[offset] > 100 && pixels[offset + 1] > 100 && pixels[offset + 2] > 100)
+                lit.Add(new Point(x, y));
+        }
+
+        Assert.NotEmpty(lit);
+        var iconCenter = new Point((lit.Min(p => p.X) + lit.Max(p => p.X)) / 2, (lit.Min(p => p.Y) + lit.Max(p => p.Y)) / 2);
+        Assert.InRange(Math.Abs(iconCenter.X - (width - 1) / 2d), 0, 0.5);
+        Assert.InRange(Math.Abs(iconCenter.Y - (height - 1) / 2d), 0, 0.5);
+    }
+
 }

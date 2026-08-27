@@ -150,7 +150,8 @@
         <Setter Property="MinWidth" Value="34" />
         <Setter Property="Height" Value="34" />
         <Setter Property="Margin" Value="0,0,4,0" />
-        <Setter Property="Padding" Value="7" />
+        <!-- 34 = 1 px border on each side + 6 px padding on each side + a 20 px icon. -->
+        <Setter Property="Padding" Value="6" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -161,6 +162,35 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#333333" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="CanvasActionToggleButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource RibbonToggleButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Width" Value="34" />
+        <Setter Property="MinWidth" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="6" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#333333" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" />
+                            <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

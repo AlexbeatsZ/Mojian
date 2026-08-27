@@ -39,7 +39,7 @@ The normal window uses four vertical zones after the ribbon:
 ```text
 +----+--------------------+----------------------+---------------------------+
 |rail| notebook/sections  | pages                | paper workspace           |
-|32px| 196px, near-black  | 220px, dark gray     | unbounded or A4 sheets    |
+|32px| 196px, near-black  | 196px, dark gray     | unbounded or A4 sheets    |
 +----+--------------------+----------------------+---------------------------+
 ```
 
@@ -48,8 +48,13 @@ The normal window uses four vertical zones after the ribbon:
   move the black-pane root.
 - `开始`, `插入`, `绘图`, and `视图` have separate ribbon panels. Controls never remain visible merely
   because a binding failed.
-- Full-page mode hides tabs and the rail but leaves independent section/page recovery buttons and a
-  content-sized floating tool strip.
+- Full-page mode hides tabs and collapses the rail column completely. It starts with both panes
+  closed, leaves independent section/page recovery buttons, and keeps their open state transient so
+  entering or leaving full page never rewrites the normal-workspace pane preferences. Its top
+  controls remain clickable inside the 34 px native caption region and stay clear of DWM caption
+  buttons. The 34 px canvas actions preserve the Android 24 x 24 icon viewport inside their border
+  instead of clipping path geometry to the content box; the visible enter/exit glyph bounds are
+  raster-checked against the button center rather than trusting WPF's nominal layout bounds.
 - Split view owns two independent page slots. Leaving split view keeps the right slot.
 - Backstage is a true full-screen surface with working notebook/workspace/export/options panels.
   Its shortcut panel follows the ribbon order and lists only immediate leaf actions; Xiaomi pen
@@ -83,8 +88,13 @@ foreground. ADB screenshots of the installed Android build are the visual compar
   text, transform selected content, lasso, or pan.
 - Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
   button or using hand mode pans; holding Ctrl while performing either drag continuously zooms.
+  Ctrl-drag is radial around the canvas center: dragging toward the center zooms out and dragging
+  toward an edge zooms in, with the original contact point kept as the content anchor.
   A mouse side button remapped by its driver to middle button inherits this behavior. Zoom lock
   blocks gesture scaling only.
+- Panorama mode switches immediately to a hand cursor. A real stylus in range uses a small
+  screen-space nib dot for pen/highlighter authoring, including while text insertion remains armed;
+  ordinary mouse movement keeps its pointer because mouse input cannot author ink.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not
   user-configurable shortcut entries. `插入文本框` only controls blank-canvas creation. Persisted
   text remains editable in every ribbon/tool state, and lasso selection includes text and inserts.

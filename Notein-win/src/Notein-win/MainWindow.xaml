@@ -24,15 +24,34 @@
         <Style x:Key="PaneRow" TargetType="Border">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="CornerRadius" Value="2" />
-            <Setter Property="Margin" Value="4,1" />
-            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Margin" Value="5,1" />
+            <Setter Property="MinHeight" Value="40" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                     <Setter Property="Background" Value="{StaticResource SelectedOverlay}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource AccentPurple}" />
-                    <Setter Property="BorderThickness" Value="1,0,0,0" />
                 </DataTrigger>
             </Style.Triggers>
+        </Style>
+
+        <Style x:Key="NotebookPaneRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Margin" Value="5,1" />
+            <Setter Property="Height" Value="40" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsFocused}" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SelectedOverlay}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="NavigationChevronButton" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
 
         <Style x:Key="HomeDropdownButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
@@ -177,7 +196,7 @@
 
                         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Visibility="{Binding IsViewRibbonVisible, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="整页视图" Click="OnEnterFullPageClick"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="整页视图" Click="OnEnterFullPageClick"><Viewbox Width="21" Height="21"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="普通视图" Click="OnExitFullPageClick"><Path Data="{StaticResource Fluent_panel_left}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="拆分视图" IsChecked="{Binding IsSplitView, Mode=OneWay}" Command="{Binding ToggleSplitViewCommand}"><Path Data="{StaticResource Fluent_split_view}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
@@ -199,9 +218,18 @@
                 </Border>
             </StackPanel>
 
-            <Grid>
+            <Grid x:Name="WorkspaceLayout">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition>
+                        <ColumnDefinition.Style>
+                            <Style TargetType="ColumnDefinition">
+                                <Setter Property="Width" Value="32" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFullPageMode}" Value="True"><Setter Property="Width" Value="0" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ColumnDefinition.Style>
+                    </ColumnDefinition>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -215,19 +243,39 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="1" Width="196" Background="{StaticResource SectionPaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
-                        Visibility="{Binding IsSectionPaneVisible, Converter={StaticResource BoolToVisibility}}">
+                <Border x:Name="SectionPane" Grid.Column="1" Width="196" Background="{StaticResource SectionPaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsSectionPaneOpen, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
-                        <Grid DockPanel.Dock="Top" Height="36">
+                        <Grid DockPanel.Dock="Top" Height="44">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="{Binding ActiveNotebookTitle}" Command="{Binding FocusNotebookRootCommand}" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" HorizontalContentAlignment="Left" Padding="10,0" />
-                            <Button Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="28" Height="28" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></Button>
+                            <Button Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Margin="0,0,7,0" Padding="8" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
                         </Grid>
-                        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Library.Notebooks}" Margin="4,0,4,4">
+                        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding NotebookRows}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Content="{Binding Title}" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"
-                                            Background="#232323" Foreground="{StaticResource TextSecondary}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" Padding="8,4" Margin="0,1" HorizontalContentAlignment="Left" />
+                                    <Border Style="{StaticResource NotebookPaneRow}" Padding="5,0,7,0">
+                                        <Grid Background="Transparent">
+                                            <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" /></Grid.InputBindings>
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Left" Style="{StaticResource NavigationChevronButton}" Command="{Binding DataContext.ToggleNotebookExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}">
+                                                    <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextPrimary}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Button>
+                                                <Viewbox DockPanel.Dock="Left" Width="22" Height="22" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                    <Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_notebook}" Fill="{Binding AccentBrush}" /></Canvas>
+                                                </Viewbox>
+                                                <TextBlock Text="{Binding Title}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsActive}" Value="True"><Setter Property="Foreground" Value="{StaticResource TextPrimary}" /><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </DockPanel>
+                                        </Grid>
+                                    </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
@@ -235,15 +283,24 @@
                             <ItemsControl ItemsSource="{Binding SectionRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource PaneRow}" MinHeight="38" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
+                                        <Border Style="{StaticResource PaneRow}" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" /></Grid.InputBindings>
                                                 <DockPanel>
-                                                    <Button DockPanel.Dock="Left" Width="20" Background="Transparent" BorderThickness="0" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
-                                                        <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextSecondary}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Button DockPanel.Dock="Left" Style="{StaticResource NavigationChevronButton}" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
+                                                        <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextSecondary}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Button>
                                                     <Border DockPanel.Dock="Left" Width="4" Height="22" Background="{Binding SectionColorBrush}" CornerRadius="2" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding Section.Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Section.Title}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentPurple}" /><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                 </DockPanel>
                                             </Grid>
                                         </Border>
@@ -254,39 +311,51 @@
                     </DockPanel>
                 </Border>
 
-                <Border Grid.Column="2" Width="220" Background="{StaticResource PagePaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
-                        Visibility="{Binding IsPagePaneVisible, Converter={StaticResource BoolToVisibility}}">
+                <Border x:Name="PagePane" Grid.Column="2" Width="196" Background="{StaticResource PagePaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                        Visibility="{Binding IsPagePaneOpen, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
-                        <Grid DockPanel.Dock="Top" Height="36">
-                            <Border Height="1" Background="{StaticResource BorderHairline}" VerticalAlignment="Bottom" />
-                            <Button Style="{StaticResource RibbonIconButtonStyle}" Width="28" Height="28" HorizontalAlignment="Right" Margin="0,0,8,0"
+                        <Grid DockPanel.Dock="Top" Height="48">
+                            <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Padding="8" HorizontalAlignment="Right" Margin="0,0,6,0"
                                     ToolTip="新建页面" IsEnabled="{Binding CanAddPage}" Click="OnAddPageClick">
-                                <Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" />
+                                <Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox>
                             </Button>
                         </Grid>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding PagePaneRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border MinHeight="48" Margin="5,1,5,1" Padding="{Binding Indent}" CornerRadius="2" PreviewMouseRightButtonUp="OnPageRowRightClick">
+                                        <Border Margin="{Binding Margin}" Padding="{Binding Indent}" CornerRadius="2" PreviewMouseRightButtonUp="OnPageRowRightClick">
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectPageCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" /></Grid.InputBindings>
-                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <StackPanel VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                                <TextBlock Grid.Column="1" Text="PDF" Foreground="{StaticResource TextSecondary}" FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
+                                                <DockPanel Visibility="{Binding IsHeader, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <TextBlock DockPanel.Dock="Right" Text="PDF" Foreground="#828282" FontSize="9" FontWeight="SemiBold" Width="30" TextAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="FontWeight" Value="Normal" />
+                                                                    <Style.Triggers><DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger></Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource TextSecondary}" FontSize="10" Margin="0,2,0,0" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                                <DockPanel Visibility="{Binding IsHeader, Converter={StaticResource BoolToVisibility}}">
+                                                    <Border DockPanel.Dock="Left" Width="3" Height="18" Background="{Binding SectionColorBrush}" CornerRadius="1" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
                                             </Grid>
                                             <Border.Style>
                                                 <Style TargetType="Border">
                                                     <Setter Property="Background" Value="Transparent" />
+                                                    <Setter Property="MinHeight" Value="58" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                             <Setter Property="Background" Value="{StaticResource SelectedOverlay}" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding IsHeader}" Value="True">
-                                                            <Setter Property="MinHeight" Value="28" />
+                                                            <Setter Property="MinHeight" Value="32" />
                                                             <Setter Property="Background" Value="#232323" />
                                                             <Setter Property="IsHitTestVisible" Value="False" />
                                                         </DataTrigger>
@@ -320,13 +389,15 @@
                                              InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
 
-                    <StackPanel Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
+                    <StackPanel x:Name="FullPagePaneButtons" Grid.ColumnSpan="3" Orientation="Vertical" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
+                                WindowChrome.IsHitTestVisibleInChrome="True"
                                 Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}">
-                        <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="折叠或展开分区栏" IsChecked="{Binding IsSectionPaneVisible}"><Path Data="{StaticResource Fluent_navigation}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></ToggleButton>
-                        <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="折叠或展开页面栏" IsChecked="{Binding IsPagePaneVisible}"><Path Data="{StaticResource Fluent_panel_left}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" /></ToggleButton>
+                        <ToggleButton Style="{StaticResource CanvasActionToggleButtonStyle}" Margin="0,0,0,4" ToolTip="折叠或展开分区栏" AutomationProperties.AutomationId="FullPageSectionPaneButton" IsChecked="{Binding IsSectionPaneOpen}"><Viewbox Width="20" Height="20"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_navigation}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" /></Canvas></Viewbox></ToggleButton>
+                        <ToggleButton Style="{StaticResource CanvasActionToggleButtonStyle}" ToolTip="折叠或展开页面栏" AutomationProperties.AutomationId="FullPagePagePaneButton" IsChecked="{Binding IsPagePaneOpen}"><Viewbox Width="20" Height="20"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_panel_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" /></Canvas></Viewbox></ToggleButton>
                     </StackPanel>
 
-                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,14,0,0" Padding="4,2" CornerRadius="3" Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1">
+                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,14,0,0" Padding="4,2" CornerRadius="3" Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -362,7 +433,8 @@
                         </ItemsControl>
                     </Border>
 
-                    <StackPanel Grid.ColumnSpan="3" Panel.ZIndex="50" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                    <StackPanel x:Name="CanvasActions" Grid.ColumnSpan="3" Panel.ZIndex="50" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Margin" Value="0,6,7,0" />
@@ -374,8 +446,8 @@
                         <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" ToolTip="显示或隐藏绘图工具栏" IsChecked="{Binding IsFloatingToolbarVisible}"
                                       Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_pen}" Fill="{StaticResource TextPrimary}" Width="17" Height="17" /></ToggleButton>
                         <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="搜索笔记" Click="OnSearchClick"><Path Data="{StaticResource Fluent_search}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
-                        <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="进入整页视图" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
-                        <Button Style="{StaticResource CanvasActionButtonStyle}" ToolTip="退出整页视图" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Path Data="{StaticResource Fluent_full_screen_minimize}" Fill="{StaticResource TextPrimary}" Width="20" Height="20" /></Button>
+                        <Button x:Name="EnterFullPageButton" Style="{StaticResource CanvasActionButtonStyle}" ToolTip="进入整页视图" AutomationProperties.AutomationId="EnterFullPageButton" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}"><Grid Width="20" Height="20"><Path Data="{StaticResource Fluent_full_screen_maximize}" Fill="{StaticResource TextPrimary}" Width="15" Height="15" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" /></Grid></Button>
+                        <Button x:Name="ExitFullPageButton" Style="{StaticResource CanvasActionButtonStyle}" ToolTip="退出整页视图" AutomationProperties.AutomationId="ExitFullPageButton" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Grid Width="20" Height="20"><Path Data="{StaticResource Fluent_full_screen_minimize}" Fill="{StaticResource TextPrimary}" Width="15" Height="15" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" /></Grid></Button>
                     </StackPanel>
 
                     <Border x:Name="SearchPanel" Grid.ColumnSpan="3" Panel.ZIndex="30" Width="360" MaxHeight="380" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,44,7,0"

@@ -1,4 +1,6 @@
 using Notein_win.Services;
+using Notein_win.Models;
+using System.Windows;
 using Xunit;
 
 namespace Notein_win.Tests;
@@ -32,5 +34,31 @@ public class ViewportStateTests
 
         viewport.ZoomAt(100, 100, 0.01f);
         Assert.Equal(0.5f, viewport.Scale);
+    }
+
+    [Fact]
+    public void RadialDragZoom_UsesCanvasCenterInsteadOfScreenAxis()
+    {
+        var center = new Point(500, 400);
+        var previous = new Point(650, 400);
+
+        Assert.True(ViewportState.RadialDragZoomFactor(center, previous, new Point(600, 400)) < 1);
+        Assert.True(ViewportState.RadialDragZoomFactor(center, previous, new Point(700, 400)) > 1);
+        Assert.Equal(1f, ViewportState.RadialDragZoomFactor(center, previous, new Point(500, 550)), precision: 5);
+    }
+
+    [Theory]
+    [InlineData(true, false, true, DrawingToolKind.Pen, CanvasPointerCursorMode.Hand)]
+    [InlineData(false, true, true, DrawingToolKind.Pen, CanvasPointerCursorMode.PenDot)]
+    [InlineData(false, true, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Text)]
+    [InlineData(false, false, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Arrow)]
+    public void PointerFeedback_ReflectsPanoramaAndPhysicalStylus(
+        bool panorama,
+        bool textInsertion,
+        bool stylusInRange,
+        DrawingToolKind tool,
+        CanvasPointerCursorMode expected)
+    {
+        Assert.Equal(expected, CanvasPointerFeedback.Resolve(panorama, textInsertion, stylusInRange, tool));
     }
 }

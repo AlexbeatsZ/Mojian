@@ -117,6 +117,12 @@ tag chooser is not. Duplicate key combinations move to the newly assigned action
 - A mouse middle-button drag temporarily enters the exact same panorama drag state as a left-button
   drag with the hand selected; it never toggles toolbar state. Ordinary wheel pans vertically,
   `Shift+wheel` pans horizontally, and `Ctrl+wheel` zooms with Ctrl taking priority over Shift.
+- On Windows, holding Ctrl during a middle-button or panorama-hand drag uses radial distance from
+  the canvas center: moving toward the center zooms out and moving toward any edge zooms in. The
+  original contact point remains the zoom anchor, so direction does not depend on a vertical axis.
+- Windows shows a hand cursor as soon as panorama mode is enabled. A physical stylus hovering or
+  writing with a pen/highlighter hides the system arrow and shows a small screen-space nib dot;
+  mouse input does not masquerade as an authoring stylus.
 - Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
   drift below one platform touch slop and span drift below two touch slops do nothing.
 - After a candidate crosses a threshold, it initially commits to pan or scale according to the

@@ -24,6 +24,8 @@ public sealed class MainViewModel : ObservableObject
     private CanvasSlot _focusedSlot = CanvasSlot.Left;
     private RibbonTab _activeRibbonTab = RibbonTab.Draw;
     private bool _isFullPageMode;
+    private bool _isFullPageSectionPaneOpen;
+    private bool _isFullPagePagePaneOpen;
     private bool _isSplitView;
     private bool _isFloatingToolbarVisible = true;
     private bool _isToolFlyoutOpen;
@@ -36,6 +38,7 @@ public sealed class MainViewModel : ObservableObject
     private string _searchQuery = string.Empty;
     private string _saveStateText = "已保存";
 
+    public ObservableCollection<NotebookPaneRow> NotebookRows { get; } = new();
     public ObservableCollection<SectionRow> SectionRows { get; } = new();
     public ObservableCollection<PagePaneRow> PagePaneRows { get; } = new();
     public ObservableCollection<ToolPreset> Tools { get; } = new();
@@ -148,7 +151,23 @@ public sealed class MainViewModel : ObservableObject
             if (_settings.SectionPaneVisible == value) return;
             _settings.SectionPaneVisible = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSectionPaneOpen));
             SaveSettings();
+        }
+    }
+
+    public bool IsSectionPaneOpen
+    {
+        get => IsFullPageMode ? _isFullPageSectionPaneOpen : IsSectionPaneVisible;
+        set
+        {
+            if (!IsFullPageMode)
+            {
+                IsSectionPaneVisible = value;
+                return;
+            }
+
+            SetField(ref _isFullPageSectionPaneOpen, value);
         }
     }
 
@@ -160,7 +179,23 @@ public sealed class MainViewModel : ObservableObject
             if (_settings.PagePaneVisible == value) return;
             _settings.PagePaneVisible = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsPagePaneOpen));
             SaveSettings();
+        }
+    }
+
+    public bool IsPagePaneOpen
+    {
+        get => IsFullPageMode ? _isFullPagePagePaneOpen : IsPagePaneVisible;
+        set
+        {
+            if (!IsFullPageMode)
+            {
+                IsPagePaneVisible = value;
+                return;
+            }
+
+            SetField(ref _isFullPagePagePaneOpen, value);
         }
     }
 
@@ -295,7 +330,14 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!SetField(ref _isFullPageMode, value)) return;
+            if (value)
+            {
+                _isFullPageSectionPaneOpen = false;
+                _isFullPagePagePaneOpen = false;
+            }
             OnPropertyChanged(nameof(IsNormalChromeVisible));
+            OnPropertyChanged(nameof(IsSectionPaneOpen));
+            OnPropertyChanged(nameof(IsPagePaneOpen));
         }
     }
 
@@ -404,6 +446,7 @@ public sealed class MainViewModel : ObservableObject
     public ICommand ToggleFloatingToolbarCommand { get; }
     public ICommand ToggleSplitViewCommand { get; }
     public ICommand SelectNotebookCommand { get; }
+    public ICommand ToggleNotebookExpandCommand { get; }
     public ICommand AddNotebookCommand { get; }
     public ICommand SelectSectionCommand { get; }
     public ICommand FocusNotebookRootCommand { get; }
@@ -449,12 +492,13 @@ public sealed class MainViewModel : ObservableObject
         _preferences.WorkspaceRoot = _store.RootDirectory;
         _preferencesStore.Save(_preferences);
 
-        ToggleSectionPaneCommand = new RelayCommand(() => IsSectionPaneVisible = !IsSectionPaneVisible);
-        TogglePagePaneCommand = new RelayCommand(() => IsPagePaneVisible = !IsPagePaneVisible);
+        ToggleSectionPaneCommand = new RelayCommand(() => IsSectionPaneOpen = !IsSectionPaneOpen);
+        TogglePagePaneCommand = new RelayCommand(() => IsPagePaneOpen = !IsPagePaneOpen);
         ToggleFullPageCommand = new RelayCommand(() => IsFullPageMode = !IsFullPageMode);
         ToggleFloatingToolbarCommand = new RelayCommand(() => IsFloatingToolbarVisible = !IsFloatingToolbarVisible);
         ToggleSplitViewCommand = new RelayCommand(ToggleSplitView);
         SelectNotebookCommand = new RelayCommand<string>(SelectNotebook);
+        ToggleNotebookExpandCommand = new RelayCommand<string>(ToggleNotebookExpanded);
         AddNotebookCommand = new RelayCommand(() => AddNotebook("新笔记本"));
         SelectSectionCommand = new RelayCommand<string>(SelectSection);
         FocusNotebookRootCommand = new RelayCommand(FocusNotebookRoot);
@@ -851,7 +895,7 @@ public sealed class MainViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(id)) return;
         SaveFocusedDocument();
         if (!_library.SelectNotebook(id)) return;
-        ActiveWorkspace.SelectFirstPage(PagePaneMode);
+        ActiveWorkspace.FocusNotebook(PagePaneMode);
         LoadSelectedIntoFocusedSlot();
         SaveLibrary();
         RefreshNavigation();
@@ -880,6 +924,15 @@ public sealed class MainViewModel : ObservableObject
     private void ToggleSectionExpanded(string? id)
     {
         if (string.IsNullOrWhiteSpace(id) || !ActiveWorkspace.ToggleExpanded(id)) return;
+        SaveLibrary();
+        RefreshSectionRows();
+    }
+
+    private void ToggleNotebookExpanded(string? id)
+    {
+        var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == id);
+        if (notebook == null) return;
+        notebook.Expanded = !notebook.Expanded;
         SaveLibrary();
         RefreshSectionRows();
     }
@@ -1159,8 +1212,15 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshSectionRows()
     {
+        NotebookRows.Clear();
+        for (var index = 0; index < _library.Notebooks.Count; index++)
+        {
+            var notebook = _library.Notebooks[index];
+            NotebookRows.Add(new NotebookPaneRow(notebook, index, notebook.Id == _library.ActiveNotebookId));
+        }
         SectionRows.Clear();
-        foreach (var row in ActiveWorkspace.FlattenSections()) SectionRows.Add(row);
+        if (ActiveWorkspace.Expanded)
+            foreach (var row in ActiveWorkspace.FlattenSections()) SectionRows.Add(row);
     }
 
     private void RefreshPagePaneRows()
@@ -1283,6 +1343,8 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(PagePaneMode));
         OnPropertyChanged(nameof(IsSectionPaneVisible));
         OnPropertyChanged(nameof(IsPagePaneVisible));
+        OnPropertyChanged(nameof(IsSectionPaneOpen));
+        OnPropertyChanged(nameof(IsPagePaneOpen));
         OnPropertyChanged(nameof(ZoomLocked));
         OnPropertyChanged(nameof(PredictionEnabled));
         OnPropertyChanged(nameof(ImageDisplayMode));

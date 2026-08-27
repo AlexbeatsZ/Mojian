@@ -52,6 +52,14 @@ public class ViewportState
         TranslationY = viewY - anchorY * newScale;
     }
 
+    public static float RadialDragZoomFactor(Point viewCenter, Point previousPoint, Point currentPoint, double sensitivity = 240d)
+    {
+        if (sensitivity <= 0) throw new ArgumentOutOfRangeException(nameof(sensitivity));
+        var previousRadius = (previousPoint - viewCenter).Length;
+        var currentRadius = (currentPoint - viewCenter).Length;
+        return (float)Math.Exp((currentRadius - previousRadius) / sensitivity);
+    }
+
     public void Reset()
     {
         Scale = 1.0f;

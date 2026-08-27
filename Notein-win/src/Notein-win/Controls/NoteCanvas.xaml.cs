@@ -42,6 +42,8 @@ public partial class NoteCanvas : UserControl
     private StrokeRecord? _activeStroke;
     private Rect? _selectionBounds;
     private Point _lastPointer;
+    private Point _dragZoomCenter;
+    private Point _dragZoomAnchor;
     private Point _transformPoint;
     private Point _lassoOrigin;
     private bool _isPanning;
@@ -55,6 +57,7 @@ public partial class NoteCanvas : UserControl
     private Point? _eraserViewPoint;
     private Point? _hoverViewPoint;
     private bool _stylusActive;
+    private bool _stylusInRange;
     private bool _stylusEraserActive;
     private TouchDevice? _touchLassoDevice;
     private long _ignoreMouseUntil;
@@ -74,7 +77,7 @@ public partial class NoteCanvas : UserControl
     public static readonly DependencyProperty SelectedToolProperty = DependencyProperty.Register(
         nameof(SelectedTool), typeof(ToolPreset), typeof(NoteCanvas), new PropertyMetadata(null, OnSelectedToolChanged));
     public static readonly DependencyProperty SingleFingerPanEnabledProperty = DependencyProperty.Register(
-        nameof(SingleFingerPanEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false));
+        nameof(SingleFingerPanEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnPointerModeChanged));
     public static readonly DependencyProperty TextInsertionArmedProperty = DependencyProperty.Register(
         nameof(TextInsertionArmed), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnTextInsertionChanged));
     public static readonly DependencyProperty InsertSpaceModeEnabledProperty = DependencyProperty.Register(
@@ -140,8 +143,14 @@ public partial class NoteCanvas : UserControl
 
     private static void OnTextInsertionChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
+        OnPointerModeChanged(source, args);
+    }
+
+    private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
+    {
         var canvas = (NoteCanvas)source;
         canvas.UpdatePointerCursor();
+        canvas.InvalidateVisual();
     }
 
     private static void OnSelectedToolChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
@@ -442,7 +451,7 @@ public partial class NoteCanvas : UserControl
         base.OnMouseLeave(e);
         if (IsMouseCaptured || _stylusActive) return;
         _hoverViewPoint = null;
-        Cursor = Cursors.Arrow;
+        UpdatePointerCursor();
         InvalidateVisual();
     }
 
@@ -454,14 +463,27 @@ public partial class NoteCanvas : UserControl
         e.Handled = true;
     }
 
+    protected override void OnStylusEnter(StylusEventArgs e)
+    {
+        base.OnStylusEnter(e);
+        if (e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
+        _stylusInRange = true;
+        _hoverViewPoint = e.GetPosition(this);
+        UpdatePointerCursor();
+        InvalidateVisual();
+    }
+
     private void HandleStylusDown(object sender, StylusDownEventArgs e)
     {
         if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
         _stylusActive = true;
+        _stylusInRange = true;
         _stylusEraserActive = e.StylusDevice.Inverted;
         _ignoreMouseUntil = Environment.TickCount64 + 250;
         var points = e.GetStylusPoints(this);
         var point = points.Count > 0 ? points[^1] : default;
+        _hoverViewPoint = point.ToPoint();
+        UpdatePointerCursor();
         BeginPointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true, forcePan: false, forceErase: _stylusEraserActive);
         e.Handled = true;
     }
@@ -469,6 +491,7 @@ public partial class NoteCanvas : UserControl
     private void HandleStylusMove(object sender, StylusEventArgs e)
     {
         if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
+        _stylusInRange = true;
         var points = e.GetStylusPoints(this);
         if (points.Count > 0)
         {
@@ -489,6 +512,7 @@ public partial class NoteCanvas : UserControl
     {
         base.OnStylusLeave(e);
         if (_stylusActive) return;
+        _stylusInRange = false;
         _hoverViewPoint = null;
         UpdatePointerCursor();
         InvalidateVisual();
@@ -501,6 +525,8 @@ public partial class NoteCanvas : UserControl
         _stylusActive = false;
         _stylusEraserActive = false;
         _ignoreMouseUntil = Environment.TickCount64 + 250;
+        UpdatePointerCursor();
+        InvalidateVisual();
         e.Handled = true;
     }
 
@@ -612,6 +638,8 @@ public partial class NoteCanvas : UserControl
         {
             _isDragZooming = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && !ZoomLocked;
             _isPanning = !_isDragZooming;
+            _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
+            _dragZoomAnchor = viewPoint;
             CaptureMouse();
             return;
         }
@@ -705,8 +733,8 @@ public partial class NoteCanvas : UserControl
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         if (_isDragZooming)
         {
-            var factor = (float)Math.Exp((_lastPointer.Y - viewPoint.Y) / 240d);
-            _viewport.ZoomAt((float)_lastPointer.X, (float)_lastPointer.Y, factor);
+            var factor = ViewportState.RadialDragZoomFactor(_dragZoomCenter, _lastPointer, viewPoint);
+            _viewport.ZoomAt((float)_dragZoomAnchor.X, (float)_dragZoomAnchor.Y, factor);
             _lastPointer = viewPoint;
             UpdateTextEditorPositions();
             InvalidateVisual();
@@ -1391,6 +1419,12 @@ public partial class NoteCanvas : UserControl
             var radius = (SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool.EraserRadiusMm : 4.5) * UnitsPerMillimeter * _viewport.Scale;
             dc.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromRgb(185, 185, 185)), 1.2), eraser, radius, radius);
         }
+        if (_hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
+        {
+            var fill = TextBrush(SelectedTool?.Color ?? InkPalette.Black, Appearance.Theme == PageTheme.Dark, false);
+            var outline = new Pen(Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black, 1);
+            dc.DrawEllipse(fill, outline, hover, 2.25, 2.25);
+        }
         if (_isInsertingSpace)
         {
             var start = _viewport.DocumentToView(0, _insertStartY).Y;
@@ -1403,8 +1437,17 @@ public partial class NoteCanvas : UserControl
 
     private void UpdatePointerCursor()
     {
-        Cursor = TextInsertionArmed ? Cursors.IBeam : Cursors.Arrow;
+        Cursor = CurrentPointerCursorMode() switch
+        {
+            CanvasPointerCursorMode.Text => Cursors.IBeam,
+            CanvasPointerCursorMode.Hand => Cursors.Hand,
+            CanvasPointerCursorMode.PenDot => Cursors.None,
+            _ => Cursors.Arrow,
+        };
     }
+
+    private CanvasPointerCursorMode CurrentPointerCursorMode() =>
+        CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, TextInsertionArmed, _stylusInRange, SelectedTool?.Kind);
 
     private BitmapSource? LoadBitmap(string assetName, bool inverted)
     {

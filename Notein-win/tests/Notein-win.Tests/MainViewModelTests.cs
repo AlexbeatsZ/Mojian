@@ -9,6 +9,55 @@ namespace Notein_win.Tests;
 public class MainViewModelTests
 {
     [Fact]
+    public void FullPageMode_UsesTransientPaneStateAndPreservesNormalPanePreferences()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences)
+        {
+            IsSectionPaneVisible = true,
+            IsPagePaneVisible = true,
+        };
+
+        viewModel.IsFullPageMode = true;
+
+        Assert.False(viewModel.IsSectionPaneOpen);
+        Assert.False(viewModel.IsPagePaneOpen);
+        viewModel.ToggleSectionPaneCommand.Execute(null);
+        Assert.True(viewModel.IsSectionPaneOpen);
+        Assert.False(viewModel.IsPagePaneOpen);
+
+        viewModel.IsFullPageMode = false;
+
+        Assert.True(viewModel.IsSectionPaneVisible);
+        Assert.True(viewModel.IsPagePaneVisible);
+        Assert.True(viewModel.IsSectionPaneOpen);
+        Assert.True(viewModel.IsPagePaneOpen);
+    }
+
+    [Fact]
+    public void NotebookPaneRow_UsesAndroidExpansionAndRootFocusContract()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+
+        var notebookRow = Assert.Single(viewModel.NotebookRows);
+        Assert.True(notebookRow.IsActive);
+        Assert.Equal("#7719AA", notebookRow.AccentHex);
+        Assert.NotEmpty(viewModel.SectionRows);
+
+        viewModel.ToggleNotebookExpandCommand.Execute(notebookRow.Id);
+        Assert.Empty(viewModel.SectionRows);
+        viewModel.SelectNotebookCommand.Execute(notebookRow.Id);
+
+        Assert.Null(viewModel.ActiveWorkspace.FocusedSectionId);
+        Assert.Empty(viewModel.PagePaneRows);
+    }
+
+    [Fact]
     public void AddPdfPage_PreservesNormalPageTemplateAndPersistsSourceGeometry()
     {
         using var temp = new TemporaryDirectory();
