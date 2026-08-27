@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     private TextStyleSnapshot? _formatPainter;
     private PageNavigationClipboard? _pageNavigationClipboard;
     private ObjectClipboard? _objectClipboard;
+    private bool _toolFlyoutWasOpenAtPointerDown;
+    private string? _toolFlyoutPointerToolId;
     private MainViewModel ViewModel => (MainViewModel)DataContext;
     private NoteCanvas FocusedCanvas => ViewModel.FocusedSlot == CanvasSlot.Right ? RightCanvas : LeftCanvas;
 
@@ -418,7 +420,62 @@ public partial class MainWindow : Window
     {
         if (sender is not ToggleButton button || button.DataContext is not ToolPreset tool) return;
         ToolFlyoutPopup.PlacementTarget = button;
-        ViewModel.SelectToolCommand.Execute(tool.Id);
+        ViewModel.SelectToolFromToolbar(tool.Id, ConsumeToolFlyoutPointerDown(tool.Id));
+    }
+
+    private void OnToolPresetPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement button || ToolIdForToolbarElement(button) is not { } id) return;
+        if (_toolFlyoutWasOpenAtPointerDown && string.Equals(_toolFlyoutPointerToolId, id, StringComparison.Ordinal)) return;
+        _toolFlyoutPointerToolId = id;
+        _toolFlyoutWasOpenAtPointerDown = ToolFlyoutPopup.IsOpen || ViewModel.IsToolFlyoutOpen;
+    }
+
+    private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (!ToolFlyoutPopup.IsOpen && !ViewModel.IsToolFlyoutOpen)
+        {
+            _toolFlyoutWasOpenAtPointerDown = false;
+            _toolFlyoutPointerToolId = null;
+            return;
+        }
+        if (e.OriginalSource is not DependencyObject source || IsWithin(source, ToolFlyoutPopup.Child)) return;
+
+        var toolButton = FindAncestor<ToggleButton>(source);
+        _toolFlyoutWasOpenAtPointerDown = true;
+        _toolFlyoutPointerToolId = toolButton == null ? null : ToolIdForToolbarElement(toolButton);
+        ViewModel.IsToolFlyoutOpen = false;
+    }
+
+    private void OnWindowDeactivated(object? sender, EventArgs e)
+    {
+        ViewModel.IsToolFlyoutOpen = false;
+        PanoramaFlyoutPopup.IsOpen = false;
+        _toolFlyoutWasOpenAtPointerDown = false;
+        _toolFlyoutPointerToolId = null;
+    }
+
+    private bool ConsumeToolFlyoutPointerDown(string id)
+    {
+        var wasOpen = _toolFlyoutWasOpenAtPointerDown && string.Equals(_toolFlyoutPointerToolId, id, StringComparison.Ordinal);
+        _toolFlyoutWasOpenAtPointerDown = false;
+        _toolFlyoutPointerToolId = null;
+        return wasOpen;
+    }
+
+    private static string? ToolIdForToolbarElement(FrameworkElement button)
+    {
+        if (button.DataContext is ToolPreset tool) return tool.Id;
+        return button.Tag is string tag && tag.StartsWith("tool:", StringComparison.Ordinal) ? tag[5..] : null;
+    }
+
+    private static bool IsWithin(DependencyObject source, DependencyObject? ancestor)
+    {
+        if (ancestor == null) return false;
+        for (var current = source; current != null; current = VisualTreeHelper.GetParent(current))
+            if (ReferenceEquals(current, ancestor)) return true;
+        return false;
     }
 
     private void OnPanoramaToolClick(object sender, RoutedEventArgs e)
@@ -441,7 +498,8 @@ public partial class MainWindow : Window
         if (id.StartsWith("tool:", StringComparison.Ordinal))
         {
             ToolFlyoutPopup.PlacementTarget = button;
-            ViewModel.SelectToolCommand.Execute(id[5..]);
+            var toolId = id[5..];
+            ViewModel.SelectToolFromToolbar(toolId, ConsumeToolFlyoutPointerDown(toolId));
             return;
         }
         if (id.StartsWith("home:", StringComparison.Ordinal))

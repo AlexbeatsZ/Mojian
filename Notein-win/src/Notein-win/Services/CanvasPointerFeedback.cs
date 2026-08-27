@@ -44,8 +44,17 @@ public static class CanvasPointerFeedback
         bool matchesStylusHover) =>
         promotedByStylus || barrelButtonDown || matchesStylusHover;
 
-    public static bool StylusDownStartsDrawing(bool inAir, bool rightButtonGestureArmed) =>
-        !inAir && !rightButtonGestureArmed;
+    public static bool RightButtonGestureIntent(
+        bool gestureArmed,
+        bool barrelButtonDown,
+        bool mouseRightButtonDown) =>
+        gestureArmed || barrelButtonDown || mouseRightButtonDown;
+
+    public static bool RightButtonGestureIsHeld(bool mouseRightButtonDown, bool barrelButtonDown) =>
+        mouseRightButtonDown || barrelButtonDown;
+
+    public static bool StylusDownStartsDrawing(bool inAir, bool rightButtonGestureIntent) =>
+        !inAir && !rightButtonGestureIntent;
 
     public static bool SuppressMouseStream(
         bool stylusContactActive,

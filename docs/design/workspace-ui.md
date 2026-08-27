@@ -125,6 +125,13 @@ to that tool. It does not contain delete-tool or delete-selection actions; a mix
 is deleted by `Backspace` / `Delete` or its context surface. Pixel erasing remains a labeled shell;
 it must not masquerade as a completed function.
 
+Tool flyout dismissal is part of that same two-click contract. If a tool flyout is already open,
+clicking its selected tool closes it, while clicking a different tool closes the old flyout and
+selects the new tool without opening the new flyout. Only a later second click on that now-selected
+tool may open its flyout. Windows must preserve the popup state observed at pointer-down; WPF's
+outside-click dismissal must not clear `IsOpen` first and make the following `Click` look like a
+second click.
+
 Follow the desktop OneNote grouping rhythm: undo/redo, a hairline divider, lasso,
 another hairline divider, eraser and ink tools, add-tool, a divider, stylus panorama hand, a divider,
 insert space and background format (rule lines/grid styles), then low-frequency page clearing

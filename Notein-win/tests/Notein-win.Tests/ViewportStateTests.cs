@@ -129,14 +129,30 @@ public class ViewportStateTests
     }
 
     [Fact]
-    public void DriverPromotedRightButtonUsesHoveringStylusAndNeverStartsInkInAir()
+    public void DriverPromotedRightButtonUsesHoveringStylusAndNeverStartsInkBeforeMousePromotion()
     {
         Assert.True(CanvasPointerFeedback.RightButtonUsesStylus(false, true, false));
         Assert.True(CanvasPointerFeedback.RightButtonUsesStylus(false, false, true));
         Assert.False(CanvasPointerFeedback.RightButtonUsesStylus(false, false, false));
 
-        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: true, rightButtonGestureArmed: false));
-        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureArmed: true));
-        Assert.True(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureArmed: false));
+        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: true, mouseRightButtonDown: false));
+        Assert.True(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: false, mouseRightButtonDown: true));
+        Assert.False(CanvasPointerFeedback.RightButtonGestureIntent(gestureArmed: false, barrelButtonDown: false, mouseRightButtonDown: false));
+
+        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: true, rightButtonGestureIntent: false));
+        Assert.False(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureIntent: true));
+        Assert.True(CanvasPointerFeedback.StylusDownStartsDrawing(inAir: false, rightButtonGestureIntent: false));
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, false)]
+    public void TemporaryRightLassoOnlyRemainsActiveWhileEitherRightButtonSignalIsHeld(
+        bool mouseRightButtonDown,
+        bool barrelButtonDown,
+        bool expected)
+    {
+        Assert.Equal(expected, CanvasPointerFeedback.RightButtonGestureIsHeld(mouseRightButtonDown, barrelButtonDown));
     }
 }

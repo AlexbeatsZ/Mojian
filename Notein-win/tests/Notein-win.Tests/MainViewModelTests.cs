@@ -123,6 +123,38 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void ToolFlyoutRequiresASecondClickAndAnOpenFlyoutConsumesTheNextToolClick()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+        var first = viewModel.SelectedTool;
+        var second = viewModel.ToolShelf.Tools.First(tool => tool.Id != first.Id);
+
+        viewModel.SingleFingerPanEnabled = true;
+        viewModel.SelectToolFromToolbar(first.Id, flyoutWasOpenAtPointerDown: false);
+        Assert.False(viewModel.SingleFingerPanEnabled);
+        Assert.False(viewModel.IsToolFlyoutOpen);
+
+        viewModel.SelectToolFromToolbar(second.Id, flyoutWasOpenAtPointerDown: false);
+        Assert.Same(second, viewModel.SelectedTool);
+        Assert.False(viewModel.IsToolFlyoutOpen);
+
+        viewModel.SelectToolFromToolbar(second.Id, flyoutWasOpenAtPointerDown: false);
+        Assert.True(viewModel.IsToolFlyoutOpen);
+
+        viewModel.SelectToolFromToolbar(first.Id, flyoutWasOpenAtPointerDown: true);
+        Assert.Same(first, viewModel.SelectedTool);
+        Assert.False(viewModel.IsToolFlyoutOpen);
+
+        viewModel.SelectToolFromToolbar(first.Id, flyoutWasOpenAtPointerDown: false);
+        Assert.True(viewModel.IsToolFlyoutOpen);
+        viewModel.SelectToolFromToolbar(first.Id, flyoutWasOpenAtPointerDown: true);
+        Assert.False(viewModel.IsToolFlyoutOpen);
+    }
+
+    [Fact]
     public void LegacyPenPressureSettingsMigrateIntoEraserAndPanoramaSensitivityPersists()
     {
         using var temp = new TemporaryDirectory();

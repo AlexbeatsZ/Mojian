@@ -196,6 +196,7 @@ public partial class NoteCanvas : UserControl
     private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
     }
@@ -203,6 +204,7 @@ public partial class NoteCanvas : UserControl
     private static void OnSelectedToolChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
     }
@@ -513,7 +515,12 @@ public partial class NoteCanvas : UserControl
         }
         if (_rightLassoArmed)
         {
-            ContinueRightButtonLasso(e.GetPosition(this));
+            if (CanvasPointerFeedback.RightButtonGestureIsHeld(
+                    e.RightButton == MouseButtonState.Pressed,
+                    _rightLassoUsesStylus && _stylusBarrelButtonDown))
+                ContinueRightButtonLasso(e.GetPosition(this));
+            else
+                FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
             e.Handled = true;
             return;
         }
@@ -565,6 +572,24 @@ public partial class NoteCanvas : UserControl
         InvalidateVisual();
     }
 
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (_rightLassoArmed && !_rightLassoUsesStylus) CancelRightButtonLasso();
+    }
+
+    protected override void OnLostStylusCapture(StylusEventArgs e)
+    {
+        base.OnLostStylusCapture(e);
+        if (_rightLassoArmed && _rightLassoUsesStylus) CancelRightButtonLasso();
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        base.OnLostKeyboardFocus(e);
+        CancelRightButtonLasso();
+    }
+
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
@@ -608,12 +633,17 @@ public partial class NoteCanvas : UserControl
         var point = points.Count > 0 ? points[^1] : default;
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
-        var rightGestureArmed = _rightLassoArmed && _rightLassoUsesStylus;
-        if (!CanvasPointerFeedback.StylusDownStartsDrawing(e.InAir, rightGestureArmed))
+        var rightGestureIntent = CanvasPointerFeedback.RightButtonGestureIntent(
+            _rightLassoArmed,
+            _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice),
+            Mouse.RightButton == MouseButtonState.Pressed);
+        if (rightGestureIntent && !_rightLassoArmed)
+            BeginRightButtonLasso(point.ToPoint(), usesStylus: true);
+        if (!CanvasPointerFeedback.StylusDownStartsDrawing(e.InAir, rightGestureIntent))
         {
-            _stylusActive = !e.InAir;
+            _stylusActive = false;
             _stylusEraserActive = false;
-            if (rightGestureArmed) e.Handled = true;
+            if (rightGestureIntent) e.Handled = true;
             InvalidateVisual();
             return;
         }
@@ -641,7 +671,16 @@ public partial class NoteCanvas : UserControl
         }
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
-            if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
+            if (CanvasPointerFeedback.RightButtonGestureIsHeld(
+                    Mouse.RightButton == MouseButtonState.Pressed,
+                    _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice)))
+            {
+                if (points.Count > 0) ContinueRightButtonLasso(points[^1].ToPoint());
+            }
+            else
+            {
+                FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
+            }
             e.Handled = true;
             return;
         }
@@ -682,17 +721,34 @@ public partial class NoteCanvas : UserControl
 
     private void HandleStylusButtonDown(object sender, StylusButtonEventArgs e)
     {
-        if (IsBarrelButton(e.StylusButton)) _stylusBarrelButtonDown = true;
+        if (!IsBarrelButton(e.StylusButton)) return;
+        _stylusBarrelButtonDown = true;
+        if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
+        Focus();
+        if (_stylusActive) CancelStylusToolActionForNavigation();
+        BeginRightButtonLasso(e.GetPosition(this), usesStylus: true);
+        e.Handled = true;
     }
 
     private void HandleStylusButtonUp(object sender, StylusButtonEventArgs e)
     {
-        if (IsBarrelButton(e.StylusButton)) _stylusBarrelButtonDown = false;
+        if (!IsBarrelButton(e.StylusButton)) return;
+        _stylusBarrelButtonDown = false;
+        if (_rightLassoArmed && _rightLassoUsesStylus)
+        {
+            EndRightButtonLasso();
+            e.Handled = true;
+        }
     }
 
     protected override void OnStylusLeave(StylusEventArgs e)
     {
         base.OnStylusLeave(e);
+        if (_rightLassoArmed && _rightLassoUsesStylus &&
+            !CanvasPointerFeedback.RightButtonGestureIsHeld(
+                Mouse.RightButton == MouseButtonState.Pressed,
+                _stylusBarrelButtonDown || IsBarrelButtonPressed(e.StylusDevice)))
+            FinishRightButtonLasso(commitSelection: true, showContextMenu: false);
         if (_stylusActive) return;
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
@@ -1359,6 +1415,10 @@ public partial class NoteCanvas : UserControl
     private static bool IsBarrelButton(StylusButton button) =>
         button.Guid == StylusPointProperties.BarrelButton.Id;
 
+    private static bool IsBarrelButtonPressed(StylusDevice device) =>
+        device.StylusButtons.Cast<StylusButton>().Any(button =>
+            IsBarrelButton(button) && button.StylusButtonState == StylusButtonState.Down);
+
     private void CheckPressureEraseActivation()
     {
         var eraserTool = _pressureCandidateEraserTool;
@@ -1488,20 +1548,40 @@ public partial class NoteCanvas : UserControl
 
     private void EndRightButtonLasso()
     {
-        var showContextMenu = !_rightLassoActive;
+        FinishRightButtonLasso(commitSelection: true, showContextMenu: true);
+    }
+
+    private void CancelRightButtonLasso()
+    {
+        FinishRightButtonLasso(commitSelection: false, showContextMenu: false);
+    }
+
+    private void FinishRightButtonLasso(bool commitSelection, bool showContextMenu)
+    {
+        if (!_rightLassoArmed) return;
+        var wasActive = _rightLassoActive;
+        var usesStylus = _rightLassoUsesStylus;
         var contextPoint = _rightLassoStartView;
-        ReleaseInput(_rightLassoUsesStylus);
-        if (_rightLassoActive)
-        {
-            _isLassoing = false;
-            ComputeLassoSelection();
-        }
+
+        // Clear the state before releasing capture: WPF raises Lost*Capture
+        // synchronously, and that callback must not re-enter this gesture.
         _rightLassoArmed = false;
         _rightLassoActive = false;
         _rightLassoUsesStylus = false;
+        _stylusBarrelButtonDown = false;
+        _isLassoing = false;
+        if (usesStylus)
+        {
+            _stylusActive = false;
+            _stylusEraserActive = false;
+        }
+
+        if (wasActive && commitSelection) ComputeLassoSelection();
+        else _lasso.Clear();
+        ReleaseInput(usesStylus);
         UpdatePointerCursor();
         InvalidateVisual();
-        if (showContextMenu) ShowDirectContextMenu(contextPoint);
+        if (showContextMenu && !wasActive) ShowDirectContextMenu(contextPoint);
     }
 
     private void BeginLasso(Point documentPoint, LassoShape shape)
@@ -2279,6 +2359,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        CancelRightButtonLasso();
         AbandonTemporaryText();
         _directLongPressTimer.Stop();
         _directTouchDevice = null;
@@ -2288,8 +2369,6 @@ public partial class NoteCanvas : UserControl
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
         _middleNavigationActive = false; _middleNavigationUsesStylus = false;
         EndPanoramaSpringLoadedTool();
-        if (_rightLassoArmed) ReleaseInput(_rightLassoUsesStylus);
-        _rightLassoArmed = false; _rightLassoActive = false; _rightLassoUsesStylus = false;
         if (_temporaryPressureEraser) EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
         _pressureCandidate = false; _pressureCandidateEraserTool = null; _temporaryPressureEraser = false; _activePressureEraserTool = null; _pressureTimer.Stop(); _eraserViewPoint = null;
         ClearSelection();

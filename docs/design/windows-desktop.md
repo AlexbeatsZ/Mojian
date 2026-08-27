@@ -123,6 +123,9 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   a completed right-drag never also opens that menu. Native text-editor right-click remains native.
   Driver-promoted right-click events may omit their stylus association, so recent stylus hover and
   barrel-button state are part of source classification; an in-air stylus-down never authors ink.
+  The temporary path exists only while right/barrel is physically held. Raw barrel release, promoted
+  right release, lost mouse/stylus capture, focus loss, document change, and tool change share one
+  idempotent cleanup path that clears the lasso overlay before releasing WPF capture.
 - Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
   stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not

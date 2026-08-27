@@ -965,10 +965,15 @@ public sealed class MainViewModel : ObservableObject
 
     private void SelectTool(string? id)
     {
+        SelectToolFromToolbar(id, flyoutWasOpenAtPointerDown: false);
+    }
+
+    public void SelectToolFromToolbar(string? id, bool flyoutWasOpenAtPointerDown)
+    {
         if (string.IsNullOrWhiteSpace(id)) return;
         CancelSpringLoadedTool();
-        if (_toolShelf.SelectedId == id) IsToolFlyoutOpen = !IsToolFlyoutOpen;
-        else if (_toolShelf.Select(id))
+        var wasActiveSelection = _toolShelf.SelectedId == id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled;
+        if (!wasActiveSelection && _toolShelf.Select(id))
         {
             if (_toolShelf.Selected.Kind == DrawingToolKind.Eraser)
                 _settings.PressureEraserToolId = _toolShelf.Selected.Id;
@@ -978,6 +983,10 @@ public sealed class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(SelectedTool));
             NotifySelectedToolProperties();
             SaveSettings();
+        }
+        else if (wasActiveSelection)
+        {
+            IsToolFlyoutOpen = !flyoutWasOpenAtPointerDown;
         }
         RefreshTools();
     }
