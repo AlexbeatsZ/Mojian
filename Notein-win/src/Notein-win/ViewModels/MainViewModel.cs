@@ -30,7 +30,6 @@ public sealed class MainViewModel : ObservableObject
     private bool _isFloatingToolbarVisible = true;
     private bool _isToolFlyoutOpen;
     private bool _singleFingerPanEnabled;
-    private bool _textInsertionArmed;
     private bool _insertSpaceModeEnabled;
     private CanvasTagKind? _pendingTagKind;
     private bool _isBackstageOpen;
@@ -357,20 +356,9 @@ public sealed class MainViewModel : ObservableObject
         get => _singleFingerPanEnabled;
         set
         {
-            if (!SetField(ref _singleFingerPanEnabled, value) || !value) return;
-            TextInsertionArmed = false;
-            InsertSpaceModeEnabled = false;
-        }
-    }
-
-    public bool TextInsertionArmed
-    {
-        get => _textInsertionArmed;
-        set
-        {
-            if (!SetField(ref _textInsertionArmed, value) || !value) return;
-            SingleFingerPanEnabled = false;
-            InsertSpaceModeEnabled = false;
+            if (!SetField(ref _singleFingerPanEnabled, value)) return;
+            if (value) InsertSpaceModeEnabled = false;
+            RefreshFullPageToolbarCatalog();
         }
     }
 
@@ -379,9 +367,9 @@ public sealed class MainViewModel : ObservableObject
         get => _insertSpaceModeEnabled;
         set
         {
-            if (!SetField(ref _insertSpaceModeEnabled, value) || !value) return;
-            SingleFingerPanEnabled = false;
-            TextInsertionArmed = false;
+            if (!SetField(ref _insertSpaceModeEnabled, value)) return;
+            if (value) SingleFingerPanEnabled = false;
+            RefreshFullPageToolbarCatalog();
         }
     }
 
@@ -458,7 +446,6 @@ public sealed class MainViewModel : ObservableObject
     public ICommand SelectRibbonTabCommand { get; }
     public ICommand SelectToolCommand { get; }
     public ICommand AddToolCommand { get; }
-    public ICommand DeleteSelectedToolCommand { get; }
     public ICommand ArmTagPlacementCommand { get; }
     public ICommand SetBackgroundFormatCommand { get; }
     public ICommand TogglePageThemeCommand { get; }
@@ -510,7 +497,6 @@ public sealed class MainViewModel : ObservableObject
         SelectRibbonTabCommand = new RelayCommand<RibbonTab>(SelectRibbonTab);
         SelectToolCommand = new RelayCommand<string>(SelectTool);
         AddToolCommand = new RelayCommand<DrawingToolKind>(AddTool);
-        DeleteSelectedToolCommand = new RelayCommand(DeleteSelectedTool);
         ArmTagPlacementCommand = new RelayCommand<CanvasTagKind>(kind => PendingTagKind = kind);
         SetBackgroundFormatCommand = new RelayCommand<CanvasBackgroundFormat>(SetBackgroundFormat);
         TogglePageThemeCommand = new RelayCommand(TogglePageTheme);
@@ -955,7 +941,6 @@ public sealed class MainViewModel : ObservableObject
         {
             IsToolFlyoutOpen = false;
             SingleFingerPanEnabled = false;
-            TextInsertionArmed = false;
             InsertSpaceModeEnabled = false;
             OnPropertyChanged(nameof(SelectedTool));
             NotifySelectedToolProperties();
@@ -969,7 +954,6 @@ public sealed class MainViewModel : ObservableObject
         if (!_toolShelf.Select(id)) return false;
         IsToolFlyoutOpen = false;
         SingleFingerPanEnabled = false;
-        TextInsertionArmed = false;
         InsertSpaceModeEnabled = false;
         RefreshTools();
         SaveSettings();
@@ -1060,18 +1044,6 @@ public sealed class MainViewModel : ObservableObject
         SelectedTool.LassoShape = shape;
         SaveSettings();
         NotifySelectedToolProperties();
-    }
-
-    private void DeleteSelectedTool()
-    {
-        var removedId = _toolShelf.SelectedId;
-        if (!_toolShelf.DeleteSelected()) return;
-        _fullPageConfig.Remove($"tool:{removedId}");
-        IsToolFlyoutOpen = false;
-        RefreshTools();
-        OnPropertyChanged(nameof(SelectedTool));
-        NotifySelectedToolProperties();
-        SaveSettings();
     }
 
     private void ToggleSplitView()
@@ -1285,17 +1257,18 @@ public sealed class MainViewModel : ObservableObject
         var catalog = new List<FullPageToolDescriptor>
         {
             new("draw:undo", "撤销", "arrow_undo"),
-            new("draw:cursor", "插入文本框", "cursor"),
+            new("draw:redo", "重做", "arrow_redo"),
         };
         catalog.AddRange(_toolShelf.Tools.Select(tool => new FullPageToolDescriptor(
             $"tool:{tool.Id}", tool.DisplayName,
             tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", _ => "lasso" },
-            tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4")));
+            tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4",
+            IsSelected: tool.Id == _toolShelf.SelectedId && !SingleFingerPanEnabled && !InsertSpaceModeEnabled)));
         catalog.AddRange(new[]
         {
             new FullPageToolDescriptor("draw:add", "添加绘图工具", "add"),
-            new FullPageToolDescriptor("draw:pan", "单指平移", "hand_left"),
-            new FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space", PreserveColors: true),
+            new FullPageToolDescriptor("draw:pan", "触控笔抓手", "hand_left", IsSelected: SingleFingerPanEnabled),
+            new FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space", PreserveColors: true, IsSelected: InsertSpaceModeEnabled),
             new FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines", PreserveColors: true),
             new FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"),
         });

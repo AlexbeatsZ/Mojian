@@ -112,38 +112,37 @@ Required working tools:
   ink-flow/speed response, and optional stationary pressure eraser;
 - highlighter with the same restricted black/blue/red palette, width, and opacity;
 - whole-stroke eraser with its own radius;
-- lasso with per-preset `自由圈选` and `矩形` shapes. Either shape selects intersecting complete
-  strokes, enclosed page tags, overlapping text boxes, and overlapping non-background inserted
-  objects such as images. Mixed content shares one selection frame, can be deleted together, moves
+- pen lasso with per-preset `自由圈选` and `矩形` shapes. Either shape uses complete containment for
+  stroke geometry, page tags, text boxes, and non-background inserted objects such as images. Mixed
+  content shares one selection frame, can be deleted together, moves
   by dragging inside the frame, and scales from any corner handle.
 
 The drawing ribbon is icon-only. A first tap on an unselected tool selects it without interruption;
 tapping the already selected tool opens its own flyout. The flyout shows only parameters meaningful
 to that tool. Pixel erasing remains a labeled shell; it must not masquerade as a completed function.
 
-Follow the desktop OneNote grouping rhythm: undo, a hairline divider, text cursor and lasso,
-another hairline divider, eraser and ink tools, add-tool, a divider, panorama hand, a divider,
+Follow the desktop OneNote grouping rhythm: undo/redo, a hairline divider, lasso,
+another hairline divider, eraser and ink tools, add-tool, a divider, stylus panorama hand, a divider,
 insert space and background format (rule lines/grid styles), then low-frequency page clearing
 after a final divider. Dividers are one physical pixel on the tested tablet rather than one
 density-independent pixel. Keep icons and selected frames compact and do not restore permanent
 tool labels.
 
-The cursor is a working session-only, finger-only text mode. Selecting it suppresses finger drawing;
-tapping the paper with a finger creates a transparent multi-line text box at that document point,
-shows a visible caret, and requests the Android keyboard. Text boxes follow document pan/zoom. When
-text editing is off, a finger double tap selects a complete text box; the lasso can also include one
-or more text boxes in a mixed selection for move, scale, or deletion. Stylus events bypass the text
-layer and author with the most recently selected pen immediately, without requiring the user to
-leave cursor mode; the hardware eraser still erases. Choosing a drawing tool or the panorama hand
-exits text mode. Text remains session-only until it joins the durable page storage model.
+There is no cursor/text tool. Finger and primary-mouse input always use the direct-content contract
+in `input-gestures.md`: an ordinary click selects content, a later ordinary click on selected text
+enters editing, and a blank click creates a temporary caret without immediately opening Android's
+keyboard. The first valid character commits the text box to page content; an empty temporary box is
+discarded when focus or operation changes and does not create an undo record. This behavior remains
+independent from the selected stylus tool.
 
-The Fluent palm icon after add-tool is a working panorama hand, not a shell. Selected on Android it
-turns both one-finger input and stylus contact into panning while preserving two-finger pinch; the
-pen cannot leave ink in this mode. Deselecting it restores two-finger-only navigation. Choosing any
-drawing tool also exits panorama-hand mode.
+The Fluent palm icon after add-tool is a working stylus panorama hand, not a shell. It changes only
+stylus contact into panning, so the pen cannot leave ink in this mode. Finger and mouse behavior do
+not inherit this state: one direct pointer still selects/edits/marquees content and two fingers always
+pan/zoom. Choosing a drawing tool exits the stylus panorama state.
 
 The insert space and background format group directly to the right of panorama hand provides:
-- an insert space tool toggle supporting stylus hover preview lines, drag displacement, and downward content shifting;
+- an insert-space exception supporting finger or stylus drag displacement and downward content
+  shifting. Stylus and mouse hover show the dashed insertion preview, but mouse-left keeps direct-content routing;
 - a background format tool that opens a flyout menu offering ruled lines (narrow, standard with margin line, wide, clean), grid styles (standard, dense, wide), dot matrix styles (standard, dense, wide), and blank page formatting, instantly updating and persisting on the underlying canvas.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
@@ -234,14 +233,14 @@ asset, filter, and export behavior is owned by `docs/design/insert-and-export.md
 
 ## Preserved input behavior
 
-- Stylus input authors the selected pen or highlighter; while finger text mode is active it authors
-  with the most recently selected pen.
+- Stylus input exclusively follows the selected stylus tool: ink/highlighter/eraser, containment
+  lasso, or stylus panorama hand. It does not change finger or mouse routing.
 - The explicit eraser and hardware eraser erase complete intersecting strokes and page tags.
-- The lasso consumes stylus motion without creating ink. Its rectangle/freeform geometry selects
-  ink, tags, text boxes, and inserted objects into one frame whose move/scale gestures remain active
-  while the lasso tool is selected.
-- One finger does not write or move the page; two fingers pan/zoom only when no stylus stroke is
-  active.
+- Finger and primary-mouse drags move/resize only when they begin on selected content or a selected
+  handle. Every other drag starts a rectangular containment marquee, including a drag that begins
+  over unselected content. All content types share one dotted eight-handle frame.
+- One finger never writes or pans the page. Two fingers always preempt the pending one-finger action
+  and pan/zoom, even when the first finger began over a text editor or inserted object.
 - Prediction, undo, clear-with-confirmation, pressure erasing, viewport transforms, Xiaomi shortcut
   filtering, and wet/dry coordinate parity remain available.
 

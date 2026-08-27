@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -22,6 +23,7 @@ public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 
 public partial class NoteCanvas : UserControl
 {
+    private enum DirectGestureMode { None, Move, Resize, Marquee }
     private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private const double UnitsPerMillimeter = 96d / 25.4d;
 
@@ -37,6 +39,7 @@ public partial class NoteCanvas : UserControl
     private readonly HashSet<int> _activeTouchDevices = new();
     private readonly DispatcherTimer _saveTimer;
     private readonly DispatcherTimer _pressureTimer;
+    private readonly DispatcherTimer _directLongPressTimer;
     private readonly Stopwatch _strokeClock = new();
 
     private StrokeRecord? _activeStroke;
@@ -52,6 +55,7 @@ public partial class NoteCanvas : UserControl
     private bool _isTransforming;
     private int _resizeHandle = -1;
     private bool _isInsertingSpace;
+    private bool _insertSpaceUndoPushed;
     private double _insertStartY;
     private double _insertCurrentY;
     private Point? _eraserViewPoint;
@@ -59,7 +63,20 @@ public partial class NoteCanvas : UserControl
     private bool _stylusActive;
     private bool _stylusInRange;
     private bool _stylusEraserActive;
-    private TouchDevice? _touchLassoDevice;
+    private TouchDevice? _directTouchDevice;
+    private bool _touchInsertSpaceActive;
+    private DirectGestureMode _directGestureMode;
+    private bool _directGestureCommitted;
+    private bool _directGestureFromTouch;
+    private bool _directUndoPushed;
+    private bool _directLongPressTriggered;
+    private Point _directDownView;
+    private Point _directLastDocument;
+    private LassoShape _activeLassoShape = LassoShape.Freeform;
+    private TextItem? _temporaryTextItem;
+    private TextBox? _temporaryTextEditor;
+    private bool _temporaryTextCommitted;
+    private int _temporaryTextUndoDepth;
     private long _ignoreMouseUntil;
     private bool _pressureEraseArmed;
     private bool _pressureCandidate;
@@ -78,8 +95,6 @@ public partial class NoteCanvas : UserControl
         nameof(SelectedTool), typeof(ToolPreset), typeof(NoteCanvas), new PropertyMetadata(null, OnSelectedToolChanged));
     public static readonly DependencyProperty SingleFingerPanEnabledProperty = DependencyProperty.Register(
         nameof(SingleFingerPanEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnPointerModeChanged));
-    public static readonly DependencyProperty TextInsertionArmedProperty = DependencyProperty.Register(
-        nameof(TextInsertionArmed), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnTextInsertionChanged));
     public static readonly DependencyProperty InsertSpaceModeEnabledProperty = DependencyProperty.Register(
         nameof(InsertSpaceModeEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false));
     public static readonly DependencyProperty PendingTagKindProperty = DependencyProperty.Register(
@@ -94,7 +109,6 @@ public partial class NoteCanvas : UserControl
     public string PageTitle { get => (string)GetValue(PageTitleProperty); set => SetValue(PageTitleProperty, value); }
     public ToolPreset? SelectedTool { get => (ToolPreset?)GetValue(SelectedToolProperty); set => SetValue(SelectedToolProperty, value); }
     public bool SingleFingerPanEnabled { get => (bool)GetValue(SingleFingerPanEnabledProperty); set => SetValue(SingleFingerPanEnabledProperty, value); }
-    public bool TextInsertionArmed { get => (bool)GetValue(TextInsertionArmedProperty); set => SetValue(TextInsertionArmedProperty, value); }
     public bool InsertSpaceModeEnabled { get => (bool)GetValue(InsertSpaceModeEnabledProperty); set => SetValue(InsertSpaceModeEnabledProperty, value); }
     public CanvasTagKind? PendingTagKind { get => (CanvasTagKind?)GetValue(PendingTagKindProperty); set => SetValue(PendingTagKindProperty, value); }
     public bool ZoomLocked { get => (bool)GetValue(ZoomLockedProperty); set => SetValue(ZoomLockedProperty, value); }
@@ -104,7 +118,6 @@ public partial class NoteCanvas : UserControl
 
     public event EventHandler? DocumentChanged;
     public event EventHandler? ViewportChanged;
-    public event EventHandler<PageObjectEventArgs>? ObjectActivated;
     public event EventHandler<PageObjectEventArgs>? ObjectContextRequested;
 
     public NoteCanvas()
@@ -115,9 +128,30 @@ public partial class NoteCanvas : UserControl
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); RaiseDocumentChanged(); };
         _pressureTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _pressureTimer.Tick += (_, _) => CheckPressureEraseActivation();
+        _directLongPressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
+        _directLongPressTimer.Tick += (_, _) =>
+        {
+            _directLongPressTimer.Stop();
+            if (_directGestureFromTouch && !_directGestureCommitted) ShowDirectContextMenu(_directDownView);
+        };
         AddHandler(Stylus.StylusDownEvent, new StylusDownEventHandler(HandleStylusDown), handledEventsToo: true);
         AddHandler(Stylus.StylusMoveEvent, new StylusEventHandler(HandleStylusMove), handledEventsToo: true);
         AddHandler(Stylus.StylusUpEvent, new StylusEventHandler(HandleStylusUp), handledEventsToo: true);
+        AddHandler(UIElement.PreviewTouchDownEvent, new EventHandler<TouchEventArgs>(ObservePreviewTouchDown), handledEventsToo: true);
+        AddHandler(UIElement.PreviewTouchUpEvent, new EventHandler<TouchEventArgs>(ObservePreviewTouchUp), handledEventsToo: true);
+    }
+
+    private void ObservePreviewTouchDown(object? sender, TouchEventArgs e)
+    {
+        _activeTouchDevices.Add(e.TouchDevice.Id);
+        if (_activeTouchDevices.Count < 2) return;
+        CancelDirectPointerForPageNavigation();
+        AbandonTemporaryText();
+    }
+
+    private void ObservePreviewTouchUp(object? sender, TouchEventArgs e)
+    {
+        _activeTouchDevices.Remove(e.TouchDevice.Id);
     }
 
     private static void OnDocumentChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
@@ -139,11 +173,6 @@ public partial class NoteCanvas : UserControl
         var canvas = (NoteCanvas)source;
         canvas.UpdateTextEditorAppearance();
         canvas.InvalidateVisual();
-    }
-
-    private static void OnTextInsertionChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
-    {
-        OnPointerModeChanged(source, args);
     }
 
     private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
@@ -409,18 +438,18 @@ public partial class NoteCanvas : UserControl
         if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
         if (e.ChangedButton == MouseButton.Right)
         {
-            var item = HitObject(e.GetPosition(this));
-            if (item == null || item.IsPageBackground) return;
-            SelectOnlyObject(item);
-            ObjectContextRequested?.Invoke(this, new PageObjectEventArgs(item));
-            e.Handled = true;
+            if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
+            e.Handled = ShowDirectContextMenu(e.GetPosition(this));
             return;
         }
         if (e.ChangedButton is not MouseButton.Left and not MouseButton.Middle) return;
         Focus();
         var point = e.GetPosition(this);
-        if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left && HandleDoubleClick(point)) { e.Handled = true; return; }
-        BeginPointer(point, pressure: 0.65f, tiltX: 0, tiltY: 0, isStylus: false, forcePan: e.MiddleButton == MouseButtonState.Pressed || Keyboard.IsKeyDown(Key.Space), forceErase: false);
+        var forcePan = e.ChangedButton == MouseButton.Middle || Keyboard.IsKeyDown(Key.Space);
+        if (forcePan || PendingTagKind.HasValue)
+            BeginPointer(point, pressure: 0.65f, tiltX: 0, tiltY: 0, isStylus: false, forcePan, forceErase: false);
+        else
+            BeginDirectPointer(point, fromTouch: false);
         e.Handled = true;
     }
 
@@ -432,7 +461,8 @@ public partial class NoteCanvas : UserControl
         UpdatePointerCursor();
         if (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured)
         {
-            ContinuePointer(_hoverViewPoint.Value, 0.65f, 0, 0, isStylus: false);
+            if (_directGestureMode != DirectGestureMode.None) ContinueDirectPointer(_hoverViewPoint.Value);
+            else ContinuePointer(_hoverViewPoint.Value, 0.65f, 0, 0, isStylus: false);
             e.Handled = true;
         }
         InvalidateVisual();
@@ -459,7 +489,8 @@ public partial class NoteCanvas : UserControl
     {
         base.OnMouseUp(e);
         if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
-        EndPointer(isStylus: false);
+        if (_directGestureMode != DirectGestureMode.None) EndDirectPointer(e.GetPosition(this));
+        else EndPointer(isStylus: false);
         e.Handled = true;
     }
 
@@ -542,48 +573,50 @@ public partial class NoteCanvas : UserControl
     {
         _activeTouchDevices.Add(e.TouchDevice.Id);
         base.OnTouchDown(e);
-        if (_activeTouchDevices.Count >= 2 && _touchLassoDevice != null)
+        if (_activeTouchDevices.Count >= 2)
         {
-            _isLassoing = false;
-            _lasso.Clear();
-            ReleaseTouchCapture(_touchLassoDevice);
-            _touchLassoDevice = null;
-            InvalidateVisual();
+            CancelDirectPointerForPageNavigation();
+            AbandonTemporaryText();
             return;
         }
-        if (
-            _activeTouchDevices.Count == 1 &&
-            !TextInsertionArmed &&
-            !SingleFingerPanEnabled &&
-            SelectedTool?.Kind == DrawingToolKind.Lasso
-        ) {
-            BeginLasso(_viewport.ViewToDocument(e.GetTouchPoint(this).Position.X, e.GetTouchPoint(this).Position.Y));
-            _touchLassoDevice = e.TouchDevice;
-            CaptureTouch(e.TouchDevice);
-            e.Handled = true;
+        if (_activeTouchDevices.Count != 1) return;
+        var touchPoint = e.GetTouchPoint(this).Position;
+        if (InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger))
+        {
+            BeginInsertSpace(touchPoint);
+            _touchInsertSpaceActive = true;
         }
+        else
+        {
+            if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
+            BeginDirectPointer(touchPoint, fromTouch: true);
+        }
+        _directTouchDevice = e.TouchDevice;
+        CaptureTouch(e.TouchDevice);
+        e.Handled = true;
     }
 
     protected override void OnTouchMove(TouchEventArgs e)
     {
         base.OnTouchMove(e);
-        if (_touchLassoDevice?.Id != e.TouchDevice.Id || !_isLassoing || _activeTouchDevices.Count != 1) return;
+        if (_directTouchDevice?.Id != e.TouchDevice.Id || _activeTouchDevices.Count != 1) return;
         var point = e.GetTouchPoint(this).Position;
-        ExtendLasso(_viewport.ViewToDocument(point.X, point.Y));
-        InvalidateVisual();
+        if (_touchInsertSpaceActive) ContinuePointer(point, 0.65f, 0, 0, isStylus: false);
+        else ContinueDirectPointer(point);
         e.Handled = true;
     }
 
     protected override void OnTouchUp(TouchEventArgs e)
     {
-        var finishingLasso = _touchLassoDevice?.Id == e.TouchDevice.Id && _isLassoing;
+        var finishingDirect = _directTouchDevice?.Id == e.TouchDevice.Id;
         _activeTouchDevices.Remove(e.TouchDevice.Id);
-        if (finishingLasso)
+        if (finishingDirect)
         {
-            _isLassoing = false;
-            _touchLassoDevice = null;
+            if (_touchInsertSpaceActive) EndPointer(isStylus: false);
+            else EndDirectPointer(e.GetTouchPoint(this).Position);
+            _touchInsertSpaceActive = false;
+            _directTouchDevice = null;
             ReleaseTouchCapture(e.TouchDevice);
-            ComputeLassoSelection();
             e.Handled = true;
         }
         base.OnTouchUp(e);
@@ -591,11 +624,10 @@ public partial class NoteCanvas : UserControl
 
     protected override void OnTouchLeave(TouchEventArgs e)
     {
-        if (_touchLassoDevice?.Id == e.TouchDevice.Id && e.TouchDevice.Captured == null)
+        if (_directTouchDevice?.Id == e.TouchDevice.Id && e.TouchDevice.Captured == null)
         {
-            _touchLassoDevice = null;
-            _isLassoing = false;
-            _lasso.Clear();
+            _directTouchDevice = null;
+            CancelDirectPointer();
             InvalidateVisual();
         }
         if (e.TouchDevice.Captured == null) _activeTouchDevices.Remove(e.TouchDevice.Id);
@@ -606,7 +638,7 @@ public partial class NoteCanvas : UserControl
     {
         base.OnManipulationDelta(e);
         if (Document == null || _activeStroke != null) return;
-        if (!SingleFingerPanEnabled && _activeTouchDevices.Count < 2)
+        if (_activeTouchDevices.Count < 2)
         {
             e.Handled = true;
             return;
@@ -628,13 +660,231 @@ public partial class NoteCanvas : UserControl
         e.Handled = true;
     }
 
+    private void BeginDirectPointer(Point viewPoint, bool fromTouch)
+    {
+        if (Document == null) return;
+        var editingEditor = EditorAt(viewPoint);
+        var editingHit = editingEditor is { IsKeyboardFocusWithin: true, IsHitTestVisible: true };
+        var selectedHit = HitSelectedContent(viewPoint);
+        var handleHit = false;
+        var handle = -1;
+        if (_selectionBounds is { } bounds)
+            handleHit = HitSelectionHandle(viewPoint, _viewport.DocumentToView(bounds), out handle);
+        var intent = DirectInputPolicy.PointerDownIntent(1, true, editingHit, selectedHit, handleHit);
+        if (intent == DirectPointerDownIntent.NativeTextEdit) return;
+
+        _directGestureMode = intent == DirectPointerDownIntent.TransformSelection
+            ? handleHit ? DirectGestureMode.Resize : DirectGestureMode.Move
+            : DirectGestureMode.Marquee;
+        _resizeHandle = handleHit ? handle : -1;
+        _directGestureCommitted = false;
+        _directGestureFromTouch = fromTouch;
+        _directUndoPushed = false;
+        _directLongPressTriggered = false;
+        _directDownView = viewPoint;
+        _directLastDocument = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        _transformPoint = _directLastDocument;
+        if (fromTouch) _directLongPressTimer.Start();
+        else CaptureMouse();
+    }
+
+    private void ContinueDirectPointer(Point viewPoint)
+    {
+        if (_directGestureMode == DirectGestureMode.None || Document == null) return;
+        var distance = Distance(viewPoint, _directDownView);
+        if (!_directGestureCommitted)
+        {
+            var threshold = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance);
+            if (distance < threshold) return;
+            _directLongPressTimer.Stop();
+            _directGestureCommitted = true;
+            if (_temporaryTextItem != null && !_temporaryTextCommitted)
+            {
+                AbandonTemporaryText();
+                _directGestureMode = DirectGestureMode.Marquee;
+            }
+            if (_directGestureMode is DirectGestureMode.Move or DirectGestureMode.Resize)
+            {
+                PushUndo();
+                _directUndoPushed = true;
+                _isTransforming = true;
+            }
+            else
+            {
+                BeginLasso(_viewport.ViewToDocument(_directDownView.X, _directDownView.Y), LassoShape.Rectangle);
+            }
+        }
+
+        var documentPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        switch (_directGestureMode)
+        {
+            case DirectGestureMode.Move:
+                TranslateSelection(documentPoint.X - _directLastDocument.X, documentPoint.Y - _directLastDocument.Y);
+                _directLastDocument = documentPoint;
+                break;
+            case DirectGestureMode.Resize:
+                ResizeSelection(documentPoint);
+                _directLastDocument = documentPoint;
+                break;
+            case DirectGestureMode.Marquee:
+                ExtendLasso(documentPoint);
+                break;
+        }
+        InvalidateVisual();
+    }
+
+    private void EndDirectPointer(Point viewPoint)
+    {
+        _directLongPressTimer.Stop();
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        if (_directLongPressTriggered)
+        {
+            ResetDirectPointer();
+            return;
+        }
+        if (!_directGestureCommitted)
+        {
+            HandleDirectTap(viewPoint);
+            ResetDirectPointer();
+            return;
+        }
+        if (_directGestureMode == DirectGestureMode.Marquee)
+        {
+            _isLassoing = false;
+            ComputeLassoSelection();
+        }
+        else
+        {
+            _isTransforming = false;
+            RecomputeSelectionBounds();
+            MarkChanged(immediate: true);
+        }
+        ResetDirectPointer();
+    }
+
+    private void CancelDirectPointerForPageNavigation()
+    {
+        if (_directTouchDevice != null) ReleaseTouchCapture(_directTouchDevice);
+        _directTouchDevice = null;
+        CancelDirectPointer();
+    }
+
+    private void CancelDirectPointer()
+    {
+        _directLongPressTimer.Stop();
+        if (_isInsertingSpace) CancelInsertSpace();
+        if (_directGestureMode == DirectGestureMode.Marquee)
+        {
+            _isLassoing = false;
+            _lasso.Clear();
+        }
+        else if (_directGestureCommitted && _directUndoPushed && _undo.Count > 0)
+        {
+            var snapshot = _undo.Pop();
+            RestoreSnapshot(snapshot);
+        }
+        ResetDirectPointer();
+    }
+
+    private void ResetDirectPointer()
+    {
+        _directGestureMode = DirectGestureMode.None;
+        _directGestureCommitted = false;
+        _directGestureFromTouch = false;
+        _directUndoPushed = false;
+        _directLongPressTriggered = false;
+        _isTransforming = false;
+        _resizeHandle = -1;
+        InvalidateVisual();
+    }
+
+    private void CancelInsertSpace()
+    {
+        _isInsertingSpace = false;
+        _touchInsertSpaceActive = false;
+        if (_insertSpaceUndoPushed && _undo.Count > 0) _undo.Pop();
+        _insertSpaceUndoPushed = false;
+        InvalidateVisual();
+    }
+
+    private void HandleDirectTap(Point viewPoint)
+    {
+        if (Document == null) return;
+        var text = HitText(viewPoint);
+        if (text != null)
+        {
+            if (_selectedTextItems.Count == 1 && ReferenceEquals(_selectedTextItems[0], text)) ActivateTextEditor(text);
+            else { AbandonTemporaryText(); Focus(); SelectOnlyText(text); }
+            return;
+        }
+        var item = HitObject(viewPoint);
+        if (item is { IsPageBackground: false })
+        {
+            AbandonTemporaryText();
+            Focus();
+            if (!_selectedObjects.Contains(item)) SelectOnlyObject(item);
+            return;
+        }
+        var tag = HitTag(viewPoint);
+        if (tag != null)
+        {
+            AbandonTemporaryText();
+            Focus();
+            if (!_selectedTags.Contains(tag)) SelectOnlyTag(tag);
+            return;
+        }
+        var stroke = HitStroke(viewPoint);
+        if (stroke != null)
+        {
+            AbandonTemporaryText();
+            Focus();
+            if (!_selectedStrokes.Contains(stroke)) SelectOnlyStroke(stroke);
+            return;
+        }
+        AbandonTemporaryText();
+        Focus();
+        ClearSelection();
+        AddTemporaryTextItem(_viewport.ViewToDocument(viewPoint.X, viewPoint.Y));
+    }
+
+    private bool ShowDirectContextMenu(Point viewPoint)
+    {
+        if (Document == null) return false;
+        var item = HitObject(viewPoint);
+        if (item is { IsPageBackground: false })
+        {
+            AbandonTemporaryText();
+            Focus();
+            SelectOnlyObject(item);
+            ObjectContextRequested?.Invoke(this, new PageObjectEventArgs(item));
+            _directLongPressTriggered = true;
+            return true;
+        }
+        var text = HitText(viewPoint);
+        var tag = HitTag(viewPoint);
+        var stroke = HitStroke(viewPoint);
+        if (text == null && tag == null && stroke == null) return false;
+        AbandonTemporaryText();
+        Focus();
+        if (text != null) SelectOnlyText(text);
+        else if (tag != null) SelectOnlyTag(tag);
+        else if (stroke != null) SelectOnlyStroke(stroke);
+        var menu = new ContextMenu { Placement = PlacementMode.Relative, PlacementTarget = this, HorizontalOffset = viewPoint.X, VerticalOffset = viewPoint.Y };
+        var delete = new MenuItem { Header = "删除" };
+        delete.Click += (_, _) => DeleteSelection();
+        menu.Items.Add(delete);
+        menu.IsOpen = true;
+        _directLongPressTriggered = true;
+        return true;
+    }
+
     private void BeginPointer(Point viewPoint, float pressure, float tiltX, float tiltY, bool isStylus, bool forcePan, bool forceErase)
     {
         if (Document == null) return;
         _lastPointer = viewPoint;
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
 
-        if (forcePan || SingleFingerPanEnabled)
+        if (forcePan || (isStylus && SingleFingerPanEnabled))
         {
             _isDragZooming = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && !ZoomLocked;
             _isPanning = !_isDragZooming;
@@ -642,20 +892,6 @@ public partial class NoteCanvas : UserControl
             _dragZoomAnchor = viewPoint;
             CaptureMouse();
             return;
-        }
-
-        if (_selectionBounds.HasValue)
-        {
-            var viewBounds = _viewport.DocumentToView(_selectionBounds.Value);
-            if (HitSelectionHandle(viewPoint, viewBounds, out var handle) || viewBounds.Contains(viewPoint))
-            {
-                PushUndo();
-                _isTransforming = true;
-                _resizeHandle = handle;
-                _transformPoint = docPoint;
-                CaptureMouse();
-                return;
-            }
         }
 
         if (PendingTagKind.HasValue)
@@ -668,24 +904,15 @@ public partial class NoteCanvas : UserControl
             return;
         }
 
-        if (InsertSpaceModeEnabled)
+        if (InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(isStylus ? DirectInputDevice.Pen : DirectInputDevice.Mouse))
         {
-            PushUndo();
-            _isInsertingSpace = true;
-            _insertStartY = _insertCurrentY = docPoint.Y;
+            BeginInsertSpace(viewPoint);
             CaptureMouse();
             return;
         }
 
-        if (TextInsertionArmed && !isStylus)
-        {
-            AddTextItem(docPoint);
-            return;
-        }
-
         var tool = SelectedTool ?? ToolShelf.Defaults().First();
-        // Mouse remains a pointer device even while a pen/eraser preset is selected.
-        // It may lasso or pan, but only a real stylus can author or erase ink.
+        // Direct mouse/touch content input is routed before this pen-tool path.
         if (!isStylus && tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter or DrawingToolKind.Eraser)
         {
             return;
@@ -724,6 +951,17 @@ public partial class NoteCanvas : UserControl
                 CaptureMouse();
                 break;
         }
+        InvalidateVisual();
+    }
+
+    private void BeginInsertSpace(Point viewPoint)
+    {
+        if (Document == null) return;
+        var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        PushUndo();
+        _insertSpaceUndoPushed = true;
+        _isInsertingSpace = true;
+        _insertStartY = _insertCurrentY = docPoint.Y;
         InvalidateVisual();
     }
 
@@ -820,6 +1058,8 @@ public partial class NoteCanvas : UserControl
             _isInsertingSpace = false;
             var delta = _insertCurrentY - _insertStartY;
             if (Math.Abs(delta) > 2) { InsertVerticalSpace((float)_insertStartY, (float)delta); changed = true; }
+            else if (_insertSpaceUndoPushed && _undo.Count > 0) _undo.Pop();
+            _insertSpaceUndoPushed = false;
         }
         if (_isTransforming)
         {
@@ -898,25 +1138,31 @@ public partial class NoteCanvas : UserControl
     {
         ClearSelection(keepLasso: true);
         if (Document == null || _lasso.Count < 3) { _lasso.Clear(); return; }
-        _selectedStrokes.AddRange(Document.Strokes.Where(stroke => stroke.Points.Any(point => SelectionGeometry.PointInPolygon(point.X, point.Y, _lasso))));
-        _selectedTags.AddRange(Document.Tags.Where(tag => SelectionGeometry.PointInPolygon(tag.DocumentX, tag.DocumentY, _lasso)));
-        _selectedTextItems.AddRange(Document.TextItems.Where(text => SelectionGeometry.PolygonIntersectsRect(_lasso, new Rect(text.X, text.Y, text.Width, text.Height))));
-        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground && SelectionGeometry.PolygonIntersectsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
+        _selectedStrokes.AddRange(Document.Strokes.Where(stroke => stroke.Points.Count > 0 && stroke.Points.All(point => SelectionGeometry.PointInPolygonOrBoundary(point.ToPoint(), _lasso))));
+        _selectedTags.AddRange(Document.Tags.Where(tag => SelectionGeometry.PolygonContainsRect(_lasso, new Rect(tag.DocumentX - 12, tag.DocumentY - 12, 24, 24))));
+        _selectedTextItems.AddRange(Document.TextItems.Where(text => SelectionGeometry.PolygonContainsRect(_lasso, new Rect(text.X, text.Y, text.Width, text.Height))));
+        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground && SelectionGeometry.PolygonContainsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
         _lasso.Clear();
         RecomputeSelectionBounds();
     }
 
     private void BeginLasso(Point documentPoint)
     {
+        BeginLasso(documentPoint, SelectedTool?.LassoShape ?? LassoShape.Freeform);
+    }
+
+    private void BeginLasso(Point documentPoint, LassoShape shape)
+    {
         ClearSelection();
         _isLassoing = true;
+        _activeLassoShape = shape;
         _lassoOrigin = documentPoint;
         _lasso.Add(documentPoint);
     }
 
     private void ExtendLasso(Point documentPoint)
     {
-        if (SelectedTool?.LassoShape != LassoShape.Rectangle)
+        if (_activeLassoShape != LassoShape.Rectangle)
         {
             _lasso.Add(documentPoint);
             return;
@@ -1022,22 +1268,54 @@ public partial class NoteCanvas : UserControl
         UpdateTextEditorPositions();
     }
 
-    private void AddTextItem(Point documentPoint)
+    private void AddTemporaryTextItem(Point documentPoint)
     {
         if (Document == null) return;
-        PushUndo();
         var item = new TextItem { X = (float)documentPoint.X, Y = (float)documentPoint.Y };
-        Document.TextItems.Add(item);
         var editor = CreateTextEditor(item);
+        _temporaryTextItem = item;
+        _temporaryTextEditor = editor;
+        _temporaryTextCommitted = false;
+        _temporaryTextUndoDepth = _undo.Count;
         EditorLayer.Children.Add(editor);
         PositionEditor(editor, item);
+        SelectOnlyText(item);
+        editor.IsHitTestVisible = true;
         editor.Focus();
-        MarkChanged();
+        editor.CaretIndex = 0;
+        InvalidateVisual();
+    }
+
+    private void AbandonTemporaryText()
+    {
+        var item = _temporaryTextItem;
+        var editor = _temporaryTextEditor;
+        if (item == null || editor == null) return;
+        _temporaryTextItem = null;
+        _temporaryTextEditor = null;
+        var committed = _temporaryTextCommitted;
+        var undoDepth = _temporaryTextUndoDepth;
+        _temporaryTextCommitted = false;
+        _temporaryTextUndoDepth = 0;
+        if (committed && !string.IsNullOrWhiteSpace(item.Text)) return;
+        if (committed)
+        {
+            Document?.TextItems.Remove(item);
+            while (_undo.Count > undoDepth) _undo.Pop();
+        }
+        _selectedTextItems.Remove(item);
+        EditorLayer.Children.Remove(editor);
+        RecomputeSelectionBounds();
+        if (committed) MarkChanged(immediate: true);
     }
 
     private void RebuildTextEditors()
     {
         _suppressEditorChange = true;
+        _temporaryTextItem = null;
+        _temporaryTextEditor = null;
+        _temporaryTextCommitted = false;
+        _temporaryTextUndoDepth = 0;
         EditorLayer.Children.Clear();
         if (Document != null)
         {
@@ -1068,21 +1346,36 @@ public partial class NoteCanvas : UserControl
             CaretBrush = Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black,
         };
         ApplyTextItemStyle(editor, item);
-        editor.PreviewMouseDoubleClick += (_, e) =>
-        {
-            if (_selectedTextItems.Count == 1 && ReferenceEquals(_selectedTextItems[0], item)) ActivateTextEditor(item);
-            else SelectOnlyText(item);
-            e.Handled = true;
-        };
         editor.TextChanged += (_, _) =>
         {
             if (_suppressEditorChange) return;
+            if (ReferenceEquals(_temporaryTextItem, item) && !_temporaryTextCommitted)
+            {
+                item.Text = editor.Text;
+                if (string.IsNullOrWhiteSpace(item.Text)) return;
+                PushUndo();
+                Document?.TextItems.Add(item);
+                _temporaryTextCommitted = true;
+            }
             item.Text = editor.Text;
             item.Height = (float)Math.Max(32, editor.ActualHeight);
             MarkChanged();
         };
         editor.LostKeyboardFocus += (_, _) =>
         {
+            editor.IsHitTestVisible = false;
+            if (ReferenceEquals(_temporaryTextItem, item))
+            {
+                if (string.IsNullOrWhiteSpace(item.Text)) AbandonTemporaryText();
+                else
+                {
+                    _temporaryTextItem = null;
+                    _temporaryTextEditor = null;
+                    _temporaryTextCommitted = false;
+                    _temporaryTextUndoDepth = 0;
+                }
+                return;
+            }
             if (!string.IsNullOrWhiteSpace(item.Text)) return;
             Document?.TextItems.Remove(item);
             EditorLayer.Children.Remove(editor);
@@ -1108,7 +1401,7 @@ public partial class NoteCanvas : UserControl
         foreach (TextBox editor in EditorLayer.Children)
         {
             editor.IsReadOnly = false;
-            editor.IsHitTestVisible = editor.Tag is not TextItem item || !_selectedTextItems.Contains(item);
+            editor.IsHitTestVisible = editor.IsKeyboardFocusWithin;
             editor.Cursor = Cursors.IBeam;
         }
     }
@@ -1401,7 +1694,7 @@ public partial class NoteCanvas : UserControl
             using var context = geometry.Open();
             context.BeginFigure(_viewport.DocumentToView(_lasso[0].X, _lasso[0].Y), false, false);
             for (var i = 1; i < _lasso.Count; i++) context.LineTo(_viewport.DocumentToView(_lasso[i].X, _lasso[i].Y), true, false);
-            if (SelectedTool?.LassoShape == LassoShape.Rectangle && _lasso.Count >= 4) context.LineTo(_viewport.DocumentToView(_lasso[0].X, _lasso[0].Y), true, false);
+            if (_activeLassoShape == LassoShape.Rectangle && _lasso.Count >= 4) context.LineTo(_viewport.DocumentToView(_lasso[0].X, _lasso[0].Y), true, false);
             dc.DrawGeometry(null, pen, geometry);
         }
         if (_selectionBounds is { } bounds)
@@ -1419,7 +1712,7 @@ public partial class NoteCanvas : UserControl
             var radius = (SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool.EraserRadiusMm : 4.5) * UnitsPerMillimeter * _viewport.Scale;
             dc.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromRgb(185, 185, 185)), 1.2), eraser, radius, radius);
         }
-        if (_hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
+        if (!InsertSpaceModeEnabled && _hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
         {
             var fill = TextBrush(SelectedTool?.Color ?? InkPalette.Black, Appearance.Theme == PageTheme.Dark, false);
             var outline = new Pen(Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black, 1);
@@ -1433,13 +1726,18 @@ public partial class NoteCanvas : UserControl
             dc.DrawLine(pen, new Point(0, start), new Point(ActualWidth, start));
             dc.DrawLine(pen, new Point(0, current), new Point(ActualWidth, current));
         }
+        else if (InsertSpaceModeEnabled && _hoverViewPoint is { } insertHover &&
+                 DirectInputPolicy.ShowsInsertSpaceHover(_stylusInRange ? DirectInputDevice.Pen : DirectInputDevice.Mouse))
+        {
+            var pen = new Pen(new SolidColorBrush(Color.FromRgb(218, 178, 233)), 1.2) { DashStyle = DashStyles.Dash };
+            dc.DrawLine(pen, new Point(0, insertHover.Y), new Point(ActualWidth, insertHover.Y));
+        }
     }
 
     private void UpdatePointerCursor()
     {
         Cursor = CurrentPointerCursorMode() switch
         {
-            CanvasPointerCursorMode.Text => Cursors.IBeam,
             CanvasPointerCursorMode.Hand => Cursors.Hand,
             CanvasPointerCursorMode.PenDot => Cursors.None,
             _ => Cursors.Arrow,
@@ -1447,7 +1745,7 @@ public partial class NoteCanvas : UserControl
     }
 
     private CanvasPointerCursorMode CurrentPointerCursorMode() =>
-        CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, TextInsertionArmed, _stylusInRange, SelectedTool?.Kind);
+        CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, _stylusInRange, SelectedTool?.Kind);
 
     private BitmapSource? LoadBitmap(string assetName, bool inverted)
     {
@@ -1481,26 +1779,6 @@ public partial class NoteCanvas : UserControl
         catch { return null; }
     }
 
-    private bool HandleDoubleClick(Point viewPoint)
-    {
-        var text = HitText(viewPoint);
-        if (text != null)
-        {
-            if (_selectedTextItems.Count == 1 && ReferenceEquals(_selectedTextItems[0], text)) return ActivateTextEditor(text);
-            SelectOnlyText(text);
-            return true;
-        }
-        var item = HitObject(viewPoint);
-        if (item == null || item.IsPageBackground) return false;
-        if (_selectedObjects.Count == 1 && ReferenceEquals(_selectedObjects[0], item))
-        {
-            ObjectActivated?.Invoke(this, new PageObjectEventArgs(item));
-            return true;
-        }
-        SelectOnlyObject(item);
-        return true;
-    }
-
     private TextItem? HitText(Point viewPoint)
     {
         if (Document == null) return null;
@@ -1515,9 +1793,42 @@ public partial class NoteCanvas : UserControl
         return Document.Objects.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
     }
 
+    private CanvasTag? HitTag(Point viewPoint)
+    {
+        if (Document == null) return null;
+        var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        var radius = 14 / Math.Max(0.01, _viewport.Scale);
+        return Document.Tags.LastOrDefault(value => Distance(new Point(value.DocumentX, value.DocumentY), doc) <= radius);
+    }
+
+    private StrokeRecord? HitStroke(Point viewPoint)
+    {
+        if (Document == null) return null;
+        var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        var radius = 10 / Math.Max(0.01, _viewport.Scale);
+        return Document.Strokes.LastOrDefault(stroke => StrokeHitsCircle(stroke, doc, radius));
+    }
+
+    private TextBox? EditorAt(Point viewPoint) =>
+        EditorLayer.Children.OfType<TextBox>().LastOrDefault(editor =>
+            editor.Tag is TextItem item && new Rect(item.X, item.Y, item.Width, item.Height)
+                .Contains(_viewport.ViewToDocument(viewPoint.X, viewPoint.Y)));
+
+    private bool HitSelectedContent(Point viewPoint)
+    {
+        var text = HitText(viewPoint);
+        if (text != null && _selectedTextItems.Contains(text)) return true;
+        var item = HitObject(viewPoint);
+        if (item != null && _selectedObjects.Contains(item)) return true;
+        var tag = HitTag(viewPoint);
+        if (tag != null && _selectedTags.Contains(tag)) return true;
+        var stroke = HitStroke(viewPoint);
+        return stroke != null && _selectedStrokes.Contains(stroke);
+    }
+
     private bool ActivateTextEditor(TextItem item)
     {
-        ClearSelection();
+        if (!_selectedTextItems.Contains(item)) SelectOnlyText(item);
         var editor = EditorLayer.Children.OfType<TextBox>().FirstOrDefault(value => ReferenceEquals(value.Tag, item));
         if (editor == null) return false;
         editor.IsHitTestVisible = true;
@@ -1617,8 +1928,13 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        AbandonTemporaryText();
+        _directLongPressTimer.Stop();
+        _directTouchDevice = null;
+        _touchInsertSpaceActive = false;
+        _insertSpaceUndoPushed = false;
+        _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
-        _touchLassoDevice = null;
         _pressureCandidate = false; _temporaryPressureEraser = false; _pressureTimer.Stop(); _eraserViewPoint = null;
         ClearSelection();
     }
@@ -1643,6 +1959,22 @@ public partial class NoteCanvas : UserControl
     {
         ClearSelection();
         _selectedTextItems.Add(item);
+        RecomputeSelectionBounds();
+        InvalidateVisual();
+    }
+
+    private void SelectOnlyTag(CanvasTag tag)
+    {
+        ClearSelection();
+        _selectedTags.Add(tag);
+        RecomputeSelectionBounds();
+        InvalidateVisual();
+    }
+
+    private void SelectOnlyStroke(StrokeRecord stroke)
+    {
+        ClearSelection();
+        _selectedStrokes.Add(stroke);
         RecomputeSelectionBounds();
         InvalidateVisual();
     }

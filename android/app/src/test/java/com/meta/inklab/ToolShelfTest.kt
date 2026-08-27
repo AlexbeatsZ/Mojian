@@ -17,7 +17,7 @@ class ToolShelfTest {
     }
 
     @Test
-    fun addedToolBecomesSelectedAndCanBeDeleted() {
+    fun addedToolBecomesSelected() {
         val shelf = ToolShelf()
         val originalSize = shelf.tools.size
 
@@ -25,15 +25,13 @@ class ToolShelfTest {
         assertEquals(added.id, shelf.selected.id)
         assertEquals(originalSize + 1, shelf.tools.size)
 
-        assertTrue(shelf.deleteSelected())
-        assertEquals(originalSize, shelf.tools.size)
     }
 
     @Test
-    fun lastToolCannotBeDeleted() {
+    fun missingRequiredToolsAreRestored() {
         val shelf = ToolShelf(listOf(ToolPreset("only", DrawingToolKind.LASSO)))
 
-        assertFalse(shelf.deleteSelected())
+        assertTrue(ToolShelf.defaults().all { required -> shelf.tools.any { it.id == required.id } })
         assertEquals("only", shelf.selected.id)
     }
 

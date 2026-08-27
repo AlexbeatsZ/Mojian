@@ -111,7 +111,6 @@ public static class ShortcutActionCatalog
 
             new("draw:undo", "撤销", ShortcutCategory.Draw),
             new("draw:redo", "重做", ShortcutCategory.Draw),
-            new("draw:cursor", "插入文本框", ShortcutCategory.Draw),
             new("draw:previous-tool", "上一个绘图工具", ShortcutCategory.Draw),
             new("draw:next-tool", "下一个绘图工具", ShortcutCategory.Draw),
             new("draw:pan", "全景手柄", ShortcutCategory.Draw),

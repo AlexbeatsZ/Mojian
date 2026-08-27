@@ -7,17 +7,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.LruCache
 import android.util.TypedValue
-import android.view.GestureDetector
-import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import java.io.File
 import kotlin.math.max
 
@@ -27,16 +23,9 @@ class InsertContentLayer(
     private val repository: PageContentRepository,
 ) : View(context) {
     private var document: PageInsertDocument? = null
-    private var pressedObject: InsertObject? = null
     private var selectedObject: InsertObject? = null
     private val lassoSelectedObjects = linkedSetOf<InsertObject>()
-    private var gestureObject: InsertObject? = null
-    private var resizeHandle = -1
-    private var lastDocumentPoint = DocumentPoint(0f, 0f)
-    private var resizeStartBounds = RectF()
-    private var objectMutated = false
     private var selectionTransformMutated = false
-    private val gestureArbiter = InsertObjectGestureArbiter(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
     private val bitmapCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -68,65 +57,17 @@ class InsertContentLayer(
         }
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-    var onObjectActivated: ((InsertObject) -> Unit)? = null
     var onObjectContextMenuRequested: ((InsertObject, Float, Float) -> Unit)? = null
     var onSelectionChanged: ((InsertObject?) -> Unit)? = null
     var onDocumentChanged: ((PageInsertDocument) -> Unit)? = null
-    var objectManipulationEnabled: Boolean = true
-    var selectionModeEnabled: Boolean = false
-        set(value) {
-            field = value
-            invalidate()
-        }
-
-    private val gestureDetector =
-        GestureDetector(
-            context,
-            object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(event: MotionEvent): Boolean = true
-
-                override fun onSingleTapConfirmed(event: MotionEvent): Boolean {
-                    val item = hitSelectable(event.x, event.y)
-                    var handled = false
-                    if (selectedCount() > 0 && item !in selectedItems()) {
-                        select(null)
-                        invalidate()
-                        handled = true
-                    }
-                    if (item != null && isInteractive(item)) {
-                        onObjectActivated?.invoke(item)
-                        handled = true
-                    }
-                    return handled || item != null
-                }
-
-                override fun onDoubleTap(event: MotionEvent): Boolean {
-                    val item = hitSelectable(event.x, event.y) ?: return false
-                    select(item)
-                    invalidate()
-                    return true
-                }
-
-                override fun onLongPress(event: MotionEvent) {
-                    if (!gestureArbiter.canOpenContextMenu()) return
-                    val item = hitSelectable(event.x, event.y) ?: return
-                    select(item)
-                    invalidate()
-                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                    onObjectContextMenuRequested?.invoke(item, event.x, event.y)
-                }
-            },
-        )
-
     init {
         setBackgroundColor(Color.TRANSPARENT)
-        isClickable = true
+        isClickable = false
     }
 
     fun bind(document: PageInsertDocument?) {
         if (this.document?.notebookId == document?.notebookId && this.document?.pageId == document?.pageId) return
         this.document = document
-        pressedObject = null
         select(null)
         bitmapCache.evictAll()
         invalidate()
@@ -146,7 +87,6 @@ class InsertContentLayer(
     fun clearSelection() {
         if (selectedCount() == 0) return
         select(null)
-        gestureArbiter.end()
         invalidate()
     }
 
@@ -159,7 +99,7 @@ class InsertContentLayer(
                 if (item is InsertObject.Image && item.pageBackground) return@forEach
                 val itemBounds = bounds(item)
                 if (
-                    SelectionGeometry.polygonIntersectsRect(
+                    SelectionGeometry.polygonContainsRect(
                         polygon,
                         DocumentRect(itemBounds.left, itemBounds.top, itemBounds.right, itemBounds.bottom),
                     )
@@ -170,6 +110,27 @@ class InsertContentLayer(
         }
         invalidate()
         return lassoSelectedObjects.size
+    }
+
+    fun isSelectedAtView(viewX: Float, viewY: Float): Boolean =
+        hitSelectable(viewX, viewY)?.let { it in selectedItems() } == true
+
+    fun hasSelectableAtView(viewX: Float, viewY: Float): Boolean = hitSelectable(viewX, viewY) != null
+
+    fun selectAtView(viewX: Float, viewY: Float): Boolean {
+        val item = hitSelectable(viewX, viewY) ?: return false
+        select(item)
+        invalidate()
+        return true
+    }
+
+    fun requestContextMenuAt(viewX: Float, viewY: Float): Boolean {
+        val item = hitSelectable(viewX, viewY) ?: return false
+        select(item)
+        invalidate()
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        onObjectContextMenuRequested?.invoke(item, viewX, viewY)
+        return true
     }
 
     fun translateSelection(deltaX: Float, deltaY: Float) {
@@ -375,38 +336,7 @@ class InsertContentLayer(
                 is InsertObject.NoteLink -> drawLink(canvas, item)
             }
         }
-        if (!forExport) drawSelection(canvas)
         canvas.restore()
-    }
-
-    private fun drawSelection(canvas: Canvas) {
-        if (selectionModeEnabled) return
-        val item = selectedObject ?: return
-        val box = bounds(item)
-        val scale = viewport.scale.coerceAtLeast(0.01f)
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(238, 238, 238)
-            style = Paint.Style.STROKE
-            strokeWidth = dp(1f) / scale
-            pathEffect = DashPathEffect(floatArrayOf(dp(3f) / scale, dp(3f) / scale), 0f)
-        }.also { canvas.drawRect(box, it) }
-        val half = dp(4.5f) / scale
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(245, 245, 245)
-            style = Paint.Style.FILL
-        }.also { fill ->
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(86, 86, 86)
-                style = Paint.Style.STROKE
-                strokeWidth = dp(1f) / scale
-            }.also { stroke ->
-                selectionHandles(box).forEach { point ->
-                    val handle = RectF(point.x - half, point.y - half, point.x + half, point.y + half)
-                    canvas.drawRect(handle, fill)
-                    canvas.drawRect(handle, stroke)
-                }
-            }
-        }
     }
 
     private fun drawTable(canvas: Canvas, table: InsertObject.Table, forExport: Boolean) {
@@ -534,85 +464,6 @@ class InsertContentLayer(
         canvas.drawText(ellipsize(link.targetTitle, 58), link.documentX, link.documentY + link.height * 0.7f, linkPaint)
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val directPointer =
-            event.pointerCount == 1 &&
-                (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE)
-        if (!directPointer) {
-            gestureDetector.onTouchEvent(event)
-            if (event.pointerCount > 1) gestureArbiter.addPointer()
-            finishObjectGesture(persistMutation = true)
-            return false
-        }
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                pressedObject = hitSelectable(event.x, event.y)
-                gestureObject = pressedObject
-                objectMutated = false
-                val point = viewport.viewToDocument(event.x, event.y)
-                lastDocumentPoint = DocumentPoint(point.x, point.y)
-                var requestedMode = InsertObjectGestureMode.NONE
-                selectedPressTarget(selectedObject, pressedObject)?.let { selectedPress ->
-                    val selectedBounds = bounds(selectedPress)
-                    resizeHandle = hitResizeHandle(point.x, point.y, selectedBounds)
-                    if (resizeHandle >= 0) {
-                        requestedMode = InsertObjectGestureMode.RESIZE
-                        resizeStartBounds = RectF(selectedBounds)
-                    } else if (selectedBounds.contains(point.x, point.y)) {
-                        requestedMode = InsertObjectGestureMode.MOVE
-                    }
-                }
-                gestureArbiter.begin(event.x, event.y, requestedMode, objectManipulationEnabled)
-                gestureDetector.onTouchEvent(event)
-                return pressedObject != null
-            }
-            MotionEvent.ACTION_MOVE -> {
-                gestureDetector.onTouchEvent(event)
-                val item = gestureObject ?: return false
-                if (!gestureArbiter.move(event.x, event.y)) return true
-                val point = viewport.viewToDocument(event.x, event.y)
-                when (gestureArbiter.mode) {
-                    InsertObjectGestureMode.MOVE -> {
-                        item.documentX += point.x - lastDocumentPoint.x
-                        item.documentY += point.y - lastDocumentPoint.y
-                        lastDocumentPoint = DocumentPoint(point.x, point.y)
-                        objectMutated = true
-                        invalidate()
-                    }
-                    InsertObjectGestureMode.RESIZE -> {
-                        applyResize(item, DocumentPoint(point.x, point.y))
-                        objectMutated = true
-                        invalidate()
-                    }
-                    InsertObjectGestureMode.NONE -> Unit
-                }
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                gestureDetector.onTouchEvent(event)
-                if (pressedObject == null) return false
-                if (objectMutated) document?.let(::changed) else performClick()
-                finishObjectGesture(persistMutation = false)
-                return true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                val consumed = pressedObject != null
-                gestureDetector.onTouchEvent(event)
-                finishObjectGesture(persistMutation = true)
-                return consumed
-            }
-        }
-        return pressedObject != null
-    }
-
-    private fun finishObjectGesture(persistMutation: Boolean) {
-        if (persistMutation && objectMutated) document?.let(::changed)
-        pressedObject = null
-        gestureObject = null
-        gestureArbiter.end()
-        objectMutated = false
-    }
-
     override fun performClick(): Boolean {
         super.performClick()
         return true
@@ -623,53 +474,11 @@ class InsertContentLayer(
         invalidate()
     }
 
-    private fun isInteractive(item: InsertObject): Boolean =
-        item is InsertObject.Attachment || item is InsertObject.Spreadsheet || item is InsertObject.NoteLink || item is InsertObject.Table
-
     private fun hitSelectable(viewX: Float, viewY: Float): InsertObject? {
         val point = viewport.viewToDocument(viewX, viewY)
         return document?.objects?.asReversed()?.firstOrNull {
             !(it is InsertObject.Image && it.pageBackground) && bounds(it).contains(point.x, point.y)
         }
-    }
-
-    private fun selectionHandles(bounds: RectF): List<DocumentPoint> =
-        listOf(
-            DocumentPoint(bounds.left, bounds.top),
-            DocumentPoint(bounds.centerX(), bounds.top),
-            DocumentPoint(bounds.right, bounds.top),
-            DocumentPoint(bounds.right, bounds.centerY()),
-            DocumentPoint(bounds.right, bounds.bottom),
-            DocumentPoint(bounds.centerX(), bounds.bottom),
-            DocumentPoint(bounds.left, bounds.bottom),
-            DocumentPoint(bounds.left, bounds.centerY()),
-        )
-
-    private fun hitResizeHandle(x: Float, y: Float, bounds: RectF): Int {
-        val radius = dp(24f) / viewport.scale.coerceAtLeast(0.01f)
-        return SelectionGeometry.nearestPointIndexWithinRadius(x, y, selectionHandles(bounds), radius)
-    }
-
-    private fun applyResize(item: InsertObject, point: DocumentPoint) {
-        val minimum = dp(24f) / viewport.scale.coerceAtLeast(0.01f)
-        var left = resizeStartBounds.left
-        var top = resizeStartBounds.top
-        var right = resizeStartBounds.right
-        var bottom = resizeStartBounds.bottom
-        when (resizeHandle) {
-            0 -> { left = point.x.coerceAtMost(right - minimum); top = point.y.coerceAtMost(bottom - minimum) }
-            1 -> top = point.y.coerceAtMost(bottom - minimum)
-            2 -> { right = point.x.coerceAtLeast(left + minimum); top = point.y.coerceAtMost(bottom - minimum) }
-            3 -> right = point.x.coerceAtLeast(left + minimum)
-            4 -> { right = point.x.coerceAtLeast(left + minimum); bottom = point.y.coerceAtLeast(top + minimum) }
-            5 -> bottom = point.y.coerceAtLeast(top + minimum)
-            6 -> { left = point.x.coerceAtMost(right - minimum); bottom = point.y.coerceAtLeast(top + minimum) }
-            7 -> left = point.x.coerceAtMost(right - minimum)
-        }
-        item.documentX = left
-        item.documentY = top
-        item.width = right - left
-        item.height = bottom - top
     }
 
     private fun reorderSelection(toFront: Boolean): Boolean {

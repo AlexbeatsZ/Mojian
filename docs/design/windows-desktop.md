@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-08-24
+Last verified: 2026-08-27
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -81,35 +81,42 @@ foreground. ADB screenshots of the installed Android build are the visual compar
 
 ## Canvas and input
 
+The normative device/state mapping is `docs/design/input-gestures.md`; this section records only
+Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-single semantics.
+
 - Persist all completed ink in document coordinates with position, elapsed time, normalized pressure,
   tilt, tool type, logical color, width, opacity, and brush profile version.
 - WPF stylus input uses real `StylusPoint.PressureFactor`; promoted mouse events must not duplicate a
-  stylus stroke. Only a real stylus authors/erases ink. Mouse remains a pointer and may edit existing
-  text, transform selected content, lasso, or pan.
+  stylus stroke. Only a real stylus authors/erases ink. Mouse and touch use direct content handling:
+  click/tap selects, a second click/tap on selected text edits, dragging selected content transforms
+  it, and every other primary drag creates a containment marquee even when it starts over an object.
 - Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
-  button or using hand mode pans; holding Ctrl while performing either drag continuously zooms.
+  button pans; holding Ctrl with middle drag continuously zooms.
   Ctrl-drag is radial around the canvas center: dragging toward the center zooms out and dragging
   toward an edge zooms in, with the original contact point kept as the content anchor.
   A mouse side button remapped by its driver to middle button inherits this behavior. Zoom lock
   blocks gesture scaling only.
-- Panorama mode switches immediately to a hand cursor. A real stylus in range uses a small
-  screen-space nib dot for pen/highlighter authoring, including while text insertion remains armed;
-  ordinary mouse movement keeps its pointer because mouse input cannot author ink.
+- Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
+  A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
+  mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.
+- Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
+  stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not
-  user-configurable shortcut entries. `插入文本框` only controls blank-canvas creation. Persisted
-  text remains editable in every ribbon/tool state, and lasso selection includes text and inserts.
+  user-configurable shortcut entries. The old cursor/text-insertion mode does not exist. A blank
+  primary click/tap creates an uncommitted caret; the first valid character commits it, while focus
+  loss, another operation, or page navigation removes an empty temporary box without Undo.
 - Keyboard mappings are stored per workspace, categorized as `文件`, `开始`, `插入`, `绘图`, and `视图`,
   and resolve conflicts by removing the previous owner. Standard editing, undo/redo, search,
   full-page, delete-selection, and zoom defaults are provided.
 - Pen rendering uses pressure and speed correction with start/end taper. Logical black remaps for dark
   paper without changing the stored color.
-- Whole-stroke eraser, freeform/rectangle lasso selection, mixed-content move, and eight-handle
+- Whole-stroke eraser, pen freeform/rectangle lasso, direct-pointer rectangle marquee, mixed-content move, and eight-handle
   non-uniform scaling are document operations and participate in autosave. The eraser removes ink
   and tags but never treats inserted objects as strokes; immutable PDF page backgrounds also survive
   clear-page operations.
-- Existing text and non-background inserted objects remain selectable in every tool state. The first
-  double click selects them; a later double click activates editing or opening. A right click selects
-  the object and opens the shared dark command surface at the pointer.
+- Existing text, ink, tags, and non-background inserted objects remain directly selectable regardless
+  of Pen tool state. Text follows Select -> Edit through ordinary clicks; canvas double-click is
+  reserved. Right click selects the target and opens the same context surface as touch long press.
 - Changing page or view state cannot leak content between pages.
 
 ## Insert and export

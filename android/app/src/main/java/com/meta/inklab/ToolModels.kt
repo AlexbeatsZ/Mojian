@@ -93,6 +93,7 @@ data class ToolPreset(
 
 class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
     private val mutableTools = initialTools.toMutableList()
+        .apply { restoreMissingDefaults() }
     private var sequence = mutableTools.size + 1
 
     var selectedId: String = mutableTools.firstOrNull()?.id ?: defaults().first().id
@@ -147,18 +148,10 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
         return preset
     }
 
-    fun deleteSelected(): Boolean {
-        if (mutableTools.size <= 1) return false
-        val index = mutableTools.indexOfFirst { it.id == selectedId }
-        if (index < 0) return false
-        mutableTools.removeAt(index)
-        selectedId = mutableTools[index.coerceAtMost(mutableTools.lastIndex)].id
-        return true
-    }
-
     fun restoreFrom(other: ToolShelf) {
         mutableTools.clear()
         mutableTools.addAll(other.mutableTools)
+        mutableTools.restoreMissingDefaults()
         sequence = (mutableTools.mapNotNull { it.id.substringAfterLast("-", "").toIntOrNull() }.maxOrNull() ?: mutableTools.size) + 1
         selectedId = if (mutableTools.any { it.id == other.selectedId }) other.selectedId else mutableTools.first().id
     }
@@ -180,6 +173,11 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
     }
 
     private fun nextId(prefix: String): String = "$prefix-${sequence++}"
+
+    private fun MutableList<ToolPreset>.restoreMissingDefaults() {
+        val knownIds = mapTo(mutableSetOf()) { it.id }
+        defaults().forEach { preset -> if (knownIds.add(preset.id)) add(preset) }
+    }
 
     companion object {
         fun fromJson(jsonStr: String): ToolShelf? {

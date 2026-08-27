@@ -19,7 +19,7 @@ public class ToolShelfTests
     }
 
     [Fact]
-    public void ToolShelf_AddAndDelete_WorksCorrectly()
+    public void ToolShelf_AddsToolsAndRestoresMissingDefaults()
     {
         var shelf = new ToolShelf();
         int initialCount = shelf.Tools.Count;
@@ -28,9 +28,10 @@ public class ToolShelfTests
         Assert.Equal(initialCount + 1, shelf.Tools.Count);
         Assert.Equal(newTool.Id, shelf.SelectedId);
 
-        bool deleted = shelf.DeleteSelected();
-        Assert.True(deleted);
-        Assert.Equal(initialCount, shelf.Tools.Count);
+        var restored = new ToolShelf(new[] { new ToolPreset("pen-black", DrawingToolKind.Pen) });
+        Assert.Equal(ToolShelf.Defaults().Count(), restored.Tools.Count);
+        Assert.Contains(restored.Tools, tool => tool.Id == "lasso-freeform");
+        Assert.Contains(restored.Tools, tool => tool.Id == "eraser-stroke");
     }
 
     [Fact]

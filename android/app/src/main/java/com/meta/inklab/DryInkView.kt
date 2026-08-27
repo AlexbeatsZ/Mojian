@@ -280,9 +280,9 @@ class DryInkView(context: Context) : View(context) {
         if (polygon.size >= 3) {
             for (stroke in strokes) {
                 val inputs = stroke.inputs
-                if ((0 until inputs.size).any { index ->
+                if (inputs.size > 0 && (0 until inputs.size).all { index ->
                         val input = inputs.get(index)
-                        SelectionGeometry.pointInPolygon(input.x, input.y, polygon)
+                        SelectionGeometry.pointInPolygonOrBoundary(input.x, input.y, polygon)
                     }
                 ) {
                     selectedStrokes += stroke
@@ -296,6 +296,23 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun selectedCount(): Int = selectedStrokes.size
+
+    fun isSelectedAtDocument(x: Float, y: Float, radius: Float): Boolean =
+        selectedStrokes.any { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+
+    fun hasStrokeAtDocument(x: Float, y: Float, radius: Float): Boolean =
+        strokes.any { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+
+    fun selectAtDocument(x: Float, y: Float, radius: Float): Boolean {
+        val hit = strokes.asReversed().firstOrNull { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+            ?: return false
+        selectedStrokes.clear()
+        selectedStrokes += hit
+        lassoPoints.clear()
+        lassoStartPoint = null
+        invalidate()
+        return true
+    }
 
     fun clearSelection() {
         selectedStrokes.clear()

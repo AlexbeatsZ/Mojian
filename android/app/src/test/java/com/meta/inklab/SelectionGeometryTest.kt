@@ -72,4 +72,19 @@ class SelectionGeometryTest {
         )
         assertFalse(SelectionGeometry.polygonIntersectsRect(polygon, DocumentRect(120f, 120f, 150f, 150f)))
     }
+
+    @Test
+    fun containmentSelectionRejectsPartiallyCoveredLargeObject() {
+        val polygon =
+            listOf(
+                DocumentPoint(0f, 0f),
+                DocumentPoint(100f, 0f),
+                DocumentPoint(100f, 100f),
+                DocumentPoint(0f, 100f),
+            )
+
+        assertTrue(SelectionGeometry.polygonContainsRect(polygon, DocumentRect(20f, 20f, 80f, 80f)))
+        assertTrue(SelectionGeometry.polygonContainsRect(polygon, DocumentRect(0f, 0f, 100f, 100f)))
+        assertFalse(SelectionGeometry.polygonContainsRect(polygon, DocumentRect(80f, 80f, 130f, 130f)))
+    }
 }

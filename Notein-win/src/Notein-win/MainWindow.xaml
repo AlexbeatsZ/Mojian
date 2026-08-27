@@ -177,15 +177,14 @@
                             <StackPanel Orientation="Horizontal" Margin="6,2,8,2">
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="撤销" Command="{Binding UndoCommand}"><Path Data="{StaticResource Fluent_arrow_undo}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入文本框" IsChecked="{Binding TextInsertionArmed}"><Path Data="{StaticResource Fluent_cursor}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
-                                <ItemsControl ItemsSource="{Binding LassoTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_lasso}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding LassoTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnToolPresetClick"><Path Data="{StaticResource Fluent_lasso}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <ItemsControl ItemsSource="{Binding EraserTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_eraser}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                                <ItemsControl ItemsSource="{Binding HighlighterTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_highlight}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                                <ItemsControl ItemsSource="{Binding PenTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Command="{Binding DataContext.SelectToolCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}"><Path Data="{StaticResource Fluent_pen}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding EraserTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnToolPresetClick"><Path Data="{StaticResource Fluent_eraser}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding HighlighterTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnToolPresetClick"><Path Data="{StaticResource Fluent_highlight}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                                <ItemsControl ItemsSource="{Binding PenTools}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ToggleButton Style="{StaticResource ToolPresetToggleButtonStyle}" ToolTip="{Binding DisplayName}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnToolPresetClick"><Path Data="{StaticResource Fluent_pen}" Fill="{Binding DisplayColorHex}" Width="21" Height="21" /></ToggleButton></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0,0,3,0" ToolTip="添加" Click="OnAddToolMenuClick"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="单指平移" IsChecked="{Binding SingleFingerPanEnabled}"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="触控笔抓手" IsChecked="{Binding SingleFingerPanEnabled}"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入空白空间" IsChecked="{Binding InsertSpaceModeEnabled}"><Image Source="{StaticResource FluentDrawing_insert_space}" Width="21" Height="21" Stretch="Uniform" /></ToggleButton>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="设置背景格式" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
@@ -379,13 +378,13 @@
 
                     <Border Grid.Column="0" PreviewMouseDown="OnLeftCanvasFocus">
                         <controls:NoteCanvas x:Name="LeftCanvas" Document="{Binding PrimaryDocument}" Appearance="{Binding PrimaryPageAppearance}" PageTitle="{Binding PrimaryPageTitle}"
-                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextInsertionArmed="{Binding TextInsertionArmed}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}"
                                              InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
                     <Border Grid.Column="1" Width="7" Background="#2A2A2A" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1,0" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}" />
                     <Border Grid.Column="2" PreviewMouseDown="OnRightCanvasFocus" Visibility="{Binding IsSplitView, Converter={StaticResource BoolToVisibility}}">
                         <controls:NoteCanvas x:Name="RightCanvas" Document="{Binding SecondaryDocument}" Appearance="{Binding SecondaryPageAppearance}" PageTitle="{Binding SecondaryPageTitle}"
-                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}" TextInsertionArmed="{Binding TextInsertionArmed}"
+                                             SelectedTool="{Binding SelectedTool}" SingleFingerPanEnabled="{Binding SingleFingerPanEnabled}"
                                              InsertSpaceModeEnabled="{Binding InsertSpaceModeEnabled}" PendingTagKind="{Binding PendingTagKind, Mode=TwoWay}" ZoomLocked="{Binding ZoomLocked}" PredictionEnabled="{Binding PredictionEnabled}" />
                     </Border>
 
@@ -416,12 +415,12 @@
                             <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Style="{StaticResource RibbonIconButtonStyle}" ToolTip="{Binding Label}" Tag="{Binding Id}" Click="OnFullPageToolClick">
+                                    <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="{Binding Label}" Tag="{Binding Id}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="OnFullPageToolClick">
                                         <Grid Width="18" Height="18">
                                             <Path x:Name="singleColorIcon" Data="{Binding IconKey, Converter={StaticResource FluentIcon}}" Fill="{Binding TintHex}" Stretch="Uniform" />
                                             <Image x:Name="multiColorIcon" Source="{Binding IconKey, Converter={StaticResource FluentDrawingIcon}}" Stretch="Uniform" Visibility="Collapsed" />
                                         </Grid>
-                                    </Button>
+                                    </ToggleButton>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding PreserveColors}" Value="True">
                                             <Setter TargetName="singleColorIcon" Property="Visibility" Value="Collapsed" />
@@ -479,12 +478,12 @@
             </Grid>
         </DockPanel>
 
-        <Border Panel.ZIndex="40" Width="304" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="365,94,0,0"
-                Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" CornerRadius="3" Padding="14"
-                Visibility="{Binding IsToolFlyoutOpen, Converter={StaticResource BoolToVisibility}}">
+        <Popup x:Name="ToolFlyoutPopup" AllowsTransparency="True" StaysOpen="False" Placement="Bottom"
+               HorizontalOffset="-8" VerticalOffset="2" IsOpen="{Binding IsToolFlyoutOpen, Mode=TwoWay}">
+        <Border Width="316" MaxHeight="650" Background="#232323" BorderBrush="{StaticResource BorderStrong}"
+                BorderThickness="1" CornerRadius="3" Padding="12,10">
             <StackPanel>
-                <DockPanel Margin="0,0,0,10">
-                    <Button DockPanel.Dock="Right" Content="×" Width="26" Height="26" Background="Transparent" Foreground="{StaticResource TextSecondary}" BorderThickness="0" Click="OnCloseToolFlyoutClick" />
+                <Grid Height="38">
                     <StackPanel Orientation="Horizontal">
                         <Path Data="{StaticResource Fluent_pen}" Fill="{Binding SelectedTool.ColorHex}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsPen, Converter={StaticResource BoolToVisibility}}" />
                         <Path Data="{StaticResource Fluent_highlight}" Fill="{Binding SelectedTool.ColorHex}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}" />
@@ -492,7 +491,7 @@
                         <Path Data="{StaticResource Fluent_lasso}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" Margin="0,0,9,0" Visibility="{Binding SelectedToolIsLasso, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Text="{Binding SelectedTool.DisplayName}" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
-                </DockPanel>
+                </Grid>
                 <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,8" />
 
                 <StackPanel Visibility="{Binding SelectedToolIsPen, Converter={StaticResource BoolToVisibility}}">
@@ -551,10 +550,9 @@
                     <TextBlock Text="拖动框内移动；八个方形控点缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
                 </StackPanel>
 
-                <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,10,0,6" />
-                <Button Content="删除工具" Style="{StaticResource RibbonIconButtonStyle}" HorizontalContentAlignment="Left" Command="{Binding DeleteSelectedToolCommand}" />
             </StackPanel>
         </Border>
+        </Popup>
 
         <controls:BackstageView x:Name="Backstage" Visibility="{Binding IsBackstageOpen, Converter={StaticResource BoolToVisibility}}" />
     </Grid>

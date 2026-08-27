@@ -47,11 +47,9 @@ class CanvasTagLayer(
         }
     private var pendingKind: CanvasTagKind? = null
     private var focusedIndex: Int? = null
-    private var pressedTag: CanvasTag? = null
 
     var onPlacementFinished: ((CanvasTag) -> Unit)? = null
     var onTagClicked: ((CanvasTag) -> Unit)? = null
-    var selectionModeEnabled = false
 
     fun beginPlacement(kind: CanvasTagKind) {
         pendingKind = kind
@@ -77,7 +75,6 @@ class CanvasTagLayer(
         selectedTags.clear()
         pendingKind = null
         focusedIndex = null
-        pressedTag = null
         isClickable = false
         invalidate()
     }
@@ -94,18 +91,60 @@ class CanvasTagLayer(
 
     fun clearSelection() {
         selectedTags.clear()
-        pressedTag = null
         invalidate()
     }
 
     fun selectInPolygon(polygon: List<DocumentPoint>): Int {
         selectedTags.clear()
         if (polygon.size >= 3) {
-            selectedTags += tags.filter { SelectionGeometry.pointInPolygon(it.documentX, it.documentY, polygon) }
+            val halfSize = dp(10f)
+            selectedTags += tags.filter { tag ->
+                SelectionGeometry.polygonContainsRect(
+                    polygon,
+                    DocumentRect(
+                        tag.documentX - halfSize,
+                        tag.documentY - halfSize,
+                        tag.documentX + halfSize,
+                        tag.documentY + halfSize,
+                    ),
+                )
+            }
         }
         invalidate()
         return selectedTags.size
     }
+
+    fun isSelectedAtView(viewX: Float, viewY: Float): Boolean {
+        val point = viewport.viewToDocument(viewX, viewY)
+        val hitRadius = dp(16f) / viewport.scale
+        return selectedTags.any { tag ->
+            SelectionGeometry.squaredDistance(point.x, point.y, tag.documentX, tag.documentY) <= hitRadius * hitRadius
+        }
+    }
+
+    fun hasTagAtView(viewX: Float, viewY: Float): Boolean {
+        val point = viewport.viewToDocument(viewX, viewY)
+        val hitRadius = dp(16f) / viewport.scale
+        return tags.any { tag ->
+            SelectionGeometry.squaredDistance(point.x, point.y, tag.documentX, tag.documentY) <= hitRadius * hitRadius
+        }
+    }
+
+    fun selectAtView(viewX: Float, viewY: Float): Boolean {
+        val point = viewport.viewToDocument(viewX, viewY)
+        val hitRadius = dp(16f) / viewport.scale
+        val hit = tags.asReversed().firstOrNull { tag ->
+            SelectionGeometry.squaredDistance(point.x, point.y, tag.documentX, tag.documentY) <= hitRadius * hitRadius
+        } ?: return false
+        selectedTags.clear()
+        selectedTags += hit
+        focusedIndex = null
+        invalidate()
+        onTagClicked?.invoke(hit)
+        return true
+    }
+
+    fun isPlacementPending(): Boolean = pendingKind != null
 
     fun deleteSelection(): Int {
         val count = selectedTags.size
@@ -199,7 +238,7 @@ class CanvasTagLayer(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val kind = pendingKind
-        if (kind == null) return handleSelectionTouch(event)
+        if (kind == null) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> return true
             MotionEvent.ACTION_UP -> {
@@ -217,41 +256,6 @@ class CanvasTagLayer(
             MotionEvent.ACTION_CANCEL -> return true
         }
         return true
-    }
-
-    private fun handleSelectionTouch(event: MotionEvent): Boolean {
-        val toolType = event.getToolType(event.actionIndex.coerceAtMost(event.pointerCount - 1))
-        val maySelect = toolType == MotionEvent.TOOL_TYPE_FINGER || selectionModeEnabled
-        if (!maySelect) return false
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                val point = viewport.viewToDocument(event.x, event.y)
-                val hitRadius = dp(16f) / viewport.scale
-                pressedTag =
-                    tags.asReversed().firstOrNull { tag ->
-                        SelectionGeometry.squaredDistance(point.x, point.y, tag.documentX, tag.documentY) <= hitRadius * hitRadius
-                    } ?: return false
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> return pressedTag != null
-            MotionEvent.ACTION_UP -> {
-                val tag = pressedTag ?: return false
-                pressedTag = null
-                selectedTags.clear()
-                selectedTags += tag
-                focusedIndex = null
-                performClick()
-                invalidate()
-                onTagClicked?.invoke(tag)
-                return true
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                val consumed = pressedTag != null
-                pressedTag = null
-                return consumed
-            }
-        }
-        return pressedTag != null
     }
 
     override fun performClick(): Boolean {

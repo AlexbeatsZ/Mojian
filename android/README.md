@@ -13,10 +13,11 @@ model of a future independent notebook application. It does not read or modify N
   selected frame while the corresponding pane is expanded;
 - one section `+` in the black-pane header: it adds beneath the focused section, or at notebook root
   after blank-space focus clearing;
-- per-tool flyouts and add/delete for black, blue, and red fountain pens, highlighter, whole-stroke
+- per-tool flyouts and add-only presets for black, blue, and red fountain pens, highlighter, whole-stroke
   eraser, and freeform lasso selection;
 - an icon-only drawing ribbon where the first tap selects a tool and a second tap opens its options;
-- a cursor tool that places a session-only text caret on the paper and opens the Android keyboard;
+- direct finger/mouse text creation: a blank tap creates an uncommitted caret without opening the
+  Android keyboard, and a second tap on the selected text box enters editing;
 - a clean writing canvas without duplicate breadcrumb or current-tool status overlays;
 - canvas-right search and full-page controls; full-page view uses a centered floating toolbox whose
   visibility is controlled by its pen button;
@@ -25,7 +26,8 @@ model of a future independent notebook application. It does not read or modify N
   unbounded or automatically growing paginated A4 paper, optional page title, and light/dark page backgrounds;
 - a compact page-pane `+` dialog that remembers the last successfully created page's paper,
   baseline, and color configuration without saving cancelled changes;
-- a panorama-hand toggle for one-finger panning; off restores the default two-finger-only gestures;
+- a pen-only panorama-hand toggle; finger input remains direct-content and two fingers always pan/zoom;
+- an insert-space exception that accepts finger or stylus drag and shows a dashed preview for stylus/mouse hover while leaving mouse-primary direct;
 - a File/Backstage notebook information page with a bottom Options entry; prediction and page-pane
   range live in that settings panel instead of the workspace;
 - preserved motion prediction, two-finger pan/zoom, stationary pressure erasing, undo, and clear.

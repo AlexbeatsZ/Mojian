@@ -8,27 +8,24 @@ class CanvasInputRoutingTest {
     fun middleButtonReusesPanoramaDragAndCtrlPromotesItToZoom() {
         assertEquals(
             CanvasDragIntent.PAN,
-            CanvasInputRouting.mouseDragIntent(false, true, false, false, false),
+            CanvasInputRouting.mouseDragIntent(true, false),
         )
         assertEquals(
             CanvasDragIntent.ZOOM,
-            CanvasInputRouting.mouseDragIntent(false, true, true, false, false),
+            CanvasInputRouting.mouseDragIntent(true, true),
         )
-        assertEquals(
-            CanvasDragIntent.PAN,
-            CanvasInputRouting.mouseDragIntent(true, false, false, true, false),
-        )
+        assertEquals(CanvasDragIntent.NONE, CanvasInputRouting.mouseDragIntent(false, false))
     }
 
     @Test
-    fun mouseCanLassoButNeverFallsThroughToInk() {
+    fun primaryMouseIsAlwaysReservedForDirectContentManipulation() {
         assertEquals(
-            CanvasDragIntent.LASSO,
-            CanvasInputRouting.mouseDragIntent(true, false, false, false, true),
+            CanvasDragIntent.NONE,
+            CanvasInputRouting.mouseDragIntent(false, false),
         )
         assertEquals(
             CanvasDragIntent.NONE,
-            CanvasInputRouting.mouseDragIntent(true, false, false, false, false),
+            CanvasInputRouting.mouseDragIntent(false, false),
         )
     }
 

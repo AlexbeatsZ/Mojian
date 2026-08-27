@@ -48,17 +48,16 @@ public class ViewportStateTests
     }
 
     [Theory]
-    [InlineData(true, false, true, DrawingToolKind.Pen, CanvasPointerCursorMode.Hand)]
-    [InlineData(false, true, true, DrawingToolKind.Pen, CanvasPointerCursorMode.PenDot)]
-    [InlineData(false, true, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Text)]
-    [InlineData(false, false, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Arrow)]
+    [InlineData(true, true, DrawingToolKind.Pen, CanvasPointerCursorMode.Hand)]
+    [InlineData(true, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Arrow)]
+    [InlineData(false, true, DrawingToolKind.Pen, CanvasPointerCursorMode.PenDot)]
+    [InlineData(false, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Arrow)]
     public void PointerFeedback_ReflectsPanoramaAndPhysicalStylus(
-        bool panorama,
-        bool textInsertion,
+        bool penHand,
         bool stylusInRange,
         DrawingToolKind tool,
         CanvasPointerCursorMode expected)
     {
-        Assert.Equal(expected, CanvasPointerFeedback.Resolve(panorama, textInsertion, stylusInRange, tool));
+        Assert.Equal(expected, CanvasPointerFeedback.Resolve(penHand, stylusInRange, tool));
     }
 }

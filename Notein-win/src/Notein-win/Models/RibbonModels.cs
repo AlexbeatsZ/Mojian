@@ -156,7 +156,7 @@ public class FullPageToolbarConfig
     public static readonly IReadOnlyList<string> DefaultIds = new List<string>
     {
         "draw:undo",
-        "draw:cursor",
+        "draw:redo",
         "tool:lasso-freeform",
         "tool:eraser-stroke",
         "tool:highlighter-blue",
@@ -169,4 +169,10 @@ public class FullPageToolbarConfig
     };
 }
 
-public record FullPageToolDescriptor(string Id, string Label, string IconKey, string TintHex = "#F4F4F4", bool PreserveColors = false);
+public record FullPageToolDescriptor(
+    string Id,
+    string Label,
+    string IconKey,
+    string TintHex = "#F4F4F4",
+    bool PreserveColors = false,
+    bool IsSelected = false);

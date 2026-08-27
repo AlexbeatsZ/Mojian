@@ -54,7 +54,26 @@ object SelectionGeometry {
         )
     }
 
-    /** Select boxes that overlap the lasso, not only boxes whose centre lies inside it. */
+    /** True only when the complete rectangle is inside the selection polygon. */
+    fun polygonContainsRect(polygon: List<DocumentPoint>, rect: DocumentRect): Boolean {
+        if (polygon.size < 3 || rect.isEmpty) return false
+        return listOf(
+            DocumentPoint(rect.left, rect.top),
+            DocumentPoint(rect.right, rect.top),
+            DocumentPoint(rect.right, rect.bottom),
+            DocumentPoint(rect.left, rect.bottom),
+        ).all { pointInPolygonOrBoundary(it.x, it.y, polygon) }
+    }
+
+    fun rectContainsRect(container: DocumentRect, candidate: DocumentRect): Boolean =
+        !container.isEmpty &&
+            !candidate.isEmpty &&
+            candidate.left >= container.left &&
+            candidate.top >= container.top &&
+            candidate.right <= container.right &&
+            candidate.bottom <= container.bottom
+
+    /** Legacy overlap helper retained for non-selection collision checks. */
     fun polygonIntersectsRect(polygon: List<DocumentPoint>, rect: DocumentRect): Boolean {
         if (polygon.size < 3 || rect.isEmpty) return false
         val corners =
@@ -79,6 +98,15 @@ object SelectionGeometry {
         val deltaX = x1 - x2
         val deltaY = y1 - y2
         return deltaX * deltaX + deltaY * deltaY
+    }
+
+    fun pointInPolygonOrBoundary(x: Float, y: Float, polygon: List<DocumentPoint>): Boolean {
+        if (pointInPolygon(x, y, polygon)) return true
+        val point = DocumentPoint(x, y)
+        return polygon.indices.any { index ->
+            abs(orientation(polygon[index], polygon[(index + 1) % polygon.size], point)) < 0.0001f &&
+                onSegment(polygon[index], polygon[(index + 1) % polygon.size], point)
+        }
     }
 
     fun nearestPointIndexWithinRadius(

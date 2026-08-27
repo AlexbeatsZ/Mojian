@@ -91,6 +91,25 @@ public static class SelectionGeometry
         return false;
     }
 
+    public static bool PolygonContainsRect(IList<Point> polygon, Rect rect)
+    {
+        if (polygon.Count < 3 || rect.IsEmpty) return false;
+        return new[] { rect.TopLeft, rect.TopRight, rect.BottomRight, rect.BottomLeft }
+            .All(point => PointInPolygonOrBoundary(point, polygon));
+    }
+
+    public static bool PointInPolygonOrBoundary(Point point, IList<Point> polygon)
+    {
+        if (PointInPolygon(point.X, point.Y, polygon)) return true;
+        for (var index = 0; index < polygon.Count; index++)
+        {
+            var start = polygon[index];
+            var end = polygon[(index + 1) % polygon.Count];
+            if (Math.Abs(Orientation(start, end, point)) < 0.0001 && OnSegment(start, end, point)) return true;
+        }
+        return false;
+    }
+
     public static bool LineIntersectsCircle(Point p1, Point p2, Point center, double radius)
     {
         double dx = p2.X - p1.X;

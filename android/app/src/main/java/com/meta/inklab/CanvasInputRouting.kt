@@ -4,7 +4,6 @@ enum class CanvasDragIntent {
     NONE,
     PAN,
     ZOOM,
-    LASSO,
 }
 
 enum class WheelIntent {
@@ -21,16 +20,12 @@ data class WheelDecision(
 
 object CanvasInputRouting {
     fun mouseDragIntent(
-        primaryPressed: Boolean,
         middlePressed: Boolean,
         ctrlPressed: Boolean,
-        panoramaEnabled: Boolean,
-        lassoEnabled: Boolean,
     ): CanvasDragIntent =
         when {
-            middlePressed || (primaryPressed && panoramaEnabled) ->
+            middlePressed ->
                 if (ctrlPressed) CanvasDragIntent.ZOOM else CanvasDragIntent.PAN
-            primaryPressed && lassoEnabled -> CanvasDragIntent.LASSO
             else -> CanvasDragIntent.NONE
         }
 

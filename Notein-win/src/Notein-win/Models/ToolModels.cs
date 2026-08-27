@@ -177,10 +177,7 @@ public class ToolShelf
     public ToolShelf(IEnumerable<ToolPreset>? initialTools = null)
     {
         _mutableTools = (initialTools ?? Defaults()).ToList();
-        if (_mutableTools.Count == 0)
-        {
-            _mutableTools = Defaults().ToList();
-        }
+        RestoreMissingDefaults();
         _sequence = _mutableTools.Count + 1;
         SelectedId = _mutableTools[0].Id;
     }
@@ -228,24 +225,22 @@ public class ToolShelf
         return preset;
     }
 
-    public bool DeleteSelected()
-    {
-        if (_mutableTools.Count <= 1) return false;
-        var index = _mutableTools.FindIndex(t => t.Id == SelectedId);
-        if (index < 0) return false;
-
-        _mutableTools.RemoveAt(index);
-        var nextIndex = Math.Min(index, _mutableTools.Count - 1);
-        SelectedId = _mutableTools[nextIndex].Id;
-        return true;
-    }
-
     public void RestoreFrom(ToolShelf other)
     {
         _mutableTools.Clear();
         _mutableTools.AddRange(other._mutableTools);
+        RestoreMissingDefaults();
         SelectedId = _mutableTools.Any(t => t.Id == other.SelectedId) ? other.SelectedId : _mutableTools[0].Id;
         _sequence = _mutableTools.Count + 1;
+    }
+
+    private void RestoreMissingDefaults()
+    {
+        var knownIds = _mutableTools.Select(tool => tool.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var preset in Defaults())
+        {
+            if (knownIds.Add(preset.Id)) _mutableTools.Add(preset);
+        }
     }
 
     public string ToJson()

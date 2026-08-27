@@ -1,192 +1,200 @@
-# Stylus Shortcuts, Viewport Gestures, and Pressure Erasing
+# 墨笺输入设备与交互契约
 
-Last verified: 2026-08-23
+Last verified: 2026-08-27
 
-Read this document before changing key dispatch, touch arbitration, viewport transforms, or eraser
-activation.
+修改 Android / Windows 的指针分发、对象选择、文本框、画布变换、触控笔工具、快捷键或压力橡皮前，必须先读本文。
+本文是输入行为的唯一设计来源；`workspace-ui.md` 与 `windows-desktop.md` 只能引用，不能另行定义冲突手势。
 
-## Verified device and Notein behavior
+## 1. 不可破坏的总原则
 
-### Xiaomi pen input channels
+软件同时支持触控笔、手指和鼠标，但三类设备不共享全局工具模式：
 
-The tablet exposes two independent input devices:
+- 触控笔是工具型输入，拥有自己的 Ink / Lasso / Hand 状态；钢笔、荧光笔和橡皮属于 Ink 工具族的具体预设。
+- 手指是直接内容操作加页面导航：单指操作内容，双指操作 Viewport。
+- 鼠标是桌面式直接内容操作加页面导航：左键操作内容，右键打开菜单，中键/滚轮操作 Viewport。
 
-- `NVTCapacitivePen` at `/dev/input/event11`: stylus position, normalized pressure, distance, and
-  tilt. The hardware pressure range is 0–4095 before Android normalization.
-- `Xiaomi Smart Pen Keyboard` at `/dev/input/event16`: Bluetooth keyboard-style shortcut events.
+选择触控笔套索或抓手时，只改变触控笔。手指仍执行单指点击/框选与双指页面导航，鼠标仍执行左键直接操作与中键/滚轮导航。代码中的历史字段 `singleFingerPanEnabled` 目前仅表示“触控笔抓手”，不得再用它改变手指或鼠标。
 
-The shortcut device advertises arrow, PageUp/PageDown, and Meta keys. A live `getevent` capture in
-Notein proved that the two physical buttons emit `KEY_PAGEUP` and `KEY_PAGEDOWN`; a long press holds
-the same key and a double press produces two down/up pairs. They are not delivered as
-`BTN_STYLUS` or Android's generic stylus-button MotionEvent bits.
+没有“整个软件进入套索模式”或“整个软件进入光标模式”的概念。光标/插入文本框模式已经删除；文本创建是手指和鼠标空白单击的固有行为。
 
-Notein resources contain separate configurable Xiaomi primary/secondary shortcut entries and an
-independent Xiaomi slide-gesture setting. The capture did not establish which physical label maps
-to PageUp versus PageDown, so the lab protocol names the observed keys without guessing primary or
-secondary semantics.
+## 2. 内容状态
 
-### Notein gesture and pressure-eraser evidence
+普通对象至少有未选中、已选中两态。文本框有未选中、已选中、编辑三态。
 
-Decoded Notein resources expose these settings and guides:
+空白单击产生的文本框先处于未提交临时态：
 
-- `2-Finger Swipe to Move Page`;
-- one-finger double-tap zoom as a separate optional gesture;
-- `Adaptive Stroke Width`, which makes stroke thickness scale with page zoom when enabled;
-- `Hold to Erase`, enabled by default in the decoded eraser layout;
-- an eraser sensitivity slider whose decoded companion value defaults to `20%`;
-- the guide sequence “write, lift, then press down again,” with temporary erasing ending on lift.
+- 立即显示 caret，但 Android 不主动弹出软键盘；
+- 第二次单击该已选文本框后进入正式编辑，Android 才请求软键盘；
+- 鼠标进入编辑时是否出现软键盘由硬件键盘和系统 IME 策略决定，应用不强制；
+- 第一个非空白有效字符出现后才提交进文档/快照；
+- 未输入有效内容便失焦、点击其他内容、开始框选、切换操作或开始页面导航时自动删除；
+- 未提交临时文本不持久化、不扩展页面，也不产生 Undo；输入后又清空并放弃时净结果同样不保留无意义 Undo。
 
-The protected application code does not expose the mapping from that 20% user value to normalized
-pressure, or the exact dwell and stationarity constants. The lab must show its normalized threshold
-explicitly and treat 78% / 140 ms / 2 dp as tunable research data, not recovered Notein constants.
+## 3. 手指
 
-The installed protected APK likewise exposes editor gesture class names only as unresolved
-references, including `NoteinZoomHandle`; their implementations and numeric motion thresholds are
-not defined in the shell DEX. A fresh scan of all six DEX files marks `NoteinZoomHandle` as `r`
-(referenced) rather than `d` (defined), while the defined application-loader classes belong to
-`com.sagittarius.v6`. Do not claim a Notein-specific pinch threshold from static inspection.
-The clean-room implementation instead follows Android's public gesture convention: scale slop is
-twice `ViewConfiguration.scaledTouchSlop`, with explicit pan/scale arbitration described below.
+### 单指点击
 
-## Clean-room implementation contract
+- 未选中普通对象：选中。
+- 已选中普通对象：保持选中，不激活第二种功能。
+- 未选中文本框：第一次点击只选中。
+- 已选中文本框：再次点击进入编辑、放置 caret 并请求 Android 软键盘。
+- 编辑中的文本：交给原生文本组件移动 caret、选择文字和处理输入法。
+- 空白：创建未提交临时文本框，不立即请求 Android 软键盘。
 
-### Android stylus shortcuts and shared command IDs
+这是严格的 `Select -> Edit` 两阶段文本模型。不得用双击检测器代替两次普通点击。
 
-`XiaomiStylusShortcutDispatcher` is an Android-only device boundary:
+### 单指拖动
 
-- accept PageUp/PageDown only when `InputDevice.name` exactly equals
-  `Xiaomi Smart Pen Keyboard`;
-- preserve down/up phase, repeat count, and held duration;
-- consume recognized events so the pen cannot accidentally scroll or adjust focused controls;
-  ordinary keyboard PageUp/PageDown still pass through;
-- interpret each physical key independently as delayed single tap, rapid double tap, or hold. The
-  user owns the double-tap window (150--600 ms) and hold threshold (200--1200 ms);
-- single/double tap can toggle to a chosen tool and back, undo, redo, or move to the previous/next
-  tool in actual ribbon order. Hold can temporarily select a chosen tool and restores the prior
-  tool on release;
-- a single tap waits until the double-tap window expires. A configured double action suppresses
-  both singles; without one, the two taps retain ordinary two-single behavior;
-- consume application-delivered repeats, but do not claim that Android can override a Xiaomi
-  system gesture that the OEM handles before it reaches this process.
+- 起点命中当前已选内容或选择框控制柄：越过平台 slop 后移动/缩放当前选择。
+- 其他任何起点：越过平台 slop 后开始矩形框选。
 
-The settings UI calls these `触控笔` bindings; Xiaomi device bindings are never exposed on Windows.
-Android and Windows instead share stable
-action IDs/categories for `文件`, `开始`, `插入`, `绘图`, and `视图`, with platform-local key assignments.
-Only concrete leaf actions are bindable: `重要` and `问题` are separate actions, while the parent
-tag chooser is not. Duplicate key combinations move to the newly assigned action.
+因此未选中的图片、文本、表格或其他对象不能“一拖就移动”；在它们表面起拖仍是框选。移动必须先点击选中，再从已选内容上拖动。多选框内部的空白间隙不算“已选内容命中”，从间隙起拖仍应框选。
 
-### Touch arbitration
+### 框选
 
-- Stylus/eraser tool types are the only inputs that author or erase ink and take priority while a
-  stroke is active. Finger and mouse input must never fall through to a pen/highlighter/eraser preset.
-- `插入文本框` arms only blank-canvas creation. Existing text boxes remain hit-testable regardless
-  of the selected ribbon tool. Finger double tap selects a complete text box; a later tap enters
-  editing, while a drag beyond platform slop moves the selected box and its handles resize it. A
-  confirmed blank tap exits editing and clears selection; page motion never does.
-- The canvas input host observes complete tap streams before any `EditText`, ink, lasso, or inserted
-  object child claims them. A matched text double tap is consumed at that host boundary so a lower
-  layer cannot immediately clear the new selection. Stylus events bypass text selection and use the
-  most recently selected pen while insertion is armed. A second finger cancels text/object
-  manipulation and enters the same two-finger page transform without clearing selection.
-- Page tags accept a direct finger tap for selection. While lasso is active, a stylus can also tap a
-  tag, draw a freeform selection, drag inside the resulting frame, or drag a corner handle to scale.
-- Each lasso preset switches between a freeform path and a normalized drag rectangle. Stylus and
-  mouse can lasso; finger lasso is accepted only as an exactly one-finger stream while the lasso
-  preset is selected. Adding a second finger cancels the incomplete lasso without selecting and
-  rebases into two-finger pan/pinch. The completed polygon selects overlapping text boxes and
-  non-background inserted objects in addition to ink and tags; the shared frame transforms every
-  selected content type in document coordinates.
-- The whole-stroke eraser hit-tests both ink strokes and page tags in document coordinates.
-- With the panorama-hand control off, a one-finger stream first reaches the inserted-object layer.
-  A hit image/object may consume double-tap selection, selection drag/resize, activation, or long
-  press. A miss continues to the ordinary canvas arbiter and does not write, pan, or zoom.
-- Observing an inserted object never withholds the pointer stream from the canvas arbiter. The first
-  finger `DOWN` must reach both layers so a later second pointer can establish a complete pan/pinch
-  baseline even when the gesture starts over a selected image.
-- Object-body move and handle resize remain candidates until movement exceeds the platform touch
-  slop. A stationary hold may open the object menu; motion beyond slop permanently suppresses that
-  menu for the sequence. When the panorama hand is active, object manipulation stays observational:
-  sliding over an image pans the page, while a stationary hold can still open the image menu.
-- A second finger cancels any pending object move/resize and hands the unchanged selection to the
-  two-finger transform arbiter. Page pan/zoom never clears the selected image. Only Android's
-  confirmed single-tap callback on a different object or blank canvas clears it; raw `DOWN`, drag,
-  pointer-count changes, and pinch do not.
-- With the panorama hand selected, one finger or a contacting stylus/eraser pans at 1x scale and
-  cannot author ink. Tapping the selected hand again or choosing a drawing tool restores the
-  default two-finger-only mode.
-- A mouse middle-button drag temporarily enters the exact same panorama drag state as a left-button
-  drag with the hand selected; it never toggles toolbar state. Ordinary wheel pans vertically,
-  `Shift+wheel` pans horizontally, and `Ctrl+wheel` zooms with Ctrl taking priority over Shift.
-- On Windows, holding Ctrl during a middle-button or panorama-hand drag uses radial distance from
-  the canvas center: moving toward the center zooms out and moving toward any edge zooms in. The
-  original contact point remains the zoom anchor, so direction does not depend on a vertical axis.
-- Windows shows a hand cursor as soon as panorama mode is enabled. A physical stylus hovering or
-  writing with a pen/highlighter hides the system arrow and shows a small screen-space nib dot;
-  mouse input does not masquerade as an authoring stylus.
-- Two finger pointers begin a transform candidate only when no stylus stroke is active. Centroid
-  drift below one platform touch slop and span drift below two touch slops do nothing.
-- After a candidate crosses a threshold, it initially commits to pan or scale according to the
-  larger normalized motion. A committed pan ignores span noise below scale slop but promotes to
-  scale if the same contact sequence later develops an unambiguous pinch. Scale remains committed
-  and may translate around its moving centroid. Initial commitment and pan-to-scale promotion both
-  rebase the incremental span so the page does not jump.
-- The zoom lock prevents a scale candidate from committing but does not disable a two-finger pan;
-  ribbon presets and zoom buttons are outside this touch arbiter and continue to work.
-- Adding, removing, or reindexing pointers rebases the gesture centroid and span to avoid jumps.
-- A viewport transform never changes during an active stylus stroke.
+矩形框选不要求从空白开始，默认采用完全包含选择：
 
-### Coordinate spaces
+- 文本框、图片、表格、标签和其他矩形对象的完整选择几何必须在框内；
+- 自由笔迹尽量检查所有 stroke 输入点/实际几何都在框内，不能用过度膨胀的包围盒，也不能“任一点相交即选中”；
+- 位于大图片上方的小对象可被完整框住，而只被部分覆盖的大图片不应同时选中。
 
-Finished strokes live in document coordinates. `ViewportState` owns the only document-to-view
-scale and translation:
+触控笔 Lasso 完成后的对象判定也使用完全包含语义；区别只在于它画自由路径或触控笔预设的矩形路径。
 
-- dry ink and the grid render through the document-to-view matrix;
-- apply that matrix inside `ViewStrokeRenderer.drawWithStrokes`, after the renderer captures its
-  baseline canvas transform, so its screen-space antialiasing receives the actual zoom;
-- stylus MotionEvents enter AndroidX Ink through the inverse view-to-document matrix;
-- wet ink uses AndroidX Ink's world/stroke transforms so it matches the dry renderer;
-- eraser hit testing converts the pointer through the same inverse matrix.
-- lasso selection bounds, text-box and inserted-object bounds, tag hit testing, move deltas, and
-  corner scaling all use the same document coordinate space; the overlay converts only touch and
-  rendering at its boundary.
+### 双指
 
-Zoom is anchored at the two-finger centroid, not the screen center. The lab range is 50–800%. This
-is a safe prototype limit, not a claim about Notein's full runtime range.
+双指永远操作页面，不操作对象。无论起点在空白、图片、文本、已选对象、控制柄还是笔迹上：
 
-### Pressure eraser state machine
+- 双指拖动平移整个 Canvas / Viewport；
+- 捏合缩放页面；
+- 默认不定义双指旋转。
 
-1. A completed pen stroke and lift arm pressure erasing.
-2. On a later stylus contact, pressure must remain above the displayed normalized threshold while
-   the nib stays within a small screen-space stationarity radius for the dwell interval (currently
-   140 ms). Continuing to write outside that radius restarts the timer even at high pressure.
-3. Activation cancels the provisional wet pen stroke and enters temporary erase mode.
-4. Movement erases complete strokes intersecting the visible eraser circle.
-5. Stylus lift always exits erase mode, clears the visible eraser circle, and restores the pen.
+第二根手指加入时，画布父层必须抢占完整事件流，取消尚未完成的单指框选、移动或缩放候选，丢弃未提交空文本，再进入同一套双指变换仲裁。双指序列中途抬起一指后，剩余一指在本序列结束前也不能突然变回内容拖动。
 
-The first implementation is a whole-stroke eraser. Pixel splitting, eraser-size controls, undo of
-erasures, and persistence are separate future features.
+缩放锁只阻止捏合缩放提交，不阻止双指平移；Ribbon 缩放按钮和预设仍可改变缩放。
 
-## Verification
+### 长按与双击
 
-Automated tests cover transform slop, pan-to-scale promotion, scale commitment, viewport anchoring/clamping,
-pressure-erasing arming/dwell/reset, exact Xiaomi
-device/key filtering, lasso geometry, translation/scaling geometry, and finger-only text routing.
-Real-device acceptance still requires:
+- 非文本编辑态长按对象：选中该对象并打开与鼠标右键相同的上下文菜单。
+- 文本编辑态长按：交给系统文本组件处理选词、handles、复制、剪切、粘贴和输入法行为。
+- 画布双击当前为 Reserved，不绑定选择、编辑、打开或缩放，也不引入等待双击导致的单击延迟。
 
-- two-finger pan without scale drift;
-- hand-selected one-finger pan, followed by hand deselection restoring inert one-finger input;
-- pinch zoom without a centroid jump when a finger lifts;
-- completed ink remaining sharp at 50–800% instead of scaling its 1x antialias fringe;
-- wet and dry ink remaining under the nib after zooming;
-- pressure erase not triggering on the first stroke or ordinary heavy writing;
-- eraser activation after dwell and pen restoration on lift;
-- Xiaomi PageUp/PageDown filtering, delayed single/double arbitration, temporary hold restoration,
-  user timing limits, and ordinary-keyboard separation. Physical key and OEM long-press acceptance
-  still require the tablet.
-- finger taps creating/focusing text while a hovering or contacting stylus immediately writes ink;
-- tag tap/lasso selection, whole-stroke erasure, selection drag, and all four scale handles under
-  the actual tablet touch/stylus dispatcher.
-- inserted-image finger double tap, eight-handle resize, image drag, immediate long-press menu, and
-  stylus authoring above an image under the actual tablet dispatcher.
-- selected-image two-finger pinch beginning on the image, panorama-hand swipe beginning on the image,
-  stationary long press versus moving swipe, and selection retention after page pan/zoom.
+## 4. 鼠标
+
+鼠标左键的内容语义与手指单指一致：
+
+- 左键单击未选中对象：选中；单击已选普通对象：保持选中。
+- 第一次单击文本框：选中；再次单击已选文本：进入编辑并放置 caret。
+- 左键单击空白：创建未提交临时文本框。
+- 从已选内容/控制柄起拖：移动/缩放选择。
+- 其他左键拖动：矩形框选，且采用完全包含判定。
+
+鼠标右键等价于触摸长按。文本编辑中的右键仍交给原生文本编辑菜单；其他对象使用墨笺深色命令面。
+
+Viewport 导航固定为：
+
+- 中键拖动：平移页面；
+- 普通滚轮：纵向平移；
+- `Shift + 滚轮`：横向平移；
+- `Ctrl + 滚轮`：以指针为锚缩放，Ctrl 优先于 Shift；
+- Windows 的 `Ctrl + 中键拖动`：围绕画布中心做径向缩放，并保持初始接触点为内容锚；
+- `Space + 左键拖动` 可作为临时页面抓手，但普通左键拖动的默认仍是内容框选/移动。
+
+触控笔 Hand 被选择时，鼠标指针仍是普通箭头，左键仍是内容操作；只有中键/滚轮/Space 进入鼠标页面导航。
+
+## 5. 触控笔
+
+触控笔只遵循自己的工具状态：
+
+- Ink：真实触控笔接触才写入钢笔/荧光笔，或执行所选整笔橡皮；手指和鼠标永不落入 Ink。
+- Lasso：触控笔拖动绘制自由/矩形套索，完成后按完全包含规则选择混合内容。
+- Hand：触控笔拖动平移 Viewport，不移动对象；选择其他绘图工具或再次切换抓手后退出。
+- 硬件反转橡皮和压力临时橡皮仍是触控笔专属路径。
+
+`插入空白空间` 是用户明确指定的跨设备例外，不是第四种全局笔工具：开启后，单指拖动或触控笔拖动都可推移内容；鼠标左键仍按本契约直接选择/编辑/框选。触控笔和鼠标具有悬浮状态，因此两者悬浮时都显示当前插入位置的虚线预览；手指没有悬浮，只在按下拖动后显示操作线。第二根手指加入仍取消当前插入候选并进入 Viewport 导航。除明确记录的此类命令外，未来辅助命令不得擅自接管其他设备。
+
+触控笔开始写、套索或抓手操作时，应丢弃未提交空文本，但不应仅因为切换笔工具就清除手指/鼠标建立的对象选择。触控笔 Ink 默认不承担直接点击选对象、移动对象或创建文本。
+
+快捷键允许持久切换与 spring-loaded 临时工具：短按可切换触控笔工具，按住可临时进入目标工具，松开恢复先前工具。具体按键绑定由快捷设置保存，不写死在本契约中。
+
+## 6. 输入优先级
+
+```text
+Touch
+第二根手指加入         -> 取消单指候选 / 临时空文本 -> Viewport Pan / Zoom
+已在正式文本编辑中     -> 原生文本组件
+已选内容或控制柄上拖动 -> Move / Resize Selection
+其他单指拖动           -> Rectangle Marquee
+单指点击               -> Select / Edit Selected Text / Create Temporary Text
+```
+
+```text
+Mouse
+Middle Drag            -> Viewport Pan
+Ctrl + Middle Drag     -> Viewport Radial Zoom (Windows)
+Ctrl / Shift / Wheel   -> Viewport Zoom / Horizontal Pan / Vertical Pan
+Right Click            -> Context Menu
+Left Drag on Selection -> Move / Resize Selection
+Other Left Drag        -> Rectangle Marquee
+Left Click             -> Select / Edit Selected Text / Create Temporary Text
+```
+
+```text
+Pen
+Pen Tool = Ink         -> Stroke / Highlighter / Eraser
+Pen Tool = Lasso       -> Pen Lasso Selection
+Pen Tool = Hand        -> Viewport Pan
+```
+
+## 7. 跨层实现边界
+
+Android 的 `CanvasInputHost` 必须在 `EditText`、选择层、笔迹层和插入对象层之前观察完整 pointer stream。第二指抢占属于父层，因为子 View 一旦消费第一指的 `DOWN`，后续事件不能靠另一个 sibling 可靠接管。`SelectionOverlayView` 统一实现手指/主鼠标的单指候选、移动/缩放、矩形框选、长按和八控制柄；插入对象层不再单独定义双击选择或一拖即移动。
+
+插入空白空间开启时，Android 父层还必须先接管单指序列，确保手指从文本或对象表面起拖也能执行插入；第二指分支仍排在它之前。选择层只为手指让路，鼠标左键继续走直接内容状态机。Windows 同样只把单指触摸和真实笔送入插入动作，鼠标仅提供悬浮虚线并保留左键直接操作。
+
+Windows 的 `NoteCanvas` 同样在一个直接操作状态机内处理鼠标左键和触摸单指；WPF preview touch boundary负责在文本控件已经消费第一指时仍观察第二指。`DirectInputPolicy` 是两端测试的设备独立决策表，不能重新加入“所选笔工具决定手指/鼠标”的参数。
+
+旧配置里残留的 `draw:cursor` 只作为未知 stale ID 被过滤，不迁移成其他命令，也不在 Ribbon、快捷目录或全页工具栏目录出现。
+
+## 8. 坐标与渲染
+
+完成的笔迹、标签、文本框、插入对象、套索和选择框都使用文档坐标。`ViewportState` 是唯一的文档/视图变换所有者：
+
+- 触摸/鼠标命中在边界处从 view 转 document；
+- 移动增量、完整包含判定、控制柄缩放和持久化在 document space 完成；
+- AndroidX Ink 的 wet/dry transform 必须保持一致；
+- 缩放锚是双指 centroid 或鼠标指针，而不是任意固定屏幕点；
+- 触控笔书写期间不得改变 Viewport。
+
+缩放范围仍为 50–800%。这是墨笺产品范围，不是对 Notein 私有运行时的推断。
+
+## 9. Xiaomi 触控笔快捷键
+
+实机证明 `NVTCapacitivePen` 提供位置/压力/倾角，`Xiaomi Smart Pen Keyboard` 以 PageUp/PageDown 键盘事件提供两个实体快捷键。只在设备名完全等于 `Xiaomi Smart Pen Keyboard` 时拦截，普通键盘 PageUp/PageDown 必须保持原义。
+
+每个实体键独立支持单击、急促双击和按住；双击窗口 150–600 ms，按住阈值 200–1200 ms，由用户设置。这里的“双击”是实体快捷键时序，不是画布双击手势。单击若需等待双击判定，只能延迟快捷键动作，不能延迟画布单击。
+
+## 10. 压力临时橡皮
+
+1. 完成一笔并抬起后才允许压力橡皮候选。
+2. 后续接触需在显示阈值以上并在小屏幕半径内停留可调 dwell；移动超出半径重置计时。
+3. 激活时取消临时 wet stroke，进入整笔擦除。
+4. 抬笔无条件退出并清除可见橡皮圈。
+
+Notein 资源只证明默认开启 hold-to-erase 和可见默认灵敏度 20%，没有证明 20% 到标准化压力的映射或精确 dwell/slop。墨笺参数必须继续明确可调，不得称为恢复出的 Notein 常量。
+
+## 11. 验证要求
+
+自动测试至少覆盖：
+
+- 笔工具状态不参与手指/鼠标 direct-pointer 决策；
+- 第二指在任何命中目标上都得到 Viewport 优先权；
+- 只有已选内容可拖动，其他起点进入矩形框选；
+- 完整包含选择拒绝仅部分覆盖的大对象，边界上的完整对象仍可选；
+- 临时空文本不进入快照/持久化/Undo，首个有效字符提交，失焦或页面导航删除；
+- 文本严格 Select -> Edit，不存在画布双击动作；
+- 鼠标中键/滚轮与触控笔 Hand 互不污染；
+- 触控笔 Lasso/Ink/Hand 不改变手指和鼠标语义；
+- 插入空白空间允许单指/笔拖动、笔/鼠标悬浮预览，但鼠标左键仍是直接内容操作；
+- 双指变换 slop、pan-to-pinch promotion、缩放锁和指针重排无跳变。
+
+真实设备验收仍需覆盖 Android 软键盘首次不弹、第二次点击弹出、编辑态系统长按、在大型图片表面框选小对象、第二指中断单指框选，以及触控笔 Ink/Lasso/Hand 与手指/鼠标并行互不串模式。

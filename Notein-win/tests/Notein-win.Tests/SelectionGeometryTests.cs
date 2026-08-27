@@ -51,6 +51,16 @@ public class SelectionGeometryTests
     }
 
     [Fact]
+    public void PolygonContainsRect_RequiresCompleteContainment()
+    {
+        var polygon = new List<Point> { new(0, 0), new(100, 0), new(100, 100), new(0, 100) };
+
+        Assert.True(SelectionGeometry.PolygonContainsRect(polygon, new Rect(20, 20, 60, 60)));
+        Assert.True(SelectionGeometry.PolygonContainsRect(polygon, new Rect(0, 0, 100, 100)));
+        Assert.False(SelectionGeometry.PolygonContainsRect(polygon, new Rect(80, 80, 50, 50)));
+    }
+
+    [Fact]
     public void SelectionHandles_ExposeEightAndroidCompatiblePositions()
     {
         var handles = SelectionGeometry.SelectionHandles(new Rect(10, 20, 80, 40));

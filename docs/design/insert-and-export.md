@@ -45,17 +45,19 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   rendering bypass the view filter.
 - Tables are page objects with an explicit row/column count and cell strings. The size picker adds
   a table and tapping that table opens its cell editor.
-- On Android, a finger double tap selects any non-background inserted object, including an image,
-  PDF printout, sticker, table, attachment, spreadsheet, or note link. A selected object can be
-  dragged by its body or resized from eight compact square handles on a light dotted frame. Each
+- On Android and Windows, one ordinary finger/primary-mouse click selects any non-background
+  inserted object, including an image, PDF printout, sticker, table, attachment, spreadsheet, or
+  note link. Only an already selected object can be dragged by its body or resized from eight compact
+  square handles on the shared light dotted frame. Each
   handle keeps an approximately 48 dp invisible touch target; corner handles change two
   axes and edge handles change one axis. Holding reaches the context menu before release.
   Immutable PDF page-background objects never participate in this direct selection path.
 - Overlapping handle hit regions resolve to the nearest handle, not the first handle in drawing
   order. Body move and resize commit only after platform touch slop. Canvas pan/pinch keeps the
   object selected; a confirmed single tap elsewhere is the sole deselection gesture.
-- The lasso's rectangle and freeform variants select every non-background inserted object whose
-  document bounds overlap the completed polygon. Images can therefore join ink, tags, and text
+- The stylus lasso's rectangle/freeform variants and the direct-input rectangular marquee select
+  every non-background inserted object whose complete document bounds are contained by the completed
+  region; partial overlap is not enough. Images can therefore join ink, tags, and text
   boxes in one shared move/scale/delete selection; immutable PDF page backgrounds remain excluded.
 - Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
   four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise
@@ -63,8 +65,8 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   Order and rotation are right-side submenus; unavailable link/move/crop commands remain visibly
   disabled instead of silently disappearing. Rotation quarter-turns, both flip flags, size, position,
   and background state are persisted in page JSON with backward-compatible defaults.
-- Windows mirrors this object contract with direct double-click selection, the same dotted eight-handle
-  frame, mixed freeform/rectangle lasso selection, pointer-positioned dark context menus, asset-aware
+- Windows mirrors this object contract with ordinary-click selection, the same dotted eight-handle
+  frame, mixed pen-lasso/direct-marquee containment selection, pointer-positioned dark context menus, asset-aware
   clipboard copies, persisted image transforms, and immutable PDF page backgrounds. The platform's
   light menu template and icon gutter are not used.
 - Windows `.mjn` output serializes PDF page view settings as Android `PaperSize.PDF`, includes the

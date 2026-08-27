@@ -64,7 +64,6 @@ class FullPageToolbarConfig(initialIds: List<String> = DEFAULT_IDS) {
             listOf(
                 "draw:undo",
                 "draw:redo",
-                "draw:cursor",
                 "tool:lasso-freeform",
                 "tool:eraser-stroke",
                 "tool:highlighter-blue",

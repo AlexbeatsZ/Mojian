@@ -84,7 +84,7 @@ public class UiRenderTests
                 AssertRenderedIconIsCentered(normalFullPageButton);
                 var leftCanvas = Assert.IsType<NoteCanvas>(window.FindName("LeftCanvas"));
                 vm.SingleFingerPanEnabled = true;
-                Assert.Same(System.Windows.Input.Cursors.Hand, leftCanvas.Cursor);
+                Assert.Same(System.Windows.Input.Cursors.Arrow, leftCanvas.Cursor);
                 vm.SingleFingerPanEnabled = false;
 
                 // 5. Add Page dialog

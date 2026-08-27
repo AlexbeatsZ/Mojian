@@ -80,7 +80,6 @@ public partial class MainWindow : Window
         canvas.ResolveAssetPath = name => canvas.Document == null ? string.Empty : ViewModel.ResolveAsset(canvas.Document, name);
         canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
-        canvas.ObjectActivated += OnObjectActivated;
         canvas.ObjectContextRequested += OnObjectContextRequested;
     }
 
@@ -122,6 +121,9 @@ public partial class MainWindow : Window
         if (sender is not NoteCanvas canvas || canvas.Document == null) return;
         var item = e.Value;
         var menu = new ContextMenu();
+
+        AddMenuItem(menu, item.Kind == PageObjectKind.Table ? "编辑" : "打开", () => OnObjectActivated(canvas, e));
+        menu.Items.Add(new Separator());
 
         AddMenuItem(menu, "剪切", () => CaptureObjectClipboard(canvas, item, cut: true));
         AddMenuItem(menu, "复制", () => CaptureObjectClipboard(canvas, item, cut: false));
@@ -399,7 +401,7 @@ public partial class MainWindow : Window
 
     private void OnAddToolMenuClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button) return;
+        if (sender is not FrameworkElement button) return;
         var menu = new ContextMenu();
         AddMenuItem(menu, "添加钢笔", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Pen));
         AddMenuItem(menu, "添加荧光笔", () => ViewModel.AddToolCommand.Execute(DrawingToolKind.Highlighter));
@@ -409,11 +411,19 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
+    private void OnToolPresetClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton button || button.DataContext is not ToolPreset tool) return;
+        ToolFlyoutPopup.PlacementTarget = button;
+        ViewModel.SelectToolCommand.Execute(tool.Id);
+    }
+
     private void OnFullPageToolClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string id) return;
+        if (sender is not FrameworkElement button || button.Tag is not string id) return;
         if (id.StartsWith("tool:", StringComparison.Ordinal))
         {
+            ToolFlyoutPopup.PlacementTarget = button;
             ViewModel.SelectToolCommand.Execute(id[5..]);
             return;
         }
@@ -429,7 +439,7 @@ public partial class MainWindow : Window
         switch (id)
         {
             case "draw:undo": FocusedCanvas.Undo(); break;
-            case "draw:cursor": ViewModel.TextInsertionArmed = !ViewModel.TextInsertionArmed; break;
+            case "draw:redo": FocusedCanvas.Redo(); break;
             case "draw:add": OnAddToolMenuClick(button, e); break;
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; break;
             case "draw:insert_space": ViewModel.InsertSpaceModeEnabled = !ViewModel.InsertSpaceModeEnabled; break;
@@ -474,7 +484,7 @@ public partial class MainWindow : Window
 
     private void OnBackgroundFormatClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button) return;
+        if (sender is not FrameworkElement button) return;
         var menu = new ContextMenu();
         AddBackground(menu, "标准网格", CanvasBackgroundFormat.GridStandard);
         AddBackground(menu, "密集网格", CanvasBackgroundFormat.GridDense);
@@ -700,7 +710,7 @@ public partial class MainWindow : Window
 
     private void OnHomeCommandClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || !Enum.TryParse<HomeCommand>(button.Tag?.ToString(), out var command)) return;
+        if (sender is not FrameworkElement button || !Enum.TryParse<HomeCommand>(button.Tag?.ToString(), out var command)) return;
         switch (command)
         {
             case HomeCommand.Paste: FocusedTextBox()?.Paste(); break;
@@ -956,7 +966,6 @@ public partial class MainWindow : Window
             case "insert:link": OnInsertLinkClick(this, new RoutedEventArgs()); return true;
             case "draw:undo": FocusedCanvas.Undo(); return true;
             case "draw:redo": FocusedCanvas.Redo(); return true;
-            case "draw:cursor": ViewModel.TextInsertionArmed = !ViewModel.TextInsertionArmed; return true;
             case "draw:previous-tool": return ViewModel.CycleDrawingTool(-1);
             case "draw:next-tool": return ViewModel.CycleDrawingTool(1);
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; return true;
