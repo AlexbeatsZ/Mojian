@@ -144,9 +144,9 @@
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="文件附件" Click="OnInsertAttachmentClick"><Path Data="{StaticResource Fluent_attach}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="文件打印样式" Click="OnInsertPdfPrintoutClick"><Path Data="{StaticResource Fluent_document_page}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="电子表格" Click="OnInsertSpreadsheetClick"><Path Data="{StaticResource Fluent_table_simple}" Fill="#49AA6B" Width="22" Height="22" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="电子表格" Click="OnInsertSpreadsheetClick"><Path Data="{StaticResource Fluent_table_simple}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="图片" Click="OnInsertImageClick"><Path Data="{StaticResource Fluent_image}" Fill="#569CD6" Width="22" Height="22" /></Button>
+                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="图片" Click="OnInsertImageClick"><Path Data="{StaticResource Fluent_image}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="贴纸" Click="OnInsertStickerClick"><Path Data="{StaticResource Fluent_sticker}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="46" Margin="0" ToolTip="链接" Click="OnInsertLinkClick"><Path Data="{StaticResource Fluent_link}" Fill="{StaticResource TextPrimary}" Width="22" Height="22" /></Button>
@@ -234,13 +234,14 @@
                             <ItemsControl ItemsSource="{Binding SectionRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Style="{StaticResource PaneRow}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
+                                        <Border Style="{StaticResource PaneRow}" MinHeight="38" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnSectionRowRightClick">
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" /></Grid.InputBindings>
-                                                <DockPanel Margin="{Binding Indent}">
-                                                    <Button DockPanel.Dock="Left" Width="24" Background="Transparent" BorderThickness="0" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
-                                                        <Path Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" Visibility="{Binding HasChildren, Converter={StaticResource BoolToVisibility}}" />
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Left" Width="20" Background="Transparent" BorderThickness="0" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
+                                                        <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextSecondary}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Button>
+                                                    <Border DockPanel.Dock="Left" Width="4" Height="22" Background="{Binding SectionColorBrush}" CornerRadius="2" Margin="0,0,8,0" VerticalAlignment="Center" />
                                                     <TextBlock Text="{Binding Section.Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                                 </DockPanel>
                                             </Grid>
@@ -252,28 +253,42 @@
                     </DockPanel>
                 </Border>
 
-                <Border Grid.Column="2" Width="196" Background="{StaticResource PagePaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
+                <Border Grid.Column="2" Width="220" Background="{StaticResource PagePaneBackground}" BorderBrush="{StaticResource BorderHairline}" BorderThickness="0,0,1,0"
                         Visibility="{Binding IsPagePaneVisible, Converter={StaticResource BoolToVisibility}}">
                     <DockPanel>
-                        <Button DockPanel.Dock="Top" Content="+ 添加页面" Height="36" IsEnabled="{Binding CanAddPage}" Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimary}" HorizontalContentAlignment="Left" Padding="12,0" Click="OnAddPageClick" />
+                        <Grid DockPanel.Dock="Top" Height="36">
+                            <Border Height="1" Background="{StaticResource BorderHairline}" VerticalAlignment="Bottom" />
+                            <Button Style="{StaticResource RibbonIconButtonStyle}" Width="28" Height="28" HorizontalAlignment="Right" Margin="0,0,8,0"
+                                    ToolTip="新建页面" IsEnabled="{Binding CanAddPage}" Click="OnAddPageClick">
+                                <Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" Width="14" Height="14" />
+                            </Button>
+                        </Grid>
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding PagePaneRows}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border MinHeight="44" Padding="{Binding Indent}" PreviewMouseRightButtonUp="OnPageRowRightClick">
+                                        <Border MinHeight="48" Margin="5,1,5,1" Padding="{Binding Indent}" CornerRadius="2" PreviewMouseRightButtonUp="OnPageRowRightClick">
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectPageCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" /></Grid.InputBindings>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource TextMuted}" FontSize="10" Margin="0,2,0,0" />
+                                                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Subtitle}" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,2,0,0" />
                                                 </StackPanel>
-                                                <TextBlock Grid.Column="1" Text="PDF" Foreground="{StaticResource TextMuted}" FontSize="9" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
+                                                <TextBlock Grid.Column="1" Text="PDF" Foreground="{StaticResource TextSecondary}" FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
                                             </Grid>
                                             <Border.Style>
-                                                <Style TargetType="Border" BasedOn="{StaticResource PaneRow}">
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="Transparent" />
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsHeader}" Value="True"><Setter Property="MinHeight" Value="28" /><Setter Property="Background" Value="#232323" /><Setter Property="IsHitTestVisible" Value="False" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource SelectedOverlay}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsHeader}" Value="True">
+                                                            <Setter Property="MinHeight" Value="28" />
+                                                            <Setter Property="Background" Value="#232323" />
+                                                            <Setter Property="IsHitTestVisible" Value="False" />
+                                                        </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>

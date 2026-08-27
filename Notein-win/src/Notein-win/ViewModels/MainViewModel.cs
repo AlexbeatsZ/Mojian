@@ -223,11 +223,51 @@ public sealed class MainViewModel : ObservableObject
             ActiveWorkspace.SelectFirstPage(value);
             LoadSelectedIntoFocusedSlot();
             OnPropertyChanged();
+            OnPropertyChanged(nameof(PagePaneModeButtonText));
             SaveSettings();
             SaveLibrary();
             RefreshNavigation();
         }
     }
+
+    public string PredictionButtonText => PredictionEnabled ? "开启" : "关闭";
+    public string PagePaneModeButtonText => PagePaneMode == PagePaneMode.CurrentSection ? "本层" : "递归";
+    public string ImageDisplayModeButtonText => ImageDisplayMode switch
+    {
+        ImageImportDisplayMode.Invert => "自动反色",
+        ImageImportDisplayMode.Original => "保持原图",
+        _ => "导入时询问"
+    };
+    public string PdfDisplayModeButtonText => PdfDisplayMode switch
+    {
+        ImageImportDisplayMode.Invert => "自动反色",
+        ImageImportDisplayMode.Original => "保持原图",
+        _ => "导入时询问"
+    };
+
+    public ICommand TogglePredictionCommand => new RelayCommand(() =>
+    {
+        PredictionEnabled = !PredictionEnabled;
+        OnPropertyChanged(nameof(PredictionButtonText));
+    });
+
+    public ICommand TogglePagePaneModeCommand => new RelayCommand(() =>
+    {
+        PagePaneMode = PagePaneMode == PagePaneMode.CurrentSection ? PagePaneMode.Recursive : PagePaneMode.CurrentSection;
+        OnPropertyChanged(nameof(PagePaneModeButtonText));
+    });
+
+    public ICommand CycleImageDisplayModeCommand => new RelayCommand(() =>
+    {
+        ImageDisplayMode = (ImageImportDisplayMode)(((int)ImageDisplayMode + 1) % 3);
+        OnPropertyChanged(nameof(ImageDisplayModeButtonText));
+    });
+
+    public ICommand CyclePdfDisplayModeCommand => new RelayCommand(() =>
+    {
+        PdfDisplayMode = (ImageImportDisplayMode)(((int)PdfDisplayMode + 1) % 3);
+        OnPropertyChanged(nameof(PdfDisplayModeButtonText));
+    });
 
     public bool CanAddPage => ActiveWorkspace.HasSelectedSection();
 

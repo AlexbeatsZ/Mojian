@@ -112,6 +112,7 @@
 - [x] Initialize and port Notein-win Windows desktop frontend (.NET 10 WPF MVVM) with OneNote-style dark workspace, ribbons, recursive section navigation, dual-mode page pane, multi-layer canvas, and full xUnit test suite.
 - [x] Replace the rejected Notein-win prototype with the persistent Windows desktop product defined in `docs/design/windows-desktop.md`, then publish and exercise its actual self-contained Release EXE.
 - [x] Reconcile the Windows document interaction and Page/PDF creation paths with the latest Android model, then repeat isolated real-Release persistence and menu acceptance.
+- [x] Capture and compare real Android vs Windows screenshots, align Windows UI 1:1 with Android baseline across PageCreationDialog card layout, sidebar section color strips/chevrons/page headers, Insert ribbon icon tinting, and Backstage Options cards.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.

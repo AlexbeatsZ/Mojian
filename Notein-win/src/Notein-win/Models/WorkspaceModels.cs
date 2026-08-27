@@ -119,11 +119,16 @@ public sealed class SectionNode
 
 public sealed class SectionRow
 {
+    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
+
     public SectionNode Section { get; }
     public int Depth { get; }
-    public Thickness Indent => new(Depth * 14, 0, 0, 0);
+    public Thickness Indent => new(14 + Depth * 15, 0, 7, 0);
     public bool HasChildren => Section.Children.Count > 0;
+    public string Chevron => HasChildren ? (Section.Expanded ? "⌄" : "›") : string.Empty;
     public bool IsSelected { get; }
+    public string SectionColorHex => SectionColors[Math.Abs(Depth + 1) % SectionColors.Length];
+    public System.Windows.Media.Brush SectionColorBrush => new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SectionColorHex));
 
     public SectionRow(SectionNode section, int depth, bool isSelected = false)
     {

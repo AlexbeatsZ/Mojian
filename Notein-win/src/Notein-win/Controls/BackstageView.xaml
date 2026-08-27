@@ -157,28 +157,76 @@
                     </ItemsControl>
                 </StackPanel>
 
-                <StackPanel Visibility="{Binding IsBackstageOptions, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="选项" Foreground="{StaticResource TextPrimary}" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,22" />
-                    <TextBlock Text="页面窗格" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                        <RadioButton Content="本层" Foreground="{StaticResource TextPrimary}" Margin="0,0,20,0" Command="{Binding SetPagePaneModeCommand}" CommandParameter="{x:Static models:PagePaneMode.CurrentSection}" />
-                        <RadioButton Content="递归" Foreground="{StaticResource TextPrimary}" Command="{Binding SetPagePaneModeCommand}" CommandParameter="{x:Static models:PagePaneMode.Recursive}" />
-                    </StackPanel>
-                    <CheckBox Content="启用湿笔迹预测" IsChecked="{Binding PredictionEnabled}" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,20" />
-                    <TextBlock Text="整页视图" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold" Margin="0,8,0,8" />
-                    <Button Content="配置快捷工具栏" Style="{StaticResource ActionCard}" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Toolbar" Margin="0,0,0,20" />
-                    <TextBlock Text="图片导入" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
-                        <Button Content="询问" Style="{StaticResource ActionCard}" Command="{Binding SetImageDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Ask}" />
-                        <Button Content="自动反色" Style="{StaticResource ActionCard}" Margin="8,4" Command="{Binding SetImageDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Invert}" />
-                        <Button Content="保持原图" Style="{StaticResource ActionCard}" Command="{Binding SetImageDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Original}" />
-                    </StackPanel>
-                    <TextBlock Text="PDF 打印输出" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="询问" Style="{StaticResource ActionCard}" Command="{Binding SetPdfDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Ask}" />
-                        <Button Content="自动反色" Style="{StaticResource ActionCard}" Margin="8,4" Command="{Binding SetPdfDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Invert}" />
-                        <Button Content="保持原图" Style="{StaticResource ActionCard}" Command="{Binding SetPdfDisplayModeCommand}" CommandParameter="{x:Static models:ImageImportDisplayMode.Original}" />
-                    </StackPanel>
+                <StackPanel Visibility="{Binding IsBackstageOptions, Converter={StaticResource BoolToVisibility}}" MaxWidth="820">
+                    <TextBlock Text="墨笺选项" Foreground="{StaticResource TextPrimary}" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24" />
+                    
+                    <!-- Section 1: 绘图与页面 -->
+                    <TextBlock Text="绘图与页面" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,12" />
+
+                    <!-- Row 1: 笔迹预测 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding PredictionButtonText}" Command="{Binding TogglePredictionCommand}"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="笔迹预测" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="使用预测触点降低快速书写时的视觉延迟。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Row 2: 页面栏显示范围 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding PagePaneModeButtonText}" Command="{Binding TogglePagePaneModeCommand}"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="页面栏显示范围" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="本层只显示当前分区页面；递归还显示所有子分区及其页面。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Row 3: 图片导入显示 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding ImageDisplayModeButtonText}" Command="{Binding CycleImageDisplayModeCommand}"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="图片导入显示" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="只改变画布查看效果；原图与导出始终保持不变。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Row 4: PDF 打印样式显示 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding PdfDisplayModeButtonText}" Command="{Binding CyclePdfDisplayModeCommand}"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="PDF 打印样式显示" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="逐页导入时使用查看滤镜；原 PDF 与导出页面不反色。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Section 2: 整页视图 -->
+                    <TextBlock Text="整页视图" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold" Margin="0,24,0,6" />
+                    <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,12" />
+
+                    <!-- Row 1: 快捷工具栏 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="配置" Command="{Binding SelectBackstageTabCommand}" CommandParameter="Toolbar"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="快捷工具栏" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="添加或移除任意开始、绘图按钮；整页视图中可横向滑动使用。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
                 </StackPanel>
             </Grid>
         </ScrollViewer>
