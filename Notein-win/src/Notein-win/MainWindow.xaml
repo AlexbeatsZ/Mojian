@@ -5,6 +5,7 @@
         xmlns:controls="clr-namespace:Notein_win.Controls"
         xmlns:vm="clr-namespace:Notein_win.ViewModels"
         Title="墨笺" Height="820" Width="1280" MinHeight="620" MinWidth="920"
+        Icon="Assets/mojian.png"
         WindowStyle="SingleBorderWindow" ResizeMode="CanResize" AllowsTransparency="False"
         Background="{StaticResource WindowBackground}"
         FontFamily="Segoe UI Variable, Microsoft YaHei UI"

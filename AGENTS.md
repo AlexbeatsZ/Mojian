@@ -113,6 +113,7 @@
 - [x] Replace the rejected Notein-win prototype with the persistent Windows desktop product defined in `docs/design/windows-desktop.md`, then publish and exercise its actual self-contained Release EXE.
 - [x] Reconcile the Windows document interaction and Page/PDF creation paths with the latest Android model, then repeat isolated real-Release persistence and menu acceptance.
 - [x] Capture and compare real Android vs Windows screenshots, align Windows UI 1:1 with Android baseline across PageCreationDialog card layout, sidebar section color strips/chevrons/page headers, Insert ribbon icon tinting, and Backstage Options cards.
+- [x] Generate brand app icon for 墨笺 (Mojian) featuring obsidian squircle, notebook page, and glowing lavender fountain pen nib; apply to Windows PC (EXE icon/Assets) and Android tablet (adaptive/round mipmaps), publish Release build, install to tablet, and create desktop shortcut.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
 - [ ] Collect the user's unplugged subjective feedback on the single adjustable stroke, especially nib alignment, taper, and pressure/ink-flow response.
 - [ ] Prove a read-only Notein stroke renderer before any write-back experiment.

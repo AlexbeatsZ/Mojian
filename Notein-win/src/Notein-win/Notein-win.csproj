@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,6 +10,11 @@
     <AssemblyName>Mojian</AssemblyName>
     <Product>墨笺</Product>
     <Version>0.5.0</Version>
+    <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\mojian.png" />
+  </ItemGroup>
 
 </Project>
