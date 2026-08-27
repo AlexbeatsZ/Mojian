@@ -870,8 +870,6 @@ public partial class MainWindow : Window
             ViewModel.SetSelectedLassoShape(shape);
     }
 
-    private void OnDeleteSelectionClick(object sender, RoutedEventArgs e) => FocusedCanvas.DeleteSelection();
-
     private void OnToolSettingChanged(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
@@ -889,6 +887,11 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (FocusedTextBox() == null && DirectInputPolicy.IsSelectionDeleteKey(e.Key, Keyboard.Modifiers) && FocusedCanvas.DeleteSelection())
+        {
+            e.Handled = true;
+            return;
+        }
         var gesture = ShortcutGesture.FromEvent(e);
         var shortcutAction = ViewModel.FindShortcutAction(gesture);
         if (shortcutAction != null && ExecuteShortcutAction(shortcutAction))

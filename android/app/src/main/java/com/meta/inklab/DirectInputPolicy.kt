@@ -1,5 +1,7 @@
 package com.meta.inklab
 
+import android.view.KeyEvent
+
 /** Device-independent direct-manipulation policy for finger and primary-mouse input. */
 enum class DirectPointerDownIntent {
     IGNORE,
@@ -16,6 +18,17 @@ enum class DirectInputDevice {
 }
 
 object DirectInputPolicy {
+    fun isSelectionDeleteKey(
+        keyCode: Int,
+        action: Int,
+        repeatCount: Int,
+        hasModifiers: Boolean,
+    ): Boolean =
+        action == KeyEvent.ACTION_DOWN &&
+            repeatCount == 0 &&
+            !hasModifiers &&
+            (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)
+
     fun canDragInsertSpace(device: DirectInputDevice): Boolean =
         device == DirectInputDevice.FINGER || device == DirectInputDevice.PEN
 

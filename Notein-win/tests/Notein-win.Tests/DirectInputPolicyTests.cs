@@ -1,4 +1,5 @@
 using Notein_win.Services;
+using System.Windows.Input;
 using Xunit;
 
 namespace Notein_win.Tests;
@@ -41,5 +42,14 @@ public class DirectInputPolicyTests
         Assert.False(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Finger));
         Assert.True(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Mouse));
         Assert.True(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Pen));
+    }
+
+    [Theory]
+    [InlineData(Key.Delete)]
+    [InlineData(Key.Back)]
+    public void DeleteAndBackspaceDeleteCanvasSelection(Key key)
+    {
+        Assert.True(DirectInputPolicy.IsSelectionDeleteKey(key, ModifierKeys.None));
+        Assert.False(DirectInputPolicy.IsSelectionDeleteKey(key, ModifierKeys.Control));
     }
 }

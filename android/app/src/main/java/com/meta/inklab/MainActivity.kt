@@ -400,6 +400,15 @@ class MainActivity : Activity() {
         if (shortcutDispatcher.dispatch(event)) return true
         val keyIdentity = event.deviceId to event.keyCode
         if (event.action == KeyEvent.ACTION_UP && consumedKeyboardShortcutKeys.remove(keyIdentity)) return true
+        if (
+            currentFocus !is EditText &&
+            DirectInputPolicy.isSelectionDeleteKey(event.keyCode, event.action, event.repeatCount, !event.hasNoModifiers())
+        ) {
+            if (deleteContentSelection() > 0) {
+                consumedKeyboardShortcutKeys += keyIdentity
+                return true
+            }
+        }
         val chord = ShortcutKeyChord.fromEvent(event)
         if (chord != null) {
             keyboardShortcutSettings.actionFor(chord)?.let { actionId ->
@@ -3834,14 +3843,7 @@ class MainActivity : Activity() {
                     },
                 )
                 addToolDetailLine(detailHint("选择笔迹、标记、文字框和图片"))
-                addToolDetailLine(
-                    detailChip("删除所选 ${selectedContentCount()}", selectedContentCount() > 0) {
-                        val removed = deleteContentSelection()
-                        if (removed == 0) Toast.makeText(this, "请先选择内容", Toast.LENGTH_SHORT).show()
-                        renderToolDetails()
-                    },
-                )
-                addToolDetailLine(detailHint("在框内按住拖动；拖动四角缩放"))
+                addToolDetailLine(detailHint("Backspace / Delete 删除所选；在框内按住拖动；拖动控点缩放"))
             }
         }
 

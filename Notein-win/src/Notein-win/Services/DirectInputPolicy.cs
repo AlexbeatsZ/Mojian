@@ -1,3 +1,5 @@
+using System.Windows.Input;
+
 namespace Notein_win.Services;
 
 public enum DirectPointerDownIntent
@@ -18,6 +20,9 @@ public enum DirectInputDevice
 
 public static class DirectInputPolicy
 {
+    public static bool IsSelectionDeleteKey(Key key, ModifierKeys modifiers) =>
+        modifiers == ModifierKeys.None && key is Key.Delete or Key.Back;
+
     public static bool CanDragInsertSpace(DirectInputDevice device) =>
         device is DirectInputDevice.Finger or DirectInputDevice.Pen;
 

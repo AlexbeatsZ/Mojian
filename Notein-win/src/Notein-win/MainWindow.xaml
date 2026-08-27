@@ -546,8 +546,7 @@
                                       Style="{StaticResource RibbonToggleButtonStyle}" Height="30" MinWidth="64" Click="OnSetLassoShapeClick" />
                     </StackPanel>
                     <TextBlock Text="可同时选择笔迹、标记、文本框和插入对象" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Margin="0,8,0,0" />
-                    <Button Content="删除所选" Style="{StaticResource RibbonIconButtonStyle}" HorizontalContentAlignment="Left" Margin="0,8,0,0" Click="OnDeleteSelectionClick" />
-                    <TextBlock Text="拖动框内移动；八个方形控点缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
+                    <TextBlock Text="Backspace / Delete 删除所选；拖动框内移动；八个方形控点缩放" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" />
                 </StackPanel>
 
             </StackPanel>

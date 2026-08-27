@@ -104,7 +104,8 @@ confirmation; a section deletion explicitly includes its descendant sections and
 ## Drawing-tool contract
 
 Each toolbar item is a `ToolPreset`, not a global mode plus unrelated settings. Adding a tool creates
-a new preset; deleting removes only that preset. At least one tool remains.
+a new preset. Tool presets are add-only: neither the ribbon nor a tool flyout may expose a delete-tool
+button, and persisted presets are never silently discarded.
 
 Required working tools:
 
@@ -119,7 +120,9 @@ Required working tools:
 
 The drawing ribbon is icon-only. A first tap on an unselected tool selects it without interruption;
 tapping the already selected tool opens its own flyout. The flyout shows only parameters meaningful
-to that tool. Pixel erasing remains a labeled shell; it must not masquerade as a completed function.
+to that tool. It does not contain delete-tool or delete-selection actions; a mixed content selection
+is deleted by `Backspace` / `Delete` or its context surface. Pixel erasing remains a labeled shell;
+it must not masquerade as a completed function.
 
 Follow the desktop OneNote grouping rhythm: undo/redo, a hairline divider, lasso,
 another hairline divider, eraser and ink tools, add-tool, a divider, stylus panorama hand, a divider,

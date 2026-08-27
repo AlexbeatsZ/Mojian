@@ -63,6 +63,8 @@ public partial class NoteCanvas : UserControl
     private bool _stylusActive;
     private bool _stylusInRange;
     private bool _stylusEraserActive;
+    private bool _middleNavigationActive;
+    private bool _middleNavigationUsesStylus;
     private TouchDevice? _directTouchDevice;
     private bool _touchInsertSpaceActive;
     private DirectGestureMode _directGestureMode;
@@ -217,9 +219,9 @@ public partial class NoteCanvas : UserControl
         InvalidateVisual();
     }
 
-    public void DeleteSelection()
+    public bool DeleteSelection()
     {
-        if (Document == null || (_selectedStrokes.Count == 0 && _selectedTags.Count == 0 && _selectedTextItems.Count == 0 && _selectedObjects.Count == 0)) return;
+        if (Document == null || (_selectedStrokes.Count == 0 && _selectedTags.Count == 0 && _selectedTextItems.Count == 0 && _selectedObjects.Count == 0)) return false;
         PushUndo();
         foreach (var stroke in _selectedStrokes) Document.Strokes.Remove(stroke);
         foreach (var tag in _selectedTags) Document.Tags.Remove(tag);
@@ -229,6 +231,7 @@ public partial class NoteCanvas : UserControl
         RebuildTextEditors();
         MarkChanged(immediate: true);
         InvalidateVisual();
+        return true;
     }
 
     public void AddObject(PageObject item)
@@ -435,17 +438,36 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
         base.OnMouseDown(e);
-        if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
+        if (Document == null) return;
+        var promotedByStylus = IsPhysicalStylus(e.StylusDevice);
+        if (e.ChangedButton == MouseButton.Middle)
+        {
+            Focus();
+            if (_stylusActive) CancelStylusToolActionForNavigation();
+            _middleNavigationActive = true;
+            _middleNavigationUsesStylus = promotedByStylus || _stylusInRange;
+            BeginPointer(
+                e.GetPosition(this),
+                pressure: 0.65f,
+                tiltX: 0,
+                tiltY: 0,
+                isStylus: _middleNavigationUsesStylus,
+                forcePan: true,
+                forceErase: false);
+            e.Handled = true;
+            return;
+        }
+        if (CanvasPointerFeedback.SuppressMouseStream(_stylusActive, promotedByStylus, stylusDrivenMiddleNavigation: false) || Environment.TickCount64 < _ignoreMouseUntil) return;
         if (e.ChangedButton == MouseButton.Right)
         {
             if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
             e.Handled = ShowDirectContextMenu(e.GetPosition(this));
             return;
         }
-        if (e.ChangedButton is not MouseButton.Left and not MouseButton.Middle) return;
+        if (e.ChangedButton != MouseButton.Left) return;
         Focus();
         var point = e.GetPosition(this);
-        var forcePan = e.ChangedButton == MouseButton.Middle || Keyboard.IsKeyDown(Key.Space);
+        var forcePan = Keyboard.IsKeyDown(Key.Space);
         if (forcePan || PendingTagKind.HasValue)
             BeginPointer(point, pressure: 0.65f, tiltX: 0, tiltY: 0, isStylus: false, forcePan, forceErase: false);
         else
@@ -456,7 +478,16 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
+        if (Document == null) return;
+        if (CanvasPointerFeedback.SuppressMouseStream(
+                _stylusActive,
+                IsPhysicalStylus(e.StylusDevice),
+                _middleNavigationActive && _middleNavigationUsesStylus))
+        {
+            if (_middleNavigationActive && _middleNavigationUsesStylus) e.Handled = true;
+            return;
+        }
+        if (Environment.TickCount64 < _ignoreMouseUntil) return;
         _hoverViewPoint = e.GetPosition(this);
         UpdatePointerCursor();
         if (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured)
@@ -488,7 +519,16 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
-        if (Environment.TickCount64 < _ignoreMouseUntil || Document == null) return;
+        if (Document == null) return;
+        if (e.ChangedButton == MouseButton.Middle && _middleNavigationActive)
+        {
+            EndPointer(isStylus: _middleNavigationUsesStylus);
+            _middleNavigationActive = false;
+            _middleNavigationUsesStylus = false;
+            e.Handled = true;
+            return;
+        }
+        if (CanvasPointerFeedback.SuppressMouseStream(_stylusActive, IsPhysicalStylus(e.StylusDevice), stylusDrivenMiddleNavigation: false) || Environment.TickCount64 < _ignoreMouseUntil) return;
         if (_directGestureMode != DirectGestureMode.None) EndDirectPointer(e.GetPosition(this));
         else EndPointer(isStylus: false);
         e.Handled = true;
@@ -515,6 +555,11 @@ public partial class NoteCanvas : UserControl
         var point = points.Count > 0 ? points[^1] : default;
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
+        if (_middleNavigationActive && _middleNavigationUsesStylus)
+        {
+            e.Handled = true;
+            return;
+        }
         BeginPointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true, forcePan: false, forceErase: _stylusEraserActive);
         e.Handled = true;
     }
@@ -529,13 +574,28 @@ public partial class NoteCanvas : UserControl
             _hoverViewPoint = points[^1].ToPoint();
             UpdatePointerCursor();
         }
+        if (_middleNavigationActive && _middleNavigationUsesStylus && points.Count > 0)
+        {
+            var latest = points[^1];
+            ContinuePointer(latest.ToPoint(), latest.PressureFactor, Tilt(latest, StylusPointProperties.XTiltOrientation), Tilt(latest, StylusPointProperties.YTiltOrientation), isStylus: true);
+            e.Handled = true;
+            return;
+        }
         if (!_stylusActive)
         {
             InvalidateVisual();
             return;
         }
-        foreach (var point in points)
-            ContinuePointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true);
+        if (CanvasPointerFeedback.UseLatestStylusSample(_isPanning, _isDragZooming, stylusDrivenMiddleNavigation: false) && points.Count > 0)
+        {
+            var latest = points[^1];
+            ContinuePointer(latest.ToPoint(), latest.PressureFactor, Tilt(latest, StylusPointProperties.XTiltOrientation), Tilt(latest, StylusPointProperties.YTiltOrientation), isStylus: true);
+        }
+        else
+        {
+            foreach (var point in points)
+                ContinuePointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true);
+        }
         e.Handled = true;
     }
 
@@ -543,6 +603,12 @@ public partial class NoteCanvas : UserControl
     {
         base.OnStylusLeave(e);
         if (_stylusActive) return;
+        if (_middleNavigationActive && _middleNavigationUsesStylus)
+        {
+            EndPointer(isStylus: true);
+            _middleNavigationActive = false;
+            _middleNavigationUsesStylus = false;
+        }
         _stylusInRange = false;
         _hoverViewPoint = null;
         UpdatePointerCursor();
@@ -552,6 +618,16 @@ public partial class NoteCanvas : UserControl
     private void HandleStylusUp(object sender, StylusEventArgs e)
     {
         if (!_stylusActive) return;
+        if (_middleNavigationActive && _middleNavigationUsesStylus)
+        {
+            _stylusActive = false;
+            _stylusEraserActive = false;
+            _ignoreMouseUntil = Environment.TickCount64 + 250;
+            UpdatePointerCursor();
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
         EndPointer(isStylus: true);
         _stylusActive = false;
         _stylusEraserActive = false;
@@ -890,7 +966,7 @@ public partial class NoteCanvas : UserControl
             _isPanning = !_isDragZooming;
             _dragZoomCenter = new Point(ActualWidth / 2, ActualHeight / 2);
             _dragZoomAnchor = viewPoint;
-            CaptureMouse();
+            CaptureInput(isStylus);
             return;
         }
 
@@ -907,7 +983,7 @@ public partial class NoteCanvas : UserControl
         if (InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(isStylus ? DirectInputDevice.Pen : DirectInputDevice.Mouse))
         {
             BeginInsertSpace(viewPoint);
-            CaptureMouse();
+            CaptureInput(isStylus);
             return;
         }
 
@@ -931,7 +1007,7 @@ public partial class NoteCanvas : UserControl
                 };
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
                 Document.Strokes.Add(_activeStroke);
-                CaptureMouse();
+                CaptureInput(isStylus);
                 if (isStylus && tool.Kind == DrawingToolKind.Pen && tool.PressureEraseEnabled && _pressureEraseArmed && pressure * 100 >= tool.PressureEraseThresholdPercent)
                 {
                     _pressureCandidate = true;
@@ -944,11 +1020,11 @@ public partial class NoteCanvas : UserControl
                 PushUndo();
                 _eraserViewPoint = viewPoint;
                 PerformErase(docPoint, (forceErase ? Math.Max(2.5f, tool.EraserRadiusMm) : tool.EraserRadiusMm) * UnitsPerMillimeter);
-                CaptureMouse();
+                CaptureInput(isStylus);
                 break;
             case DrawingToolKind.Lasso:
                 BeginLasso(docPoint);
-                CaptureMouse();
+                CaptureInput(isStylus);
                 break;
         }
         InvalidateVisual();
@@ -1041,7 +1117,7 @@ public partial class NoteCanvas : UserControl
     private void EndPointer(bool isStylus)
     {
         if (Document == null) return;
-        if (IsMouseCaptured) ReleaseMouseCapture();
+        ReleaseInput(isStylus);
         var changed = false;
         if (_isPanning)
         {
@@ -1092,6 +1168,51 @@ public partial class NoteCanvas : UserControl
         if (changed) MarkChanged(immediate: true);
         InvalidateVisual();
     }
+
+    private void CancelStylusToolActionForNavigation()
+    {
+        var restoreDocument =
+            _activeStroke != null ||
+            _eraserViewPoint.HasValue ||
+            _temporaryPressureEraser ||
+            _isInsertingSpace;
+        var snapshot = restoreDocument && _undo.Count > 0 ? _undo.Pop() : null;
+
+        _activeStroke = null;
+        _eraserViewPoint = null;
+        _temporaryPressureEraser = false;
+        _pressureCandidate = false;
+        _pressureTimer.Stop();
+        _isLassoing = false;
+        _lasso.Clear();
+        _isInsertingSpace = false;
+        _insertSpaceUndoPushed = false;
+        if (IsStylusCaptured) ReleaseStylusCapture();
+
+        if (snapshot != null) RestoreSnapshot(snapshot);
+        else InvalidateVisual();
+    }
+
+    private void CaptureInput(bool isStylus)
+    {
+        if (isStylus) CaptureStylus();
+        else CaptureMouse();
+    }
+
+    private void ReleaseInput(bool isStylus)
+    {
+        if (isStylus)
+        {
+            if (IsStylusCaptured) ReleaseStylusCapture();
+        }
+        else if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+    }
+
+    private static bool IsPhysicalStylus(StylusDevice? device) =>
+        device?.TabletDevice.Type == TabletDeviceType.Stylus;
 
     private void CheckPressureEraseActivation()
     {
@@ -1628,16 +1749,6 @@ public partial class NoteCanvas : UserControl
             }
         }
 
-        if (!lightExport && PredictionEnabled && _activeStroke?.Points.Count >= 2)
-        {
-            var points = _activeStroke.Points;
-            var p1 = points[^1];
-            var predicted = HandwritingEngine.Predict(points, horizonMilliseconds: 10, maxDistance: 18);
-            if (predicted == null) return;
-            var color = ((SolidColorBrush)TextBrush(_activeStroke.Color, Appearance.Theme == PageTheme.Dark, false)).Color;
-            var brush = new SolidColorBrush(Color.FromArgb(110, color.R, color.G, color.B));
-            dc.DrawLine(new Pen(brush, HandwritingEngine.SegmentWidth(_activeStroke, points.Count - 1)), p1.ToPoint(), predicted.Value);
-        }
     }
 
     private static void DrawPolyline(DrawingContext dc, IReadOnlyList<InkPoint> points, Pen pen)
@@ -1934,7 +2045,8 @@ public partial class NoteCanvas : UserControl
         _touchInsertSpaceActive = false;
         _insertSpaceUndoPushed = false;
         _directGestureMode = DirectGestureMode.None;
-        _activeStroke = null; _isPanning = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
+        _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
+        _middleNavigationActive = false; _middleNavigationUsesStylus = false;
         _pressureCandidate = false; _temporaryPressureEraser = false; _pressureTimer.Stop(); _eraserViewPoint = null;
         ClearSelection();
     }

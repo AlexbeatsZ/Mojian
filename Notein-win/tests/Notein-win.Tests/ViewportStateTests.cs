@@ -47,6 +47,22 @@ public class ViewportStateTests
         Assert.Equal(1f, ViewportState.RadialDragZoomFactor(center, previous, new Point(500, 550)), precision: 5);
     }
 
+    [Fact]
+    public void RadialDragZoom_AwayFromCenterIncreasesViewportScale()
+    {
+        var viewport = new ViewportState();
+        var center = new Point(500, 400);
+        var start = new Point(600, 500);
+        var outward = new Point(700, 600);
+
+        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.RadialDragZoomFactor(center, start, outward));
+        Assert.True(viewport.Scale > 1f);
+
+        viewport.Reset();
+        viewport.ZoomAt((float)start.X, (float)start.Y, ViewportState.RadialDragZoomFactor(center, start, new Point(550, 450)));
+        Assert.True(viewport.Scale < 1f);
+    }
+
     [Theory]
     [InlineData(true, true, DrawingToolKind.Pen, CanvasPointerCursorMode.Hand)]
     [InlineData(true, false, DrawingToolKind.Pen, CanvasPointerCursorMode.Arrow)]
@@ -59,5 +75,19 @@ public class ViewportStateTests
         CanvasPointerCursorMode expected)
     {
         Assert.Equal(expected, CanvasPointerFeedback.Resolve(penHand, stylusInRange, tool));
+    }
+
+    [Fact]
+    public void StylusViewportGesturesUseOneStreamAndOnlyTheLatestCoalescedSample()
+    {
+        Assert.True(CanvasPointerFeedback.SuppressMouseStream(true, false, false));
+        Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, true, false));
+        Assert.True(CanvasPointerFeedback.SuppressMouseStream(false, false, true));
+        Assert.False(CanvasPointerFeedback.SuppressMouseStream(false, false, false));
+
+        Assert.True(CanvasPointerFeedback.UseLatestStylusSample(true, false, false));
+        Assert.True(CanvasPointerFeedback.UseLatestStylusSample(false, true, false));
+        Assert.True(CanvasPointerFeedback.UseLatestStylusSample(false, false, true));
+        Assert.False(CanvasPointerFeedback.UseLatestStylusSample(false, false, false));
     }
 }

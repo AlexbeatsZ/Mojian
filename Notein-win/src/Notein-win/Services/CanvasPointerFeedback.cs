@@ -11,6 +11,18 @@ public enum CanvasPointerCursorMode
 
 public static class CanvasPointerFeedback
 {
+    public static bool SuppressMouseStream(
+        bool stylusContactActive,
+        bool promotedByStylus,
+        bool stylusDrivenMiddleNavigation) =>
+        stylusContactActive || promotedByStylus || stylusDrivenMiddleNavigation;
+
+    public static bool UseLatestStylusSample(
+        bool panning,
+        bool dragZooming,
+        bool stylusDrivenMiddleNavigation) =>
+        panning || dragZooming || stylusDrivenMiddleNavigation;
+
     public static CanvasPointerCursorMode Resolve(
         bool penHandEnabled,
         bool stylusInRange,

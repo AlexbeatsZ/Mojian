@@ -94,8 +94,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   button pans; holding Ctrl with middle drag continuously zooms.
   Ctrl-drag is radial around the canvas center: dragging toward the center zooms out and dragging
   toward an edge zooms in, with the original contact point kept as the content anchor.
-  A mouse side button remapped by its driver to middle button inherits this behavior. Zoom lock
-  blocks gesture scaling only.
+  A mouse or stylus side button remapped by its driver to middle button inherits this behavior.
+  Stylus-driven middle drag consumes only the latest coalesced stylus sample and suppresses its
+  promoted mouse stream, so the same movement is never applied twice. Zoom lock blocks gesture
+  scaling only.
 - Pen Hand shows a hand cursor only while a real stylus is in range and makes that stylus pan.
   A real stylus in range uses a small screen-space nib dot for pen/highlighter authoring; ordinary
   mouse movement keeps its arrow and left-button content behavior even while Pen Hand is selected.
@@ -107,9 +109,11 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   loss, another operation, or page navigation removes an empty temporary box without Undo.
 - Keyboard mappings are stored per workspace, categorized as `文件`, `开始`, `插入`, `绘图`, and `视图`,
   and resolve conflicts by removing the previous owner. Standard editing, undo/redo, search,
-  full-page, delete-selection, and zoom defaults are provided.
+  full-page, delete-selection, and zoom defaults are provided. Outside native text editing,
+  unmodified `Backspace` and `Delete` are reserved for deleting the current mixed selection.
 - Pen rendering uses pressure and speed correction with start/end taper. Logical black remaps for dark
-  paper without changing the stored color.
+  paper without changing the stored color. The Windows wet layer never draws a visible extrapolated
+  segment ahead of the pen-tip feedback dot.
 - Whole-stroke eraser, pen freeform/rectangle lasso, direct-pointer rectangle marquee, mixed-content move, and eight-handle
   non-uniform scaling are document operations and participate in autosave. The eraser removes ink
   and tags but never treats inserted objects as strokes; immutable PDF page backgrounds also survive
@@ -134,6 +138,11 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   assets. Export never substitutes for autosave.
 
 ## Release acceptance
+
+Release output is replaceable state, not an archive. Before publishing, remove every prior project-owned
+release/candidate directory after confirming no delivered EXE is running. Publish only to
+`Notein-win/artifacts/release`, then clean project-local `bin/obj`; do not retain parallel dated or
+candidate copies. Reusable package caches and user workspace data are outside this cleanup boundary.
 
 1. Start from an empty temporary workspace; create notebook, nested section, and pages.
 2. Draw with mouse and stylus paths, add text/tag/table/image/attachment, navigate away and back.
