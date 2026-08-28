@@ -420,7 +420,10 @@ class NoteinImporter:
                 except Exception as exc:
                     self.errors.append({"note": source.note_id, "error": str(exc)})
                     print(f"NOTEIN_NOTE {index}/{len(sources)} failed", flush=True)
-        first_section = notebook["sections"][0] if notebook["sections"] else None
+        first_section = next(
+            (s for s in notebook["sections"] if s.get("pages") and not s.get("id", "").startswith("section-notein-preview")),
+            notebook["sections"][0] if notebook["sections"] else None,
+        )
         if first_section:
             notebook["focusedSectionId"] = first_section["id"]
             if first_section["pages"]:
@@ -989,7 +992,10 @@ class OneNoteImporter:
             for section_source in notebook_source.get("sections", []):
                 notebook["sections"].append(self._import_section(notebook_id, section_source))
             if notebook["sections"]:
-                first = notebook["sections"][0]
+                first = next(
+                    (s for s in notebook["sections"] if s.get("pages") and not s.get("id", "").startswith("section-onenote-pdf")),
+                    next((s for s in notebook["sections"] if s.get("pages")), notebook["sections"][0]),
+                )
                 notebook["focusedSectionId"] = first["id"]
                 if first["pages"]:
                     notebook["selectedPageSectionId"] = first["id"]
