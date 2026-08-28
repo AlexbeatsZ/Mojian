@@ -8,3 +8,4 @@ param(
 $ErrorActionPreference = 'Stop'
 $oneNote = New-Object -ComObject OneNote.Application
 $oneNote.Publish($SourceId, [IO.Path]::GetFullPath($OutputPath), 3, '')
+

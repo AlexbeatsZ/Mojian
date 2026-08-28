@@ -3,6 +3,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
     [switch]$Resume,
+    [switch]$SkipPdf,
+    [switch]$SkipManifest,
+    [ValidateRange(1, 1000000)]
+    [int]$StartPage = 1,
+    [ValidateRange(0, 1000000)]
+    [int]$EndPage = 0,
     [ValidateRange(0, 1000000)]
     [int]$MaxPages = 0,
     [ValidateRange(10, 3600)]
@@ -310,9 +316,13 @@ foreach ($notebook in $hierarchyDocument.SelectNodes('//one:Notebook', $hierarch
 }
 
 $completed = 0
+$ordinal = 0
 $failed = 0
 $totals = [ordered]@{ strokes = 0; textItems = 0; objects = 0; warnings = 0 }
 foreach ($item in $pageQueue) {
+    $ordinal++
+    if ($ordinal -lt $StartPage) { continue }
+    if ($EndPage -gt 0 -and $ordinal -gt $EndPage) { break }
     if ($MaxPages -gt 0 -and $completed -ge $MaxPages) { break }
     $completed++
     $descriptor = $item.descriptor
@@ -324,17 +334,17 @@ foreach ($item in $pageQueue) {
             $stats = Export-PageContent $oneNote $item.hierarchy $descriptor.id $pageJsonPath $pageAssetDirectory
             foreach ($key in @('strokes', 'textItems', 'objects', 'warnings')) { $totals[$key] += $stats[$key] }
         }
-        if (-not ($Resume -and (Test-Path -LiteralPath $pagePdfPath))) {
+        if (-not $SkipPdf -and -not ($Resume -and (Test-Path -LiteralPath $pagePdfPath))) {
             if (-not (Export-PagePdfWithTimeout $descriptor.sourceId $pagePdfPath $PdfTimeoutSeconds)) {
                 $descriptor.pdfError = "PDF export exceeded $PdfTimeoutSeconds seconds or failed."
             }
         }
-        Write-Output ("ONENOTE_PAGE {0}/{1} ok" -f $completed, $pageQueue.Count)
+        Write-Output ("ONENOTE_PAGE {0}/{1} ok" -f $ordinal, $pageQueue.Count)
     }
     catch {
         $failed++
         $descriptor.error = $_.Exception.Message
-        Write-Output ("ONENOTE_PAGE {0}/{1} failed HRESULT=0x{2:X8}" -f $completed, $pageQueue.Count, ($_.Exception.HResult -band 0xffffffffL))
+        Write-Output ("ONENOTE_PAGE {0}/{1} failed HRESULT=0x{2:X8}" -f $ordinal, $pageQueue.Count, ($_.Exception.HResult -band 0xffffffffL))
     }
 }
 
@@ -354,5 +364,7 @@ $manifest = [ordered]@{
         warnings = $totals.warnings
     }
 }
-[IO.File]::WriteAllText((Join-Path $root 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+if (-not $SkipManifest) {
+    [IO.File]::WriteAllText((Join-Path $root 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+}
 Write-Output ("ONENOTE_DONE pages={0} failed={1}" -f $pageQueue.Count, $failed)

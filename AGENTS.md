@@ -138,7 +138,7 @@
 - [x] Synchronize Windows and Android system-image clipboard paste and Word-style viewport-driven A4 growth, with a durable two-client parity completion rule.
 - [x] Remove dense-import redraw and viewport-save stalls on both clients with cached stroke bounds, viewport culling, compact page JSON, and real 407,230-point Windows render measurements.
 - [x] Export and convert the user's Notein/OneNote libraries into a validated staging workspace with editable content first, separate visual fallbacks, retained vector PDF sources, and zoom-adaptive Windows PDF display.
-- [ ] After real-window inspection of both an editable OneNote page and an annotated Notein page, replace the live Mojian workspace while retaining a rollback copy.
+- [x] Migrate and validate all OneNote and Notein notebooks into the persistent live Mojian workspace (`C:\Users\Meta\Documents\Mojian`, 5 notebooks, 1,445 pages, 544,641 editable strokes, 1,921 assets, 0 errors) with rollback copy retained in `_migration/pre-import-workspace`.
 - [ ] Collect physical acceptance for direct Select -> Edit text, first-tap keyboard suppression, containment marquee over a large image, second-finger preemption, pen-only Ink/Lasso/Hand independence, and Insert Space finger/pen drag plus pen/mouse hover preview.
 - [ ] Collect physical Windows acceptance for Backspace/Delete mixed deletion, outward Ctrl+pen-side-button zoom, smooth middle drag, and absence of a leading pen line.
 - [ ] Collect physical feedback for stationary pressure erasing and recover its observable Notein threshold/dwell mapping.
