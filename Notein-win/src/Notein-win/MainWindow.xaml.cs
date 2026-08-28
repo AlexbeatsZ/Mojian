@@ -86,6 +86,7 @@ public partial class MainWindow : Window
         canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
         canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
+        canvas.PageMetadataChanged += (_, _) => ViewModel.SavePageMetadata();
         canvas.ObjectContextRequested += OnObjectContextRequested;
     }
 

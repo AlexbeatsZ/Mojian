@@ -764,6 +764,8 @@ public sealed class MainViewModel : ObservableObject
         RefreshPagePaneRows();
     }
 
+    public void SavePageMetadata() => SaveLibrary();
+
     public void SaveAll()
     {
         var documents = new[] { PrimaryDocument, SecondaryDocument }

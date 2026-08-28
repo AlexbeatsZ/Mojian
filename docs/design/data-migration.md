@@ -40,6 +40,16 @@ The source PDF, not the preview PNG, remains available for re-rendering and
 package/export provenance. A visual fallback page is explicitly non-editable;
 PDF-backed annotation strokes above it remain ordinary editable Mojian strokes.
 
+## Large-page performance contract
+
+Imported source pages can be much larger than pages authored natively in Mojian. The verified
+staging corpus includes pages above 10,000 strokes and 400,000 input points. Migration therefore
+writes page JSON without indentation, while library/report metadata remains readable. The Windows
+and Android canvases cache each stroke's document-space bounds and submit only viewport-intersecting
+strokes during interactive rendering; export intentionally bypasses that culling. Panning and zooming
+must update viewport state without synchronously serializing the whole page. Navigation and shutdown
+still flush the latest viewport, while content mutations retain ordinary atomic autosave.
+
 ## Known source limits
 
 - The 2026-08-22 Notein backup contains only 43 of 112 original source PDFs.

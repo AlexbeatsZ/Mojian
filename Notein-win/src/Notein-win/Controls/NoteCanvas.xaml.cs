@@ -151,6 +151,7 @@ public partial class NoteCanvas : UserControl
 
     public event EventHandler? DocumentChanged;
     public event EventHandler? ViewportChanged;
+    public event EventHandler? PageMetadataChanged;
     public event EventHandler<PageObjectEventArgs>? ObjectContextRequested;
 
     public NoteCanvas()
@@ -1737,6 +1738,7 @@ public partial class NoteCanvas : UserControl
             {
                 var first = _activeStroke.Points[0];
                 _activeStroke.Points.Add(new InkPoint(first.X + 0.01f, first.Y + 0.01f, first.Pressure, elapsedMilliseconds: first.ElapsedMilliseconds + 1));
+                _activeStroke.InvalidateBounds();
             }
             _activeStroke = null;
             _pressureEraseArmed = true;
@@ -1873,6 +1875,7 @@ public partial class NoteCanvas : UserControl
             if (Math.Abs(previous.X - documentPoint.X) < 0.01 && Math.Abs(previous.Y - documentPoint.Y) < 0.01) return;
         }
         stroke.Points.Add(new InkPoint((float)documentPoint.X, (float)documentPoint.Y, pressure, tiltX, tiltY, _strokeClock.ElapsedMilliseconds));
+        stroke.InvalidateBounds();
     }
 
     private void PerformErase(Point point, double radius)
@@ -2113,7 +2116,11 @@ public partial class NoteCanvas : UserControl
 
     private void TranslateSelection(double dx, double dy)
     {
-        foreach (var stroke in _selectedStrokes) foreach (var point in stroke.Points) { point.X += (float)dx; point.Y += (float)dy; }
+        foreach (var stroke in _selectedStrokes)
+        {
+            foreach (var point in stroke.Points) { point.X += (float)dx; point.Y += (float)dy; }
+            stroke.InvalidateBounds();
+        }
         foreach (var tag in _selectedTags) { tag.DocumentX += (float)dx; tag.DocumentY += (float)dy; }
         foreach (var text in _selectedTextItems) { text.X += (float)dx; text.Y += (float)dy; }
         foreach (var item in _selectedObjects) { item.X += (float)dx; item.Y += (float)dy; }
@@ -2130,6 +2137,7 @@ public partial class NoteCanvas : UserControl
                 var scaled = SelectionGeometry.Scale(point.X, point.Y, anchor.X, anchor.Y, factorX, factorY);
                 point.X = (float)scaled.X; point.Y = (float)scaled.Y;
             }
+            stroke.InvalidateBounds();
         }
         foreach (var tag in _selectedTags)
         {
@@ -2168,7 +2176,11 @@ public partial class NoteCanvas : UserControl
     private void InsertVerticalSpace(float startY, float deltaY)
     {
         if (Document == null) return;
-        foreach (var stroke in Document.Strokes.Where(item => item.Bounds.Top >= startY)) foreach (var point in stroke.Points) point.Y += deltaY;
+        foreach (var stroke in Document.Strokes.Where(item => item.Bounds.Top >= startY))
+        {
+            foreach (var point in stroke.Points) point.Y += deltaY;
+            stroke.InvalidateBounds();
+        }
         foreach (var tag in Document.Tags.Where(item => item.DocumentY >= startY)) tag.DocumentY += deltaY;
         foreach (var text in Document.TextItems.Where(item => item.Y >= startY)) text.Y += deltaY;
         foreach (var item in Document.Objects.Where(item => item.Y >= startY)) item.Y += deltaY;
@@ -2363,10 +2375,10 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return;
         if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite) DrawPaper(dc, lightExport, extent);
-        if (layer is CanvasRenderLayer.Inserts or CanvasRenderLayer.Composite) DrawObjects(dc, lightExport);
+        if (layer is CanvasRenderLayer.Inserts or CanvasRenderLayer.Composite) DrawObjects(dc, lightExport, extent);
         if (layer is CanvasRenderLayer.InkAndText or CanvasRenderLayer.Composite)
         {
-            DrawStrokes(dc, lightExport);
+            DrawStrokes(dc, lightExport, extent);
             DrawTags(dc, lightExport);
             if (lightExport) DrawTextItems(dc, lightExport);
         }
@@ -2383,9 +2395,13 @@ public partial class NoteCanvas : UserControl
         else
         {
             var sheets = Math.Max(1, Appearance.SheetCount);
-            for (var i = 0; i < sheets; i++)
+            var stride = Appearance.Height + A4PageLayout.PageGap;
+            var firstSheet = Math.Max(0, (int)Math.Floor(extent.Top / stride));
+            var lastSheet = Math.Min(sheets - 1, (int)Math.Floor(Math.Max(extent.Top, extent.Bottom) / stride));
+            for (var i = firstSheet; i <= lastSheet; i++)
             {
                 var rect = new Rect(0, i * (Appearance.Height + A4PageLayout.PageGap), Appearance.Width, Appearance.Height);
+                if (!rect.IntersectsWith(extent)) continue;
                 dc.DrawRectangle(paper, new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
                 DrawPattern(dc, rect, lightExport);
             }
@@ -2427,12 +2443,13 @@ public partial class NoteCanvas : UserControl
         }
     }
 
-    private void DrawObjects(DrawingContext dc, bool lightExport)
+    private void DrawObjects(DrawingContext dc, bool lightExport, Rect extent)
     {
         if (Document == null) return;
         foreach (var item in Document.Objects)
         {
             var rect = new Rect(item.X, item.Y, item.Width, item.Height);
+            if (!rect.IntersectsWith(extent)) continue;
             var border = new Pen(new SolidColorBrush(lightExport ? Color.FromRgb(180, 180, 180) : Color.FromRgb(87, 87, 87)), 1);
             switch (item.Kind)
             {
@@ -2514,12 +2531,12 @@ public partial class NoteCanvas : UserControl
             DrawText(dc, preview[r][c], new Point(rect.X + c * cellWidth + 5, header.Bottom + r * cellHeight + 4), 10, light ? Brushes.Black : Brushes.White);
     }
 
-    private void DrawStrokes(DrawingContext dc, bool lightExport)
+    private void DrawStrokes(DrawingContext dc, bool lightExport, Rect extent)
     {
         if (Document == null) return;
         foreach (var stroke in Document.Strokes)
         {
-            if (stroke.Points.Count == 0) continue;
+            if (stroke.Points.Count == 0 || !StrokeViewportCulling.IsVisible(stroke, extent)) continue;
             var brush = TextBrush(stroke.Color, Appearance.Theme == PageTheme.Dark, lightExport);
             if (stroke.Kind == DrawingToolKind.Highlighter)
             {
@@ -2859,16 +2876,19 @@ public partial class NoteCanvas : UserControl
         else { _saveTimer.Stop(); _saveTimer.Start(); }
     }
 
-    private void GrowA4IfNeeded()
+    private bool GrowA4IfNeeded()
     {
-        if (Document == null || Appearance.PaperKind != PaperKind.A4) return;
+        if (Document == null || Appearance.PaperKind != PaperKind.A4) return false;
         var bottom = 0d;
         foreach (var stroke in Document.Strokes) if (!stroke.Bounds.IsEmpty) bottom = Math.Max(bottom, stroke.Bounds.Bottom);
         foreach (var tag in Document.Tags) bottom = Math.Max(bottom, tag.DocumentY + 18 * tag.Scale);
         foreach (var text in Document.TextItems) bottom = Math.Max(bottom, text.Y + text.Height);
         foreach (var item in Document.Objects) bottom = Math.Max(bottom, item.Y + item.Height);
         var visibleBottom = ActualHeight > 0 ? _viewport.ViewToDocument(0, ActualHeight).Y : 0;
-        Appearance.SheetCount = A4PageLayout.RequiredSheetCount(bottom, visibleBottom, Appearance.SheetCount, Appearance.Height);
+        var required = A4PageLayout.RequiredSheetCount(bottom, visibleBottom, Appearance.SheetCount, Appearance.Height);
+        if (required == Appearance.SheetCount) return false;
+        Appearance.SheetCount = required;
+        return true;
     }
 
     private void RaiseDocumentChanged() => DocumentChanged?.Invoke(this, EventArgs.Empty);
@@ -2878,7 +2898,7 @@ public partial class NoteCanvas : UserControl
         UpdateTextEditorPositions();
         if (Document != null) _viewport.CopyTo(Document.Viewport);
         ViewportChanged?.Invoke(this, EventArgs.Empty);
-        MarkChanged();
+        if (GrowA4IfNeeded()) PageMetadataChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
 

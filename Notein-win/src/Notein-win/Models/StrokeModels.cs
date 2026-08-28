@@ -29,28 +29,57 @@ public sealed class InkPoint
 
 public sealed class StrokeRecord
 {
+    private float _widthMm = 0.4f;
+    private List<InkPoint> _points = new();
+    private Rect? _cachedBounds;
+
     public string Id { get; set; } = IdFactory.New("stroke");
     public DrawingToolKind Kind { get; set; } = DrawingToolKind.Pen;
     public InkPalette Color { get; set; } = InkPalette.Black;
-    public float WidthMm { get; set; } = 0.4f;
+    public float WidthMm
+    {
+        get => _widthMm;
+        set
+        {
+            _widthMm = value;
+            _cachedBounds = null;
+        }
+    }
     public int PressurePercent { get; set; } = 200;
     public int InkFlowPercent { get; set; } = 100;
     public int OpacityPercent { get; set; } = 100;
     public string BrushProfile { get; set; } = "fountain-v1";
-    public List<InkPoint> Points { get; set; } = new();
+    public List<InkPoint> Points
+    {
+        get => _points;
+        set
+        {
+            _points = value ?? new List<InkPoint>();
+            _cachedBounds = null;
+        }
+    }
 
     [JsonIgnore]
     public Rect Bounds
     {
         get
         {
+            if (_cachedBounds is { } cached) return cached;
             if (Points.Count == 0) return Rect.Empty;
-            var minX = Points.Min(point => point.X);
-            var minY = Points.Min(point => point.Y);
-            var maxX = Points.Max(point => point.X);
-            var maxY = Points.Max(point => point.Y);
+            var minX = float.PositiveInfinity;
+            var minY = float.PositiveInfinity;
+            var maxX = float.NegativeInfinity;
+            var maxY = float.NegativeInfinity;
+            foreach (var point in Points)
+            {
+                minX = Math.Min(minX, point.X);
+                minY = Math.Min(minY, point.Y);
+                maxX = Math.Max(maxX, point.X);
+                maxY = Math.Max(maxY, point.Y);
+            }
             var margin = Math.Max(1, WidthMm * 3.78);
-            return new Rect(minX - margin, minY - margin, Math.Max(1, maxX - minX + margin * 2), Math.Max(1, maxY - minY + margin * 2));
+            _cachedBounds = new Rect(minX - margin, minY - margin, Math.Max(1, maxX - minX + margin * 2), Math.Max(1, maxY - minY + margin * 2));
+            return _cachedBounds.Value;
         }
     }
 
@@ -67,6 +96,8 @@ public sealed class StrokeRecord
     }
 
     public void ComputeBounds() => _ = Bounds;
+
+    public void InvalidateBounds() => _cachedBounds = null;
 }
 
 public enum CanvasTagKind { Important, Question }

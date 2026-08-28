@@ -32,6 +32,10 @@ Parity means the same product outcome, not identical operating-system APIs. For 
   viewport browsing near the final sheet both append more paper before the user reaches the end.
   Sheets retain an explicit workspace-colored gap, the stored count never shrinks automatically,
   and the enlarged count persists with the page.
+- Dense imported handwriting remains interactive on both clients by caching document-space stroke
+  bounds and submitting only strokes intersecting the visible viewport to the native renderer.
+  Viewport movement must not rescan every input point or rewrite the complete page document; full
+  export still renders every stroke.
 - Shared `.mjn`, page appearance, object, and asset semantics remain compatible even when the native
   picker, clipboard, pointer, or window integration differs.
 

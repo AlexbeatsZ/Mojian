@@ -24,6 +24,7 @@ import pymupdf as fitz
 
 
 JSON_KWARGS = {"ensure_ascii": False, "indent": 2}
+PAGE_JSON_KWARGS = {"ensure_ascii": False, "separators": (",", ":")}
 UNITS_PER_MM = 96.0 / 25.4
 PALETTE = {
     "Black": (0x1B, 0x1B, 0x1F),
@@ -62,7 +63,8 @@ def parse_time(value: Any) -> str:
 def atomic_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, **JSON_KWARGS), encoding="utf-8")
+    options = PAGE_JSON_KWARGS if isinstance(payload, dict) and "strokes" in payload else JSON_KWARGS
+    temporary.write_text(json.dumps(payload, **options), encoding="utf-8")
     os.replace(temporary, path)
 
 

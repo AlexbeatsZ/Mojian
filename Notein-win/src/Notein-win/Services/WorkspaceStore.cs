@@ -13,6 +13,10 @@ public sealed class WorkspaceStore
         AllowTrailingCommas = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
     };
+    private static readonly JsonSerializerOptions PageJsonOptions = new(JsonOptions)
+    {
+        WriteIndented = false,
+    };
 
     public string RootDirectory { get; }
     public string LibraryPath => Path.Combine(RootDirectory, "library.json");
@@ -88,7 +92,8 @@ public sealed class WorkspaceStore
         if (!File.Exists(path)) return new PageDocument(notebookId, pageId);
         try
         {
-            var document = JsonSerializer.Deserialize<PageDocument>(File.ReadAllText(path), JsonOptions);
+            using var stream = File.OpenRead(path);
+            var document = JsonSerializer.Deserialize<PageDocument>(stream, PageJsonOptions);
             if (document != null)
             {
                 document.NotebookId = notebookId;
@@ -107,7 +112,7 @@ public sealed class WorkspaceStore
     {
         document.Revision++;
         document.UpdatedAt = DateTime.UtcNow;
-        AtomicWrite(GetPageDocumentPath(document.NotebookId, document.PageId), JsonSerializer.Serialize(document, JsonOptions));
+        AtomicWrite(GetPageDocumentPath(document.NotebookId, document.PageId), JsonSerializer.SerializeToUtf8Bytes(document, PageJsonOptions));
     }
 
     public string GetNotebookDirectory(string notebookId)
@@ -198,6 +203,14 @@ public sealed class WorkspaceStore
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + $".{Guid.NewGuid():N}.tmp";
         File.WriteAllText(temporary, content);
+        File.Move(temporary, path, overwrite: true);
+    }
+
+    public static void AtomicWrite(string path, ReadOnlySpan<byte> content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + $".{Guid.NewGuid():N}.tmp";
+        File.WriteAllBytes(temporary, content.ToArray());
         File.Move(temporary, path, overwrite: true);
     }
 

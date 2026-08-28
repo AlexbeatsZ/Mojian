@@ -177,6 +177,11 @@ Pressure erasing is product-level tool switching, not part of the fountain brush
 belongs to one real eraser preset, can be triggered by pen or highlighter authoring, and must expose
 the temporary eraser selection/cursor before restoring the source tool on lift.
 
+The Android dry-ink layer caches document-space bounds and content-bottom metadata for completed
+strokes. Normal on-screen drawing submits only strokes intersecting the inverse-mapped viewport to
+AndroidX Ink; export submits the complete list. Any operation that replaces, moves, scales, erases,
+undoes, or redoes strokes must rebuild that cache so culling never hides changed ink.
+
 ### Interface direction
 
 Subject: a stylus-engine test bench for a technically engaged tablet user.

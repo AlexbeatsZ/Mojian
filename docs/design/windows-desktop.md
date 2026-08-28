@@ -91,6 +91,15 @@ foreground. ADB screenshots of the installed Android build are the visual compar
 The normative device/state mapping is `docs/design/input-gestures.md`; this section records only
 Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-single semantics.
 
+- Interactive rendering caches each stroke's document-space bounds, culls strokes and inserted
+  objects outside the visible viewport, and draws only visible A4 sheets. The complete document is
+  still used for export. A point mutation must invalidate its stroke's cached bounds.
+- Viewport pan/zoom copies state into the in-memory document but does not schedule a complete page
+  autosave. Navigation and shutdown already flush that state. Viewport-driven A4 sheet growth saves
+  only lightweight library metadata; content mutations retain the debounced atomic page save.
+- Page documents are saved as compact UTF-8 JSON. This preserves the shared schema while avoiding
+  indentation overhead on imported pages containing hundreds of thousands of input points.
+
 - Persist all completed ink in document coordinates with position, elapsed time, normalized pressure,
   tilt, tool type, logical color, width, opacity, and brush profile version.
 - `开始 -> 粘贴` and `Ctrl+V` first recognize a system clipboard bitmap or copied image-file list and

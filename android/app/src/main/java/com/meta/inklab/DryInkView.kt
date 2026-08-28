@@ -15,6 +15,7 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.rendering.android.view.ViewStrokeRenderer
 import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
+import java.util.IdentityHashMap
 import kotlin.math.floor
 import kotlin.math.sqrt
 
@@ -55,6 +56,8 @@ class DryInkView(context: Context) : View(context) {
     private var backgroundInvalidator: (() -> Unit)? = null
 
     private val strokes = mutableListOf<Stroke>()
+    private val strokeBounds = IdentityHashMap<Stroke, StrokeViewportBounds>()
+    private var cachedContentBottom = 0f
     private val redoStrokes = ArrayDeque<Stroke>()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
@@ -157,24 +160,30 @@ class DryInkView(context: Context) : View(context) {
         selectedStrokes.clear()
         redoStrokes.clear()
         strokes.addAll(newStrokes)
+        newStrokes.forEach(::registerStroke)
     }
 
     fun undo(): Boolean {
         if (strokes.isEmpty()) return false
         redoStrokes.addLast(strokes.removeAt(strokes.lastIndex))
+        rebuildStrokeMetrics()
         invalidate()
         return true
     }
 
     fun redo(): Boolean {
         if (redoStrokes.isEmpty()) return false
-        strokes.add(redoStrokes.removeLast())
+        val restored = redoStrokes.removeLast()
+        strokes.add(restored)
+        registerStroke(restored)
         invalidate()
         return true
     }
 
     fun clear() {
         strokes.clear()
+        strokeBounds.clear()
+        cachedContentBottom = 0f
         redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
@@ -189,6 +198,7 @@ class DryInkView(context: Context) : View(context) {
     fun replaceStrokes(replacement: List<Stroke>) {
         strokes.clear()
         strokes.addAll(replacement)
+        rebuildStrokeMetrics()
         redoStrokes.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
@@ -196,16 +206,7 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun contentBottom(): Float {
-        var bottom = 0f
-        for (stroke in strokes) {
-            val inputs = stroke.inputs
-            for (index in 0 until inputs.size) {
-                bottom = maxOf(bottom, inputs.get(index).y + stroke.brush.size * 0.5f)
-            }
-        }
-        return bottom
-    }
+    fun contentBottom(): Float = cachedContentBottom
 
     fun setViewport(matrix: Matrix) {
         documentToView.set(matrix)
@@ -241,6 +242,7 @@ class DryInkView(context: Context) : View(context) {
         val selectedReplacements = selectedStrokes.mapNotNull(replacements::get)
         selectedStrokes.removeAll(replacements.keys)
         selectedStrokes.addAll(selectedReplacements)
+        rebuildStrokeMetrics()
         invalidate()
     }
 
@@ -315,13 +317,15 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun isSelectedAtDocument(x: Float, y: Float, radius: Float): Boolean =
-        selectedStrokes.any { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+        selectedStrokes.any { stroke -> strokeMayTouchCircle(stroke, x, y, radius) && strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
 
     fun hasStrokeAtDocument(x: Float, y: Float, radius: Float): Boolean =
-        strokes.any { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+        strokes.any { stroke -> strokeMayTouchCircle(stroke, x, y, radius) && strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
 
     fun selectAtDocument(x: Float, y: Float, radius: Float): Boolean {
-        val hit = strokes.asReversed().firstOrNull { stroke -> strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f) }
+        val hit = strokes.asReversed().firstOrNull { stroke ->
+            strokeMayTouchCircle(stroke, x, y, radius) && strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f)
+        }
             ?: return false
         selectedStrokes.clear()
         selectedStrokes += hit
@@ -344,6 +348,7 @@ class DryInkView(context: Context) : View(context) {
         redoStrokes.clear()
         strokes.removeAll(selectedStrokes)
         selectedStrokes.clear()
+        rebuildStrokeMetrics()
         invalidate()
         return count
     }
@@ -380,13 +385,16 @@ class DryInkView(context: Context) : View(context) {
         val iterator = strokes.iterator()
         while (iterator.hasNext()) {
             val stroke = iterator.next()
-            if (strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f)) {
+            if (strokeMayTouchCircle(stroke, x, y, radius) && strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f)) {
                 iterator.remove()
                 selectedStrokes.remove(stroke)
                 removed++
             }
         }
-        if (removed > 0) invalidate()
+        if (removed > 0) {
+            rebuildStrokeMetrics()
+            invalidate()
+        }
         if (removed > 0) redoStrokes.clear()
         return removed
     }
@@ -432,6 +440,7 @@ class DryInkView(context: Context) : View(context) {
         for (index in strokes.indices) {
             replacements[strokes[index]]?.let { strokes[index] = it }
         }
+        rebuildStrokeMetrics()
         invalidate()
     }
 
@@ -474,6 +483,7 @@ class DryInkView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val visible = visibleStrokeBounds()
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
             transformedCanvas.concat(documentToView)
@@ -481,11 +491,13 @@ class DryInkView(context: Context) : View(context) {
             val startY = insertSpaceStartY
             val currentY = insertSpaceCurrentY
             for (stroke in strokes) {
+                val bounds = boundsFor(stroke)
                 if (startY != null && currentY != null) {
                     val deltaY = currentY - startY
                     val inputs = stroke.inputs
                     val isBelow = if (inputs.isEmpty()) false else (0 until inputs.size).minOf { inputs.get(it).y } >= startY
                     if (isBelow) {
+                        if (!bounds.translated(deltaY).intersects(visible)) continue
                         transformedCanvas.save()
                         transformedCanvas.translate(0f, deltaY)
                         scope.drawStroke(stroke)
@@ -493,6 +505,7 @@ class DryInkView(context: Context) : View(context) {
                         continue
                     }
                 }
+                if (!bounds.intersects(visible)) continue
                 scope.drawStroke(stroke)
             }
             drawLasso(transformedCanvas)
@@ -642,6 +655,51 @@ class DryInkView(context: Context) : View(context) {
         return RectF(0f, 0f, width.toFloat(), height.toFloat()).also(inverse::mapRect)
     }
 
+    private fun visibleStrokeBounds(): StrokeViewportBounds =
+        visibleDocumentBounds().let { StrokeViewportBounds(it.left, it.top, it.right, it.bottom) }
+
+    private fun registerStroke(stroke: Stroke) {
+        val bounds = computeStrokeBounds(stroke)
+        strokeBounds[stroke] = bounds
+        cachedContentBottom = maxOf(cachedContentBottom, bounds.bottom)
+    }
+
+    private fun rebuildStrokeMetrics() {
+        strokeBounds.clear()
+        cachedContentBottom = 0f
+        strokes.forEach(::registerStroke)
+    }
+
+    private fun boundsFor(stroke: Stroke): StrokeViewportBounds =
+        strokeBounds[stroke] ?: computeStrokeBounds(stroke).also {
+            strokeBounds[stroke] = it
+            cachedContentBottom = maxOf(cachedContentBottom, it.bottom)
+        }
+
+    private fun computeStrokeBounds(stroke: Stroke): StrokeViewportBounds {
+        val inputs = stroke.inputs
+        if (inputs.isEmpty()) return StrokeViewportBounds(0f, 0f, 0f, 0f)
+        val first = inputs.get(0)
+        var left = first.x
+        var top = first.y
+        var right = first.x
+        var bottom = first.y
+        for (index in 1 until inputs.size) {
+            val input = inputs.get(index)
+            left = minOf(left, input.x)
+            top = minOf(top, input.y)
+            right = maxOf(right, input.x)
+            bottom = maxOf(bottom, input.y)
+        }
+        val margin = stroke.brush.size * 0.5f
+        return StrokeViewportBounds(left - margin, top - margin, right + margin, bottom + margin)
+    }
+
+    private fun strokeMayTouchCircle(stroke: Stroke, x: Float, y: Float, radius: Float): Boolean {
+        val margin = radius + stroke.brush.size * 0.5f
+        return boundsFor(stroke).intersects(StrokeViewportBounds(x - margin, y - margin, x + margin, y + margin))
+    }
+
     private fun invalidateBackground() {
         if (renderBackgroundInInkLayer) invalidate() else backgroundInvalidator?.invoke()
     }
@@ -715,6 +773,7 @@ class DryInkView(context: Context) : View(context) {
         }
         selectedStrokes.clear()
         selectedStrokes.addAll(replacements.values)
+        rebuildStrokeMetrics()
         invalidate()
     }
 }
