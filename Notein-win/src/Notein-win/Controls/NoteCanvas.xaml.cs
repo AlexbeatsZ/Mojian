@@ -2385,7 +2385,7 @@ public partial class NoteCanvas : UserControl
             var sheets = Math.Max(1, Appearance.SheetCount);
             for (var i = 0; i < sheets; i++)
             {
-                var rect = new Rect(0, i * (Appearance.Height + 32), Appearance.Width, Appearance.Height);
+                var rect = new Rect(0, i * (Appearance.Height + A4PageLayout.PageGap), Appearance.Width, Appearance.Height);
                 dc.DrawRectangle(paper, new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
                 DrawPattern(dc, rect, lightExport);
             }
@@ -2809,7 +2809,7 @@ public partial class NoteCanvas : UserControl
     private Rect CalculateDocumentExtent()
     {
         var extent = Appearance.PaperKind != PaperKind.Infinite
-            ? new Rect(0, 0, Appearance.Width, Math.Max(1, Appearance.SheetCount) * Appearance.Height + Math.Max(0, Appearance.SheetCount - 1) * 32)
+            ? new Rect(0, 0, Appearance.Width, Math.Max(1, Appearance.SheetCount) * Appearance.Height + Math.Max(0, Appearance.SheetCount - 1) * A4PageLayout.PageGap)
             : new Rect(0, 0, Math.Max(1200, Appearance.Width), Math.Max(1600, Appearance.Height));
         if (Document == null) return extent;
         foreach (var stroke in Document.Strokes) if (!stroke.Bounds.IsEmpty) extent = Rect.Union(extent, stroke.Bounds);
@@ -2867,9 +2867,8 @@ public partial class NoteCanvas : UserControl
         foreach (var tag in Document.Tags) bottom = Math.Max(bottom, tag.DocumentY + 18 * tag.Scale);
         foreach (var text in Document.TextItems) bottom = Math.Max(bottom, text.Y + text.Height);
         foreach (var item in Document.Objects) bottom = Math.Max(bottom, item.Y + item.Height);
-        var margin = 24 * UnitsPerMillimeter;
-        while (bottom >= (Appearance.SheetCount - 1) * (Appearance.Height + 32) + Appearance.Height - margin)
-            Appearance.SheetCount++;
+        var visibleBottom = ActualHeight > 0 ? _viewport.ViewToDocument(0, ActualHeight).Y : 0;
+        Appearance.SheetCount = A4PageLayout.RequiredSheetCount(bottom, visibleBottom, Appearance.SheetCount, Appearance.Height);
     }
 
     private void RaiseDocumentChanged() => DocumentChanged?.Invoke(this, EventArgs.Empty);

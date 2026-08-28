@@ -444,6 +444,18 @@ class DryInkView(context: Context) : View(context) {
         renderBackground(canvas, documentMatrix, exportTheme = false)
     }
 
+    fun renderBackground(canvas: Canvas, documentClips: Iterable<RectF>, documentMatrix: Matrix = documentToView) {
+        canvas.save()
+        canvas.concat(documentMatrix)
+        documentClips.forEach { clip ->
+            canvas.save()
+            canvas.clipRect(clip)
+            drawGrid(canvas, exportTheme = false)
+            canvas.restore()
+        }
+        canvas.restore()
+    }
+
     private fun renderBackground(canvas: Canvas, documentMatrix: Matrix, exportTheme: Boolean) {
         canvas.save()
         canvas.concat(documentMatrix)

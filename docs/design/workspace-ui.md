@@ -189,7 +189,10 @@ paper-size menu names are visible. Accessibility descriptions and hover tooltips
 - Page color, paper size, baseline, page-title visibility, and light-versus-dark page background are
   stored per page. Paper options are only unbounded and A4. A4 is a paginated document policy, not a
   fixed single sheet: it renders consecutive A4 sheets with visible gaps and appends sheets before
-  edited content reaches the final sheet's bottom. Automatic editing never shrinks the sheet count.
+  edited content or the downward-moving viewport reaches the final sheet's bottom. It must therefore
+  remain continuously browsable like Word even before new content is placed. Automatic editing and
+  browsing never shrink the sheet count. Rule, grid, and dot backgrounds are clipped separately to
+  every sheet so the workspace-colored inter-sheet gap remains visually empty.
 - Switching the page between light and dark backgrounds remaps logical black ink and default text
   editor colors for readability without changing blue/red ink.
 - Finite paper is a surface, not a clipping mask. Changing paper size never hides text, ink, tags,

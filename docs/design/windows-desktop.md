@@ -93,6 +93,15 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 
 - Persist all completed ink in document coordinates with position, elapsed time, normalized pressure,
   tilt, tool type, logical color, width, opacity, and brush profile version.
+- `开始 -> 粘贴` and `Ctrl+V` first recognize a system clipboard bitmap or copied image-file list and
+  insert it through the normal page-owned image/asset pipeline. Pasted images keep their aspect ratio,
+  follow the normal image display policy, and remain available after the clipboard changes. Plain text
+  continues to target an active text editor, while the product's internal mixed/object clipboard is the
+  fallback when the system clipboard does not contain an image or text.
+- A4 pages are a continuous Word-style stack rather than one fixed rectangle. Completed content and the
+  visible viewport both grow the persisted sheet count before reaching the final sheet bottom, so wheel,
+  middle-drag, and touch navigation can continue downward. Page gaps remain workspace-colored and are
+  never covered by paper patterns; automatic editing or browsing never removes sheets.
 - WPF stylus input uses real `StylusPoint.PressureFactor`; promoted mouse events must not duplicate a
   stylus stroke. Only a real stylus authors/erases ink. Mouse and touch use direct content handling:
   click/tap selects, a second click/tap on selected text edits, dragging selected content transforms

@@ -670,8 +670,7 @@ public partial class MainWindow : Window
         var y = 110d;
         foreach (var file in dialog.FileNames)
         {
-            InsertAssetObject(file, PageObjectKind.Image, MimeFor(file), invert.Value, y);
-            y += 28;
+            y += InsertImageFile(file, invert.Value, y) + 18;
         }
     }
 
@@ -777,6 +776,100 @@ public partial class MainWindow : Window
         FocusedCanvas.AddObject(item);
     }
 
+    private double InsertImageFile(string path, bool inverted, double y)
+    {
+        var asset = ViewModel.ImportAsset(path);
+        var info = new FileInfo(path);
+        var point = InsertPoint(y);
+        var item = PageObject.Asset(PageObjectKind.Image, (float)point.X, (float)point.Y, asset, info.Name, MimeFor(path), info.Length);
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var frame = BitmapFrame.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            ApplyFittedImageSize(item, frame.PixelWidth, frame.PixelHeight);
+        }
+        catch
+        {
+            // The existing asset renderer will surface unsupported image formats without losing the source file.
+        }
+        item.ViewInverted = inverted;
+        FocusedCanvas.AddObject(item);
+        return item.Height;
+    }
+
+    private void PasteHomeContent()
+    {
+        if (TryPasteSystemImages()) return;
+        if (FocusedTextBox() is { } textBox && SystemClipboardContainsText())
+        {
+            textBox.Paste();
+            return;
+        }
+        if (FocusedCanvas.PasteSelection()) return;
+        if (_objectClipboard != null) PasteObject();
+    }
+
+    private bool TryPasteSystemImages()
+    {
+        if (FocusedCanvas.Document == null) return false;
+        try
+        {
+            var data = Clipboard.GetDataObject();
+            if (data == null) return false;
+            var bitmap = data.GetDataPresent(DataFormats.Bitmap, true)
+                ? Clipboard.GetImage() ?? data.GetData(DataFormats.Bitmap, true) as BitmapSource
+                : null;
+            var paths = data.GetDataPresent(DataFormats.FileDrop, true) && data.GetData(DataFormats.FileDrop, true) is string[] dropped
+                ? dropped.Where(IsSupportedImagePath).ToArray()
+                : Array.Empty<string>();
+            if (bitmap == null && paths.Length == 0) return false;
+
+            var invert = ResolveInversion(ViewModel.ImageDisplayMode, "剪贴板图片");
+            if (invert == null) return true;
+            if (bitmap != null)
+            {
+                var bytes = BitmapToPng(bitmap);
+                var asset = ViewModel.WriteAsset(".png", bytes);
+                var point = InsertPoint(110);
+                var item = PageObject.Asset(PageObjectKind.Image, (float)point.X, (float)point.Y, asset, "剪贴板图片.png", "image/png", bytes.Length);
+                ApplyFittedImageSize(item, bitmap.PixelWidth, bitmap.PixelHeight);
+                item.ViewInverted = invert.Value;
+                FocusedCanvas.AddObject(item);
+                return true;
+            }
+
+            var y = 110d;
+            foreach (var path in paths) y += InsertImageFile(path, invert.Value, y) + 18;
+            return true;
+        }
+        catch (ExternalException ex)
+        {
+            MessageBox.Show(this, $"剪贴板暂时无法读取：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"剪贴板图片粘贴失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+            return true;
+        }
+    }
+
+    private static void ApplyFittedImageSize(PageObject item, int pixelWidth, int pixelHeight)
+    {
+        var size = ImagePlacement.FitPixels(pixelWidth, pixelHeight);
+        item.Width = (float)size.Width;
+        item.Height = (float)size.Height;
+    }
+
+    private static bool IsSupportedImagePath(string path) =>
+        File.Exists(path) && Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".webp";
+
+    private static bool SystemClipboardContainsText()
+    {
+        try { return Clipboard.ContainsText(); }
+        catch (ExternalException) { return false; }
+    }
+
     private bool? ResolveInversion(ImageImportDisplayMode mode, string kind)
     {
         if (mode == ImageImportDisplayMode.Invert) return true;
@@ -790,7 +883,7 @@ public partial class MainWindow : Window
         if (sender is not FrameworkElement button || !Enum.TryParse<HomeCommand>(button.Tag?.ToString(), out var command)) return;
         switch (command)
         {
-            case HomeCommand.Paste: FocusedTextBox()?.Paste(); break;
+            case HomeCommand.Paste: PasteHomeContent(); break;
             case HomeCommand.Cut: FocusedTextBox()?.Cut(); break;
             case HomeCommand.Copy: FocusedTextBox()?.Copy(); break;
             case HomeCommand.FormatPainter: ApplyFormatPainter(); break;

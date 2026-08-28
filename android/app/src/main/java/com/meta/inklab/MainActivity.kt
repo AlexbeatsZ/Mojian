@@ -2058,7 +2058,7 @@ class MainActivity : Activity() {
 
     private fun performHomeCommand(command: HomeCommand, anchor: View) {
         when (command) {
-            HomeCommand.PASTE -> runTextCommand("粘贴") { textInputLayer.paste() }
+            HomeCommand.PASTE -> performPasteCommand()
             HomeCommand.CUT -> runTextCommand("剪切") { textInputLayer.cut() }
             HomeCommand.COPY -> runTextCommand("复制") { textInputLayer.copy() }
             HomeCommand.FORMAT_PAINTER ->
@@ -2238,7 +2238,7 @@ class MainActivity : Activity() {
                         dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         insertContentLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
-                        expandA4ForContentIfNeeded()
+                        expandA4IfNeeded()
                     }
                     insertSpaceActive = false
                     insertSpacePointerId = null
@@ -2701,7 +2701,7 @@ class MainActivity : Activity() {
                 onTransformFinished = {
                     insertContentLayer.finishSelectionTransform()
                     saveBoundPageSession()
-                    expandA4ForContentIfNeeded()
+                    expandA4IfNeeded()
                     renderToolDetails()
                 }
                 selectedContentHitTest = ::selectedContentHitAt
@@ -2718,7 +2718,7 @@ class MainActivity : Activity() {
             }
         tagLayer.onPlacementFinished = { tag ->
             updateSelectionInteraction()
-            expandA4ForContentIfNeeded()
+            expandA4IfNeeded()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
             renderFullPageToolbar()
         }
@@ -2729,7 +2729,10 @@ class MainActivity : Activity() {
             updateSelectionInteraction()
             renderToolDetails()
         }
-        insertContentLayer.onDocumentChanged = pageContentRepository::save
+        insertContentLayer.onDocumentChanged = { document ->
+            pageContentRepository.save(document)
+            expandA4IfNeeded()
+        }
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
         insertContentLayer.onSelectionChanged = { selected ->
             if (selected != null) {
@@ -4099,7 +4102,7 @@ class MainActivity : Activity() {
                 override fun onStrokesFinished(strokes: Map<InProgressStrokeId, Stroke>) {
                     dryInkView.addStrokes(strokes.values)
                     dryInkView.invalidate()
-                    expandA4ForContentIfNeeded()
+                    expandA4IfNeeded()
                     wetInkView.removeFinishedStrokes(strokes.keys)
                 }
             },
@@ -4869,6 +4872,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyViewportToLayers() {
+        expandA4IfNeeded()
         dryInkView.setViewport(viewport.documentToViewMatrix())
         pageSurfaceBackground.invalidate()
         pageSurfaceForeground.invalidate()
@@ -5031,6 +5035,7 @@ class MainActivity : Activity() {
         dryInkView.backgroundFormat = settings.backgroundFormat
         dryInkView.setDarkBackground(nextDark)
         textInputLayer.setDarkBackground(nextDark)
+        canvasBackgroundLayer.updatePage(settings)
         pageSurfaceBackground.updatePage(page?.title.orEmpty(), settings)
         pageSurfaceForeground.updatePage(page?.title.orEmpty(), settings)
         if (::currentBrush.isInitialized) rebuildBrush()
@@ -5050,23 +5055,41 @@ class MainActivity : Activity() {
     private fun ensureA4Capacity(page: NotePage? = workspace.selectedPage()): Boolean {
         val targetPage = page ?: return false
         if (targetPage.viewSettings.paperSize != PaperSize.A4) return false
+        val boundDocument = if (::insertContentLayer.isInitialized) insertContentLayer.currentDocument() else null
+        val isLivePage = boundDocument?.notebookId == workspace.id && boundDocument.pageId == targetPage.id
         val contentBottom =
-            maxOf(
-                dryInkView.contentBottom(),
-                tagLayer.contentBottom(),
-                textInputLayer.contentBottom(),
-                insertContentLayer.contentBottom(),
+            if (isLivePage) {
+                maxOf(
+                    dryInkView.contentBottom(),
+                    tagLayer.contentBottom(),
+                    textInputLayer.contentBottom(),
+                    insertContentLayer.contentBottom(),
+                )
+            } else {
+                0f
+            }
+        val visibleDocumentBottom =
+            if (isLivePage && ::paperContainer.isInitialized && paperContainer.height > 0) {
+                viewport.viewToDocument(0f, paperContainer.height.toFloat()).y
+            } else {
+                0f
+            }
+        val required =
+            A4PageLayout.requiredPageCount(
+                contentBottom,
+                visibleDocumentBottom,
+                targetPage.viewSettings.a4PageCount,
             )
-        val required = A4PageLayout.requiredPageCount(contentBottom, targetPage.viewSettings.a4PageCount)
         if (required == targetPage.viewSettings.a4PageCount) return false
         targetPage.viewSettings.a4PageCount = required
         return true
     }
 
-    private fun expandA4ForContentIfNeeded() {
+    private fun expandA4IfNeeded() {
         val page = workspace.selectedPage() ?: return
         if (!ensureA4Capacity(page)) return
         persistPageViewSettings()
+        canvasBackgroundLayer.updatePage(page.viewSettings)
         pageSurfaceBackground.updatePage(page.title, page.viewSettings)
         pageSurfaceForeground.updatePage(page.title, page.viewSettings)
     }
@@ -5706,6 +5729,54 @@ class MainActivity : Activity() {
         launchDocumentPicker(requestCode, "image/*", allowMultiple = true)
     }
 
+    private fun performPasteCommand() {
+        val imageUris = clipboardImageUris()
+        if (imageUris.isNotEmpty()) {
+            if (insertTarget() == null) {
+                Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
+                return
+            }
+            textInputLayer.endEditing()
+            chooseDisplayFilter(imageImportDisplayMode, "剪贴板图片如何显示？") { inverted ->
+                importImages(imageUris, inverted)
+            }
+            return
+        }
+        if (textInputLayer.paste()) {
+            Toast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (insertObjectClipboard != null && insertContentLayer.currentDocument() != null) {
+            pasteInsertObject()
+            return
+        }
+        Toast.makeText(this, "剪贴板中没有可粘贴的图片或页面内容", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun clipboardImageUris(): List<Uri> {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip ?: return emptyList()
+        val descriptionHasImage =
+            (0 until clip.description.mimeTypeCount).any { index ->
+                ClipboardImagePolicy.isImageMimeType(clip.description.getMimeType(index))
+            }
+        return buildList {
+            for (index in 0 until clip.itemCount) {
+                val item = clip.getItemAt(index)
+                val uri =
+                    item.uri
+                        ?: item.intent?.data
+                        ?: item.text
+                            ?.toString()
+                            ?.takeIf { descriptionHasImage && (it.startsWith("content://") || it.startsWith("file://")) }
+                            ?.let(Uri::parse)
+                        ?: continue
+                val mimeType = runCatching { contentResolver.getType(uri) }.getOrNull()
+                if (ClipboardImagePolicy.isImageMimeType(mimeType) || descriptionHasImage) add(uri)
+            }
+        }.distinct()
+    }
+
     private fun selectedUris(data: Intent): List<Uri> =
         buildList {
             data.clipData?.let { clip -> for (index in 0 until clip.itemCount) add(clip.getItemAt(index).uri) }
@@ -6177,7 +6248,7 @@ class MainActivity : Activity() {
             }
         }
         insertContentLayer.addObjectAndSelect(pasted)
-        expandA4ForContentIfNeeded()
+        expandA4IfNeeded()
     }
 
     private fun saveImageAs(image: InsertObject.Image) {

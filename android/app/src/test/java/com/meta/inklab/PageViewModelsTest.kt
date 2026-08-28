@@ -34,12 +34,13 @@ class PageViewModelsTest {
     }
 
     @Test
-    fun a4DocumentGrowsWhenContentApproachesTheLastSheetBottom() {
+    fun a4DocumentGrowsWhenContentOrViewportApproachesTheLastSheetBottom() {
         val beforeMargin = A4PageLayout.pageBottom(0) - A4PageLayout.autoGrowMargin - 1f
         val atMargin = A4PageLayout.pageBottom(0) - A4PageLayout.autoGrowMargin
 
         assertEquals(1, A4PageLayout.requiredPageCount(beforeMargin, 1))
         assertEquals(2, A4PageLayout.requiredPageCount(atMargin, 1))
+        assertEquals(2, A4PageLayout.requiredPageCount(0f, atMargin, 1))
         assertEquals(3, A4PageLayout.requiredPageCount(A4PageLayout.pageBottom(1), 1))
         assertEquals(3, A4PageLayout.requiredPageCount(0f, 3))
         assertEquals(A4PageLayout.pageHeight + A4PageLayout.pageGap, A4PageLayout.pageTop(1), 0.001f)

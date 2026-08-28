@@ -34,6 +34,11 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - Normal images support batch import. Stickers use the same image object and asset pipeline;
   built-in presets are rendered into page-owned PNG assets, while user presets are first copied to
   the sticker library and then copied into the target page.
+- `开始 -> 粘贴` and `Ctrl+V` reuse the same normal-image pipeline when the system clipboard contains
+  an image. Windows accepts clipboard bitmaps and copied image-file drop lists; Android accepts
+  foreground-readable `ClipData` image URIs. The pasted image is copied immediately into page-owned
+  assets, keeps its source aspect ratio, uses the configured normal-image display policy, persists,
+  and remains independent of the clipboard after insertion.
 - Image inversion is a view-only property chosen at import time. Its color transform follows the
   vault's `invert(...) hue-rotate(180deg)` method rather than a plain channel invert. The invert
   percentage is recalculated for this application's `#1b1b1b` paper: `invert(89.4118%)` maps source
