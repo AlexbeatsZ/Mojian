@@ -183,6 +183,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 - PDF export is a light-theme visual share. The private `.mjn` ZIP uses Android's existing manifest
   identifiers (`mojian-notebook` / `mojian-section`, version 1) and carries editable JSON and original
   assets. Export never substitutes for autosave.
+- The PDF canvas keeps its PNG as an immediate placeholder only. When a PDF object retains its
+  original source asset and page number, Windows asynchronously rerenders that vector source for the
+  current zoom and monitor DPI in bounded 2048--4096 px buckets. Never stretch a single 144 DPI
+  import preview across later zoom levels.
 
 ## Release acceptance
 

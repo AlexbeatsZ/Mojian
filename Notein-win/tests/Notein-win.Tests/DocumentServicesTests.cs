@@ -62,6 +62,20 @@ public class DocumentServicesTests
         Assert.Equal(1, pages[0].PageNumber);
         Assert.True(pages[0].PngBytes.Length > 8);
         Assert.Equal(new byte[] { 137, 80, 78, 71 }, pages[0].PngBytes[..4]);
+
+        var rerendered = await PdfImportService.RenderPageAsync(path, 1, 128);
+        using var stream = new MemoryStream(rerendered.PngBytes);
+        var decoder = new PngBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        Assert.True(decoder.Frames[0].PixelWidth >= 128);
+    }
+
+    [Theory]
+    [InlineData(793.7, 1.0, 1.0, 2048)]
+    [InlineData(793.7, 2.0, 1.5, 2560)]
+    [InlineData(793.7, 8.0, 1.5, 4096)]
+    public void PdfRenderSizing_TracksZoomAndCapsMemory(double width, double zoom, double dpi, uint expected)
+    {
+        Assert.Equal(expected, PdfRenderSizing.ForDisplay(width, zoom, dpi));
     }
 
     [Fact]

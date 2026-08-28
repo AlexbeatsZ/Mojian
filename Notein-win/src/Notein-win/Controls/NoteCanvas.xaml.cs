@@ -40,6 +40,9 @@ public partial class NoteCanvas : UserControl
     private readonly List<TextItem> _selectedTextItems = new();
     private readonly List<PageObject> _selectedObjects = new();
     private readonly Dictionary<string, BitmapSource> _bitmapCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, BitmapSource> _pdfBitmapCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pendingPdfRenders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _failedPdfRenders = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<int> _activeTouchDevices = new();
     private readonly DispatcherTimer _saveTimer;
     private readonly DispatcherTimer _pressureTimer;
@@ -106,6 +109,7 @@ public partial class NoteCanvas : UserControl
     private Point _pressureStartView;
     private DateTime _pressureStartedAt;
     private bool _suppressEditorChange;
+    private int _pdfRenderGeneration;
 
     public static readonly DependencyProperty DocumentProperty = DependencyProperty.Register(
         nameof(Document), typeof(PageDocument), typeof(NoteCanvas), new PropertyMetadata(null, OnDocumentChanged));
@@ -206,6 +210,10 @@ public partial class NoteCanvas : UserControl
         canvas._redo.Clear();
         canvas.ClearTransientState();
         canvas._bitmapCache.Clear();
+        canvas._pdfBitmapCache.Clear();
+        canvas._pendingPdfRenders.Clear();
+        canvas._failedPdfRenders.Clear();
+        canvas._pdfRenderGeneration++;
         if (args.NewValue is PageDocument doc) canvas._viewport.Restore(doc.Viewport);
         else canvas._viewport.Reset();
         canvas.RebuildTextEditors();
@@ -2429,11 +2437,15 @@ public partial class NoteCanvas : UserControl
             switch (item.Kind)
             {
                 case PageObjectKind.Image:
-                case PageObjectKind.PdfPrintout:
                 case PageObjectKind.Sticker:
                     var bitmap = LoadBitmap(item.AssetName, item.ViewInverted && !lightExport);
                     if (bitmap != null) DrawTransformedImage(dc, bitmap, rect, item);
                     else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"图片不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
+                    break;
+                case PageObjectKind.PdfPrintout:
+                    var pdfBitmap = LoadAdaptivePdfBitmap(item, item.ViewInverted && !lightExport, lightExport);
+                    if (pdfBitmap != null) DrawTransformedImage(dc, pdfBitmap, rect, item);
+                    else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"PDF 页面不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
                     break;
                 case PageObjectKind.Table:
                     DrawTable(dc, item, rect, lightExport, border);
@@ -2653,26 +2665,80 @@ public partial class NoteCanvas : UserControl
         {
             var source = new BitmapImage();
             source.BeginInit(); source.CacheOption = BitmapCacheOption.OnLoad; source.UriSource = new Uri(path); source.EndInit(); source.Freeze();
-            BitmapSource result = source;
-            if (inverted)
-            {
-                var converted = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
-                var stride = converted.PixelWidth * 4;
-                var pixels = new byte[stride * converted.PixelHeight];
-                converted.CopyPixels(pixels, stride, 0);
-                for (var i = 0; i < pixels.Length; i += 4)
-                {
-                    pixels[i] = (byte)(27 + (255 - pixels[i]) * 228 / 255);
-                    pixels[i + 1] = (byte)(27 + (255 - pixels[i + 1]) * 228 / 255);
-                    pixels[i + 2] = (byte)(27 + (255 - pixels[i + 2]) * 228 / 255);
-                }
-                var bitmap = BitmapSource.Create(converted.PixelWidth, converted.PixelHeight, converted.DpiX, converted.DpiY, PixelFormats.Bgra32, null, pixels, stride);
-                bitmap.Freeze(); result = bitmap;
-            }
+            var result = ApplyImageInversion(source, inverted);
             _bitmapCache[key] = result;
             return result;
         }
         catch { return null; }
+    }
+
+    private BitmapSource? LoadAdaptivePdfBitmap(PageObject item, bool inverted, bool lightExport)
+    {
+        var preview = LoadBitmap(item.AssetName, inverted);
+        if (lightExport || string.IsNullOrWhiteSpace(item.SourceAssetName)) return preview;
+        var sourcePath = ResolveAssetPath?.Invoke(item.SourceAssetName);
+        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return preview;
+
+        var targetWidth = PdfRenderSizing.ForDisplay(item.Width, _viewport.Scale, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        var prefix = $"{sourcePath}|{Math.Max(1, item.SourcePageNumber ?? 1)}|{inverted}|{File.GetLastWriteTimeUtc(sourcePath).Ticks}|";
+        var key = $"{prefix}{targetWidth}";
+        if (_pdfBitmapCache.TryGetValue(key, out var exact)) return exact;
+        if (!_pendingPdfRenders.Contains(key) && !_failedPdfRenders.Contains(key))
+        {
+            _pendingPdfRenders.Add(key);
+            _ = RenderAdaptivePdfBitmapAsync(sourcePath, Math.Max(1, item.SourcePageNumber ?? 1), targetWidth, inverted, key, _pdfRenderGeneration);
+        }
+        return _pdfBitmapCache.FirstOrDefault(entry => entry.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Value ?? preview;
+    }
+
+    private async Task RenderAdaptivePdfBitmapAsync(string sourcePath, int pageNumber, uint targetWidth, bool inverted, string key, int generation)
+    {
+        try
+        {
+            var rendered = await PdfImportService.RenderPageAsync(sourcePath, pageNumber, targetWidth);
+            var bitmap = BitmapFromBytes(rendered.PngBytes);
+            if (generation != _pdfRenderGeneration) return;
+            _pdfBitmapCache[key] = ApplyImageInversion(bitmap, inverted);
+            InvalidateVisual();
+        }
+        catch
+        {
+            if (generation == _pdfRenderGeneration) _failedPdfRenders.Add(key);
+        }
+        finally
+        {
+            _pendingPdfRenders.Remove(key);
+        }
+    }
+
+    private static BitmapSource BitmapFromBytes(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes, writable: false);
+        var source = new BitmapImage();
+        source.BeginInit();
+        source.CacheOption = BitmapCacheOption.OnLoad;
+        source.StreamSource = stream;
+        source.EndInit();
+        source.Freeze();
+        return source;
+    }
+
+    private static BitmapSource ApplyImageInversion(BitmapSource source, bool inverted)
+    {
+        if (!inverted) return source;
+        var converted = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var stride = converted.PixelWidth * 4;
+        var pixels = new byte[stride * converted.PixelHeight];
+        converted.CopyPixels(pixels, stride, 0);
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = (byte)(27 + (255 - pixels[i]) * 228 / 255);
+            pixels[i + 1] = (byte)(27 + (255 - pixels[i + 1]) * 228 / 255);
+            pixels[i + 2] = (byte)(27 + (255 - pixels[i + 2]) * 228 / 255);
+        }
+        var bitmap = BitmapSource.Create(converted.PixelWidth, converted.PixelHeight, converted.DpiX, converted.DpiY, PixelFormats.Bgra32, null, pixels, stride);
+        bitmap.Freeze();
+        return bitmap;
     }
 
     private TextItem? HitText(Point viewPoint)
