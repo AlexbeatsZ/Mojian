@@ -77,6 +77,10 @@ class InsertContentLayer(
 
     fun contentBottom(): Float = document?.objects?.maxOfOrNull { it.documentY + it.height } ?: 0f
 
+    fun contentBounds(): Sequence<StrokeViewportBounds> = document?.objects.orEmpty().asSequence().map {
+        StrokeViewportBounds(it.documentX, it.documentY, it.documentX + it.width, it.documentY + it.height)
+    }
+
     fun selectedCount(): Int = selectedItems().size
 
     fun selectAll(): Int {

@@ -654,6 +654,8 @@ public partial class NoteCanvas : UserControl
         {
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushTransform(new TranslateTransform(-extent.X, -extent.Y));
+            if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite)
+                dc.DrawRectangle(Brushes.White, null, extent);
             DrawDocument(dc, layer, lightExport: true, extent);
             dc.Pop();
             dc.Pop();
@@ -2389,8 +2391,10 @@ public partial class NoteCanvas : UserControl
         var paper = lightExport ? Brushes.White : ParseBrush(Appearance.PageColor, Appearance.Theme == PageTheme.Dark ? Color.FromRgb(27, 27, 27) : Color.FromRgb(250, 250, 250));
         if (Appearance.PaperKind == PaperKind.Infinite)
         {
-            dc.DrawRectangle(paper, null, extent);
-            DrawPattern(dc, extent, lightExport);
+            var rect = new Rect(0, 0, Appearance.InfiniteWidth, Appearance.InfiniteHeight);
+            dc.DrawRectangle(paper, lightExport ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
+            var visiblePaper = Rect.Intersect(rect, extent);
+            if (!visiblePaper.IsEmpty) DrawPattern(dc, visiblePaper, lightExport);
         }
         else
         {
@@ -2406,7 +2410,7 @@ public partial class NoteCanvas : UserControl
                 DrawPattern(dc, rect, lightExport);
             }
         }
-        if (Appearance.ShowTitle && !string.IsNullOrWhiteSpace(PageTitle))
+        if (Appearance.ShowTitle && !string.IsNullOrWhiteSpace(PageTitle) && !(lightExport && Appearance.PaperKind == PaperKind.Infinite))
         {
             DrawText(dc, PageTitle, new Point(54, 42), 22, lightExport ? Brushes.Black : TextBrush(InkPalette.Black, Appearance.Theme == PageTheme.Dark, false), true);
         }
@@ -2825,9 +2829,11 @@ public partial class NoteCanvas : UserControl
 
     private Rect CalculateDocumentExtent()
     {
+        if (Document != null && Appearance.PaperKind == PaperKind.Infinite)
+            return InfinitePageLayout.ExportBounds(Document);
         var extent = Appearance.PaperKind != PaperKind.Infinite
             ? new Rect(0, 0, Appearance.Width, Math.Max(1, Appearance.SheetCount) * Appearance.Height + Math.Max(0, Appearance.SheetCount - 1) * A4PageLayout.PageGap)
-            : new Rect(0, 0, Math.Max(1200, Appearance.Width), Math.Max(1600, Appearance.Height));
+            : new Rect(0, 0, Appearance.InfiniteWidth, Appearance.InfiniteHeight);
         if (Document == null) return extent;
         foreach (var stroke in Document.Strokes) if (!stroke.Bounds.IsEmpty) extent = Rect.Union(extent, stroke.Bounds);
         foreach (var text in Document.TextItems) extent = Rect.Union(extent, new Rect(text.X, text.Y, text.Width, text.Height));
@@ -2871,6 +2877,7 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return;
         GrowA4IfNeeded();
+        InfinitePageLayout.EnsureCapacity(Appearance, Document);
         _viewport.CopyTo(Document.Viewport);
         if (immediate) { _saveTimer.Stop(); RaiseDocumentChanged(); }
         else { _saveTimer.Stop(); _saveTimer.Start(); }

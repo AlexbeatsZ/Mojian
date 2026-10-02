@@ -46,6 +46,7 @@ enum class CanvasBackgroundFormat(
 }
 
 class DryInkView(context: Context) : View(context) {
+    var onContentChanged: (() -> Unit)? = null
     var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
         set(value) {
             field = value
@@ -161,6 +162,7 @@ class DryInkView(context: Context) : View(context) {
         redoStrokes.clear()
         strokes.addAll(newStrokes)
         newStrokes.forEach(::registerStroke)
+        onContentChanged?.invoke()
     }
 
     fun undo(): Boolean {
@@ -176,6 +178,7 @@ class DryInkView(context: Context) : View(context) {
         val restored = redoStrokes.removeLast()
         strokes.add(restored)
         registerStroke(restored)
+        onContentChanged?.invoke()
         invalidate()
         return true
     }
@@ -189,6 +192,7 @@ class DryInkView(context: Context) : View(context) {
         lassoPoints.clear()
         lassoStartPoint = null
         invalidate()
+        onContentChanged?.invoke()
     }
 
     fun strokeCount(): Int = strokes.size
@@ -207,6 +211,8 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun contentBottom(): Float = cachedContentBottom
+
+    fun contentBounds(): Sequence<StrokeViewportBounds> = strokes.asSequence().filter { !it.inputs.isEmpty() }.map(::boundsFor)
 
     fun setViewport(matrix: Matrix) {
         documentToView.set(matrix)
@@ -466,9 +472,15 @@ class DryInkView(context: Context) : View(context) {
     }
 
     private fun renderBackground(canvas: Canvas, documentMatrix: Matrix, exportTheme: Boolean) {
+        val bounds = if (exportTheme) {
+            val inverse = Matrix()
+            RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()).also {
+                if (documentMatrix.invert(inverse)) inverse.mapRect(it)
+            }
+        } else visibleDocumentBounds()
         canvas.save()
         canvas.concat(documentMatrix)
-        drawGrid(canvas, exportTheme)
+        drawGrid(canvas, exportTheme, bounds)
         canvas.restore()
     }
 
@@ -584,9 +596,8 @@ class DryInkView(context: Context) : View(context) {
         canvas.drawPath(path, lassoPaint)
     }
 
-    private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false) {
+    private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false, visible: RectF = visibleDocumentBounds()) {
         if (backgroundFormat.category == BackgroundCategory.BLANK) return
-        val visible = visibleDocumentBounds()
         val step = gridStep * backgroundFormat.stepMultiplier
 
         when (backgroundFormat.category) {
@@ -668,6 +679,7 @@ class DryInkView(context: Context) : View(context) {
         strokeBounds.clear()
         cachedContentBottom = 0f
         strokes.forEach(::registerStroke)
+        onContentChanged?.invoke()
     }
 
     private fun boundsFor(stroke: Stroke): StrokeViewportBounds =

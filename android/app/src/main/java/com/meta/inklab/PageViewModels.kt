@@ -88,12 +88,14 @@ data class PageViewSettings(
     var a4PageCount: Int = 1,
     var customDocumentWidth: Float? = null,
     var customDocumentHeight: Float? = null,
+    var boundlessDocumentWidth: Float = BoundlessPageLayout.initialWidth,
+    var boundlessDocumentHeight: Float = BoundlessPageLayout.initialHeight,
 ) {
     val documentWidth: Float?
-        get() = customDocumentWidth ?: paperSize.documentWidth
+        get() = if (paperSize == PaperSize.BOUNDLESS) boundlessDocumentWidth else customDocumentWidth ?: paperSize.documentWidth
 
     val documentHeight: Float?
-        get() = customDocumentHeight ?: paperSize.documentHeight
+        get() = if (paperSize == PaperSize.BOUNDLESS) boundlessDocumentHeight else customDocumentHeight ?: paperSize.documentHeight
 
     fun toJson(): JSONObject =
         JSONObject().apply {
@@ -103,6 +105,8 @@ data class PageViewSettings(
             put("pageTitleVisible", pageTitleVisible)
             put("darkBackground", darkBackground)
             put("a4PageCount", a4PageCount.coerceAtLeast(1))
+            put("boundlessDocumentWidth", boundlessDocumentWidth.toDouble())
+            put("boundlessDocumentHeight", boundlessDocumentHeight.toDouble())
             customDocumentWidth?.let { put("customDocumentWidth", it.toDouble()) }
             customDocumentHeight?.let { put("customDocumentHeight", it.toDouble()) }
         }
@@ -125,6 +129,10 @@ data class PageViewSettings(
                 a4PageCount = json.optInt("a4PageCount", 1).coerceAtLeast(1),
                 customDocumentWidth = json.optDouble("customDocumentWidth", Double.NaN).takeIf(Double::isFinite)?.toFloat(),
                 customDocumentHeight = json.optDouble("customDocumentHeight", Double.NaN).takeIf(Double::isFinite)?.toFloat(),
+                boundlessDocumentWidth = json.optDouble("boundlessDocumentWidth", BoundlessPageLayout.initialWidth.toDouble())
+                    .takeIf { it.isFinite() && it >= BoundlessPageLayout.initialWidth }?.toFloat() ?: BoundlessPageLayout.initialWidth,
+                boundlessDocumentHeight = json.optDouble("boundlessDocumentHeight", BoundlessPageLayout.initialHeight.toDouble())
+                    .takeIf { it.isFinite() && it >= BoundlessPageLayout.initialHeight }?.toFloat() ?: BoundlessPageLayout.initialHeight,
             )
 
         private fun restorePaperSize(saved: String): PaperSize =

@@ -124,6 +124,11 @@ public static class NotebookPackageService
             result["customDocumentWidth"] = appearance.Width;
             result["customDocumentHeight"] = appearance.Height;
         }
+        if (appearance.PaperKind == PaperKind.Infinite)
+        {
+            result["boundlessDocumentWidth"] = appearance.InfiniteWidth * InfinitePageLayout.AndroidUnitsPerDesktopUnit;
+            result["boundlessDocumentHeight"] = appearance.InfiniteHeight * InfinitePageLayout.AndroidUnitsPerDesktopUnit;
+        }
         return result;
     }
 

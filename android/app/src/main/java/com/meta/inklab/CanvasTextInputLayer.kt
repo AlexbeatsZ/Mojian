@@ -83,6 +83,7 @@ class CanvasTextInputLayer(
 
     var onSelectionChanged: ((Int) -> Unit)? = null
     var onEditingChanged: ((Boolean) -> Unit)? = null
+    var onContentChanged: (() -> Unit)? = null
     var onPageGesture: ((MotionEvent) -> Unit)? = null
 
     init {
@@ -275,6 +276,30 @@ class CanvasTextInputLayer(
             }
         }
 
+    fun contentBounds(): Sequence<StrokeViewportBounds> =
+        (0 until childCount).asSequence().mapNotNull { index ->
+            (getChildAt(index) as? EditText)?.takeIf { it.text.isNotBlank() }?.let(::documentBounds)?.let {
+                StrokeViewportBounds(it.left, it.top, it.right, it.bottom)
+            }
+        }
+
+    fun renderForExport(canvas: android.graphics.Canvas, documentMatrix: android.graphics.Matrix) {
+        canvas.save()
+        canvas.concat(documentMatrix)
+        forEachEditor { editor ->
+            if (editor.text.isBlank()) return@forEachEditor
+            val textLayout = editor.layout ?: return@forEachEditor
+            val state = state(editor)
+            canvas.save()
+            canvas.translate(state.documentX, state.documentY)
+            canvas.scale(state.contentScale, state.contentScale)
+            canvas.translate(editor.compoundPaddingLeft.toFloat(), editor.compoundPaddingTop.toFloat())
+            textLayout.draw(canvas)
+            canvas.restore()
+        }
+        canvas.restore()
+    }
+
     fun replaceEditors(snapshots: List<CanvasTextSnapshot>) {
         clearAll()
         snapshots.forEach { snapshot ->
@@ -454,9 +479,13 @@ class CanvasTextInputLayer(
                             temporaryEditors.remove(this@apply)
                             formalEditingEditors += this@apply
                         }
+                        post { onContentChanged?.invoke() }
                     }
                 },
             )
+            addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) onContentChanged?.invoke()
+            }
             setOnFocusChangeListener { view, focused ->
                 if (focused) {
                     activeEditor = view as EditText

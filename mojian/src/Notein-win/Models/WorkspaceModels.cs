@@ -54,6 +54,8 @@ public sealed class PageAppearance
     public int SheetCount { get; set; } = 1;
     public double Width { get; set; } = 793.7;
     public double Height { get; set; } = 1122.5;
+    public double InfiniteWidth { get; set; } = InfinitePageLayout.InitialWidth;
+    public double InfiniteHeight { get; set; } = InfinitePageLayout.InitialHeight;
 
     public PageAppearance Clone() => new()
     {
@@ -65,6 +67,8 @@ public sealed class PageAppearance
         SheetCount = Math.Max(1, SheetCount),
         Width = Width,
         Height = Height,
+        InfiniteWidth = InfiniteWidth,
+        InfiniteHeight = InfiniteHeight,
     };
 }
 

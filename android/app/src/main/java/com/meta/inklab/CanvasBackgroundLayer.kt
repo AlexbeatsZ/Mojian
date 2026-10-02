@@ -30,7 +30,10 @@ class CanvasBackgroundLayer(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         when (pageSettings.paperSize) {
-            PaperSize.BOUNDLESS -> inkView.renderBackground(canvas)
+            PaperSize.BOUNDLESS -> inkView.renderBackground(
+                canvas,
+                listOf(RectF(0f, 0f, pageSettings.boundlessDocumentWidth, pageSettings.boundlessDocumentHeight)),
+            )
             PaperSize.A4 -> {
                 val pages =
                     List(pageSettings.a4PageCount.coerceAtLeast(1)) { index ->

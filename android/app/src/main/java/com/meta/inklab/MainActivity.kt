@@ -2238,7 +2238,7 @@ class MainActivity : Activity() {
                         dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         insertContentLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
-                        expandA4IfNeeded()
+                        expandPageIfNeeded()
                     }
                     insertSpaceActive = false
                     insertSpacePointerId = null
@@ -2398,7 +2398,11 @@ class MainActivity : Activity() {
                         dialog.dismiss()
                         launchDocumentPicker(REQUEST_PDF_PAGES, "application/pdf", requireSelectedPage = false)
                     } else {
-                        val settings = draft.copy(a4PageCount = 1)
+                        val settings = draft.copy(
+                            a4PageCount = 1,
+                            boundlessDocumentWidth = BoundlessPageLayout.initialWidth,
+                            boundlessDocumentHeight = BoundlessPageLayout.initialHeight,
+                        )
                         val page = workspace.addPage(viewSettings = settings)
                         ensureA4Capacity(page)
                         lastPageTemplateSettings = settings.copy(a4PageCount = 1)
@@ -2701,7 +2705,7 @@ class MainActivity : Activity() {
                 onTransformFinished = {
                     insertContentLayer.finishSelectionTransform()
                     saveBoundPageSession()
-                    expandA4IfNeeded()
+                    expandPageIfNeeded()
                     renderToolDetails()
                 }
                 selectedContentHitTest = ::selectedContentHitAt
@@ -2718,7 +2722,7 @@ class MainActivity : Activity() {
             }
         tagLayer.onPlacementFinished = { tag ->
             updateSelectionInteraction()
-            expandA4IfNeeded()
+            expandPageIfNeeded()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
             renderFullPageToolbar()
         }
@@ -2731,7 +2735,7 @@ class MainActivity : Activity() {
         }
         insertContentLayer.onDocumentChanged = { document ->
             pageContentRepository.save(document)
-            expandA4IfNeeded()
+            expandPageIfNeeded()
         }
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
         insertContentLayer.onSelectionChanged = { selected ->
@@ -2753,6 +2757,8 @@ class MainActivity : Activity() {
             renderToolDetails()
         }
         textInputLayer.onEditingChanged = { updateSelectionInteraction() }
+        textInputLayer.onContentChanged = ::expandPageIfNeeded
+        dryInkView.onContentChanged = ::expandPageIfNeeded
         textInputLayer.onPageGesture = ::handleFingerGesture
         paperContainer.onPointerEventObserved = ::observeCanvasPointerEvent
         dryInkView.setViewport(viewport.documentToViewMatrix())
@@ -3700,6 +3706,7 @@ class MainActivity : Activity() {
         }
         val document = pageId?.let { pageContentRepository.load(workspace.id, it) }
         insertContentLayer.bind(document)
+        expandPageIfNeeded()
         if (splitViewState.enabled) splitViewState.updateFocused(notebookLibrary.captureLocation())
     }
 
@@ -4102,7 +4109,7 @@ class MainActivity : Activity() {
                 override fun onStrokesFinished(strokes: Map<InProgressStrokeId, Stroke>) {
                     dryInkView.addStrokes(strokes.values)
                     dryInkView.invalidate()
-                    expandA4IfNeeded()
+                    expandPageIfNeeded()
                     wetInkView.removeFinishedStrokes(strokes.keys)
                 }
             },
@@ -5047,6 +5054,7 @@ class MainActivity : Activity() {
         val page = workspace.selectedPage() ?: return
         change(page.viewSettings)
         ensureA4Capacity(page)
+        ensureBoundlessCapacity(page)
         persistPageViewSettings()
         applySelectedPageAppearance()
         persistWorkspacePreferences()
@@ -5085,13 +5093,32 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun expandA4IfNeeded() {
+    private fun documentContentBounds(): Sequence<StrokeViewportBounds> = sequence {
+        yieldAll(dryInkView.contentBounds())
+        yieldAll(tagLayer.contentBounds())
+        yieldAll(textInputLayer.contentBounds())
+        yieldAll(insertContentLayer.contentBounds())
+    }
+
+    private fun ensureBoundlessCapacity(page: NotePage): Boolean {
+        if (page.viewSettings.paperSize != PaperSize.BOUNDLESS || !::insertContentLayer.isInitialized) return false
+        val document = insertContentLayer.currentDocument() ?: return false
+        if (document.notebookId != workspace.id || document.pageId != page.id) return false
+        return BoundlessPageLayout.ensureCapacity(page.viewSettings, documentContentBounds())
+    }
+
+    private fun expandPageIfNeeded() {
         val page = workspace.selectedPage() ?: return
-        if (!ensureA4Capacity(page)) return
+        if (!ensureA4Capacity(page) && !ensureBoundlessCapacity(page)) return
         persistPageViewSettings()
         canvasBackgroundLayer.updatePage(page.viewSettings)
         pageSurfaceBackground.updatePage(page.title, page.viewSettings)
         pageSurfaceForeground.updatePage(page.title, page.viewSettings)
+    }
+
+    // Browsing may append A4 sheets, but must never grow boundless paper.
+    private fun expandA4IfNeeded() {
+        if (workspace.selectedPage()?.viewSettings?.paperSize == PaperSize.A4) expandPageIfNeeded()
     }
 
     private fun refreshViewRibbonState() {
@@ -6248,7 +6275,7 @@ class MainActivity : Activity() {
             }
         }
         insertContentLayer.addObjectAndSelect(pasted)
-        expandA4IfNeeded()
+        expandPageIfNeeded()
     }
 
     private fun saveImageAs(image: InsertObject.Image) {
@@ -6408,12 +6435,16 @@ class MainActivity : Activity() {
         val documentWidth = page.viewSettings.documentWidth
         val documentHeight = page.viewSettings.documentHeight
         val fixedDocumentExport = pdfInfo != null && documentWidth != null && documentHeight != null
+        val contentCrop = if (page.viewSettings.paperSize == PaperSize.BOUNDLESS) BoundlessPageLayout.exportBounds(documentContentBounds()) else null
+        val exportWidth = contentCrop?.let { it.right - it.left } ?: documentWidth
+        val exportHeight = contentCrop?.let { it.bottom - it.top } ?: documentHeight
+        val documentExport = fixedDocumentExport || contentCrop != null
         val (width, height) =
-            if (fixedDocumentExport) {
-                val longest = maxOf(documentWidth, documentHeight).coerceAtLeast(1f)
+            if (documentExport) {
+                val longest = maxOf(requireNotNull(exportWidth), requireNotNull(exportHeight)).coerceAtLeast(1f)
                 val scale = PDF_EXPORT_LONGEST_SIDE_PX / longest
-                (documentWidth * scale).roundToInt().coerceAtLeast(1) to
-                    (documentHeight * scale).roundToInt().coerceAtLeast(1)
+                (exportWidth * scale).roundToInt().coerceAtLeast(1) to
+                    (exportHeight * scale).roundToInt().coerceAtLeast(1)
             } else {
                 dryInkView.width to dryInkView.height
             }
@@ -6422,8 +6453,12 @@ class MainActivity : Activity() {
             return null
         }
         val documentMatrix =
-            if (fixedDocumentExport) {
-                Matrix().apply { setScale(width / documentWidth, height / documentHeight) }
+            if (documentExport) {
+                Matrix().apply {
+                    val scaleX = width / requireNotNull(exportWidth)
+                    val scaleY = height / requireNotNull(exportHeight)
+                    setValues(floatArrayOf(scaleX, 0f, -(contentCrop?.left ?: 0f) * scaleX, 0f, scaleY, -(contentCrop?.top ?: 0f) * scaleY, 0f, 0f, 1f))
+                }
             } else {
                 viewport.documentToViewMatrix()
             }
@@ -6435,20 +6470,13 @@ class MainActivity : Activity() {
         Canvas(inkAndText).also { canvas ->
             dryInkView.renderInkForExport(canvas, documentMatrix)
             tagLayer.renderForExport(canvas, documentMatrix)
-            if (fixedDocumentExport) {
-                val textMatrix = Matrix().apply { setConcat(documentMatrix, viewport.viewToDocumentMatrix()) }
-                canvas.save()
-                canvas.concat(textMatrix)
-                textInputLayer.draw(canvas)
-                canvas.restore()
-            } else {
-                textInputLayer.draw(canvas)
-            }
+            textInputLayer.renderForExport(canvas, documentMatrix)
         }
         ExportColorTransform.applyTo(inkAndText)
         return ExportSnapshot(
             layers = linkedMapOf("页面背景" to background, "插入内容" to inserted, "墨迹与文字" to inkAndText),
-            pageSize = pdfInfo?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) },
+            pageSize = pdfInfo?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) }
+                ?: contentCrop?.let { PdfOutputPageSize((it.right - it.left) / DOCUMENT_UNITS_PER_PDF_POINT, (it.bottom - it.top) / DOCUMENT_UNITS_PER_PDF_POINT) },
         )
     }
 

@@ -1,6 +1,6 @@
 # Windows / Android Product Parity
 
-Last verified: 2026-08-28
+Last verified: 2026-10-02
 
 Read this document before changing a product feature, command, persisted page concept, or user-visible
 interaction that exists in both the Android and Windows editions of 墨笺.
@@ -38,6 +38,10 @@ Parity means the same product outcome, not identical operating-system APIs. For 
   export still renders every stroke.
 - Shared `.mjn`, page appearance, object, and asset semantics remain compatible even when the native
   picker, clipboard, pointer, or window integration differs.
+- Boundless paper is anchored at document origin and grows only to the right/down when any actual
+  content reaches its 24 mm edge margin. Stored extents never shrink and viewport navigation never
+  grows them. PDF export crops current content with 6 mm padding instead of retaining historical
+  blank paper; both clients follow `docs/design/boundless-canvas.md`.
 
 ## Completion gate
 

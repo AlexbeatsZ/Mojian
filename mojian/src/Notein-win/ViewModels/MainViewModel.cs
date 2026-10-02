@@ -82,6 +82,7 @@ public sealed class MainViewModel : ObservableObject
         get => _primaryDocument;
         private set
         {
+            PrepareInfinitePage(value);
             if (!SetField(ref _primaryDocument, value)) return;
             OnPropertyChanged(nameof(PrimaryPageAppearance));
             OnPropertyChanged(nameof(PrimaryPageTitle));
@@ -93,6 +94,7 @@ public sealed class MainViewModel : ObservableObject
         get => _secondaryDocument;
         private set
         {
+            PrepareInfinitePage(value);
             if (!SetField(ref _secondaryDocument, value)) return;
             OnPropertyChanged(nameof(SecondaryPageAppearance));
             OnPropertyChanged(nameof(SecondaryPageTitle));
@@ -863,6 +865,7 @@ public sealed class MainViewModel : ObservableObject
         if (page == null) return;
         page.Appearance.PaperKind = kind;
         page.Appearance.SheetCount = Math.Max(1, page.Appearance.SheetCount);
+        if (FocusedDocument is { } document) InfinitePageLayout.EnsureCapacity(page.Appearance, document);
         ActivePageAppearance = page.Appearance.Clone();
         SaveLibrary();
         RequestAppearanceRefresh?.Invoke();
@@ -1444,6 +1447,13 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SecondaryPageAppearance));
         OnPropertyChanged(nameof(PrimaryPageTitle));
         OnPropertyChanged(nameof(SecondaryPageTitle));
+    }
+
+    private void PrepareInfinitePage(PageDocument? document)
+    {
+        if (document == null) return;
+        var appearance = AppearanceForDocument(document);
+        if (InfinitePageLayout.EnsureCapacity(appearance, document)) SaveLibrary();
     }
 
     private PageAppearance AppearanceForDocument(PageDocument? document)

@@ -81,6 +81,11 @@ class CanvasTagLayer(
 
     fun contentBottom(): Float = tags.maxOfOrNull { it.documentY + dp(10f) } ?: 0f
 
+    fun contentBounds(): Sequence<StrokeViewportBounds> = tags.asSequence().map {
+        val halfSize = dp(14f)
+        StrokeViewportBounds(it.documentX - halfSize, it.documentY - halfSize, it.documentX + halfSize, it.documentY + halfSize)
+    }
+
     fun clear() {
         tags.clear()
         selectedTags.clear()

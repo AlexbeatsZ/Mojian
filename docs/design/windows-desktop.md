@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-08-28
+Last verified: 2026-10-02
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -87,6 +87,10 @@ multi-layer `DrawingImage`, while tintable single-color assets continue to inher
 foreground. ADB screenshots of the installed Android build are the visual comparison baseline.
 
 ## Canvas and input
+
+Boundless page growth and content-cropped PDF export follow `docs/design/boundless-canvas.md`.
+Persisted dimensions are independent of A4/PDF dimensions and only grow right/down from origin;
+viewport navigation never grows boundless paper.
 
 The normative device/state mapping is `docs/design/input-gestures.md`; this section records only
 Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-single semantics.

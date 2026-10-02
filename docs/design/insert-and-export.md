@@ -93,7 +93,11 @@ is product-owned and is not Notein's proprietary backup format.
 
 ### Layered PDF
 
-PDF export writes the current visible page. It contains three Optional Content Groups (PDF layers):
+Boundless pages follow `docs/design/boundless-canvas.md`: export current mixed-content bounds with
+6 mm padding, independently of saved paper size and viewport. Content deletion may reduce the PDF
+crop without shrinking the canvas. Imported PDF MediaBox and A4 export behavior remain unchanged.
+
+PDF export writes the current page. It contains three Optional Content Groups (PDF layers):
 
 1. `页面背景`
 2. `插入内容`

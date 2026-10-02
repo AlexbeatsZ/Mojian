@@ -13,7 +13,7 @@ enum class PageSurfaceLayer {
     FOREGROUND,
 }
 
-/** Draws an unbounded canvas, a Word-like A4 stack, or one fixed-size imported PDF page. */
+/** Draws content-grown paper, a Word-like A4 stack, or one fixed-size imported PDF page. */
 @SuppressLint("ViewConstructor")
 class PageSurfaceView(
     context: Context,
@@ -61,11 +61,6 @@ class PageSurfaceView(
         titlePaint.color = if (settings.darkBackground) 0xFFEFEFEF.toInt() else 0xFF202020.toInt()
         titlePaint.textSize = TITLE_SIZE_MM * DOCUMENT_UNITS_PER_MM
 
-        if (settings.paperSize == PaperSize.BOUNDLESS) {
-            drawBoundless(canvas)
-            return
-        }
-
         val pageCount = if (settings.paperSize == PaperSize.A4) settings.a4PageCount.coerceAtLeast(1) else 1
         val documentToView = viewport.documentToViewMatrix()
         if (layer == PageSurfaceLayer.BACKGROUND) {
@@ -90,24 +85,6 @@ class PageSurfaceView(
             canvas.concat(documentToView)
             setDocumentPageRect(0, documentPageRect)
             canvas.clipRect(documentPageRect)
-            canvas.drawText(
-                pageTitle,
-                TITLE_LEFT_MM * DOCUMENT_UNITS_PER_MM,
-                TITLE_BASELINE_MM * DOCUMENT_UNITS_PER_MM,
-                titlePaint,
-            )
-            canvas.restore()
-        }
-    }
-
-    private fun drawBoundless(canvas: Canvas) {
-        if (layer == PageSurfaceLayer.BACKGROUND) {
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), pagePaint)
-            return
-        }
-        if (settings.pageTitleVisible && pageTitle.isNotBlank()) {
-            canvas.save()
-            canvas.concat(viewport.documentToViewMatrix())
             canvas.drawText(
                 pageTitle,
                 TITLE_LEFT_MM * DOCUMENT_UNITS_PER_MM,

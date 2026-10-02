@@ -5,6 +5,9 @@ Last verified: 2026-08-28
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
 
+Boundless paper dimensions, content-only right/down growth, and smart-cropped PDF output follow
+`docs/design/boundless-canvas.md`; viewport browsing never expands this paper mode.
+
 ## Product intent
 
 Turn the handwriting lab into a usable tablet workspace whose hierarchy can later be shared with a
