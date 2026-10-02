@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using System.Windows;
+using System.Windows.Media;
 
 namespace Notein_win.Models;
 
@@ -49,6 +50,52 @@ public sealed class StrokeRecord
     public int InkFlowPercent { get; set; } = 100;
     public int OpacityPercent { get; set; } = 100;
     public string BrushProfile { get; set; } = "fountain-v1";
+    public string ColorHex { get; set; } = string.Empty;
+    public string LayerId { get; set; } = string.Empty;
+    public long ZOrder { get; set; }
+    // A filled vector outline, independent of Mojian's authoring brush. The affine
+    // transform lets move/resize retain the original pressure-shaped outline.
+    public string VectorPath { get; set; } = string.Empty;
+    public double[]? VectorBounds { get; set; }
+    public double[] VectorTransform { get; set; } = [1, 0, 0, 1, 0, 0];
+    public System.Text.Json.JsonElement? SourceBrush { get; set; }
+
+    [JsonIgnore] private Geometry? _vectorGeometry;
+    [JsonIgnore] private string? _cachedVectorPath;
+    [JsonIgnore] private Geometry? _transformedVectorGeometry;
+    [JsonIgnore] private Matrix _cachedVectorMatrix;
+    [JsonIgnore] public Geometry? VectorGeometry
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(VectorPath)) return null;
+            if (_cachedVectorPath != VectorPath)
+            {
+                _vectorGeometry = Geometry.Parse(VectorPath);
+                _vectorGeometry.Freeze();
+                _cachedVectorPath = VectorPath;
+                _transformedVectorGeometry = null;
+            }
+            var m = VectorTransform;
+            var matrix = m.Length == 6 ? new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]) : Matrix.Identity;
+            if (_transformedVectorGeometry != null && matrix == _cachedVectorMatrix) return _transformedVectorGeometry;
+            var transformed = _vectorGeometry!.Clone();
+            transformed.Transform = new MatrixTransform(matrix);
+            transformed.Freeze();
+            _cachedVectorMatrix = matrix;
+            return _transformedVectorGeometry = transformed;
+        }
+    }
+
+    public void TransformVector(Matrix matrix)
+    {
+        if (string.IsNullOrEmpty(VectorPath)) return;
+        var m = VectorTransform;
+        var current = m.Length == 6 ? new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]) : Matrix.Identity;
+        current.Append(matrix);
+        VectorTransform = [current.M11, current.M12, current.M21, current.M22, current.OffsetX, current.OffsetY];
+        InvalidateBounds();
+    }
     public List<InkPoint> Points
     {
         get => _points;
@@ -65,6 +112,14 @@ public sealed class StrokeRecord
         get
         {
             if (_cachedBounds is { } cached) return cached;
+            if (VectorBounds is { Length: 4 } b)
+            {
+                var rect = new Rect(b[0], b[1], Math.Max(0, b[2] - b[0]), Math.Max(0, b[3] - b[1]));
+                var m = VectorTransform;
+                if (m.Length == 6) rect = new MatrixTransform(m[0], m[1], m[2], m[3], m[4], m[5]).TransformBounds(rect);
+                return (_cachedBounds = rect).Value;
+            }
+            if (VectorGeometry is { } geometry) return (_cachedBounds = geometry.Bounds).Value;
             if (Points.Count == 0) return Rect.Empty;
             var minX = float.PositiveInfinity;
             var minY = float.PositiveInfinity;
@@ -121,6 +176,8 @@ public sealed class CanvasTag
 
 public sealed class TextItem
 {
+    public string LayerId { get; set; } = string.Empty;
+    public long ZOrder { get; set; }
     public string Id { get; set; } = IdFactory.New("text");
     public float X { get; set; }
     public float Y { get; set; }
@@ -162,7 +219,16 @@ public sealed class PageDocument
     public List<CanvasTag> Tags { get; set; } = new();
     public List<TextItem> TextItems { get; set; } = new();
     public List<PageObject> Objects { get; set; } = new();
+    public List<PageLayer> Layers { get; set; } = new();
 
     public PageDocument() { }
     public PageDocument(string notebookId, string pageId) { NotebookId = notebookId; PageId = pageId; }
+}
+
+public sealed class PageLayer
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public bool Visible { get; set; } = true;
+    public int Order { get; set; }
 }

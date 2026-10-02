@@ -75,11 +75,79 @@ def color_components(value: int | str | None) -> tuple[int, int, int, int]:
             return 255, int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
         if len(text) == 8:
             return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16), int(text[6:8], 16)
-    raw = int(value or 0) & 0xFFFFFFFF
+    raw = int(value or 0)
+    # AndroidX Color stores packed sRGB ARGB in the upper word of a ColorLong.
+    if raw > 0xFFFFFFFF:
+        raw >>= 32
+    raw &= 0xFFFFFFFF
     alpha = (raw >> 24) & 0xFF
     if alpha == 0:
         alpha = 255
     return alpha, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF
+
+
+def source_color_hex(value: int | str | None) -> str:
+    return '#%02X%02X%02X%02X' % color_components(value)
+
+
+def stroke_outline(points: list[dict[str, Any]], size: float, *, variable: bool = True) -> str:
+    """One filled, movable vector per stroke; no preview pixels or per-segment opacity."""
+    if not points:
+        return ''
+    samples = []
+    for p in points:
+        radius = size * (0.38 + max(0.0, min(1.0, p['pressure'])) * 0.78) / 2 if variable else size / 2
+        if samples and math.hypot(p['x'] - samples[-1][0], p['y'] - samples[-1][1]) < 0.001:
+            samples[-1] = (p['x'], p['y'], max(radius, samples[-1][2]))
+        else:
+            samples.append((p['x'], p['y'], radius))
+    def number(n): return format(n, '.5f').rstrip('0').rstrip('.') or '0'
+    if len(samples) == 1:
+        x,y,r=samples[0]
+        return f'M {number(x-r)},{number(y)} A {number(r)},{number(r)} 0 1 0 {number(x+r)},{number(y)} A {number(r)},{number(r)} 0 1 0 {number(x-r)},{number(y)} Z'
+    left, right = [], []
+    for i,(x,y,r) in enumerate(samples):
+        before=samples[max(0,i-1)]; after=samples[min(len(samples)-1,i+1)]
+        dx,dy=after[0]-before[0],after[1]-before[1]; length=math.hypot(dx,dy) or 1
+        nx,ny=-dy/length*r,dx/length*r
+        left.append((x+nx,y+ny)); right.append((x-nx,y-ny))
+    if not variable:
+        vertices=left+list(reversed(right))
+        return 'M '+' L '.join(f'{number(x)},{number(y)}' for x,y in vertices)+' Z'
+    r=samples[-1][2]; first_r=samples[0][2]
+    coords=lambda seq: ' L '.join(f'{number(x)},{number(y)}' for x,y in seq)
+    return ('M '+coords(left)+f' A {number(r)},{number(r)} 0 0 0 '+coords(list(reversed(right)))+
+            f' A {number(first_r)},{number(first_r)} 0 0 0 {number(left[0][0])},{number(left[0][1])} Z')
+
+
+def cache_vector_bounds(stroke: dict[str, Any]) -> None:
+    points = stroke.get('points') or []
+    if points and stroke.get('vectorPath') and not stroke.get('vectorBounds'):
+        margin = max(1.0, stroke.get('widthMm', 1) * UNITS_PER_MM * 2)
+        stroke['vectorBounds'] = [min(p['x'] for p in points)-margin, min(p['y'] for p in points)-margin,
+                                  max(p['x'] for p in points)+margin, max(p['y'] for p in points)+margin]
+
+
+def page_fingerprint(page: fitz.Page) -> bytes:
+    # Normalize only for identifying a printout's source page, never for display.
+    rect = page.rect
+    pix = page.get_pixmap(matrix=fitz.Matrix(31.999 / rect.width, 47.999 / rect.height), colorspace=fitz.csRGB, alpha=False)
+    return pix.samples
+
+
+def match_printout(image: bytes, candidates: list[tuple[str, int, bytes]]) -> tuple[str, int] | None:
+    with fitz.open(stream=image) as document:
+        fingerprint = page_fingerprint(document[0])
+    scores = sorted((sum(abs(a-b) for a,b in zip(fingerprint, sample)) / (255 * len(sample)), name, page)
+                    for name,page,sample in candidates if len(sample) == len(fingerprint))
+    if not scores or scores[0][0] > 0.025:
+        return None
+    # Similar/blank/ambiguous pages retain the original image. A guessed PDF
+    # relationship must never silently substitute a different source page.
+    if len(scores) > 1 and scores[1][0] - scores[0][0] < 0.005:
+        return None
+    _,name,page = scores[0]
+    return name,page
 
 
 def nearest_palette(value: int | str | None) -> tuple[int, str, int]:
@@ -152,6 +220,7 @@ def page_document(notebook_id: str, page_id: str) -> dict[str, Any]:
         "tags": [],
         "textItems": [],
         "objects": [],
+        "layers": [],
     }
 
 
@@ -308,20 +377,34 @@ def decode_notein_new_stroke(blob: bytes, fallback_id: str, stats: Counter[str])
                 "y": round(y, 4),
                 "pressure": round(max(0.01, min(1.0, pressure)), 5),
                 "tiltX": 0.0,
-                "tiltY": 0.0,
+                "tiltY": float(group[2]) if len(group) > 2 else 0.0,
                 "elapsedMilliseconds": max(0, int(elapsed)),
             }
         )
+    params = {}
+    for _, parameter in fields.get(14, []):
+        entry = protobuf_fields(parameter)
+        if entry.get(1) and entry.get(2):
+            params[entry[1][0][1].decode('utf-8')] = struct.unpack('<f', entry[2][0][1])[0]
+    profile = fields[7][0][1].decode('utf-8') if fields.get(7) else 'notein-fountain-v1'
+    kind = 1 if 'highlight' in profile.lower() or 'marker' in profile.lower() else 0
+    scale = 1.0
+    for matrix in (first_matrix, second_matrix):
+        if len(matrix) >= 9: scale *= math.sqrt(abs(matrix[0]*matrix[4]-matrix[1]*matrix[3]))
+    size *= scale
     return {
         "id": stable_id("stroke-notein", stroke_id),
-        "kind": 0,
+        "kind": kind,
         "color": palette,
+        "colorHex": source_color_hex(color),
         "widthMm": max(0.05, size / UNITS_PER_MM),
-        "pressurePercent": 200,
-        "inkFlowPercent": 100,
+        "pressurePercent": round(params.get('pressure_correct', 2) * 100),
+        "inkFlowPercent": round(params.get('speed_correct', 1) * 100),
         "opacityPercent": round(alpha * 100 / 255),
         "brushProfile": "notein-fountain-v1-import",
         "points": points,
+        "vectorPath": stroke_outline(points, size, variable=kind == 0),
+        "sourceBrush": {"profile": profile, "parameters": params},
     }
 
 
@@ -348,12 +431,14 @@ def decode_notein_legacy_stroke(raw: str, fallback_id: str, stats: Counter[str])
         "id": stable_id("stroke-notein", str(source.get("id") or fallback_id)),
         "kind": kind,
         "color": palette,
+        "colorHex": source_color_hex(source.get('color')),
         "widthMm": max(0.05, float(source.get("width", 4.8649)) / UNITS_PER_MM),
         "pressurePercent": 200,
         "inkFlowPercent": 100,
         "opacityPercent": 32 if kind == 1 else round(alpha * 100 / 255),
         "brushProfile": "notein-legacy-import",
         "points": points,
+        "vectorPath": stroke_outline(points, float(source.get('width', 4.8649)), variable=kind == 0),
     }
 
 
@@ -373,11 +458,13 @@ class NoteinImporter:
         external: Path | None,
         writer: WorkspaceWriter,
         work: Path,
+        skip_missing_pdfs: bool = False,
     ):
         self.backup = backup
         self.external = external.resolve() if external else None
         self.writer = writer
         self.work = work
+        self.skip_missing_pdfs = skip_missing_pdfs
         self.stats: Counter[str] = Counter()
         self.errors: list[dict[str, str]] = []
 
@@ -415,7 +502,9 @@ class NoteinImporter:
             sources.sort(key=lambda item: (item.created_at, item.note_id))
             for index, source in enumerate(sources, 1):
                 try:
-                    notebook["sections"].append(self._import_note(outer, source, notebook_id))
+                    section = self._import_note(outer, source, notebook_id)
+                    if section is not None:
+                        notebook["sections"].append(section)
                     print(f"NOTEIN_NOTE {index}/{len(sources)} ok", flush=True)
                 except Exception as exc:
                     self.errors.append({"note": source.note_id, "error": str(exc)})
@@ -433,7 +522,7 @@ class NoteinImporter:
 
     def _import_note(
         self, outer: zipfile.ZipFile, source: NoteinSource, notebook_id: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         section_id = stable_id("section-notein", source.note_id)
         section = {"id": section_id, "title": source.title, "pages": [], "children": [], "expanded": True}
         preview_section = {
@@ -467,6 +556,13 @@ class NoteinImporter:
                 } if active_ids else {}
                 has_pdf_model = connection.execute("select count(*) from PdfInfoEntity").fetchone()[0] > 0
                 content_pages = self._content_page_ids(connection)
+                if has_pdf_model and not pdf_bytes and self.skip_missing_pdfs:
+                    self.stats['skipped-missing-pdf-notes'] += 1
+                    self.stats['skipped-missing-pdf-pages'] += len(active_ids)
+                    self.stats['skipped-missing-pdf-content-pages'] += sum(page in content_pages for page in active_ids)
+                    self.stats['source-notes'] += 1
+                    connection.close()
+                    return None
                 summary: dict[str, Any] | None = None
                 source_pdf_path: Path | None = None
                 self.stats["source-active-pages"] += len(active_ids)
@@ -546,6 +642,7 @@ class NoteinImporter:
             appearance=page_appearance(width=1240, height=1754, paper_kind=1, show_title=True),
         )
         document = page_document(notebook_id, page_id)
+
         document["textItems"].append(
             {
                 "id": stable_id("text-notein-missing", f"{source.note_id}:{source_page_id}"),
@@ -696,7 +793,14 @@ class NoteinImporter:
         height = float(paper.get("preciseHeight") or paper.get("height") or 1754)
         source_page = pdf_document.load_page(page_index) if pdf_document is not None and page_index < pdf_document.page_count else None
         source_asset = self.writer.link_asset(notebook_id, page_id, source_pdf_path) if source_page is not None and source_pdf_path is not None else None
-        appearance = page_appearance(width=width, height=height, paper_kind=2 if has_pdf_model else (0 if page_row["unbounded"] else 1), show_title=not has_pdf_model)
+        appearance = page_appearance(width=width, height=height, paper_kind=2 if has_pdf_model else (0 if page_row["unbounded"] else 1), show_title=False)
+        if 'paper_theme' in page_row.keys():
+            try:
+                theme = json.loads(page_row['paper_theme'] or '{}')
+                base = theme.get('baseTheme', theme)
+                if 'color' in base: appearance['pageColor'] = source_color_hex(base['color'])
+            except (ValueError, TypeError):
+                pass
         pdf_metadata = None
         if source_page is not None and source_asset is not None:
             pdf_metadata = {
@@ -739,6 +843,13 @@ class NoteinImporter:
             self.stats["rendered-pdf-backgrounds"] += 1
             self.stats["vector-source-pdf-pages"] += 1
 
+        if connection.execute("select 1 from sqlite_master where name='PageLayerEntity'").fetchone():
+            layer_record = connection.execute('select * from NoteContentEntity limit 1').fetchone()
+            layer_ids = json.loads(layer_record['page_layer_list'] or '[]') if layer_record and 'page_layer_list' in layer_record.keys() else []
+            document['layers'] = [
+                {'id': row['id'], 'name': row['name'] or '图层', 'visible': bool(row['visible']), 'order': layer_ids.index(row['id']) if row['id'] in layer_ids else len(layer_ids) + index}
+                for index,row in enumerate(connection.execute('select * from PageLayerEntity order by rowid'))
+            ]
         for row in connection.execute("select * from StrokeEntity where page_id=? order by creation_time,id", (page_row["id"],)):
             try:
                 if row["record_json"]:
@@ -750,6 +861,8 @@ class NoteinImporter:
                     self.stats["empty-strokes"] += 1
                     continue
                 if stroke["points"]:
+                    stroke['layerId'] = row['layer_id'] if 'layer_id' in row.keys() else 'default'
+                    stroke['zOrder'] = int(row['creation_time'] or 0)
                     document["strokes"].append(stroke)
             except Exception:
                 self.stats["stroke-decode-errors"] += 1
@@ -763,6 +876,9 @@ class NoteinImporter:
                         "id": stable_id("shape-notein", row["id"]),
                         "kind": 0,
                         "color": palette,
+                        "colorHex": source_color_hex(row['color']),
+                        "layerId": row['layer_id'] if 'layer_id' in row.keys() else 'default',
+                        "zOrder": int(row['creation_time'] or 0),
                         "widthMm": max(0.05, float(row["width"] or 1) / UNITS_PER_MM),
                         "pressurePercent": 100,
                         "inkFlowPercent": 100,
@@ -801,6 +917,9 @@ class NoteinImporter:
                             "id": stable_id("quote-notein", f"{row['id']}:{rect_index}"),
                             "kind": 1,
                             "color": palette,
+                            "colorHex": source_color_hex(row['bg_color'] or row['color']),
+                            "layerId": row['layer_id'] if 'layer_id' in row.keys() else 'default',
+                            "zOrder": int(row['creation_time'] or 0),
                             "widthMm": max(0.05, (bottom - top) / UNITS_PER_MM),
                             "pressurePercent": 100,
                             "inkFlowPercent": 100,
@@ -824,6 +943,8 @@ class NoteinImporter:
             document["textItems"].append(
                 {
                     "id": stable_id("text-notein", row["id"]),
+                    "layerId": row['layer_id'] if 'layer_id' in row.keys() else 'default',
+                    "zOrder": int(row['creation_time'] or 0),
                     "x": float(row["left"] or 0),
                     "y": float(row["top"] or 0),
                     "width": max(80.0, float(row["box_width"] or (row["right"] or 0) - (row["left"] or 0))),
@@ -837,7 +958,7 @@ class NoteinImporter:
                     "strikethrough": False,
                     "subscript": False,
                     "color": palette,
-                    "foregroundHex": "",
+                    "foregroundHex": source_color_hex(row['default_text_color']),
                     "backgroundHex": "Transparent",
                     "indentLevel": 0,
                     "alignment": "Left",
@@ -871,6 +992,15 @@ class NoteinImporter:
                 )
             )
             self.stats["images"] += 1
+            document['objects'][-1]['layerId'] = row['layer_id'] if 'layer_id' in row.keys() else 'default'
+            document['objects'][-1]['zOrder'] = int(row['creation_time'] or 0)
+        if not document['layers']:
+            document['layers'] = [{'id':'default','name':'内容','visible':True,'order':0}]
+        for stroke in document['strokes']:
+            if not stroke.get('vectorPath'):
+                stroke['vectorPath'] = stroke_outline(stroke['points'], stroke['widthMm'] * UNITS_PER_MM, variable=False)
+            cache_vector_bounds(stroke)
+            self.stats['vector-strokes'] += 1
         self.stats["editable-pages"] += 1
         self.stats["editable-strokes"] += len(document["strokes"])
         return page, document
@@ -969,8 +1099,10 @@ class NoteinImporter:
 
 
 class OneNoteImporter:
-    def __init__(self, export_root: Path, writer: WorkspaceWriter):
+    def __init__(self, export_root: Path, writer: WorkspaceWriter, include_visual_fallbacks: bool = False):
         self.root = export_root
+        self.include_visual_fallbacks = include_visual_fallbacks
+        self.pdf_fingerprints: dict[Path, list[tuple[str, int, bytes]]] = {}
         self.writer = writer
         self.stats: Counter[str] = Counter()
         self.errors: list[dict[str, str]] = []
@@ -1039,6 +1171,19 @@ class OneNoteImporter:
         page_json = self.root / descriptor["json"]
         source = json.loads(page_json.read_text(encoding="utf-8"))
         page_id = descriptor["id"]
+        metadata_path = self.root / 'enrichment' / f'{page_id}.json'
+        if metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+            # Position/size matching avoids ordinal drift when COM omits an
+            # image's binary data or the exporter rejects a malformed image.
+            for item in source.get('objects', []):
+                if item.get('kind') != 'Image':
+                    continue
+                matches = [image for image in metadata.get('images', []) if all(abs(float(item.get(key, 0))-float(image.get(key, 0))) < 0.01 for key in ('x','y','width','height'))]
+                if len(matches) == 1:
+                    item.update({key:matches[0][key] for key in ('isPrintout','zOrder','sourceObjectId')})
+            assets = {item.get('assetName') for item in source.get('objects', [])}
+            source.setdefault('objects', []).extend(item for item in metadata.get('objects', []) if item.get('assetName') not in assets)
         created = parse_time(source.get("createdAt") or descriptor.get("createdAt"))
         updated = parse_time(source.get("updatedAt") or descriptor.get("updatedAt"))
         page = note_page(
@@ -1046,10 +1191,13 @@ class OneNoteImporter:
             descriptor.get("title") or "无标题页",
             created_at=created,
             updated_at=updated,
-            appearance=page_appearance(show_title=True),
+            appearance=page_appearance(show_title=False),
         )
         document = page_document(notebook_id, page_id)
+        document['layers'] = [{'id':'onenote-content','name':'内容','visible':True,'order':0}]
         for stroke_source in source.get("strokes", []):
+            if not stroke_source.get('vectorPath'):
+                raise ValueError('OneNote export lacks native vector outlines; rerun Export-OneNote.ps1 before importing')
             palette, palette_name, alpha = nearest_palette(stroke_source.get("colorHex"))
             self.stats[f"palette-{palette_name}"] += 1
             document["strokes"].append(
@@ -1062,6 +1210,12 @@ class OneNoteImporter:
                     "inkFlowPercent": 100,
                     "opacityPercent": int(stroke_source.get("opacityPercent") or round(alpha * 100 / 255)),
                     "brushProfile": "onenote-isf-import",
+                    "colorHex": source_color_hex(stroke_source.get('colorHex')),
+                    "vectorPath": stroke_source.get('vectorPath', ''),
+                    "vectorBounds": stroke_source.get('vectorBounds'),
+                    "layerId": stroke_source.get('layerId', 'onenote-content'),
+                    "zOrder": int(stroke_source.get('zOrder', 0)),
+                    "sourceBrush": stroke_source.get('sourceDrawingAttributes'),
                     "points": [
                         {
                             "x": float(point.get("x", 0)),
@@ -1079,6 +1233,8 @@ class OneNoteImporter:
             document["textItems"].append(
                 {
                     "id": text_source.get("id") or stable_id("text-onenote", f"{page_id}:{len(document['textItems'])}"),
+                    "layerId": 'onenote-content',
+                    "zOrder": int(text_source.get('zOrder', 0)),
                     "x": float(text_source.get("x", 0)),
                     "y": float(text_source.get("y", 0)),
                     "width": max(80.0, float(text_source.get("width", 320))),
@@ -1101,14 +1257,37 @@ class OneNoteImporter:
                 }
             )
         page_assets = self.root / "assets" / page_id
+        candidates = []
+        for attachment in source.get('objects', []):
+            if attachment.get('kind') != 'Attachment' or attachment.get('mimeType') != 'application/pdf':
+                continue
+            path = page_assets / attachment['assetName']
+            if path not in self.pdf_fingerprints:
+                try:
+                    with fitz.open(path) as pdf:
+                        self.pdf_fingerprints[path] = [(attachment['assetName'],index+1,page_fingerprint(pdf[index])) for index in range(pdf.page_count)]
+                except Exception:
+                    self.stats['unreadable-original-pdfs'] += 1
+                    self.pdf_fingerprints[path] = []
+            candidates.extend(self.pdf_fingerprints[path])
         for object_source in source.get("objects", []):
             source_asset = page_assets / object_source["assetName"]
             data = source_asset.read_bytes()
             asset = self.writer.write_asset(notebook_id, page_id, object_source["assetName"], data)
             kind = 1 if object_source.get("kind") == "Attachment" else 2
+            pdf_match = None
+            if kind == 2 and object_source.get('isPrintout') and candidates:
+                pdf_match = match_printout(data, candidates)
+            original_pdf_asset = ''
+            if pdf_match:
+                original_pdf_asset = self.writer.write_asset(notebook_id,page_id,pdf_match[0],(page_assets/pdf_match[0]).read_bytes())
+                kind = 3
+                self.stats['vector-pdf-printouts'] += 1
             document["objects"].append(
                 {
                     "id": object_source.get("id") or stable_id("object-onenote", f"{page_id}:{len(document['objects'])}"),
+                    "layerId": 'onenote-content',
+                    "zOrder": int(object_source.get('zOrder', -1)),
                     "kind": kind,
                     "x": float(object_source.get("x", 0)),
                     "y": float(object_source.get("y", 0)),
@@ -1126,20 +1305,24 @@ class OneNoteImporter:
                     "targetNotebookId": "",
                     "targetSectionId": "",
                     "targetPageId": "",
-                    "sourceAssetName": "",
-                    "sourcePageNumber": None,
+                    "sourceAssetName": original_pdf_asset,
+                    "sourcePageNumber": pdf_match[1] if pdf_match else None,
                     "isPageBackground": False,
                     "rotationQuarterTurns": 0,
                     "flipHorizontal": False,
                     "flipVertical": False,
                 }
             )
+        for stroke in document['strokes']: cache_vector_bounds(stroke)
         self.writer.write_page(notebook_id, page_id, document)
         self.stats["editable-pages"] += 1
         self.stats["editable-strokes"] += len(document["strokes"])
         self.stats["text-items"] += len(document["textItems"])
+        self.stats['vector-strokes'] += len(document['strokes'])
         self.stats["objects"] += len(document["objects"])
 
+        if not self.include_visual_fallbacks:
+            return page, None
         pdf_path = self.root / descriptor["pdf"]
         if not pdf_path.is_file():
             self.stats["missing-pdf-fallbacks"] += 1
@@ -1256,6 +1439,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--notein-external", type=Path)
     parser.add_argument("--work-directory", type=Path)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument('--include-visual-fallbacks', action='store_true', help='Add explicitly non-editable image copies as child sections')
+    parser.add_argument('--skip-missing-notein-pdfs', action='store_true', help='Omit Notein PDF notes lacking their original PDF, including annotation and placeholder pages')
     return parser.parse_args()
 
 
@@ -1272,13 +1457,14 @@ def main() -> int:
         "workspace": str(args.workspace.resolve()),
     }
     if args.onenote_export:
-        report["onenote"] = OneNoteImporter(args.onenote_export.resolve(), writer).import_all()
+        report["onenote"] = OneNoteImporter(args.onenote_export.resolve(), writer, args.include_visual_fallbacks).import_all()
     if args.notein_backup:
         report["notein"] = NoteinImporter(
             args.notein_backup.resolve(),
-            args.notein_external.resolve() if args.notein_external else None,
+            args.notein_external.resolve() if args.notein_external and args.include_visual_fallbacks else None,
             writer,
             work.resolve(),
+            skip_missing_pdfs=args.skip_missing_notein_pdfs,
         ).import_all()
     writer.finish()
     report["validation"] = validate_workspace(args.workspace.resolve())
@@ -1288,7 +1474,8 @@ def main() -> int:
         f"pages={report['validation']['pages']} errors={len(report['validation']['errors'])}",
         flush=True,
     )
-    return 0 if report["validation"]["ok"] else 2
+    source_errors = any(source.get('errors') or any(value for key,value in source.get('stats', {}).items() if key.endswith('decode-errors')) for name,source in report.items() if name in ('onenote','notein'))
+    return 0 if report["validation"]["ok"] and not source_errors else 2
 
 
 if __name__ == "__main__":

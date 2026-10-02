@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
@@ -18,6 +18,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName System.Web
+Add-Type -Path (Join-Path $PSScriptRoot 'OneNoteInkDecoder.cs') -ReferencedAssemblies @(
+    'System.dll', 'System.Core.dll', [Windows.Ink.Stroke].Assembly.Location, [Windows.Media.Matrix].Assembly.Location
+)
 
 function New-SafeId {
     param([string]$Prefix, [string]$Value)
@@ -109,35 +112,13 @@ function Convert-InkDrawing {
     }
     if ($collection.Count -eq 0) { return @() }
 
-    $allPoints = @($collection | ForEach-Object { $_.StylusPoints })
-    $minX = ($allPoints | ForEach-Object { $_.X } | Measure-Object -Minimum).Minimum
-    $minY = ($allPoints | ForEach-Object { $_.Y } | Measure-Object -Minimum).Minimum
-    $anchorX = (Get-DoubleAttribute $positionNode 'x') * 96.0 / 72.0
-    $anchorY = (Get-DoubleAttribute $positionNode 'y') * 96.0 / 72.0
-    $result = [Collections.Generic.List[object]]::new()
-    foreach ($stroke in $collection) {
-        $elapsed = 0
-        $points = [Collections.Generic.List[object]]::new()
-        foreach ($point in $stroke.StylusPoints) {
-            $points.Add([ordered]@{
-                x = [Math]::Round($anchorX + $point.X - $minX, 4)
-                y = [Math]::Round($anchorY + $point.Y - $minY, 4)
-                pressure = [Math]::Round([Math]::Max(0.01, [Math]::Min(1.0, $point.PressureFactor)), 5)
-                elapsedMilliseconds = $elapsed
-            })
-            $elapsed += 8
-        }
-        $attributes = $stroke.DrawingAttributes
-        $result.Add([ordered]@{
-            id = New-SafeId 'stroke-onenote' ($InkNode.GetAttribute('objectID') + ':' + $result.Count)
-            kind = $(if ($attributes.IsHighlighter) { 'Highlighter' } else { 'Pen' })
-            colorHex = Get-ColorHex $attributes.Color
-            widthMm = [Math]::Round([Math]::Max($attributes.Width, $attributes.Height) * 25.4 / 96.0, 4)
-            opacityPercent = $(if ($attributes.IsHighlighter) { 32 } else { [Math]::Round($attributes.Color.A * 100.0 / 255.0) })
-            points = $points
-        })
-    }
-    return $result
+    return [MojianMigration.OneNoteInkDecoder]::Decode(
+        $collection, $InkNode.GetAttribute('objectID'),
+        (Get-DoubleAttribute $positionNode 'x') * 96.0 / 72.0,
+        (Get-DoubleAttribute $positionNode 'y') * 96.0 / 72.0,
+        [long](Get-DoubleAttribute $positionNode 'z' 0)
+    )
+
 }
 
 function Export-PageContent {
@@ -180,6 +161,7 @@ function Export-PageContent {
             height = [Math]::Round([Math]::Max(36, (Get-DoubleAttribute $size 'height' 60) * 96.0 / 72.0), 4)
             text = $plainText
             fontSize = 16
+            zOrder = [long](Get-DoubleAttribute $position 'z' 0)
         })
     }
 
@@ -200,6 +182,7 @@ function Export-PageContent {
         $objects.Add([ordered]@{
             id = New-SafeId 'object-onenote' ($PageId + ':image:' + $objects.Count)
             kind = 'Image'
+            zOrder = [long](Get-DoubleAttribute $position 'z' -1)
             x = [Math]::Round((Get-DoubleAttribute $position 'x') * 96.0 / 72.0, 4)
             y = [Math]::Round((Get-DoubleAttribute $position 'y') * 96.0 / 72.0, 4)
             width = [Math]::Round((Get-DoubleAttribute $size 'width' 240) * 96.0 / 72.0, 4)
@@ -223,6 +206,7 @@ function Export-PageContent {
         $objects.Add([ordered]@{
             id = New-SafeId 'object-onenote' ($PageId + ':attachment:' + $objects.Count)
             kind = 'Attachment'
+            zOrder = [long](Get-DoubleAttribute $position 'z' -1)
             x = [Math]::Round((Get-DoubleAttribute $position 'x') * 96.0 / 72.0, 4)
             y = [Math]::Round((Get-DoubleAttribute $position 'y') * 96.0 / 72.0, 4)
             width = 280
@@ -234,7 +218,7 @@ function Export-PageContent {
     }
 
     $payload = [ordered]@{
-        version = 1
+        version = 2
         pageId = $PageId
         title = $HierarchyPage.GetAttribute('name')
         createdAt = $HierarchyPage.GetAttribute('dateTime')
@@ -244,7 +228,7 @@ function Export-PageContent {
         objects = $objects
         warnings = $warnings
     }
-    [IO.File]::WriteAllText($PageJsonPath, ($payload | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($PageJsonPath, ($payload | ConvertTo-Json -Depth 12 -Compress), [Text.UTF8Encoding]::new($false))
     return [ordered]@{ strokes = $strokes.Count; textItems = $textItems.Count; objects = $objects.Count; warnings = $warnings.Count }
 }
 
@@ -330,7 +314,14 @@ foreach ($item in $pageQueue) {
     $pagePdfPath = Join-Path $root $descriptor.pdf
     $pageAssetDirectory = Join-Path $assetsDirectory $descriptor.id
     try {
-        if (-not ($Resume -and (Test-Path -LiteralPath $pageJsonPath))) {
+        $hasNativeExport = $false
+        if ($Resume -and (Test-Path -LiteralPath $pageJsonPath)) {
+            try {
+                $previous = [IO.File]::ReadAllText($pageJsonPath) | ConvertFrom-Json
+                $hasNativeExport = $previous.version -ge 2 -and @($previous.strokes | Where-Object { [string]::IsNullOrEmpty($_.vectorPath) }).Count -eq 0
+            } catch { $hasNativeExport = $false }
+        }
+        if (-not $hasNativeExport) {
             $stats = Export-PageContent $oneNote $item.hierarchy $descriptor.id $pageJsonPath $pageAssetDirectory
             foreach ($key in @('strokes', 'textItems', 'objects', 'warnings')) { $totals[$key] += $stats[$key] }
         }

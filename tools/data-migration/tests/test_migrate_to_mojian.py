@@ -19,7 +19,13 @@ from migrate_to_mojian import (  # noqa: E402
     NoteinImporter,
     WorkspaceWriter,
     decode_notein_new_stroke,
+    decode_notein_legacy_stroke,
+    source_color_hex,
+    stroke_outline,
+    OneNoteImporter,
     page_document,
+    page_fingerprint,
+    match_printout,
     validate_workspace,
 )
 
@@ -49,6 +55,21 @@ def field(number: int, wire: int, value: bytes | int) -> bytes:
 
 
 class ProtobufStrokeTests(unittest.TestCase):
+    def test_android_colorlong_uses_high_argb_word(self) -> None:
+        self.assertEqual('#FFE02020', source_color_hex(0xFFE0202000000000))
+        self.assertEqual('#FFFFFFFF', source_color_hex(0xFFFFFFFF00000000))
+        self.assertEqual('#FF000000', source_color_hex(-16777216))
+
+    def test_legacy_ink_preserves_custom_color_and_vector_outline(self) -> None:
+        result = decode_notein_legacy_stroke(json.dumps({'width': 4, 'color': '#FF44AA66', 'points': [{'x':10,'y':20,'p':0.25},{'x':30,'y':40,'p':0.75}]}), 'sample', Counter())
+        self.assertEqual('#FF44AA66', result['colorHex'])
+        self.assertTrue(result['vectorPath'].startswith('M '))
+        self.assertTrue(result['vectorPath'].endswith(' Z'))
+        self.assertNotIn('assetName', result)
+
+    def test_stationary_dot_keeps_the_largest_pressure_in_vector_outline(self) -> None:
+        path=stroke_outline([{'x':10,'y':20,'pressure':0.1},{'x':10,'y':20,'pressure':1}],4)
+        self.assertIn('A 2.32,2.32', path)
     def test_new_notein_stroke_applies_both_matrices_and_pressure(self) -> None:
         identity = struct.pack("<9f", 1, 0, 0, 0, 1, 0, 0, 0, 1)
         translate = struct.pack("<9f", 1, 0, -5, 0, 1, 7, 0, 0, 1)
@@ -73,6 +94,55 @@ class ProtobufStrokeTests(unittest.TestCase):
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_metadata_sidecar_recovers_pdf_attachment_and_printout_without_flattening_ink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); export=root/'source'; (export/'pages').mkdir(parents=True)
+            assets=export/'assets/p'; assets.mkdir(parents=True); (export/'enrichment').mkdir()
+            with fitz.open() as pdf:
+                page=pdf.new_page(width=300,height=400); page.insert_text((20,60),'original',fontsize=24)
+                (assets/'original.pdf').write_bytes(pdf.tobytes())
+                (assets/'printout.png').write_bytes(page.get_pixmap().tobytes('png'))
+            image={'id':'image','kind':'Image','assetName':'printout.png','x':10,'y':20,'width':300,'height':400}
+            ink={'id':'ink','colorHex':'#FF55BB77','vectorPath':'M 10,20 L 30,20 30,30 Z','points':[{'x':10,'y':20},{'x':30,'y':20}]}
+            (export/'pages/p.json').write_text(json.dumps({'strokes':[ink],'objects':[image]}))
+            (export/'enrichment/p.json').write_text(json.dumps({'images':[{**image,'isPrintout':True,'zOrder':-1,'sourceObjectId':'source-image'}],
+                'objects':[{'id':'file','kind':'Attachment','assetName':'original.pdf','mimeType':'application/pdf'}]}))
+            writer=WorkspaceWriter(root/'staging'); writer.replace_notebook({'id':'n','sections':[]})
+            OneNoteImporter(export,writer)._import_page('n',{'id':'p','json':'pages/p.json','title':'Native'})
+            doc=json.loads((root/'staging/notebooks/n/pages/p.json').read_text(encoding='utf-8'))
+            self.assertEqual(2,len(doc['objects']))
+            self.assertEqual(3,doc['objects'][0]['kind'])
+            self.assertEqual(1,doc['objects'][0]['sourcePageNumber'])
+            self.assertEqual(-1,doc['objects'][0]['zOrder'])
+            self.assertTrue(doc['objects'][0]['sourceAssetName'])
+            self.assertEqual(ink['vectorPath'],doc['strokes'][0]['vectorPath'])
+
+    def test_pdf_printout_matches_original_page_and_rejects_ambiguous_sources(self) -> None:
+        with fitz.open() as pdf:
+            page = pdf.new_page(width=300, height=400)
+            page.insert_text((20, 60), "original vector source", fontsize=20)
+            preview = page.get_pixmap(matrix=fitz.Matrix(2, 2)).tobytes('png')
+            candidates = [('original.pdf', 1, page_fingerprint(page))]
+            self.assertEqual(('original.pdf', 1), match_printout(preview, candidates))
+            self.assertIsNone(match_printout(preview, candidates + [('duplicate.pdf', 1, candidates[0][2])]))
+            other = pdf.new_page(width=300, height=400)
+            other.draw_rect(other.rect, color=(0, 0, 0), fill=(0, 0, 0))
+            self.assertIsNone(match_printout(preview, [('different.pdf', 1, page_fingerprint(other))]))
+
+    def test_onenote_primary_import_contains_native_vectors_without_visual_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); export=root/'source'; export.mkdir(); (export/'pages').mkdir()
+            descriptor={'id':'p','json':'pages/p.json','pdf':'pdf/p.pdf','title':'Sample'}
+            (export/'pages/p.json').write_text(json.dumps({'strokes':[{'id':'s','colorHex':'#FF55BB77','vectorPath':'M 10,20 L 30,20 30,30 Z','points':[{'x':10,'y':20},{'x':30,'y':20}]}]}))
+            writer=WorkspaceWriter(root/'staging'); writer.replace_notebook({'id':'n','sections':[]})
+            importer=OneNoteImporter(export,writer)
+            section=importer._import_section('n',{'id':'section','pages':[descriptor]})
+            doc=json.loads((root/'staging/notebooks/n/pages/p.json').read_text(encoding='utf-8'))
+            self.assertEqual([],section['children'])
+            self.assertEqual([],doc['objects'])
+            self.assertEqual('#FF55BB77',doc['strokes'][0]['colorHex'])
+            self.assertTrue(doc['strokes'][0]['vectorPath'])
+            self.assertEqual('onenote-content',doc['strokes'][0]['layerId'])
     def test_writer_preserves_existing_notebook_and_validation_checks_assets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -114,7 +184,8 @@ class WorkspaceTests(unittest.TestCase):
             connection = sqlite3.connect(database_path)
             connection.executescript(
                 """
-                create table NoteContentEntity(page_list text);
+                create table NoteContentEntity(page_list text, page_layer_list text);
+                create table PageLayerEntity(id text, name text, visible integer);
                 create table PageEntity(
                     id text, paper_spec text, unbounded integer,
                     creation_time integer, last_modification_time integer
@@ -122,7 +193,7 @@ class WorkspaceTests(unittest.TestCase):
                 create table PdfInfoEntity(id text);
                 create table StrokeEntity(
                     id text, page_id text, creation_time integer,
-                    record_json text, ink_stroke_blob blob
+                    record_json text, ink_stroke_blob blob, layer_id text
                 );
                 create table ShapeEntity(
                     id text, page_id text, creation_time integer, points text,
@@ -144,7 +215,9 @@ class WorkspaceTests(unittest.TestCase):
                 """
             )
             page_id = "page-source"
-            connection.execute("insert into NoteContentEntity values (?)", (json.dumps([page_id]),))
+            connection.execute("insert into NoteContentEntity values (?,?)", (json.dumps([page_id]), json.dumps(['lower', 'upper'])))
+            connection.execute("insert into PageLayerEntity values (?,?,?)", ('upper', 'Cover', 0))
+            connection.execute("insert into PageLayerEntity values (?,?,?)", ('lower', 'Ink', 1))
             connection.execute(
                 "insert into PageEntity values (?,?,?,?,?)",
                 (
@@ -163,8 +236,8 @@ class WorkspaceTests(unittest.TestCase):
                 "points": [{"x": 10, "y": 20, "p": 0.5}, {"x": 30, "y": 40, "p": 0.8}],
             }
             connection.execute(
-                "insert into StrokeEntity values (?,?,?,?,?)",
-                ("stroke-row", page_id, 1, json.dumps(legacy), None),
+                "insert into StrokeEntity values (?,?,?,?,?,?)",
+                ("stroke-row", page_id, 1, json.dumps(legacy), None, 'lower'),
             )
             connection.execute("insert into PdfInfoEntity values (?)", ("pdf-source",))
             connection.commit()
@@ -218,6 +291,26 @@ class WorkspaceTests(unittest.TestCase):
             )
             self.assertEqual(3, editable_document["objects"][0]["kind"])
             self.assertTrue(editable_document["objects"][0]["sourceAssetName"])
+            self.assertEqual('lower', editable_document['strokes'][0]['layerId'])
+            layers = {layer['id']: layer for layer in editable_document['layers']}
+            self.assertEqual(0, layers['lower']['order'])
+            self.assertEqual(1, layers['upper']['order'])
+            self.assertFalse(layers['upper']['visible'])
+            without_pdf=io.BytesIO()
+            with zipfile.ZipFile(inner_buffer) as original, zipfile.ZipFile(without_pdf,'w') as filtered:
+                for name in original.namelist():
+                    if not name.endswith('.pdf'):filtered.writestr(name,original.read(name))
+            missing_backup=root/'missing-pdf-backup.zip'
+            with zipfile.ZipFile(missing_backup,'w') as outer:
+                outer.writestr('n_note-source/Synthetic.in',without_pdf.getvalue())
+            filtered_writer=WorkspaceWriter(root/'filtered-workspace')
+            filtered_report=NoteinImporter(missing_backup,None,filtered_writer,root/'filtered-work',skip_missing_pdfs=True).import_all()
+            filtered_writer.finish()
+            self.assertFalse(filtered_report['errors'])
+            self.assertEqual(1,filtered_report['stats']['skipped-missing-pdf-notes'])
+            self.assertEqual(1,filtered_report['stats']['skipped-missing-pdf-content-pages'])
+            filtered_library=json.loads((root/'filtered-workspace/library.json').read_text('utf-8'))
+            self.assertEqual([],filtered_library['notebooks'][0]['sections'])
 
 
 if __name__ == "__main__":

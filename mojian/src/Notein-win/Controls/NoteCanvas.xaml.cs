@@ -359,7 +359,7 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null || (_selectedStrokes.Count == 0 && _selectedTextItems.Count == 0)) return false;
         PushUndo();
-        foreach (var stroke in _selectedStrokes) stroke.Color = color;
+        foreach (var stroke in _selectedStrokes) { stroke.Color = color; stroke.ColorHex = string.Empty; }
         foreach (var text in _selectedTextItems)
         {
             text.Color = color;
@@ -374,6 +374,11 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null || _selectedObjects.Count == 0) return false;
         PushUndo();
+        if (Document.Layers.Count > 0)
+        {
+            foreach (var item in _selectedObjects) PageScene.ReorderObject(Document, item, forward ? 1 : -1, false);
+            MarkChanged(immediate: true); InvalidateVisual(); return true;
+        }
         var selected = _selectedObjects.ToHashSet();
         if (forward)
         {
@@ -400,6 +405,11 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null || _selectedObjects.Count == 0) return false;
         PushUndo();
+        if (Document.Layers.Count > 0)
+        {
+            foreach (var item in _selectedObjects) PageScene.ReorderObject(Document, item, front ? 1 : -1, true);
+            MarkChanged(immediate: true); InvalidateVisual(); return true;
+        }
         var selected = Document.Objects.Where(_selectedObjects.Contains).ToList();
         var unselected = Document.Objects.Where(item => !_selectedObjects.Contains(item)).ToList();
         Document.Objects.Clear();
@@ -413,10 +423,10 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return false;
         ClearSelection();
-        _selectedStrokes.AddRange(Document.Strokes);
+        _selectedStrokes.AddRange(Document.Strokes.Where(item => PageScene.IsVisible(Document, item.LayerId)));
         _selectedTags.AddRange(Document.Tags);
-        _selectedTextItems.AddRange(Document.TextItems.Where(item => SelectionGeometry.HasVisibleText(item.Text)));
-        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground));
+        _selectedTextItems.AddRange(Document.TextItems.Where(item => PageScene.IsVisible(Document, item.LayerId) && SelectionGeometry.HasVisibleText(item.Text)));
+        _selectedObjects.AddRange(Document.Objects.Where(item => PageScene.IsVisible(Document, item.LayerId) && !item.IsPageBackground));
         RecomputeSelectionBounds();
         InvalidateVisual();
         return HasContentSelection();
@@ -505,15 +515,24 @@ public partial class NoteCanvas : UserControl
         return true;
     }
 
-    public bool MoveObjectToFront(PageObject item) => ReorderObject(item, Document?.Objects.Count - 1 ?? 0);
+    public bool MoveObjectToFront(PageObject item) => Document?.Layers.Count > 0 ? ReorderSourceObject(item, 1, true) : ReorderObject(item, Document?.Objects.Count - 1 ?? 0);
     public bool MoveObjectToBack(PageObject item)
     {
         if (Document == null) return false;
+        if (Document.Layers.Count > 0) return ReorderSourceObject(item, -1, true);
         var firstMovable = Document.Objects.FindIndex(candidate => !candidate.IsPageBackground);
         return ReorderObject(item, Math.Max(0, firstMovable));
     }
-    public bool MoveObjectForward(PageObject item) => ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) + 1);
-    public bool MoveObjectBackward(PageObject item) => ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) - 1);
+    public bool MoveObjectForward(PageObject item) => Document?.Layers.Count > 0 ? ReorderSourceObject(item, 1, false) : ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) + 1);
+    public bool MoveObjectBackward(PageObject item) => Document?.Layers.Count > 0 ? ReorderSourceObject(item, -1, false) : ReorderObject(item, (Document?.Objects.IndexOf(item) ?? -1) - 1);
+
+    private bool ReorderSourceObject(PageObject item, int direction, bool edge)
+    {
+        if (Document == null || item.IsPageBackground) return false;
+        PushUndo();
+        if (!PageScene.ReorderObject(Document, item, direction, edge)) return false;
+        FinishObjectMutation(item); return true;
+    }
 
     public bool RotateImageObject(PageObject item, bool clockwise)
     {
@@ -1471,6 +1490,22 @@ public partial class NoteCanvas : UserControl
             VerticalOffset = viewPoint.Y,
         };
         AttachRightButtonLassoDismissal(menu);
+        if (Document?.Layers.Count > 1)
+        {
+            var layers = new MenuItem { Header = "图层" };
+            foreach (var layer in Document.Layers.OrderByDescending(item => item.Order))
+            {
+                var toggle = new MenuItem { Header = layer.Name, IsCheckable = true, IsChecked = layer.Visible };
+                toggle.Click += (_, _) =>
+                {
+                    PushUndo(); layer.Visible = toggle.IsChecked; ClearSelection();
+                    MarkChanged(immediate: true); RebuildTextEditors(); InvalidateVisual();
+                };
+                layers.Items.Add(toggle);
+            }
+            menu.Items.Add(layers);
+            menu.Items.Add(new Separator());
+        }
         return menu;
     }
 
@@ -1883,13 +1918,16 @@ public partial class NoteCanvas : UserControl
     private void PerformErase(Point point, double radius)
     {
         if (Document == null) return;
-        Document.Strokes.RemoveAll(stroke => StrokeHitsCircle(stroke, point, radius));
+        Document.Strokes.RemoveAll(stroke => PageScene.IsVisible(Document, stroke.LayerId) && StrokeHitsCircle(stroke, point, radius));
         Document.Tags.RemoveAll(tag => Distance(new Point(tag.DocumentX, tag.DocumentY), point) <= radius + 14);
         ClearSelection();
     }
 
     private static bool StrokeHitsCircle(StrokeRecord stroke, Point point, double radius)
     {
+        if (!stroke.Bounds.IntersectsWith(new Rect(point.X - radius, point.Y - radius, radius * 2, radius * 2))) return false;
+        if (stroke.VectorGeometry is { } geometry)
+            return geometry.FillContainsWithDetail(new EllipseGeometry(point, radius, radius)) != IntersectionDetail.Empty;
         if (stroke.Points.Count == 1) return Distance(stroke.Points[0].ToPoint(), point) <= radius;
         for (var i = 1; i < stroke.Points.Count; i++)
         {
@@ -1902,10 +1940,10 @@ public partial class NoteCanvas : UserControl
     {
         ClearSelection(keepLasso: true);
         if (Document == null || _lasso.Count < 3) { _lasso.Clear(); return; }
-        _selectedStrokes.AddRange(Document.Strokes.Where(stroke => stroke.Points.Count > 0 && stroke.Points.All(point => SelectionGeometry.PointInPolygonOrBoundary(point.ToPoint(), _lasso))));
+        _selectedStrokes.AddRange(Document.Strokes.Where(stroke => PageScene.IsVisible(Document, stroke.LayerId) && (!string.IsNullOrEmpty(stroke.VectorPath) ? SelectionGeometry.PolygonContainsRect(_lasso, stroke.Bounds) : stroke.Points.Count > 0 && stroke.Points.All(point => SelectionGeometry.PointInPolygonOrBoundary(point.ToPoint(), _lasso)))));
         _selectedTags.AddRange(Document.Tags.Where(tag => SelectionGeometry.PolygonContainsRect(_lasso, new Rect(tag.DocumentX - 12, tag.DocumentY - 12, 24, 24))));
-        _selectedTextItems.AddRange(Document.TextItems.Where(text => SelectionGeometry.PolygonContainsRect(_lasso, new Rect(text.X, text.Y, text.Width, text.Height))));
-        _selectedObjects.AddRange(Document.Objects.Where(item => !item.IsPageBackground && SelectionGeometry.PolygonContainsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
+        _selectedTextItems.AddRange(Document.TextItems.Where(text => PageScene.IsVisible(Document, text.LayerId) && SelectionGeometry.PolygonContainsRect(_lasso, new Rect(text.X, text.Y, text.Width, text.Height))));
+        _selectedObjects.AddRange(Document.Objects.Where(item => PageScene.IsVisible(Document, item.LayerId) && !item.IsPageBackground && SelectionGeometry.PolygonContainsRect(_lasso, new Rect(item.X, item.Y, item.Width, item.Height))));
         _lasso.Clear();
         RecomputeSelectionBounds();
     }
@@ -2121,6 +2159,7 @@ public partial class NoteCanvas : UserControl
         foreach (var stroke in _selectedStrokes)
         {
             foreach (var point in stroke.Points) { point.X += (float)dx; point.Y += (float)dy; }
+            stroke.TransformVector(new Matrix(1, 0, 0, 1, dx, dy));
             stroke.InvalidateBounds();
         }
         foreach (var tag in _selectedTags) { tag.DocumentX += (float)dx; tag.DocumentY += (float)dy; }
@@ -2134,6 +2173,7 @@ public partial class NoteCanvas : UserControl
     {
         foreach (var stroke in _selectedStrokes)
         {
+            stroke.TransformVector(new Matrix(factorX, 0, 0, factorY, anchor.X * (1 - factorX), anchor.Y * (1 - factorY)));
             foreach (var point in stroke.Points)
             {
                 var scaled = SelectionGeometry.Scale(point.X, point.Y, anchor.X, anchor.Y, factorX, factorY);
@@ -2181,6 +2221,7 @@ public partial class NoteCanvas : UserControl
         foreach (var stroke in Document.Strokes.Where(item => item.Bounds.Top >= startY))
         {
             foreach (var point in stroke.Points) point.Y += deltaY;
+            stroke.TransformVector(new Matrix(1, 0, 0, 1, 0, deltaY));
             stroke.InvalidateBounds();
         }
         foreach (var tag in Document.Tags.Where(item => item.DocumentY >= startY)) tag.DocumentY += deltaY;
@@ -2267,6 +2308,7 @@ public partial class NoteCanvas : UserControl
             CaretBrush = Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black,
         };
         ApplyTextItemStyle(editor, item);
+        editor.GotKeyboardFocus += (_, _) => { editor.Opacity = 1; InvalidateVisual(); };
         editor.TextChanged += (_, _) =>
         {
             if (_suppressEditorChange) return;
@@ -2285,6 +2327,7 @@ public partial class NoteCanvas : UserControl
         };
         editor.LostKeyboardFocus += (_, _) =>
         {
+            if (Document?.Layers.Count > 0) { editor.Opacity = 0; InvalidateVisual(); }
             editor.IsHitTestVisible = false;
             if (ReferenceEquals(_temporaryTextItem, item))
             {
@@ -2325,6 +2368,7 @@ public partial class NoteCanvas : UserControl
             editor.IsReadOnly = false;
             editor.IsHitTestVisible = editor.IsKeyboardFocusWithin;
             editor.Cursor = Cursors.IBeam;
+            editor.Opacity = Document?.Layers.Count > 0 && !editor.IsKeyboardFocusWithin && !ReferenceEquals(editor, _temporaryTextEditor) ? 0 : 1;
         }
     }
 
@@ -2377,6 +2421,20 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return;
         if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite) DrawPaper(dc, lightExport, extent);
+        if (layer == CanvasRenderLayer.Composite && Document.Layers.Count > 0)
+        {
+            foreach (var content in PageScene.OrderedContent(Document, extent))
+            {
+                switch (content)
+                {
+                    case PageObject item: DrawObjects(dc, lightExport, extent, [item]); break;
+                    case StrokeRecord stroke: DrawStrokes(dc, lightExport, extent, [stroke]); break;
+                    case TextItem text: DrawTextItems(dc, lightExport, [text]); break;
+                }
+            }
+            DrawTags(dc, lightExport);
+            return;
+        }
         if (layer is CanvasRenderLayer.Inserts or CanvasRenderLayer.Composite) DrawObjects(dc, lightExport, extent);
         if (layer is CanvasRenderLayer.InkAndText or CanvasRenderLayer.Composite)
         {
@@ -2447,11 +2505,12 @@ public partial class NoteCanvas : UserControl
         }
     }
 
-    private void DrawObjects(DrawingContext dc, bool lightExport, Rect extent)
+    private void DrawObjects(DrawingContext dc, bool lightExport, Rect extent, IEnumerable<PageObject>? items = null)
     {
         if (Document == null) return;
-        foreach (var item in Document.Objects)
+        foreach (var item in items ?? Document.Objects)
         {
+            if (!PageScene.IsVisible(Document, item.LayerId)) continue;
             var rect = new Rect(item.X, item.Y, item.Width, item.Height);
             if (!rect.IntersectsWith(extent)) continue;
             var border = new Pen(new SolidColorBrush(lightExport ? Color.FromRgb(180, 180, 180) : Color.FromRgb(87, 87, 87)), 1);
@@ -2535,13 +2594,29 @@ public partial class NoteCanvas : UserControl
             DrawText(dc, preview[r][c], new Point(rect.X + c * cellWidth + 5, header.Bottom + r * cellHeight + 4), 10, light ? Brushes.Black : Brushes.White);
     }
 
-    private void DrawStrokes(DrawingContext dc, bool lightExport, Rect extent)
+    private void DrawStrokes(DrawingContext dc, bool lightExport, Rect extent, IEnumerable<StrokeRecord>? strokes = null)
     {
         if (Document == null) return;
-        foreach (var stroke in Document.Strokes)
+        foreach (var stroke in strokes ?? Document.Strokes)
         {
-            if (stroke.Points.Count == 0 || !StrokeViewportCulling.IsVisible(stroke, extent)) continue;
+            if (!PageScene.IsVisible(Document, stroke.LayerId) || !StrokeViewportCulling.IsVisible(stroke, extent)) continue;
             var brush = TextBrush(stroke.Color, Appearance.Theme == PageTheme.Dark, lightExport);
+            if (!string.IsNullOrEmpty(stroke.ColorHex))
+            {
+                var sourceColor = (Color)ColorConverter.ConvertFromString(stroke.ColorHex);
+                // Only logical black adapts to dark paper. Whites and arbitrary
+                // source colors remain source colors, including white cover ink.
+                if (sourceColor.R != 0 || sourceColor.G != 0 || sourceColor.B != 0 || lightExport || Appearance.Theme != PageTheme.Dark)
+                    brush = new SolidColorBrush(Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B));
+            }
+            if (stroke.VectorGeometry is { } vector)
+            {
+                dc.PushOpacity(Math.Clamp(stroke.OpacityPercent / 100d, 0, 1));
+                dc.DrawGeometry(brush, null, vector);
+                dc.Pop();
+                continue;
+            }
+            if (stroke.Points.Count == 0) continue;
             if (stroke.Kind == DrawingToolKind.Highlighter)
             {
                 var color = ((SolidColorBrush)brush).Color;
@@ -2588,11 +2663,13 @@ public partial class NoteCanvas : UserControl
         }
     }
 
-    private void DrawTextItems(DrawingContext dc, bool lightExport)
+    private void DrawTextItems(DrawingContext dc, bool lightExport, IEnumerable<TextItem>? items = null)
     {
         if (Document == null) return;
-        foreach (var item in Document.TextItems)
+        foreach (var item in items ?? Document.TextItems)
         {
+            if (!PageScene.IsVisible(Document, item.LayerId)) continue;
+            if (!lightExport && EditorLayer.Children.OfType<TextBox>().Any(editor => ReferenceEquals(editor.Tag, item) && editor.IsKeyboardFocusWithin)) continue;
             var background = ParseBrush(item.BackgroundHex, Brushes.Transparent);
             if (background != Brushes.Transparent) dc.DrawRectangle(background, null, new Rect(item.X, item.Y, item.Width, item.Height));
             var formatted = new FormattedText(item.Text ?? string.Empty, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
@@ -2716,19 +2793,27 @@ public partial class NoteCanvas : UserControl
     {
         try
         {
-            var rendered = await PdfImportService.RenderPageAsync(sourcePath, pageNumber, targetWidth);
+            var rendered = await PdfImportService.RenderPageAsync(sourcePath, pageNumber, targetWidth).ConfigureAwait(false);
             var bitmap = BitmapFromBytes(rendered.PngBytes);
-            if (generation != _pdfRenderGeneration) return;
-            _pdfBitmapCache[key] = ApplyImageInversion(bitmap, inverted);
-            InvalidateVisual();
+            bitmap = ApplyImageInversion(bitmap, inverted);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (generation != _pdfRenderGeneration) return;
+                _pdfBitmapCache[key] = bitmap;
+                InvalidateVisual();
+            });
         }
-        catch
+        catch (Exception error)
         {
-            if (generation == _pdfRenderGeneration) _failedPdfRenders.Add(key);
+            System.Diagnostics.Trace.TraceWarning($"PDF display render failed: {sourcePath}, page {pageNumber}, width {targetWidth}: {error}");
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (generation == _pdfRenderGeneration) _failedPdfRenders.Add(key);
+            });
         }
         finally
         {
-            _pendingPdfRenders.Remove(key);
+            await Dispatcher.InvokeAsync(() => _pendingPdfRenders.Remove(key));
         }
     }
 
@@ -2765,6 +2850,7 @@ public partial class NoteCanvas : UserControl
     private TextItem? HitText(Point viewPoint)
     {
         if (Document == null) return null;
+        if (Document.Layers.Count > 0) return HitSourceContent(viewPoint) as TextItem;
         var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         return Document.TextItems.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
     }
@@ -2772,6 +2858,7 @@ public partial class NoteCanvas : UserControl
     private PageObject? HitObject(Point viewPoint)
     {
         if (Document == null) return null;
+        if (Document.Layers.Count > 0) return HitSourceContent(viewPoint) as PageObject;
         var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         return Document.Objects.LastOrDefault(value => new Rect(value.X, value.Y, value.Width, value.Height).Contains(doc));
     }
@@ -2787,9 +2874,24 @@ public partial class NoteCanvas : UserControl
     private StrokeRecord? HitStroke(Point viewPoint)
     {
         if (Document == null) return null;
+        if (Document.Layers.Count > 0) return HitSourceContent(viewPoint) as StrokeRecord;
         var doc = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         var radius = 10 / Math.Max(0.01, _viewport.Scale);
         return Document.Strokes.LastOrDefault(stroke => StrokeHitsCircle(stroke, doc, radius));
+    }
+
+    private object? HitSourceContent(Point viewPoint)
+    {
+        if (Document == null) return null;
+        var point = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        var radius = 5 / Math.Max(0.01, _viewport.Scale);
+        foreach (var item in PageScene.OrderedContent(Document, new Rect(point.X-radius,point.Y-radius,radius*2,radius*2)).Reverse())
+        {
+            if (item is StrokeRecord stroke && StrokeHitsCircle(stroke, point, radius)) return stroke;
+            if (item is PageObject obj && !obj.IsPageBackground && new Rect(obj.X, obj.Y, obj.Width, obj.Height).Contains(point)) return obj;
+            if (item is TextItem text && new Rect(text.X, text.Y, text.Width, text.Height).Contains(point)) return text;
+        }
+        return null;
     }
 
     private TextBox? EditorAt(Point viewPoint) =>
@@ -2957,6 +3059,13 @@ public partial class NoteCanvas : UserControl
         InkFlowPercent = source.InkFlowPercent,
         OpacityPercent = source.OpacityPercent,
         BrushProfile = source.BrushProfile,
+        SourceBrush = source.SourceBrush,
+        ColorHex = source.ColorHex,
+        LayerId = source.LayerId,
+        ZOrder = source.ZOrder,
+        VectorPath = source.VectorPath,
+        VectorBounds = source.VectorBounds?.ToArray(),
+        VectorTransform = source.VectorTransform.Select((value, index) => index >= 4 ? value + offset : value).ToArray(),
         Points = source.Points.Select(point => new InkPoint(
             point.X + offset,
             point.Y + offset,
@@ -2977,6 +3086,8 @@ public partial class NoteCanvas : UserControl
 
     private static TextItem CloneText(TextItem source, float offset = 0) => new()
     {
+        LayerId = source.LayerId,
+        ZOrder = source.ZOrder,
         Id = IdFactory.New("text"),
         X = source.X + offset,
         Y = source.Y + offset,

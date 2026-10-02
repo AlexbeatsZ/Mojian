@@ -33,6 +33,8 @@ public static class ImageImportDisplayModeExtensions
 
 public sealed class PageObject
 {
+    public string LayerId { get; set; } = string.Empty;
+    public long ZOrder { get; set; }
     public string Id { get; set; } = IdFactory.New("object");
     public PageObjectKind Kind { get; set; }
     public float X { get; set; }
@@ -63,6 +65,8 @@ public sealed class PageObject
 
     public PageObject CloneWithNewId(float offset = 24) => new()
     {
+        LayerId = LayerId,
+        ZOrder = ZOrder,
         Id = IdFactory.New("object"),
         Kind = Kind,
         X = X + offset,

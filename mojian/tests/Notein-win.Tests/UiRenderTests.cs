@@ -29,7 +29,9 @@ public class UiRenderTests
                 application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/IconResources.xaml", UriKind.Relative)));
                 application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/Mojian;component/Themes/ControlStyles.xaml", UriKind.Relative)));
 
-                var window = new MainWindow
+                var testRoot=Path.Combine(Path.GetTempPath(),".agents","mojian-ui-render",Guid.NewGuid().ToString("N"));
+                var testModel=new MainViewModel(testRoot,new PreferencesStore(Path.Combine(testRoot,"preferences.json")));
+                var window = new MainWindow(testModel)
                 {
                     Width = 1440,
                     Height = 900

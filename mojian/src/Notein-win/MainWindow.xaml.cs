@@ -29,9 +29,11 @@ public partial class MainWindow : Window
     private MainViewModel ViewModel => (MainViewModel)DataContext;
     private NoteCanvas FocusedCanvas => ViewModel.FocusedSlot == CanvasSlot.Right ? RightCanvas : LeftCanvas;
 
-    public MainWindow()
+    public MainWindow() : this(new MainViewModel()) { }
+
+    public MainWindow(MainViewModel viewModel)
     {
-        DataContext = new MainViewModel();
+        DataContext = viewModel;
         InitializeComponent();
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
