@@ -19,6 +19,8 @@ public class UiRenderTests
     [Fact]
     public void GenerateUiScreenshots()
     {
+        string errorFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", ".agents", "ui_compare", "render_error.txt");
+        if (File.Exists(errorFile)) File.Delete(errorFile);
         var thread = new Thread(() =>
         {
             try
@@ -155,13 +157,35 @@ public class UiRenderTests
                 var panoramaSlider = Assert.IsType<Slider>(window.FindName("PanoramaSensitivitySlider"));
                 Assert.Equal(MainViewModel.MinimumPanoramaSensitivity, panoramaSlider.Minimum);
                 Assert.Equal(MainViewModel.MaximumPanoramaSensitivity, panoramaSlider.Maximum);
+
+                // Exercise the real notebook template's routed right-click, including an inactive row.
+                vm.IsFullPageMode = false;
+                var inactiveId = vm.ActiveWorkspace.Id;
+                vm.AddNotebook("Context menu target");
+                var activeId = vm.ActiveWorkspace.Id;
+                window.UpdateLayout();
+                var notebookBorder = VisualDescendants(window).OfType<Border>().First(element =>
+                    element.DataContext is NotebookPaneRow row && row.Id == inactiveId && element.ContextMenu == null && element.Padding == new Thickness(5, 0, 7, 0));
+                var title = VisualDescendants(notebookBorder).OfType<TextBlock>().Last();
+                var rightClick = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.Right)
+                {
+                    RoutedEvent = System.Windows.Input.Mouse.PreviewMouseUpEvent,
+                };
+                title.RaiseEvent(rightClick);
+                Assert.True(rightClick.Handled);
+                var notebookMenu = Assert.IsType<ContextMenu>(notebookBorder.ContextMenu);
+                Assert.True(notebookMenu.IsOpen);
+                Assert.Equal(new[] { "重命名", "删除", "新建分区" }, notebookMenu.Items.OfType<MenuItem>().Select(item => item.Header?.ToString()));
+                Assert.Equal(activeId, vm.ActiveWorkspace.Id);
+                CaptureVisual(notebookMenu, 244, 114, "win_11_notebook_menu.png");
+                notebookMenu.IsOpen = false;
+                window.Close();
             }
             catch (Exception ex)
             {
                 string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", ".agents", "ui_compare");
                 Directory.CreateDirectory(outDir);
                 File.WriteAllText(Path.Combine(outDir, "render_error.txt"), ex.ToString());
-                throw;
             }
         });
 
@@ -169,12 +193,21 @@ public class UiRenderTests
         thread.Start();
         thread.Join();
 
-        string errorFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", ".agents", "ui_compare", "render_error.txt");
         if (File.Exists(errorFile))
         {
             string err = File.ReadAllText(errorFile);
             File.Delete(errorFile);
             Assert.Fail("Render error: " + err);
+        }
+    }
+
+    private static IEnumerable<DependencyObject> VisualDescendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var descendant in VisualDescendants(child)) yield return descendant;
         }
     }
 

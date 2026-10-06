@@ -1,6 +1,6 @@
 # Workspace Navigation and Drawing UI
 
-Last verified: 2026-08-28
+Last verified: 2026-10-06
 
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
@@ -84,6 +84,17 @@ The recursive page pane ignores black-pane collapse state: collapse controls nav
 not which descendant pages exist in recursive page mode.
 
 ### Long-press management and manual ordering
+
+Notebook rows open the app-owned dark management menu on Windows right-click and Android
+long-press or mouse right-click. It offers `重命名`, `删除`, and `新建分区`; opening the menu
+does not select a different notebook. Deletion requires an explicit confirmation naming the
+notebook and counting every descendant section/page, and removes its complete page/asset directory.
+Both split slots, runtime page sessions, and navigation clipboards must stop referencing the deleted
+notebook; late autosave and shutdown must not recreate it. Deleting an inactive notebook preserves
+the active notebook/page. Deleting the active notebook selects an adjacent survivor. Deleting the
+last notebook creates a new empty notebook with a fresh ID, preserving the page-pane preference
+without restoring the example hierarchy. Rename rejects blank names and persists without switching
+focus. `新建分区` from this menu creates a section at the chosen notebook's root.
 
 Section and page rows use one mutually exclusive long-press gesture:
 

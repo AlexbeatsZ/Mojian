@@ -257,7 +257,7 @@
                             <ItemsControl ItemsSource="{Binding NotebookTreeRows}">
                                 <ItemsControl.Resources>
                                     <DataTemplate DataType="{x:Type models:NotebookPaneRow}">
-                                    <Border Style="{StaticResource NotebookPaneRow}" Padding="5,0,7,0">
+                                    <Border Style="{StaticResource NotebookPaneRow}" Padding="5,0,7,0" PreviewMouseRightButtonUp="OnNotebookRowRightClick">
                                         <Grid Background="Transparent">
                                             <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" /></Grid.InputBindings>
                                             <DockPanel>

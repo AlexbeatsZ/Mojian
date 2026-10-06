@@ -8,6 +8,65 @@ import org.junit.Test
 
 class WorkspaceModelsTest {
     @Test
+    fun deletingActiveNotebookSelectsAnAdjacentSurvivorAndPersists() {
+        val library = NotebookLibrary.sample()
+        val keptId = library.activeNotebookId
+        val deleted = library.addNotebook("Delete me")
+        deleted.addSectionAtFocus()
+        deleted.addPage("Nested page")
+
+        assertTrue(library.deleteNotebook(deleted.id))
+
+        assertEquals(keptId, library.activeNotebookId)
+        val restored = requireNotNull(NotebookLibrary.fromJson(library.toJsonString()))
+        assertEquals(listOf(keptId), restored.notebooks.map { it.id })
+        assertFalse(library.deleteNotebook("missing"))
+    }
+
+    @Test
+    fun deletingInactiveNotebookPreservesActiveNavigation() {
+        val library = NotebookLibrary.sample()
+        val deletedId = library.activeNotebookId
+        val kept = library.addNotebook("Keep me")
+        kept.addSectionAtFocus()
+        kept.addPage("Keep page")
+        val location = library.captureLocation()
+
+        assertTrue(library.deleteNotebook(deletedId))
+
+        assertEquals(location, library.captureLocation())
+    }
+
+    @Test
+    fun deletingLastNotebookLeavesAnEmptyReplacementAndRetainsPagePaneMode() {
+        val library = NotebookLibrary.sample()
+        library.setPagePaneMode(PagePaneMode.RECURSIVE)
+        val deletedId = library.activeNotebookId
+
+        assertTrue(library.deleteNotebook(deletedId))
+
+        val replacement = library.notebooks.single()
+        assertTrue(replacement.id != deletedId)
+        assertTrue(replacement.sections.isEmpty())
+        assertEquals(PagePaneMode.RECURSIVE, replacement.pagePaneMode)
+        assertTrue(requireNotNull(NotebookLibrary.fromJson(library.toJsonString())).notebooks.single().sections.isEmpty())
+    }
+
+    @Test
+    fun renamingInactiveNotebookPersistsWithoutChangingFocus() {
+        val library = NotebookLibrary.sample()
+        val renamedId = library.activeNotebookId
+        val focused = library.addNotebook("Focused")
+
+        assertTrue(library.renameNotebook(renamedId, "  Renamed  "))
+        assertFalse(library.renameNotebook(renamedId, " "))
+        assertFalse(library.renameNotebook("missing", "Missing"))
+        assertEquals(focused.id, library.activeNotebookId)
+        val restored = requireNotNull(NotebookLibrary.fromJson(library.toJsonString()))
+        assertEquals("Renamed", restored.notebooks.first { it.id == renamedId }.title)
+    }
+
+    @Test
     fun sampleLibraryDoesNotInventQuickNotesEntries() {
         assertEquals(listOf("我的笔记本"), NotebookLibrary.sample().notebooks.map { it.title })
     }

@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-10-02
+Last verified: 2026-10-06
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -44,6 +44,11 @@ The normal window uses four vertical zones after the ribbon:
 ```
 
 - The black pane contains notebooks and sections only; the gray pane contains pages only.
+- Notebook rows have their own right-click management menu (`重命名`, `删除`, `新建分区`).
+  Confirmed deletion removes all notebook-owned pages/assets and detaches both split slots;
+  autosave ignores documents whose notebook/page has been deleted. The last notebook can be
+  deleted and is replaced by an empty notebook rather than the sample library. See the shared
+  notebook lifecycle contract in `workspace-ui.md`.
 - `本层` and `递归` page modes retain the Android contract. Selecting a deep recursive page does not
   move the black-pane root.
 - `开始`, `插入`, `绘图`, and `视图` have separate ribbon panels. Controls never remain visible merely

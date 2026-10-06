@@ -558,6 +558,33 @@ public sealed class MainViewModel : ObservableObject
         RefreshNavigation();
     }
 
+    public bool RenameNotebook(string notebookId, string title)
+    {
+        if (!_library.RenameNotebook(notebookId, title)) return false;
+        SaveLibrary();
+        RefreshNavigation();
+        return true;
+    }
+
+    public bool DeleteNotebook(string notebookId)
+    {
+        if (_library.Notebooks.All(notebook => notebook.Id != notebookId)) return false;
+        SaveAll();
+        _store.DeleteNotebookData(notebookId);
+        _library.DeleteNotebook(notebookId);
+        // Detach both split slots before any later autosave or shutdown can recreate deleted pages.
+        if (PrimaryDocument?.NotebookId == notebookId) PrimaryDocument = null;
+        if (SecondaryDocument?.NotebookId == notebookId) SecondaryDocument = null;
+        if (FocusedSlot == CanvasSlot.Right && SecondaryDocument == null) FocusedSlot = CanvasSlot.Left;
+        if (FocusedDocument == null) LoadSelectedIntoFocusedSlot();
+        if (FocusedDocument is { } remaining) SelectLibraryLocation(remaining.NotebookId, remaining.PageId);
+        SearchResults.Clear();
+        SaveLibrary();
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+        return true;
+    }
+
     public void AddSection(string title)
     {
         SaveFocusedDocument();
@@ -756,11 +783,12 @@ public sealed class MainViewModel : ObservableObject
     public void SaveDocument(PageDocument? document)
     {
         if (document == null || string.IsNullOrWhiteSpace(document.PageId)) return;
-        SaveStateText = "正在保存…";
-        _store.SavePage(document);
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
         var page = notebook?.FindPage(document.PageId, out _);
-        if (page != null) page.UpdatedAt = document.UpdatedAt;
+        if (page == null) return;
+        SaveStateText = "正在保存…";
+        _store.SavePage(document);
+        page.UpdatedAt = document.UpdatedAt;
         _store.SaveLibrary(_library);
         SaveStateText = "已保存";
         RefreshPagePaneRows();

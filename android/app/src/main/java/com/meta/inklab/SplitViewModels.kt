@@ -44,6 +44,12 @@ class SplitViewState {
         if (side == SplitPaneSide.LEFT) leftLocation = location else rightLocation = location
     }
 
+    fun replaceNotebookLocations(notebookId: String, replacement: WorkspaceLocation) {
+        for (side in SplitPaneSide.entries) {
+            if (location(side)?.notebookId == notebookId) setLocation(side, replacement)
+        }
+    }
+
     fun exitKeepingRight(): WorkspaceLocation? {
         if (!enabled) return null
         val kept = rightLocation ?: leftLocation

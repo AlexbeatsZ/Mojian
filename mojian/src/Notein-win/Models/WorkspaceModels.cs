@@ -653,5 +653,23 @@ public sealed class NotebookLibrary
         return notebook;
     }
 
+    public bool RenameNotebook(string id, string title)
+    {
+        var notebook = Notebooks.FirstOrDefault(item => item.Id == id);
+        if (notebook == null || string.IsNullOrWhiteSpace(title)) return false;
+        notebook.Title = title.Trim();
+        return true;
+    }
+
+    public bool DeleteNotebook(string id)
+    {
+        var index = Notebooks.FindIndex(item => item.Id == id);
+        if (index < 0) return false;
+        Notebooks.RemoveAt(index);
+        if (Notebooks.Count == 0) AddNotebook();
+        else if (ActiveNotebookId == id) ActiveNotebookId = Notebooks[Math.Min(index, Notebooks.Count - 1)].Id;
+        return true;
+    }
+
     public static NotebookLibrary Sample() => new(new[] { NotebookWorkspace.Sample() });
 }

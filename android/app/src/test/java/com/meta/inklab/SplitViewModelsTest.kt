@@ -10,6 +10,30 @@ class SplitViewModelsTest {
     private val pageB = WorkspaceLocation("book-b", "section-b", "section-b", "page-b")
 
     @Test
+    fun deletedNotebookLocationsCannotReturnThroughFocusOrSplitExit() {
+        val state = SplitViewState()
+        state.enter(pageA)
+        state.setLocation(SplitPaneSide.RIGHT, pageB)
+
+        state.replaceNotebookLocations("book-a", pageB)
+
+        assertEquals(pageB, state.location(SplitPaneSide.LEFT))
+        assertEquals(pageB, state.location(SplitPaneSide.RIGHT))
+        assertEquals(pageB, state.exitKeepingRight())
+    }
+
+    @Test
+    fun deletionReplacesBothSlotsWhenTheyShowTheSameNotebook() {
+        val state = SplitViewState()
+        state.enter(pageA)
+
+        state.replaceNotebookLocations("book-a", pageB)
+
+        assertEquals(pageB, state.location(SplitPaneSide.LEFT))
+        assertEquals(pageB, state.location(SplitPaneSide.RIGHT))
+    }
+
+    @Test
     fun panesKeepIndependentNavigationContexts() {
         val state = SplitViewState()
 

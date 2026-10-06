@@ -2,10 +2,36 @@ package com.meta.inklab
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PageContentRepositoryTest {
+    @Test
+    fun deletingNotebookRemovesAllNestedAssetsAndPagesButPreservesOtherNotebooks() {
+        val temporaryRoot = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
+        val root = Files.createTempDirectory(temporaryRoot.toPath(), "mojian-notebook-delete").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            for (pageId in listOf("page-one", "page-two")) {
+                repository.save(PageInsertDocument("delete", pageId))
+                repository.assetDirectory("delete", pageId).resolve("original.pdf").writeBytes(byteArrayOf(1, 2))
+            }
+            repository.save(PageInsertDocument("keep", "page"))
+
+            repository.deleteNotebookData("delete")
+
+            assertFalse(repository.notebookDirectory("delete").exists())
+            assertTrue(repository.pageFile("keep", "page").isFile)
+            assertThrows(IllegalArgumentException::class.java) { repository.deleteNotebookData("..") }
+            assertThrows(IllegalArgumentException::class.java) { repository.deleteNotebookData(".") }
+            assertTrue(repository.pageFile("keep", "page").isFile)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun savesAtomicallyAndLoadsPageObjects() {
         val root = Files.createTempDirectory("mojian-page-store").toFile()

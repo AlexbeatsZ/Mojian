@@ -203,6 +203,97 @@ public class MainViewModelTests
         Assert.Equal(3, new WorkspaceStore(workspace).LoadSettings().Version);
     }
 
+    [Fact]
+    public void DeleteNotebook_RemovesNestedPagesAndAssetsAndSurvivesRestart()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        var keptId = vm.ActiveWorkspace.Id;
+        var keptDocument = vm.PrimaryDocument!;
+        vm.AddNotebook("Delete me");
+        var deletedId = vm.ActiveWorkspace.Id;
+        var deletedDocument = vm.PrimaryDocument!;
+        vm.Store.WriteAsset(deletedId, deletedDocument.PageId, ".bin", new byte[] { 1, 2, 3 });
+        vm.AddChildSection(vm.ActiveWorkspace.Sections[0].Id, "Nested");
+        vm.AddPage("Nested page", new PageAppearance());
+        vm.ToggleSplitViewCommand.Execute(null);
+        var directory = vm.Store.GetNotebookDirectory(deletedId);
+
+        Assert.True(vm.DeleteNotebook(deletedId));
+        vm.SaveDocument(deletedDocument); // A late canvas notification cannot resurrect deleted data.
+        vm.SaveAll();
+
+        Assert.False(Directory.Exists(directory));
+        Assert.Equal(keptId, vm.ActiveWorkspace.Id);
+        Assert.DoesNotContain(vm.Library.Notebooks, book => book.Id == deletedId);
+        Assert.True(vm.PrimaryDocument?.NotebookId != deletedId);
+        Assert.True(vm.SecondaryDocument?.NotebookId != deletedId);
+        Assert.True(File.Exists(vm.Store.GetPageDocumentPath(keptId, keptDocument.PageId)));
+        var restored = new MainViewModel(root, preferences);
+        Assert.Equal(keptId, Assert.Single(restored.Library.Notebooks).Id);
+        Assert.False(Directory.Exists(directory));
+    }
+
+    [Fact]
+    public void DeleteInactiveNotebook_PreservesFocusedPageAndOtherSplitSlot()
+    {
+        using var temp = new TemporaryDirectory();
+        var vm = new MainViewModel(Path.Combine(temp.Path, "workspace"), new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
+        var deletedId = vm.ActiveWorkspace.Id;
+        vm.ToggleSplitViewCommand.Execute(null);
+        vm.FocusCanvas(CanvasSlot.Right);
+        vm.AddNotebook("Keep me");
+        var keptDocument = vm.SecondaryDocument;
+
+        Assert.True(vm.DeleteNotebook(deletedId));
+
+        Assert.Same(keptDocument, vm.SecondaryDocument);
+        Assert.Same(keptDocument, vm.FocusedDocument);
+        Assert.Null(vm.PrimaryDocument);
+        Assert.Equal(keptDocument!.NotebookId, vm.ActiveWorkspace.Id);
+        vm.SaveAll();
+        Assert.False(Directory.Exists(Path.Combine(vm.WorkspaceRoot, "notebooks", deletedId)));
+    }
+
+    [Fact]
+    public void DeleteLastNotebook_CreatesAnEmptyReplacementWithoutRestoringSampleContent()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        var deletedId = vm.ActiveWorkspace.Id;
+
+        Assert.True(vm.DeleteNotebook(deletedId));
+        vm.SaveAll();
+
+        var replacement = Assert.Single(vm.Library.Notebooks);
+        Assert.NotEqual(deletedId, replacement.Id);
+        Assert.Empty(replacement.Sections);
+        Assert.Null(vm.FocusedDocument);
+        Assert.False(vm.DeleteNotebook("missing"));
+        Assert.Empty(Assert.Single(new MainViewModel(root, preferences).Library.Notebooks).Sections);
+    }
+
+    [Fact]
+    public void RenameInactiveNotebook_PersistsWithoutChangingFocus()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        var renamedId = vm.ActiveWorkspace.Id;
+        vm.AddNotebook("Focused");
+        var focusedId = vm.ActiveWorkspace.Id;
+
+        Assert.True(vm.RenameNotebook(renamedId, "  Renamed  "));
+        Assert.False(vm.RenameNotebook(renamedId, "  "));
+        Assert.Equal(focusedId, vm.ActiveWorkspace.Id);
+        Assert.Equal("Renamed", new WorkspaceStore(root).LoadLibrary().Notebooks.Single(book => book.Id == renamedId).Title);
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), ".agents", "mojian-win-tests", Guid.NewGuid().ToString("N"));

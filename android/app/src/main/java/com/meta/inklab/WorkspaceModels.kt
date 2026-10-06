@@ -684,6 +684,29 @@ class NotebookLibrary(
         return notebook
     }
 
+    fun renameNotebook(id: String, title: String): Boolean {
+        val notebook = notebooks.firstOrNull { it.id == id } ?: return false
+        val normalized = title.trim().takeIf(String::isNotEmpty) ?: return false
+        notebook.title = normalized
+        return true
+    }
+
+    fun deleteNotebook(id: String): Boolean {
+        val index = notebooks.indexOfFirst { it.id == id }
+        if (index < 0) return false
+        val mode = activeNotebook().pagePaneMode
+        notebooks.removeAt(index)
+        if (notebooks.isEmpty()) {
+            val replacement = NotebookWorkspace("notebook-${UUID.randomUUID()}", "新笔记本", mutableListOf())
+            replacement.setPagePaneMode(mode)
+            notebooks += replacement
+            activeNotebookId = replacement.id
+        } else if (activeNotebookId == id) {
+            activeNotebookId = notebooks[index.coerceAtMost(notebooks.lastIndex)].id
+        }
+        return true
+    }
+
     fun setPagePaneMode(mode: PagePaneMode) {
         notebooks.forEach { it.setPagePaneMode(mode) }
     }

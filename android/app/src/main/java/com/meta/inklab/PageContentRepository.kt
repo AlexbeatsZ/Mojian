@@ -31,6 +31,14 @@ class PageContentRepository(private val root: File) {
     fun notebookDirectory(notebookId: String): File =
         File(File(root, "notebooks"), safeId(notebookId))
 
+    fun deleteNotebookData(notebookId: String) {
+        val directory = notebookDirectory(notebookId).canonicalFile
+        require(directory.parentFile == File(root, "notebooks").canonicalFile) {
+            "Notebook directory must be inside the workspace"
+        }
+        check(!directory.exists() || directory.deleteRecursively()) { "Unable to delete notebook data" }
+    }
+
     fun deletePageData(notebookId: String, pageId: String) {
         pageFile(notebookId, pageId).delete()
         assetDirectory(notebookId, pageId).deleteRecursively()

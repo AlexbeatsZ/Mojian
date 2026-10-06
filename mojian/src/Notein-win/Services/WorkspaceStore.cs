@@ -122,6 +122,17 @@ public sealed class WorkspaceStore
         return path;
     }
 
+    public void DeleteNotebookData(string notebookId)
+    {
+        if (string.IsNullOrWhiteSpace(notebookId) || notebookId is "." or "..")
+            throw new ArgumentException("笔记本标识无效。", nameof(notebookId));
+        var notebooksRoot = Path.GetFullPath(Path.Combine(RootDirectory, "notebooks"));
+        var directory = Path.GetFullPath(Path.Combine(notebooksRoot, SafeId(notebookId)));
+        if (!string.Equals(Path.GetDirectoryName(directory), notebooksRoot, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("笔记本目录必须位于工作区内。", nameof(notebookId));
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
     public string GetPageDirectory(string notebookId, string pageId)
     {
         var path = Path.Combine(GetNotebookDirectory(notebookId), "pages");

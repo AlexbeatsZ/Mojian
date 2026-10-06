@@ -10,6 +10,18 @@ namespace Notein_win.Tests;
 public class WorkspaceStoreTests
 {
     [Fact]
+    public void DeleteNotebookData_RejectsParentDirectoryIds()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new WorkspaceStore(temp.Path);
+        var keep = store.WriteAsset("keep", "page", ".bin", new byte[] { 1 });
+
+        Assert.Throws<ArgumentException>(() => store.DeleteNotebookData(".."));
+        Assert.Throws<ArgumentException>(() => store.DeleteNotebookData("."));
+        Assert.True(File.Exists(store.ResolveAsset("keep", "page", keep)));
+    }
+
+    [Fact]
     public void PageAndAssets_UseSyncthingFriendlyAndroidCompatibleLayout()
     {
         using var temp = new TemporaryDirectory();

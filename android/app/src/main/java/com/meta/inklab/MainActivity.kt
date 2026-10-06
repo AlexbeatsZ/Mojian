@@ -3029,6 +3029,7 @@ class MainActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(0, MATCH, 1f),
             )
+            installNavigationLongPressAndDrag(notebookRow, payload = null) { showNotebookMenu(notebookRow, notebook) }
             sectionList.addView(notebookRow, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
 
             if (!notebook.expanded) continue
@@ -3229,6 +3230,10 @@ class MainActivity : Activity() {
         payload: NavigationDragPayload?,
         onLongPress: () -> Unit,
     ) {
+        view.setOnContextClickListener {
+            onLongPress()
+            true
+        }
         val slop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
         var downX = 0f
         var downY = 0f
@@ -3246,6 +3251,7 @@ class MainActivity : Activity() {
                 onLongPress()
             }
         view.setOnTouchListener { _, event ->
+            if (event.isFromSource(InputDevice.SOURCE_MOUSE)) return@setOnTouchListener false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.rawX
@@ -3386,6 +3392,58 @@ class MainActivity : Activity() {
             y - scroll.scrollY < edge -> scroll.scrollBy(0, -dp(12))
             scroll.scrollY + scroll.height - y < edge -> scroll.scrollBy(0, dp(12))
         }
+    }
+
+    private fun showNotebookMenu(anchor: View, notebook: NotebookWorkspace) {
+        MojianCommandMenu.show(
+            this,
+            anchor,
+            listOf(
+                MojianCommandMenu.Item("重命名", "pen", action = {
+                    showRenameDialog("重命名笔记本", notebook.title) { title ->
+                        if (notebookLibrary.renameNotebook(notebook.id, title)) finishNavigationMutation()
+                    }
+                }),
+                MojianCommandMenu.Item("删除", "delete_dismiss", destructive = true, action = { confirmDeleteNotebook(notebook) }),
+                MojianCommandMenu.Item("新建分区", "add", dividerBefore = true, action = {
+                    notebookLibrary.selectNotebook(notebook.id)
+                    notebook.focusNotebook()
+                    notebook.addSectionAtFocus()
+                    finishNavigationMutation()
+                }),
+            ),
+            widthDp = 244,
+        )
+    }
+
+    private fun confirmDeleteNotebook(notebook: NotebookWorkspace) {
+        val sections = notebook.allSections()
+        val pages = sections.sumOf { it.pages.size }
+        AlertDialog.Builder(this)
+            .setTitle("删除笔记本？")
+            .setMessage("将删除“${notebook.title}”以及其中 ${sections.size} 个分区、$pages 个页面和本地附件。此操作无法撤销。")
+            .setPositiveButton("删除") { _, _ ->
+                saveBoundPageSession()
+                pageContentRepository.deleteNotebookData(notebook.id)
+                if (!notebookLibrary.deleteNotebook(notebook.id)) return@setPositiveButton
+                pageSessions.keys.removeAll { it.notebookId == notebook.id }
+                if (boundPageKey?.notebookId == notebook.id) {
+                    boundPageKey = null
+                    dryInkView.replaceStrokes(emptyList())
+                    tagLayer.replaceTags(emptyList())
+                    textInputLayer.replaceEditors(emptyList())
+                    insertContentLayer.bind(null)
+                }
+                if (pageNavigationClipboard?.notebookId == notebook.id) pageNavigationClipboard = null
+                if (insertObjectClipboard?.source?.notebookId == notebook.id) insertObjectClipboard = null
+                for (side in SplitPaneSide.entries) {
+                    if (splitViewState.location(side)?.notebookId == notebook.id) clearPreview(hostFor(side))
+                }
+                splitViewState.replaceNotebookLocations(notebook.id, notebookLibrary.captureLocation())
+                finishNavigationMutation()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showSectionMenu(anchor: View, notebook: NotebookWorkspace, section: SectionNode) {

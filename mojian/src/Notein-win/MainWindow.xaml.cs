@@ -236,6 +236,38 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
+    private void OnNotebookRowRightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement anchor || anchor.DataContext is not NotebookPaneRow row) return;
+        var notebook = ViewModel.Library.Notebooks.FirstOrDefault(item => item.Id == row.Id);
+        if (notebook == null) return;
+        var menu = new ContextMenu();
+        AddMenuItem(menu, "重命名", () =>
+        {
+            var title = Prompt("重命名笔记本", "笔记本名称", notebook.Title);
+            if (title != null) ViewModel.RenameNotebook(notebook.Id, title);
+        });
+        AddMenuItem(menu, "删除", () =>
+        {
+            var sections = notebook.FlattenAllSections().Count();
+            var pages = notebook.FlattenAllSections().Sum(section => section.Pages.Count);
+            if (MessageBox.Show(this, $"将删除“{notebook.Title}”以及其中 {sections} 个分区、{pages} 个页面和本地附件。此操作无法撤销。", "删除笔记本？", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK) return;
+            if (ViewModel.DeleteNotebook(notebook.Id) && _pageNavigationClipboard?.NotebookId == notebook.Id)
+                _pageNavigationClipboard = null;
+        });
+        menu.Items.Add(new Separator());
+        AddMenuItem(menu, "新建分区", () =>
+        {
+            var title = Prompt("新建分区", "分区名称", "新分区");
+            if (title == null) return;
+            ViewModel.SelectNotebookCommand.Execute(notebook.Id);
+            ViewModel.AddSection(title);
+        });
+        anchor.ContextMenu = menu;
+        OpenContextMenu(anchor, menu);
+        e.Handled = true;
+    }
+
     private void OnSectionRowRightClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement anchor || anchor.DataContext is not SectionRow row) return;
