@@ -56,6 +56,8 @@ class DryInkView(context: Context) : View(context) {
     private var renderBackgroundInInkLayer = true
     private var backgroundInvalidator: (() -> Unit)? = null
 
+    var shapePreview: Stroke? = null
+        set(value) { field=value; invalidate() }
     private val strokes = mutableListOf<Stroke>()
     private val strokeBounds = IdentityHashMap<Stroke, StrokeViewportBounds>()
     private var cachedContentBottom = 0f
@@ -161,6 +163,7 @@ class DryInkView(context: Context) : View(context) {
         selectedStrokes.clear()
         redoStrokes.clear()
         strokes.addAll(newStrokes)
+        invalidate()
         newStrokes.forEach(::registerStroke)
         onContentChanged?.invoke()
     }
@@ -520,6 +523,7 @@ class DryInkView(context: Context) : View(context) {
                 if (!bounds.intersects(visible)) continue
                 scope.drawStroke(stroke)
             }
+            shapePreview?.let { scope.drawStroke(it) }
             drawLasso(transformedCanvas)
             eraserCursor?.let { cursor ->
                 transformedCanvas.drawCircle(cursor.x, cursor.y, eraserRadius, eraserCursorPaint)

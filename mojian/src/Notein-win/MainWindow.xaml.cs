@@ -84,6 +84,7 @@ public partial class MainWindow : Window
         canvas.ResolveAssetPath = name => canvas.Document == null ? string.Empty : ViewModel.ResolveAsset(canvas.Document, name);
         canvas.ImportAssetPath = ViewModel.ImportAsset;
         canvas.ResolvePressureEraserTool = () => ViewModel.PressureEraserTool;
+        canvas.ResolveShapeSettings = () => ViewModel.ShapeSettings;
         canvas.BeginSpringLoadedTool = ViewModel.BeginSpringLoadedTool;
         canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
         canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
@@ -487,6 +488,8 @@ public partial class MainWindow : Window
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
+        LeftCanvas.CancelShapeAuthoring();
+        RightCanvas.CancelShapeAuthoring();
         ViewModel.IsToolFlyoutOpen = false;
         PanoramaFlyoutPopup.IsOpen = false;
         _toolFlyoutWasOpenAtPointerDown = false;

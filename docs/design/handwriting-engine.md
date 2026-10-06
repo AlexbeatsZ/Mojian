@@ -236,6 +236,8 @@ The remaining acceptance items—palm rejection quality, visible wet-to-dry hand
 
 ## Later Windows Boundary
 
+图形笔画和停笔转直线遵循 `shapes-and-straightening.md`。`shape-v1` 使用固定线宽与原始几何点列，不能经过自由笔的压力/速度平滑；停笔计时须在没有新输入事件时继续工作，并服从压力橡皮和取消路径。
+
 Do not require AndroidX Ink binaries on Windows. Preserve a platform-neutral input model containing
 positions, elapsed time, pressure, tilt, orientation, tool type, physical-unit calibration, brush
 profile/version, and deterministic behavior parameters. Android can use AndroidX Ink for authoring

@@ -179,6 +179,32 @@ public class UiRenderTests
                 Assert.Equal(activeId, vm.ActiveWorkspace.Id);
                 CaptureVisual(notebookMenu, 244, 114, "win_11_notebook_menu.png");
                 notebookMenu.IsOpen = false;
+
+                // Reuse this WPF window: a second Application/window lifetime can shut down
+                // the shared test dispatcher and break later real-window assertions.
+                vm.SelectToolFromToolbar("shape-default", false);
+                vm.IsToolFlyoutOpen = true;
+                var shapePopup = Assert.IsType<System.Windows.Controls.Primitives.Popup>(window.FindName("ToolFlyoutPopup"));
+                shapePopup.PlacementTarget = window;
+                shapePopup.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, true);
+                window.UpdateLayout();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                var shapeChooser = Assert.IsType<ComboBox>(window.FindName("ShapeKindChooser"));
+                Assert.True(shapeChooser.IsVisible);
+                Assert.Equal(7, shapeChooser.Items.Count);
+                shapeChooser.SelectedItem = ShapeKind.Rectangle;
+                var shapeDelay = Assert.IsType<Slider>(window.FindName("StraightenDelaySlider"));
+                Assert.True(shapeDelay.IsVisible);
+                Assert.Equal(1000, shapeDelay.Value);
+                shapeDelay.Value = 1250;
+                vm.SaveToolSettings();
+                var restoredShapes = new MainViewModel(testRoot, new PreferencesStore(Path.Combine(testRoot, "preferences.json")));
+                Assert.Equal(ShapeKind.Rectangle, restoredShapes.ShapeSettings.ShapeKind);
+                Assert.Equal(1250, restoredShapes.ShapeSettings.StraightenDelayMillis);
+                var shapePanel = Assert.IsAssignableFrom<FrameworkElement>(shapePopup.Child);
+                shapePanel.Measure(new Size(316, double.PositiveInfinity));
+                CaptureVisual(shapePanel, 316, (int)Math.Ceiling(shapePanel.DesiredSize.Height), "win_12_shapes.png");
+                shapePopup.IsOpen = false;
                 window.Close();
             }
             catch (Exception ex)

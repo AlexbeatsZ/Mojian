@@ -164,6 +164,7 @@ public class FullPageToolbarConfig
         "tool:pen-blue",
         "tool:pen-red",
         "draw:add",
+        "tool:shape-default",
         "draw:pan",
         "draw:clear",
     };

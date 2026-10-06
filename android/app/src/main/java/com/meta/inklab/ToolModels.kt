@@ -8,6 +8,7 @@ enum class DrawingToolKind(val label: String) {
     HIGHLIGHTER("荧光笔"),
     ERASER("橡皮"),
     LASSO("套索"),
+    SHAPE("图形"),
 }
 
 enum class LassoShape(val label: String) {
@@ -34,6 +35,9 @@ data class ToolPreset(
     var pressureEraseThresholdPercent: Int = 78,
     var pressureEraseDwellMillis: Long = 140L,
     var lassoShape: LassoShape = LassoShape.FREEFORM,
+    var shapeKind: ShapeKind = ShapeKind.LINE,
+    var holdToStraightenEnabled: Boolean = true,
+    var straightenDelayMillis: Long = 1000L,
 ) {
     val displayName: String
         get() =
@@ -42,6 +46,7 @@ data class ToolPreset(
                 DrawingToolKind.HIGHLIGHTER -> "${color.label}色荧光"
                 DrawingToolKind.ERASER -> "橡皮"
                 DrawingToolKind.LASSO -> "套索"
+                DrawingToolKind.SHAPE -> "图形"
             }
 
     fun toJson(): JSONObject =
@@ -58,6 +63,9 @@ data class ToolPreset(
             put("pressureEraseThresholdPercent", pressureEraseThresholdPercent)
             put("pressureEraseDwellMillis", pressureEraseDwellMillis)
             put("lassoShape", lassoShape.name)
+            put("shapeKind", shapeKind.name)
+            put("holdToStraightenEnabled", holdToStraightenEnabled)
+            put("straightenDelayMillis", straightenDelayMillis)
         }
 
     companion object {
@@ -92,6 +100,9 @@ data class ToolPreset(
                     pressureEraseThresholdPercent = pressureEraseThresholdPercent,
                     pressureEraseDwellMillis = pressureEraseDwellMillis,
                     lassoShape = lassoShape,
+                    shapeKind = runCatching { ShapeKind.valueOf(json.optString("shapeKind", "LINE")) }.getOrDefault(ShapeKind.LINE),
+                    holdToStraightenEnabled = json.optBoolean("holdToStraightenEnabled", true),
+                    straightenDelayMillis = json.optLong("straightenDelayMillis", 1000L).coerceIn(200L, 2000L),
                 )
             } catch (_: Exception) {
                 null
@@ -108,7 +119,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
         .apply { restoreMissingDefaults() }
     private var sequence = mutableTools.size + 1
 
-    var selectedId: String = mutableTools.firstOrNull()?.id ?: defaults().first().id
+    var selectedId: String = mutableTools.first().id
         private set
 
     var pressureEraserId: String = mutableTools.first { it.kind == DrawingToolKind.ERASER }.id
@@ -156,6 +167,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                         eraserRadiusMm = 4.5f,
                         pressureEraseEnabled = true,
                     )
+                DrawingToolKind.SHAPE -> ToolPreset(nextId("shape"), kind)
                 DrawingToolKind.LASSO ->
                     ToolPreset(
                         id = nextId("lasso"),
@@ -257,6 +269,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                     eraserRadiusMm = 4.5f,
                     pressureEraseEnabled = true,
                 ),
+                ToolPreset("shape-default", DrawingToolKind.SHAPE),
                 ToolPreset(
                     id = "lasso-freeform",
                     kind = DrawingToolKind.LASSO,

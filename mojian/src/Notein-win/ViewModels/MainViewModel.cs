@@ -51,6 +51,10 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<ToolPreset> EraserTools { get; } = new();
     public ObservableCollection<ToolPreset> HighlighterTools { get; } = new();
     public ObservableCollection<ToolPreset> PenTools { get; } = new();
+    public ObservableCollection<ToolPreset> ShapeTools { get; } = new();
+    public ToolPreset ShapeSettings => _toolShelf.Tools.First(t => t.Id == "shape-default");
+    public bool SelectedToolIsShape => SelectedTool.Kind == DrawingToolKind.Shape;
+    public IReadOnlyList<ShapeKind> ShapeKinds => Enum.GetValues<ShapeKind>();
     public ObservableCollection<SearchResult> SearchResults { get; } = new();
     public ObservableCollection<FullPageToolDescriptor> FullPageToolbarItems { get; } = new();
     public ObservableCollection<FullPageToolDescriptor> FullPageToolbarAvailableItems { get; } = new();
@@ -818,6 +822,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedToolIsPen));
         OnPropertyChanged(nameof(SelectedToolIsHighlighter));
         OnPropertyChanged(nameof(SelectedToolIsEraser));
+        OnPropertyChanged(nameof(SelectedToolIsShape));
         OnPropertyChanged(nameof(SelectedToolIsLasso));
         OnPropertyChanged(nameof(SelectedLassoIsFreeform));
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));
@@ -1045,6 +1050,7 @@ public sealed class MainViewModel : ObservableObject
                 DrawingToolKind.Lasso => 0,
                 DrawingToolKind.Eraser => 1,
                 DrawingToolKind.Highlighter => 2,
+                DrawingToolKind.Shape => 4,
                 _ => 3,
             })
             .ToList();
@@ -1109,7 +1115,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void SetSelectedToolColor(InkPalette color)
     {
-        if (SelectedTool.Kind is not DrawingToolKind.Pen and not DrawingToolKind.Highlighter) return;
+        if (SelectedTool.Kind is not DrawingToolKind.Pen and not DrawingToolKind.Highlighter and not DrawingToolKind.Shape) return;
         SelectedTool.Color = color;
         SaveSettings();
         RefreshTools();
@@ -1322,6 +1328,7 @@ public sealed class MainViewModel : ObservableObject
         EraserTools.Clear();
         HighlighterTools.Clear();
         PenTools.Clear();
+        ShapeTools.Clear();
         foreach (var tool in _toolShelf.Tools)
         {
             tool.IsSelected = tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled;
@@ -1331,6 +1338,7 @@ public sealed class MainViewModel : ObservableObject
                 case DrawingToolKind.Eraser: EraserTools.Add(tool); break;
                 case DrawingToolKind.Highlighter: HighlighterTools.Add(tool); Tools.Add(tool); break;
                 case DrawingToolKind.Pen: PenTools.Add(tool); Tools.Add(tool); break;
+                case DrawingToolKind.Shape: ShapeTools.Add(tool); break;
             }
         }
         NotifySelectedToolProperties();
@@ -1375,7 +1383,7 @@ public sealed class MainViewModel : ObservableObject
         };
         catalog.AddRange(_toolShelf.Tools.Select(tool => new FullPageToolDescriptor(
             $"tool:{tool.Id}", tool.DisplayName,
-            tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", _ => "lasso" },
+            tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", DrawingToolKind.Shape => "shapes", _ => "lasso" },
             tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4",
             IsSelected: tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled)));
         catalog.AddRange(new[]
@@ -1399,11 +1407,13 @@ public sealed class MainViewModel : ObservableObject
 
     private void NotifySelectedToolProperties()
     {
+        OnPropertyChanged(nameof(ShapeSettings));
         OnPropertyChanged(nameof(SelectedTool));
         OnPropertyChanged(nameof(SelectedToolIsInk));
         OnPropertyChanged(nameof(SelectedToolIsPen));
         OnPropertyChanged(nameof(SelectedToolIsHighlighter));
         OnPropertyChanged(nameof(SelectedToolIsEraser));
+        OnPropertyChanged(nameof(SelectedToolIsShape));
         OnPropertyChanged(nameof(SelectedToolIsLasso));
         OnPropertyChanged(nameof(SelectedLassoIsFreeform));
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));

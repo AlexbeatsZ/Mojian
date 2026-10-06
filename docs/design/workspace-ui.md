@@ -1,9 +1,12 @@
 # Workspace Navigation and Drawing UI
 
-Last verified: 2026-10-06
+Last verified: 2026-10-07
 
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
+
+The shared Shapes tool, its seven primitives, and the hold-to-straighten toggle/delay live in the
+drawing-tool flyout. Read `shapes-and-straightening.md` before modifying this tool or its parameters.
 
 Boundless paper dimensions, content-only right/down growth, and smart-cropped PDF output follow
 `docs/design/boundless-canvas.md`; viewport browsing never expands this paper mode.

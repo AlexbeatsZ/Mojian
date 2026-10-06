@@ -182,6 +182,27 @@ private data class InsertObjectClipboard(
 
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
+    private val straighten = HoldToStraighten()
+    private var shapePointerId: Int? = null
+    private var shapeStart = ShapePoint(0f, 0f)
+    private var shapeEnd = shapeStart
+    private var shapePreset: ToolPreset? = null
+    private var shapeBrush: Brush? = null
+    private var restoringPageInk = false
+    private val shapeSettings get() = toolShelf.tools.first { it.id == "shape-default" }
+    private val straightenTick = object : Runnable {
+        override fun run() {
+            val pointerId = pressurePointerId ?: return
+            if (!straighten.active || straighten.snapped) return
+            if (!pressureEraser.isErasing && !(pressureEraser.isArmed && lastPressure >= pressureEraser.pressureThreshold) &&
+                shapeSettings.holdToStraightenEnabled && straighten.trySnap(SystemClock.uptimeMillis(), shapeSettings.straightenDelayMillis)) {
+                activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
+                mainHandler.removeCallbacks(activatePressureEraser)
+                pressureEraser.cancelCandidate()
+                updateShapePreview(ShapeKind.LINE)
+            } else mainHandler.postDelayed(this, 30L)
+        }
+    }
     private val viewport = ViewportState()
     private val pressureEraser = PressureEraserController()
     private val shortcutDispatcher = XiaomiStylusShortcutDispatcher()
@@ -352,6 +373,7 @@ class MainActivity : Activity() {
             val pointerId = pressurePointerId ?: return@Runnable
             if (!pressureEraser.activate(SystemClock.uptimeMillis())) return@Runnable
             activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
+            cancelShapeGesture()
             renderToolShelf()
             renderToolDetails()
             eraseAt(lastPressurePoint, pressureEraserRadius())
@@ -478,6 +500,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        cancelShapeGesture()
         dismissDarkTooltip()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
@@ -641,6 +664,7 @@ class MainActivity : Activity() {
         toolShelf.tools.sortedWith(
             compareBy {
                 when (it.kind) {
+                    DrawingToolKind.SHAPE -> 4
                     DrawingToolKind.LASSO -> 0
                     DrawingToolKind.ERASER -> 1
                     DrawingToolKind.HIGHLIGHTER -> 2
@@ -668,6 +692,7 @@ class MainActivity : Activity() {
     }
 
     private fun togglePanoramaMode() {
+        cancelStylusAction()
         tagLayer.cancelPlacement()
         singleFingerPanEnabled = !singleFingerPanEnabled
         insertSpaceModeEnabled = false
@@ -1433,7 +1458,8 @@ class MainActivity : Activity() {
                                 DrawingToolKind.PEN -> "pen"
                                 DrawingToolKind.HIGHLIGHTER -> "highlight"
                                 DrawingToolKind.ERASER -> "eraser"
-                                DrawingToolKind.LASSO -> "lasso"
+                                DrawingToolKind.SHAPE -> "shapes"
+                        DrawingToolKind.LASSO -> "lasso"
                             },
                             checked = binding.type == type && binding.toolId == tool.id,
                             action = {
@@ -2758,7 +2784,7 @@ class MainActivity : Activity() {
         }
         textInputLayer.onEditingChanged = { updateSelectionInteraction() }
         textInputLayer.onContentChanged = ::expandPageIfNeeded
-        dryInkView.onContentChanged = ::expandPageIfNeeded
+        dryInkView.onContentChanged = { expandPageIfNeeded(); persistGeneratedShapes() }
         textInputLayer.onPageGesture = ::handleFingerGesture
         paperContainer.onPointerEventObserved = ::observeCanvasPointerEvent
         dryInkView.setViewport(viewport.documentToViewMatrix())
@@ -2915,6 +2941,7 @@ class MainActivity : Activity() {
 
     private fun saveBoundPageSession() {
         val key = boundPageKey ?: return
+        persistGeneratedShapes()
         pageSessions[key] =
             PageSessionState(
                 strokes = dryInkView.snapshotStrokes(),
@@ -3753,10 +3780,14 @@ class MainActivity : Activity() {
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
         val nextKey = pageId?.let { PageSessionKey(workspace.id, it) }
         if (nextKey != boundPageKey) {
+            cancelStylusAction()
             saveBoundPageSession()
             boundPageKey = nextKey
             val session = nextKey?.let(pageSessions::get)
-            dryInkView.replaceStrokes(session?.strokes.orEmpty())
+            val stored = nextKey?.let { pageContentRepository.load(it.notebookId,it.pageId).strokes }
+            val restoredShapes = stored?.let { array -> (0 until array.length()).mapNotNull { ShapeStrokeCodec.decode(array.getJSONObject(it),::displayColor) } }.orEmpty()
+            restoringPageInk = true
+            try { dryInkView.replaceStrokes(session?.strokes ?: restoredShapes) } finally { restoringPageInk = false }
             tagLayer.replaceTags(session?.tags.orEmpty())
             textInputLayer.replaceEditors(session?.textBoxes.orEmpty())
             if (session == null) viewport.reset() else viewport.restore(session.viewport)
@@ -3791,6 +3822,7 @@ class MainActivity : Activity() {
                         DrawingToolKind.PEN -> "pen"
                         DrawingToolKind.HIGHLIGHTER -> "highlight"
                         DrawingToolKind.ERASER -> "eraser"
+                        DrawingToolKind.SHAPE -> "shapes"
                         DrawingToolKind.LASSO -> "lasso"
                     }
                 add(FullPageToolDescriptor("tool:${tool.id}", tool.displayName, icon))
@@ -3877,6 +3909,8 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(3) },
         )
         row.addView(verticalDivider())
+        toolShelf.tools.filter { it.kind == DrawingToolKind.SHAPE }.forEach { row.addView(toolButton(it)) }
+        row.addView(verticalDivider())
         row.addView(
             commandButton("hand_left", "触控笔抓手", selected = singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) },
             LinearLayout.LayoutParams(dp(40), dp(42)),
@@ -3913,6 +3947,7 @@ class MainActivity : Activity() {
                         DrawingToolKind.PEN -> "pen"
                         DrawingToolKind.HIGHLIGHTER -> "highlight"
                         DrawingToolKind.ERASER -> "eraser"
+                        DrawingToolKind.SHAPE -> "shapes"
                         DrawingToolKind.LASSO -> "lasso"
                     }
                 addView(
@@ -4021,6 +4056,15 @@ class MainActivity : Activity() {
                 addToolDetailLine(detailChip("整笔擦除", true) { }, detailHint("像素擦除稍后接入"))
             }
 
+            DrawingToolKind.SHAPE -> {
+                addPaletteControls(tool)
+                ShapeKind.entries.chunked(3).forEach { kinds ->
+                    addToolDetailLine(*kinds.map { kind -> detailChip(kind.label, tool.shapeKind == kind) { tool.shapeKind = kind; persistToolShelf(); renderToolDetails() } }.toTypedArray())
+                }
+                toolDetailRow.addView(parameterControl("线宽", ((tool.widthMm*10).roundToInt()-1).coerceIn(0,19), 19, { "${(it+1)/10f} mm" }) { tool.widthMm=(it+1)/10f; persistToolShelf() }, LinearLayout.LayoutParams(MATCH,dp(44)))
+                addToolDetailLine(detailChip("停笔转直线 ${if (shapeSettings.holdToStraightenEnabled) "开" else "关"}", shapeSettings.holdToStraightenEnabled) { shapeSettings.holdToStraightenEnabled=!shapeSettings.holdToStraightenEnabled; persistToolShelf(); renderToolDetails() })
+                toolDetailRow.addView(parameterControl("等待时间", ((shapeSettings.straightenDelayMillis-200)/50).toInt().coerceIn(0,36), 36, { "${200+it*50} ms" }) { shapeSettings.straightenDelayMillis=200L+it*50; persistToolShelf() }, LinearLayout.LayoutParams(MATCH,dp(44)))
+            }
             DrawingToolKind.LASSO -> {
                 addToolDetailLine(
                     detailChip("自由圈选", tool.lassoShape == LassoShape.FREEFORM) {
@@ -4267,6 +4311,10 @@ class MainActivity : Activity() {
         when (activeDirectTool) {
             DrawingToolKind.PEN,
             DrawingToolKind.HIGHLIGHTER -> {
+                shapeStart = ShapePoint(lastPressurePoint.x,lastPressurePoint.y)
+                shapeEnd = shapeStart
+                shapePreset = directPreset?.copy()
+                if (shapeSettings.holdToStraightenEnabled) { straighten.begin(ShapePoint(event.getX(pointerIndex),event.getY(pointerIndex)),event.eventTime); mainHandler.postDelayed(straightenTick,30L) }
                 pressureEraser.enabled = PressureEraserPolicy.canTrigger(requireNotNull(activeDirectTool), toolShelf.pressureEraser.pressureEraseEnabled)
                 activeStrokes[pointerId] =
                     wetInkView.startStroke(
@@ -4290,6 +4338,7 @@ class MainActivity : Activity() {
             DrawingToolKind.LASSO -> {
                 beginContentLasso(event.getX(pointerIndex), event.getY(pointerIndex))
             }
+            DrawingToolKind.SHAPE -> Unit
             null -> Unit
         }
     }
@@ -4305,6 +4354,9 @@ class MainActivity : Activity() {
             DrawingToolKind.LASSO -> dryInkView.extendLasso(lastPressurePoint)
             DrawingToolKind.PEN,
             DrawingToolKind.HIGHLIGHTER -> {
+                shapeEnd = ShapePoint(lastPressurePoint.x,lastPressurePoint.y)
+                if (straighten.snapped) { updateShapePreview(ShapeKind.LINE); return }
+                straighten.move(ShapePoint(event.getX(pressureIndex),event.getY(pressureIndex)),event.eventTime,2.5f*resources.displayMetrics.density)
                 if (pressureEraser.isErasing) {
                     eraseAt(lastPressurePoint, pressureEraserRadius())
                 } else {
@@ -4319,6 +4371,7 @@ class MainActivity : Activity() {
                 }
             }
 
+            DrawingToolKind.SHAPE -> Unit
             null -> Unit
         }
     }
@@ -4331,9 +4384,15 @@ class MainActivity : Activity() {
             DrawingToolKind.HIGHLIGHTER -> {
                 val strokeId = activeStrokes.remove(pointerId)
                 val wasErasing = pressureEraser.isErasing
+                val snapped = straighten.snapped
+                if (snapped && !wasErasing) {
+                    val point = viewport.viewToDocument(event.getX(event.actionIndex),event.getY(event.actionIndex)); shapeEnd=ShapePoint(point.x,point.y)
+                    commitShape(ShapeKind.LINE)
+                }
+                cancelShapeGesture()
                 if (!wasErasing && strokeId != null) wetInkView.finishStroke(event, pointerId, strokeId)
                 mainHandler.removeCallbacks(activatePressureEraser)
-                pressureEraser.onStylusLift(completedInk = !wasErasing && strokeId != null)
+                pressureEraser.onStylusLift(completedInk = !wasErasing && (strokeId != null || snapped))
                 dryInkView.setEraserCursor(null)
                 if (wasErasing) {
                     renderToolShelf()
@@ -4350,6 +4409,7 @@ class MainActivity : Activity() {
                 dryInkView.setEraserCursor(null)
             }
 
+            DrawingToolKind.SHAPE -> Unit
             null -> Unit
         }
         pressurePointerId = null
@@ -4359,6 +4419,7 @@ class MainActivity : Activity() {
 
     private fun cancelStylusAction() {
         val wasErasing = pressureEraser.isErasing
+        cancelShapeGesture()
         mainHandler.removeCallbacks(activatePressureEraser)
         pressureEraser.cancelGesture()
         pressurePointerId = null
@@ -4373,9 +4434,80 @@ class MainActivity : Activity() {
         syncPressureEraserWithTool()
     }
 
+    private fun updateShapePreview(kind: ShapeKind) {
+        val preset = shapePreset ?: return
+        val opacity = if (preset.kind == DrawingToolKind.HIGHLIGHTER) preset.opacityPercent else 100
+        val brush = shapeBrush ?: ShapeStrokeCodec.brush(preset.color, preset.widthMm, opacity, displayColor(preset.color)).also { shapeBrush = it }
+        dryInkView.shapePreview = ShapeStrokeCodec.create(ShapeGeometry.points(kind,shapeStart,shapeEnd),brush)
+    }
+
+    private fun commitShape(kind: ShapeKind) {
+        if (kotlin.math.hypot(shapeEnd.x-shapeStart.x,shapeEnd.y-shapeStart.y)<2f) return
+        updateShapePreview(kind)
+        dryInkView.shapePreview?.let { dryInkView.addStrokes(listOf(it)) }
+        dryInkView.shapePreview = null
+        saveBoundPageSession()
+    }
+
+    private fun cancelShapeGesture() {
+        mainHandler.removeCallbacks(straightenTick)
+        straighten.cancel()
+        shapePointerId=null
+        shapePreset=null
+        shapeBrush=null
+        if (::dryInkView.isInitialized) dryInkView.shapePreview=null
+    }
+
+    private fun handleShapePointer(event: MotionEvent): Boolean {
+        if (workspace.selectedPage()==null || event.getToolType(0)==MotionEvent.TOOL_TYPE_ERASER) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                cancelStylusAction()
+                clearContentSelection()
+                textInputLayer.abandonTemporaryEditors()
+                textInputLayer.endEditing()
+                shapePointerId=event.getPointerId(event.actionIndex)
+                shapePreset=toolShelf.selected.copy()
+                val p=viewport.viewToDocument(event.x,event.y); shapeStart=ShapePoint(p.x,p.y); shapeEnd=shapeStart
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val index=shapePointerId?.let(event::findPointerIndex) ?: return false
+                if (index<0) return false
+                val p=viewport.viewToDocument(event.getX(index),event.getY(index)); shapeEnd=ShapePoint(p.x,p.y)
+                updateShapePreview(shapePreset?.shapeKind ?: ShapeKind.LINE)
+            }
+            MotionEvent.ACTION_UP -> {
+                if (shapePointerId==null) return false
+                val p=viewport.viewToDocument(event.x,event.y); shapeEnd=ShapePoint(p.x,p.y)
+                commitShape(shapePreset?.shapeKind ?: ShapeKind.LINE)
+                cancelShapeGesture()
+            }
+            MotionEvent.ACTION_CANCEL -> cancelShapeGesture()
+            else -> return shapePointerId!=null
+        }
+        return true
+    }
+
+    private fun persistGeneratedShapes() {
+        val key=boundPageKey ?: return
+        if (restoringPageInk) return
+        val document=insertContentLayer.currentDocument() ?: return
+        if (document.notebookId!=key.notebookId || document.pageId!=key.pageId) return
+        val retained=org.json.JSONArray()
+        for (i in 0 until document.strokes.length()) {
+            val stroke=document.strokes.getJSONObject(i)
+            if (stroke.optString("brushProfile")!="shape-v1") retained.put(stroke)
+        }
+        dryInkView.snapshotStrokes().forEach { stroke -> ShapeStrokeCodec.encode(stroke)?.let(retained::put) }
+        if (document.strokes.toString() == retained.toString()) return
+        document.strokes=retained
+        pageContentRepository.save(document)
+    }
+
     private fun selectTool(id: String) {
         endSpringLoadedPanorama()
         if (!toolShelf.select(id)) return
+        cancelStylusAction()
         if (toolShelf.selected.kind == DrawingToolKind.PEN) lastPenToolId = toolShelf.selected.id
         persistToolShelf()
         tagLayer.cancelPlacement()
@@ -4741,6 +4873,7 @@ class MainActivity : Activity() {
         val fingerCount = (0 until event.pointerCount).count { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
         if (fingerCount >= 2 || directPageGestureCaptured) {
             if (!directPageGestureCaptured) {
+                cancelShapeGesture()
                 directPageGestureCaptured = true
                 selectionOverlay.cancelDirectGesture()
                 cancelInsertSpaceGesture()
@@ -4752,6 +4885,15 @@ class MainActivity : Activity() {
                 directPageGestureCaptured = false
             }
             return true
+        }
+        if (toolShelf.selected.kind == DrawingToolKind.SHAPE && !singleFingerPanEnabled && !insertSpaceModeEnabled) {
+            val overChrome = event.actionMasked == MotionEvent.ACTION_DOWN && listOf(floatingToolbox, fullPagePaneButtons, fullPageToggle.parent as View).any { control ->
+                if (!control.isShown) false else {
+                    val rect = android.graphics.Rect(); control.getGlobalVisibleRect(rect)
+                    rect.contains(event.rawX.toInt(), event.rawY.toInt())
+                }
+            }
+            if (!overChrome && handleShapePointer(event)) return true
         }
         if (insertSpaceModeEnabled && fingerCount == 1) return handleInsertSpaceGesture(event)
         return false
@@ -5406,6 +5548,7 @@ class MainActivity : Activity() {
     }
 
     private fun addTool(kind: DrawingToolKind) {
+        cancelStylusAction()
         val added = toolShelf.add(kind)
         if (kind == DrawingToolKind.PEN) lastPenToolId = added.id
         persistToolShelf()
@@ -5468,7 +5611,8 @@ class MainActivity : Activity() {
                     DrawingToolKind.PEN -> "pen"
                     DrawingToolKind.HIGHLIGHTER -> "highlight"
                     DrawingToolKind.ERASER -> "eraser"
-                    DrawingToolKind.LASSO -> "lasso"
+                    DrawingToolKind.SHAPE -> "shapes"
+                        DrawingToolKind.LASSO -> "lasso"
                 }
             addView(
                 ImageView(this@MainActivity).apply {

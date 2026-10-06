@@ -58,6 +58,7 @@ class PageContentRepository(private val root: File) {
                     notebookId = targetNotebookId,
                     pageId = targetPageId,
                     objects = sourceDocument.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
+                    strokes = org.json.JSONArray(sourceDocument.strokes.toString()),
                 ),
             )
         }

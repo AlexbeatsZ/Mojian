@@ -223,6 +223,7 @@ data class PageInsertDocument(
     val notebookId: String,
     val pageId: String,
     val objects: MutableList<InsertObject> = mutableListOf(),
+    var strokes: JSONArray = JSONArray(),
 ) {
     fun toJson(): JSONObject =
         JSONObject().apply {
@@ -230,11 +231,13 @@ data class PageInsertDocument(
             put("notebookId", notebookId)
             put("pageId", pageId)
             put("objects", JSONArray().apply { objects.forEach { put(it.toJson()) } })
+            put("strokes", strokes)
         }
 
     companion object {
         fun fromJson(json: JSONObject): PageInsertDocument {
             val document = PageInsertDocument(json.getString("notebookId"), json.getString("pageId"))
+            document.strokes = json.optJSONArray("strokes") ?: JSONArray()
             val objects = json.optJSONArray("objects") ?: JSONArray()
             for (index in 0 until objects.length()) document.objects += InsertObject.fromJson(objects.getJSONObject(index))
             return document

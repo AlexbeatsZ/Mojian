@@ -66,6 +66,7 @@ object ShortcutActionCatalog {
                             DrawingToolKind.ERASER -> 1
                             DrawingToolKind.HIGHLIGHTER -> 2
                             DrawingToolKind.PEN -> 3
+                            DrawingToolKind.SHAPE -> 4
                         }
                     },
                 ).forEach { tool -> add(ShortcutCategory.DRAW, "tool:${tool.id}", "切换工具：${tool.displayName}") }

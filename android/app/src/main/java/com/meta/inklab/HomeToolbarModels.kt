@@ -71,6 +71,7 @@ class FullPageToolbarConfig(initialIds: List<String> = DEFAULT_IDS) {
                 "tool:pen-blue",
                 "tool:pen-red",
                 "draw:add",
+                "tool:shape-default",
                 "draw:pan",
                 "draw:clear",
             )

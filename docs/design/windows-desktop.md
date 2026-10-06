@@ -1,9 +1,12 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-10-06
+Last verified: 2026-10-07
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
+
+Geometric strokes, the explicit Shapes tool, and pen hold-to-straighten follow
+`shapes-and-straightening.md`; shape rendering must bypass fountain-pen smoothing.
 
 ## Product boundary
 

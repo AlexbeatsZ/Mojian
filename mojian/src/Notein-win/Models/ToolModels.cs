@@ -1,3 +1,4 @@
+using Notein_win.Services;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -10,6 +11,7 @@ public enum DrawingToolKind
     Highlighter,
     Eraser,
     Lasso,
+    Shape,
 }
 
 public enum SpringLoadedToolKind
@@ -75,6 +77,9 @@ public class ToolPreset
     public int PressureEraseDwellMilliseconds { get; set; } = 140;
     public int PressureEraseThresholdPercent { get; set; } = 78;
     public LassoShape LassoShape { get; set; } = LassoShape.Freeform;
+    public ShapeKind ShapeKind { get; set; } = ShapeKind.Line;
+    public bool HoldToStraightenEnabled { get; set; } = true;
+    public int StraightenDelayMillis { get; set; } = 1000;
 
     [JsonIgnore]
     public bool IsSelected { get; set; }
@@ -107,6 +112,7 @@ public class ToolPreset
         DrawingToolKind.Highlighter => $"{Color.GetLabel()}色荧光",
         DrawingToolKind.Eraser => "橡皮",
         DrawingToolKind.Lasso => "套索",
+        DrawingToolKind.Shape => "图形",
         _ => "绘图工具"
     };
 
@@ -130,6 +136,9 @@ public class ToolPreset
             ["pressureEraseEnabled"] = PressureEraseEnabled,
             ["pressureEraseDwellMilliseconds"] = PressureEraseDwellMilliseconds,
             ["pressureEraseThresholdPercent"] = PressureEraseThresholdPercent,
+            ["shapeKind"] = ShapeKind.ToString(),
+            ["holdToStraightenEnabled"] = HoldToStraightenEnabled,
+            ["straightenDelayMillis"] = StraightenDelayMillis,
             ["lassoShape"] = LassoShape.ToString()
         };
         return obj;
@@ -164,6 +173,9 @@ public class ToolPreset
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
                 LassoShape = lassoShape,
+                ShapeKind = Enum.TryParse<ShapeKind>(json["shapeKind"]?.GetValue<string>(), true, out var shape) && Enum.IsDefined(shape) ? shape : ShapeKind.Line,
+                HoldToStraightenEnabled = json["holdToStraightenEnabled"]?.GetValue<bool>() ?? true,
+                StraightenDelayMillis = Math.Clamp(json["straightenDelayMillis"]?.GetValue<int>() ?? 1000, 200, 2000),
             };
             return preset;
         }
@@ -224,6 +236,7 @@ public class ToolShelf
                 eraserRadiusMm: 4.5f,
                 pressureEraseEnabled: true
             ),
+            DrawingToolKind.Shape => new ToolPreset(NextId("shape"), kind),
             DrawingToolKind.Lasso => new ToolPreset(
                 id: NextId("lasso"),
                 kind: kind,
@@ -342,6 +355,7 @@ public class ToolShelf
             eraserRadiusMm: 4.5f,
             pressureEraseEnabled: true
         ),
+        new("shape-default", DrawingToolKind.Shape),
         new(
             id: "lasso-freeform",
             kind: DrawingToolKind.Lasso,

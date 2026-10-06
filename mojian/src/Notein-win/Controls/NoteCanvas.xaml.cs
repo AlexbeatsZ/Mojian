@@ -53,6 +53,12 @@ public partial class NoteCanvas : UserControl
     private readonly Stopwatch _strokeClock = new();
 
     private StrokeRecord? _activeStroke;
+    private Point _shapeStart;
+    private bool _explicitShape;
+    private bool _finishingPointer;
+    private readonly HoldToStraighten _straighten = new();
+    private readonly DispatcherTimer _straightenTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    public Func<ToolPreset>? ResolveShapeSettings { get; set; }
     private Rect? _selectionBounds;
     private Point _lastPointer;
     private Point _dragZoomAnchor;
@@ -168,6 +174,7 @@ public partial class NoteCanvas : UserControl
             _directLongPressTimer.Stop();
             if (_directGestureFromTouch && !_directGestureCommitted) ShowDirectContextMenu(_directDownView);
         };
+        _straightenTimer.Tick += (_, _) => TryStraighten();
         _rightLassoHoldTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1) };
         _rightLassoHoldTimer.Tick += (_, _) =>
         {
@@ -207,6 +214,7 @@ public partial class NoteCanvas : UserControl
     {
         var canvas = (NoteCanvas)source;
         canvas.CommitViewport(args.OldValue as PageDocument);
+        if (canvas._activeStroke != null && args.OldValue is PageDocument old) old.Strokes.Remove(canvas._activeStroke);
         canvas._undo.Clear();
         canvas._redo.Clear();
         canvas.ClearTransientState();
@@ -231,6 +239,7 @@ public partial class NoteCanvas : UserControl
     private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        if (canvas._activeStroke != null) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -239,6 +248,7 @@ public partial class NoteCanvas : UserControl
     private static void OnSelectedToolChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        if (canvas._activeStroke != null) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -835,18 +845,21 @@ public partial class NoteCanvas : UserControl
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
+        if (!_finishingPointer && _explicitShape && _directTouchDevice == null) CancelStylusToolActionForNavigation();
         if (_rightLassoArmed && !_rightLassoUsesStylus) CancelRightButtonLasso();
     }
 
     protected override void OnLostStylusCapture(StylusEventArgs e)
     {
         base.OnLostStylusCapture(e);
+        if (!_finishingPointer && _activeStroke != null) CancelStylusToolActionForNavigation();
         if (_rightLassoArmed && _rightLassoUsesStylus) CancelRightButtonLasso();
     }
 
     protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
     {
         base.OnLostKeyboardFocus(e);
+        if (_activeStroke != null) CancelStylusToolActionForNavigation();
         CancelRightButtonLasso();
     }
 
@@ -1100,6 +1113,7 @@ public partial class NoteCanvas : UserControl
         if (_directTouchDevice?.Id != e.TouchDevice.Id || _activeTouchDevices.Count != 1) return;
         var point = e.GetTouchPoint(this).Position;
         if (_touchInsertSpaceActive) ContinuePointer(point, 0.65f, 0, 0, isStylus: false);
+        else if (_explicitShape) ContinuePointer(point, .5f, 0, 0, isStylus: false);
         else ContinueDirectPointer(point);
         e.Handled = true;
     }
@@ -1111,6 +1125,7 @@ public partial class NoteCanvas : UserControl
         if (finishingDirect)
         {
             if (_touchInsertSpaceActive) EndPointer(isStylus: false);
+            else if (_explicitShape) EndPointer(isStylus: false);
             else EndDirectPointer(e.GetTouchPoint(this).Position);
             _touchInsertSpaceActive = false;
             _directTouchDevice = null;
@@ -1161,6 +1176,7 @@ public partial class NoteCanvas : UserControl
     private void BeginDirectPointer(Point viewPoint, bool fromTouch)
     {
         if (Document == null) return;
+        if (SelectedTool?.Kind == DrawingToolKind.Shape && !SingleFingerPanEnabled && !InsertSpaceModeEnabled) { BeginPointer(viewPoint, .5f, 0, 0, isStylus: false, forcePan: false, forceErase: false); return; }
         var editingEditor = EditorAt(viewPoint);
         var editingHit = editingEditor is { IsKeyboardFocusWithin: true, IsHitTestVisible: true };
         var selectedHit = HitSelectedContent(viewPoint);
@@ -1262,6 +1278,7 @@ public partial class NoteCanvas : UserControl
 
     private void CancelDirectPointerForPageNavigation()
     {
+        if (_explicitShape) CancelStylusToolActionForNavigation();
         if (_directTouchDevice != null) ReleaseTouchCapture(_directTouchDevice);
         _directTouchDevice = null;
         CancelDirectPointer();
@@ -1568,6 +1585,16 @@ public partial class NoteCanvas : UserControl
 
         switch (forceErase ? DrawingToolKind.Eraser : tool.Kind)
         {
+            case DrawingToolKind.Shape:
+                ClearSelection();
+                PushUndo();
+                _shapeStart = docPoint;
+                _explicitShape = true;
+                _activeStroke = new StrokeRecord(IdFactory.New("shape"), DrawingToolKind.Pen, tool.Color, tool.WidthMm, 100) { BrushProfile = "shape-v1" };
+                _activeStroke.Points = ShapeGeometry.Points(tool.ShapeKind, docPoint, docPoint);
+                Document.Strokes.Add(_activeStroke);
+                CaptureInput(isStylus);
+                break;
             case DrawingToolKind.Pen:
             case DrawingToolKind.Highlighter:
                 ClearSelection();
@@ -1580,6 +1607,8 @@ public partial class NoteCanvas : UserControl
                 };
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
                 Document.Strokes.Add(_activeStroke);
+                _shapeStart = docPoint;
+                if (ResolveShapeSettings?.Invoke().HoldToStraightenEnabled == true) { _straighten.Begin(viewPoint, Environment.TickCount64); _straightenTimer.Start(); }
                 CaptureInput(isStylus);
                 UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
                 break;
@@ -1705,6 +1734,13 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeStroke != null)
         {
+            if (_explicitShape || _straighten.Snapped)
+            {
+                _activeStroke.Points = ShapeGeometry.Points(_explicitShape ? SelectedTool?.ShapeKind ?? ShapeKind.Line : ShapeKind.Line, _shapeStart, docPoint);
+                InvalidateVisual();
+                return;
+            }
+            _straighten.Move(viewPoint, Environment.TickCount64, 2.5);
             var tool = SelectedTool;
             if (tool != null) UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
             if (_pressureCandidate && Distance(viewPoint, _pressureStartView) > 2)
@@ -1728,7 +1764,11 @@ public partial class NoteCanvas : UserControl
     private void EndPointer(bool isStylus)
     {
         if (Document == null) return;
+        _straightenTimer.Stop();
+        _straighten.Cancel();
+        _finishingPointer = true;
         ReleaseInput(isStylus);
+        _finishingPointer = false;
         var changed = false;
         if (_isPanning)
         {
@@ -1777,6 +1817,12 @@ public partial class NoteCanvas : UserControl
                 _activeStroke.Points.Add(new InkPoint(first.X + 0.01f, first.Y + 0.01f, first.Pressure, elapsedMilliseconds: first.ElapsedMilliseconds + 1));
                 _activeStroke.InvalidateBounds();
             }
+            if (_explicitShape && _activeStroke.Points.All(p => Distance(p.ToPoint(), _shapeStart) < 2))
+            {
+                Document.Strokes.Remove(_activeStroke);
+                if (_undo.Count > 0) _undo.Pop();
+            }
+            _explicitShape = false;
             _activeStroke = null;
             _pressureEraseArmed = true;
             changed = true;
@@ -1794,8 +1840,27 @@ public partial class NoteCanvas : UserControl
         InvalidateVisual();
     }
 
+    private void TryStraighten()
+    {
+        var settings = ResolveShapeSettings?.Invoke();
+        if (_activeStroke == null || settings?.HoldToStraightenEnabled != true || _pressureCandidate || _temporaryPressureEraser) return;
+        if (!_straighten.TrySnap(Environment.TickCount64, settings.StraightenDelayMillis)) return;
+        var end = _activeStroke.Points[^1].ToPoint();
+        _activeStroke.Points = ShapeGeometry.Points(ShapeKind.Line, _shapeStart, end);
+        _activeStroke.BrushProfile = "shape-v1";
+        if (_activeStroke.Kind == DrawingToolKind.Pen) _activeStroke.OpacityPercent = 100;
+        _straightenTimer.Stop();
+        InvalidateVisual();
+    }
+
+    public void CancelShapeAuthoring()
+    {
+        if (_activeStroke != null && (_explicitShape || _straighten.Active)) CancelStylusToolActionForNavigation();
+    }
+
     private void CancelStylusToolActionForNavigation()
     {
+        _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         var restoreDocument =
             _activeStroke != null ||
             _eraserViewPoint.HasValue ||
@@ -1863,6 +1928,7 @@ public partial class NoteCanvas : UserControl
                 (DateTime.UtcNow - _pressureStartedAt).TotalMilliseconds,
                 eraserTool.PressureEraseDwellMilliseconds)) return;
         if (activeStroke == null) return;
+        _straightenTimer.Stop(); _straighten.Cancel();
         Document?.Strokes.Remove(activeStroke);
         _activeStroke = null;
         _pressureCandidate = false;
@@ -2617,6 +2683,13 @@ public partial class NoteCanvas : UserControl
                 continue;
             }
             if (stroke.Points.Count == 0) continue;
+            if (stroke.BrushProfile == "shape-v1")
+            {
+                dc.PushOpacity(Math.Clamp(stroke.OpacityPercent / 100d, 0, 1));
+                DrawPolyline(dc, stroke.Points, new Pen(brush, stroke.WidthMm * UnitsPerMillimeter) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
+                dc.Pop();
+                continue;
+            }
             if (stroke.Kind == DrawingToolKind.Highlighter)
             {
                 var color = ((SolidColorBrush)brush).Color;
@@ -3018,6 +3091,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         CancelRightButtonLasso();
         _rightLassoHoldTimer.Stop();
         _stylusContextMenuTimer.Stop();

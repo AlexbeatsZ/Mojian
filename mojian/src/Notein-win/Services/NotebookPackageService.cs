@@ -142,6 +142,7 @@ public static class NotebookPackageService
             ["notebookId"] = document.NotebookId,
             ["pageId"] = document.PageId,
             ["objects"] = objects,
+            ["strokes"] = JsonSerializer.SerializeToNode(document.Strokes.Where(stroke => stroke.BrushProfile == "shape-v1"), JsonOptions),
         };
     }
 

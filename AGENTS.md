@@ -6,11 +6,13 @@
 
 # Current State
 
+- Both clients now provide seven editable primitives (line/arrow/circle/ellipse/rectangle/triangle/diamond) and pen/highlighter hold-to-straighten. Shape settings own the shared enabled switch and 200–2000 ms delay (default 1000 ms). The current Notein 2.1.11.0 resource guide confirms a one-second hold, but protected recognition constants were not recovered. Android persists generated `shape-v1` strokes in page JSON; Windows preserves them through its store and the shared `.mjn` page payload. On 2026-10-07 Windows 103/103 and Android 126/126 tests, Android lint/build, isolated real WPF shape panel/canvas/export checks and the tablet's seven-shape native probe passed. The sole Release EXE and current APK were refreshed; both clients launched and the five live Windows notebooks retained. Read `docs/design/shapes-and-straightening.md`. Physical stylus acceptance remains pending.
+
 - The 2026-10-02 native reimport is active in `C:\Users\Meta\Documents\Mojian\_migration\native-20261002\workspace`: five notebooks, 681 pages (635 editable imported pages, 44 source/recovery pages, two preserved local pages), 541,419 per-stroke vectors, 966 independent objects and 102 text items. All referenced assets validate; OneNote's 112 matched printouts rerender from recovered original PDFs. Source colors, Notein layer order/visibility and mixed image/ink/text ordering persist. Per the user's instruction, 126 pages from Notein notes lacking original PDFs were deleted, including 57 annotation pages and 69 placeholders; use `--skip-missing-notein-pdfs` on future rebuilds. Old `C:\Users\Meta\Documents\Mojian` and source backups remain for recovery. Notein contours are reconstructed. See `docs/design/data-migration.md`; Android has no equivalent source-backup importer/native-scene renderer.
 
 - Repository was initialized with feasibility commit `817787a`; `master` now tracks the private GitHub remote `https://github.com/AlexbeatsZ/Mojian`.
 - The tablet keeps Android wireless debugging enabled (Xiaomi `23046RP50C`, Android 15 / API 35, arm64), but its ADB connection port changes. A user-supplied endpoint such as the last verified `192.168.31.243:45337` is current-session information only: connect to it immediately when supplied, never treat it as a fixed port, and never reuse an older recorded port without verification. When no current port is available, check existing `adb devices` connections and retry `adb mdns services`; an empty mDNS result does not mean the tablet is offline or wireless debugging is disabled.
-- Installed China package: `com.orion.notein`, `v2.0.10.0` (`versionCode=343`, `minSdk=26`, `targetSdk=35`), single 114,190,617-byte APK, installed from Xiaomi Market.
+- Installed China package, rechecked 2026-10-07: `com.orion.notein`, `v2.1.11.0` (`versionCode=351`, `minSdk=26`, `targetSdk=35`), single 129,403,508-byte APK. Earlier native/backup investigations refer to 2.0.10.0.
 - APK is non-debuggable and app-private `/data/user/0/com.orion.notein` cannot be read with `run-as`.
 - App-specific external files are readable at `/sdcard/Android/data/com.orion.notein/files`; current snapshot is about 256 MiB / 5,638 files, mainly UUID-named blobs and PNGs.
 - Static scan shows a native Android/Kotlin/Java app, not Flutter/React Native. It includes arm64-only native libraries such as `libink.so`, PDFium, OpenCV, SQLiteX, and Baidu Protect. Xiaomi CloudKit database/file sync providers are bundled.
@@ -70,6 +72,7 @@
 - Android canvas background patterns now render in a dedicated layer below inserted images/PDF printouts/stickers/tables/attachments, while dry and wet ink remain above inserted content. The fix passed unit tests, debug assembly, and lint; an installed tablet screenshot with two existing imported images verified that the grid remains visible around them without crossing their opaque pixels.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
+  - `docs/design/shapes-and-straightening.md` (read before shape geometry, hold-to-straighten, shape settings, or generated-stroke persistence).
   - `docs/design/boundless-canvas.md` (read before boundless page growth, paper extents, or smart-cropped PDF export).
   - `docs/design/cross-platform-parity.md` (read before any shared Windows/Android product feature or defect; shared behavior is updated, tested, and delivered on both clients by default).
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
@@ -81,6 +84,8 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [x] Implement and persist the shared Shapes tool and configurable pen/highlighter hold-to-straighten; inspect current Notein resources without accessing live notes. Native Android seven-shape rendering/editing/storage codec checks and an isolated real WPF shape panel/canvas check pass. See the design record for the remaining physical-pen acceptance boundary.
 
 - [x] Repair missing notebook management on Windows and Android: own row menu, persisted rename,
   confirmed whole-notebook deletion, split/session cleanup, empty-last-notebook replacement, and
@@ -178,6 +183,7 @@
 - Initial handwriting lab package must remain `com.meta.inklab`, request no network/storage permission, and store no durable user content.
 - Lab build and lint: from `android`, run `.\gradlew.bat :app:assembleDebug :app:lintDebug`.
 - Workspace unit tests: from `android`, run `.\gradlew.bat :app:testDebugUnitTest`; navigation tests cover unlimited section depth and both page-pane modes, while tool tests cover required defaults and add-only preset behavior.
+- Shapes device probe, Debug only: launch `com.meta.inklab.debug/com.meta.inklab.ShapeProbeActivity` directly; read `cache/shape-probe.json` through `run-as`. It uses only an isolated native view and cache, never user pages/settings. It verifies seven shapes, codec point/ID/width recovery, move/scale/erase and Undo/Redo. Build instrumentation separately; do not use connected Gradle tests against the installed product.
 - Before Android cleanup, copy the current APK to `android\artifacts\current\Mojian-debug.apk`; then run `.\gradlew.bat clean` so `android\app\build` is not retained between deliveries.
 - View tests cover explicit anchor-preserving zoom, page-width fitting, A4 content/viewport auto-growth, legacy paper migration, page-view preference JSON round trips, clipboard image MIME recognition, inserted-image aspect-ratio sizing, viewport culling, cached bounds, compact page persistence, and no whole-page autosave on viewport-only changes.
 - Debug APK: `android\app\build\outputs\apk\debug\app-debug.apk`; installed debug package/activity: `com.meta.inklab.debug/com.meta.inklab.MainActivity`.
