@@ -9,7 +9,10 @@ class PressureEraserController(
     var pressureThreshold: Float = 0.78f,
     var dwellMillis: Long = 140L,
     var stationarySlop: Float = 6f,
+    var travelLimitMm: Float = 1f,
 ) {
+    private val travel = PressureEraseTravelGuard()
+    val isTravelLimitExceeded get() = travel.exceeded
     var isErasing: Boolean = false
         private set
     var isArmed: Boolean = false
@@ -18,13 +21,24 @@ class PressureEraserController(
     private var candidateAnchorX = 0f
     private var candidateAnchorY = 0f
 
+    fun beginContact(documentXmm: Float, documentYmm: Float) {
+        travel.begin(documentXmm, documentYmm, travelLimitMm)
+        cancelCandidate()
+    }
+
+    fun observeContactTravel(documentXmm: Float, documentYmm: Float) {
+        if (isErasing) return // Once activated, the eraser may travel freely until lift.
+        travel.observe(documentXmm, documentYmm)
+        if (travel.exceeded) cancelCandidate()
+    }
+
     fun updateSample(
         pressure: Float,
         viewX: Float,
         viewY: Float,
         eventTimeMillis: Long,
     ): Long? {
-        if (!enabled || !isArmed || isErasing || pressure < pressureThreshold) {
+        if (!enabled || !isArmed || isErasing || travel.exceeded || pressure < pressureThreshold) {
             candidateSinceMillis = null
             return null
         }
@@ -50,13 +64,14 @@ class PressureEraserController(
 
     fun activate(nowMillis: Long): Boolean {
         val since = candidateSinceMillis ?: return false
-        if (!enabled || !isArmed || isErasing || nowMillis - since < dwellMillis) return false
+        if (!enabled || !isArmed || isErasing || travel.exceeded || nowMillis - since < dwellMillis) return false
         isErasing = true
         candidateSinceMillis = null
         return true
     }
 
     fun onStylusLift(completedInk: Boolean) {
+        travel.reset()
         if (completedInk) isArmed = true
         isErasing = false
         candidateSinceMillis = null
@@ -67,6 +82,7 @@ class PressureEraserController(
     }
 
     fun cancelGesture() {
+        travel.reset()
         isErasing = false
         candidateSinceMillis = null
     }

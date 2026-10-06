@@ -7,6 +7,71 @@ import org.junit.Test
 
 class PressureEraserControllerTest {
     @Test
+    fun lowPressureTravelDisablesLaterDwellEvenAfterReturningToStart() {
+        val controller = PressureEraserController(travelLimitMm = 1f)
+        controller.onStylusLift(completedInk = true)
+        controller.beginContact(0f, 0f)
+        controller.observeContactTravel(.6f, 0f)
+        controller.updateSample(.2f, 6f, 0f, 100L)
+        controller.observeContactTravel(0f, 0f) // 1.2 mm path, zero displacement.
+        assertTrue(controller.isTravelLimitExceeded)
+        controller.cancelCandidate()
+        assertNull(controller.updateSample(.95f, 0f, 0f, 200L))
+        assertFalse(controller.activate(1000L))
+        controller.onStylusLift(completedInk = true)
+        controller.beginContact(0f, 0f)
+        controller.updateSample(.95f, 0f, 0f, 1100L)
+        assertTrue(controller.activate(1240L))
+    }
+
+    @Test
+    fun crossingLimitCancelsPendingTimerButActivatedEraserCanMove() {
+        val controller = PressureEraserController(travelLimitMm = 1f)
+        controller.onStylusLift(completedInk = true)
+        controller.beginContact(0f, 0f)
+        controller.updateSample(.95f, 0f, 0f, 100L)
+        controller.observeContactTravel(1.1f, 0f)
+        assertFalse(controller.activate(1000L))
+        controller.cancelGesture()
+        controller.beginContact(0f, 0f)
+        controller.updateSample(.95f, 0f, 0f, 1100L)
+        assertTrue(controller.activate(1240L))
+        controller.observeContactTravel(100f, 100f)
+        assertTrue(controller.isErasing)
+        assertFalse(controller.isTravelLimitExceeded)
+    }
+
+    @Test
+    fun travelLimitIncludesBoundaryAndIsCapturedAtContactStart() {
+        val controller = PressureEraserController(travelLimitMm = 1f)
+        controller.onStylusLift(completedInk = true)
+        controller.beginContact(0f, 0f)
+        controller.observeContactTravel(1f, 0f)
+        assertFalse(controller.isTravelLimitExceeded)
+        controller.travelLimitMm = 5f
+        controller.observeContactTravel(1.01f, 0f)
+        assertTrue(controller.isTravelLimitExceeded)
+        controller.onStylusLift(completedInk = true)
+        controller.beginContact(0f, 0f)
+        controller.observeContactTravel(4f, 0f)
+        assertFalse(controller.isTravelLimitExceeded)
+    }
+
+    @Test
+    fun travelSettingDefaultsMigratesClampsAndPersists() {
+        val json = org.json.JSONObject("""{"id":"eraser-stroke","kind":"ERASER"}""")
+        assertTrue(ToolPreset.fromJson(json)!!.pressureEraseTravelLimitMm == 1f)
+        json.put("pressureEraseTravelLimitMm", .001)
+        assertTrue(ToolPreset.fromJson(json)!!.pressureEraseTravelLimitMm == .1f)
+        json.put("pressureEraseTravelLimitMm", 50)
+        assertTrue(ToolPreset.fromJson(json)!!.pressureEraseTravelLimitMm == 10f)
+        val shelf = ToolShelf()
+        shelf.pressureEraser.pressureEraseTravelLimitMm = 2.3f
+        val restored = ToolShelf.fromJson(shelf.toJson())!!
+        assertTrue(restored.pressureEraser.pressureEraseTravelLimitMm == 2.3f)
+    }
+
+    @Test
     fun requiresCompletedPenLiftBeforePressureCanTrigger() {
         val controller = PressureEraserController(pressureThreshold = 0.75f, dwellMillis = 140L)
 

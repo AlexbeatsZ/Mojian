@@ -570,6 +570,9 @@
                     <Slider x:Name="EraserThresholdSlider" Minimum="40" Maximum="100" TickFrequency="2" Value="{Binding SelectedTool.PressureEraseThresholdPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                     <DockPanel Margin="0,8,0,0"><TextBlock Text="按压时间" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserDwellSlider, Path=Value, StringFormat={}{0:F0} ms}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="EraserDwellSlider" Minimum="50" Maximum="500" TickFrequency="10" Value="{Binding SelectedTool.PressureEraseDwellMilliseconds, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel LastChildFill="False" Margin="0,8,0,0"><TextBlock Text="触发路程上限" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=EraserTravelLimitSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="EraserTravelLimitSlider" Minimum="0.1" Maximum="10" TickFrequency="0.1" IsSnapToTickEnabled="True" Value="{Binding SelectedTool.PressureEraseTravelLimitMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <TextBlock Text="本次落笔超过上限后不再压感切换" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,3,0,0" />
                     <TextBlock Text="整笔擦除 · 像素擦除稍后接入" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,8,0,0" />
                 </StackPanel>
 

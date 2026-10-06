@@ -76,6 +76,7 @@ public class ToolPreset
     public bool PressureEraseEnabled { get; set; }
     public int PressureEraseDwellMilliseconds { get; set; } = 140;
     public int PressureEraseThresholdPercent { get; set; } = 78;
+    public float PressureEraseTravelLimitMm { get; set; } = 1f;
     public LassoShape LassoShape { get; set; } = LassoShape.Freeform;
     public ShapeKind ShapeKind { get; set; } = ShapeKind.Line;
     public bool HoldToStraightenEnabled { get; set; } = true;
@@ -136,6 +137,7 @@ public class ToolPreset
             ["pressureEraseEnabled"] = PressureEraseEnabled,
             ["pressureEraseDwellMilliseconds"] = PressureEraseDwellMilliseconds,
             ["pressureEraseThresholdPercent"] = PressureEraseThresholdPercent,
+            ["pressureEraseTravelLimitMm"] = PressureEraseTravelLimitMm,
             ["shapeKind"] = ShapeKind.ToString(),
             ["holdToStraightenEnabled"] = HoldToStraightenEnabled,
             ["straightenDelayMillis"] = StraightenDelayMillis,
@@ -172,6 +174,7 @@ public class ToolPreset
             {
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
+                PressureEraseTravelLimitMm = Math.Clamp(json["pressureEraseTravelLimitMm"]?.GetValue<float>() ?? 1f, .1f, 10f),
                 LassoShape = lassoShape,
                 ShapeKind = Enum.TryParse<ShapeKind>(json["shapeKind"]?.GetValue<string>(), true, out var shape) && Enum.IsDefined(shape) ? shape : ShapeKind.Line,
                 HoldToStraightenEnabled = json["holdToStraightenEnabled"]?.GetValue<bool>() ?? true,

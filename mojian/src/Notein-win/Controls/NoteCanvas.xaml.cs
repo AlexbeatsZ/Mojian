@@ -108,6 +108,7 @@ public partial class NoteCanvas : UserControl
     private int _temporaryTextUndoDepth;
     private long _ignoreMouseUntil;
     private bool _pressureEraseArmed;
+    private readonly PressureEraseTravelGuard _pressureTravel = new();
     private bool _pressureCandidate;
     private bool _temporaryPressureEraser;
     private ToolPreset? _pressureCandidateEraserTool;
@@ -1608,6 +1609,8 @@ public partial class NoteCanvas : UserControl
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
                 Document.Strokes.Add(_activeStroke);
                 _shapeStart = docPoint;
+                _pressureTravel.Begin(docPoint.X / UnitsPerMillimeter, docPoint.Y / UnitsPerMillimeter,
+                    ResolvePressureEraserTool?.Invoke()?.PressureEraseTravelLimitMm ?? 1f);
                 if (ResolveShapeSettings?.Invoke().HoldToStraightenEnabled == true) { _straighten.Begin(viewPoint, Environment.TickCount64); _straightenTimer.Start(); }
                 CaptureInput(isStylus);
                 UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
@@ -1734,6 +1737,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeStroke != null)
         {
+            if (isStylus && !_explicitShape) _pressureTravel.Observe(docPoint.X / UnitsPerMillimeter, docPoint.Y / UnitsPerMillimeter);
             if (_explicitShape || _straighten.Snapped)
             {
                 _activeStroke.Points = ShapeGeometry.Points(_explicitShape ? SelectedTool?.ShapeKind ?? ShapeKind.Line : ShapeKind.Line, _shapeStart, docPoint);
@@ -1763,6 +1767,7 @@ public partial class NoteCanvas : UserControl
 
     private void EndPointer(bool isStylus)
     {
+        _pressureTravel.Reset();
         if (Document == null) return;
         _straightenTimer.Stop();
         _straighten.Cancel();
@@ -1860,6 +1865,7 @@ public partial class NoteCanvas : UserControl
 
     private void CancelStylusToolActionForNavigation()
     {
+        _pressureTravel.Reset();
         _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         var restoreDocument =
             _activeStroke != null ||
@@ -1920,6 +1926,7 @@ public partial class NoteCanvas : UserControl
 
     private void CheckPressureEraseActivation()
     {
+        if (_pressureTravel.Exceeded) return;
         var eraserTool = _pressureCandidateEraserTool;
         var activeStroke = _activeStroke;
         if (eraserTool == null || !PressureEraserPolicy.ShouldActivate(
@@ -1945,7 +1952,7 @@ public partial class NoteCanvas : UserControl
     private void UpdatePressureEraseCandidate(Point viewPoint, float pressure, bool isStylus, ToolPreset tool)
     {
         var eraserTool = ResolvePressureEraserTool?.Invoke();
-        var eligible = PressureEraserPolicy.CanStartCandidate(
+        var eligible = !_pressureTravel.Exceeded && PressureEraserPolicy.CanStartCandidate(
             isStylus,
             _pressureEraseArmed,
             tool.Kind,
@@ -3091,6 +3098,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        _pressureTravel.Reset();
         _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         CancelRightButtonLasso();
         _rightLassoHoldTimer.Stop();

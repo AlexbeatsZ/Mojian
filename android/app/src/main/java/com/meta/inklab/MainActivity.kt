@@ -194,7 +194,7 @@ class MainActivity : Activity() {
         override fun run() {
             val pointerId = pressurePointerId ?: return
             if (!straighten.active || straighten.snapped) return
-            if (!pressureEraser.isErasing && !(pressureEraser.isArmed && lastPressure >= pressureEraser.pressureThreshold) &&
+            if (!pressureEraser.isErasing && !(pressureEraser.isArmed && !pressureEraser.isTravelLimitExceeded && lastPressure >= pressureEraser.pressureThreshold) &&
                 shapeSettings.holdToStraightenEnabled && straighten.trySnap(SystemClock.uptimeMillis(), shapeSettings.straightenDelayMillis)) {
                 activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
                 mainHandler.removeCallbacks(activatePressureEraser)
@@ -4053,6 +4053,15 @@ class MainActivity : Activity() {
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
+                toolDetailRow.addView(
+                    parameterControl("触发路程上限", (tool.pressureEraseTravelLimitMm * 10).roundToInt().minus(1).coerceIn(0, 99), 99, { "${(it + 1) / 10f} mm" }) {
+                        tool.pressureEraseTravelLimitMm = (it + 1) / 10f
+                        persistToolShelf()
+                        syncPressureEraserWithTool()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
+                addToolDetailLine(detailHint("本次落笔超过上限后不再压感切换"))
                 addToolDetailLine(detailChip("整笔擦除", true) { }, detailHint("像素擦除稍后接入"))
             }
 
@@ -4316,6 +4325,7 @@ class MainActivity : Activity() {
                 shapePreset = directPreset?.copy()
                 if (shapeSettings.holdToStraightenEnabled) { straighten.begin(ShapePoint(event.getX(pointerIndex),event.getY(pointerIndex)),event.eventTime); mainHandler.postDelayed(straightenTick,30L) }
                 pressureEraser.enabled = PressureEraserPolicy.canTrigger(requireNotNull(activeDirectTool), toolShelf.pressureEraser.pressureEraseEnabled)
+                pressureEraser.beginContact(lastPressurePoint.x / INTERNAL_UNITS_PER_MM, lastPressurePoint.y / INTERNAL_UNITS_PER_MM)
                 activeStrokes[pointerId] =
                     wetInkView.startStroke(
                         event = event,
@@ -4348,6 +4358,14 @@ class MainActivity : Activity() {
         if (pressureIndex < 0) return
         lastPressure = event.getPressure(pressureIndex)
         lastPressurePoint = viewport.viewToDocument(event.getX(pressureIndex), event.getY(pressureIndex))
+        if (activeDirectTool == DrawingToolKind.PEN || activeDirectTool == DrawingToolKind.HIGHLIGHTER) {
+            // Count all real samples, including coalesced history; never predictions.
+            for (history in 0 until event.historySize) {
+                val point = viewport.viewToDocument(event.getHistoricalX(pressureIndex, history), event.getHistoricalY(pressureIndex, history))
+                pressureEraser.observeContactTravel(point.x / INTERNAL_UNITS_PER_MM, point.y / INTERNAL_UNITS_PER_MM)
+            }
+            pressureEraser.observeContactTravel(lastPressurePoint.x / INTERNAL_UNITS_PER_MM, lastPressurePoint.y / INTERNAL_UNITS_PER_MM)
+        }
 
         when (activeDirectTool) {
             DrawingToolKind.ERASER -> eraseAt(lastPressurePoint, pressureEraserRadius())
@@ -4558,6 +4576,7 @@ class MainActivity : Activity() {
         val eraser = toolShelf.pressureEraser
         pressureEraser.pressureThreshold = eraser.pressureEraseThresholdPercent / 100f
         pressureEraser.dwellMillis = eraser.pressureEraseDwellMillis
+        pressureEraser.travelLimitMm = eraser.pressureEraseTravelLimitMm
         pressureEraser.enabled = PressureEraserPolicy.canTrigger(toolShelf.selected.kind, eraser.pressureEraseEnabled)
         if (!pressureEraser.enabled) {
             mainHandler.removeCallbacks(activatePressureEraser)

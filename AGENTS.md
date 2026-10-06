@@ -6,6 +6,8 @@
 
 # Current State
 
+- Pressure erasing now has an eraser-owned accumulated-contact travel limit: default 1 mm, adjustable 0.1–10 mm in 0.1 mm steps. Real document-space path length includes low-pressure movement and historical points; strictly exceeding the limit cancels/latches out activation until lift/cancel, while an already activated/manual eraser remains movable. Old presets gain the default. Windows 106/106 tests (including real canvas and eraser panel persistence) and Android 130/130 plus build/lint passed on 2026-10-07. Both current deliverables were refreshed, the tablet update cold-launched in 931 ms, and the Windows five-notebook workspace retained. Physical pen acceptance remains pending; see `docs/design/input-gestures.md` section 10.
+
 - Both clients now provide seven editable primitives (line/arrow/circle/ellipse/rectangle/triangle/diamond) and pen/highlighter hold-to-straighten. Shape settings own the shared enabled switch and 200–2000 ms delay (default 1000 ms). The current Notein 2.1.11.0 resource guide confirms a one-second hold, but protected recognition constants were not recovered. Android persists generated `shape-v1` strokes in page JSON; Windows preserves them through its store and the shared `.mjn` page payload. On 2026-10-07 Windows 103/103 and Android 126/126 tests, Android lint/build, isolated real WPF shape panel/canvas/export checks and the tablet's seven-shape native probe passed. The sole Release EXE and current APK were refreshed; both clients launched and the five live Windows notebooks retained. Read `docs/design/shapes-and-straightening.md`. Physical stylus acceptance remains pending.
 
 - The 2026-10-02 native reimport is active in `C:\Users\Meta\Documents\Mojian\_migration\native-20261002\workspace`: five notebooks, 681 pages (635 editable imported pages, 44 source/recovery pages, two preserved local pages), 541,419 per-stroke vectors, 966 independent objects and 102 text items. All referenced assets validate; OneNote's 112 matched printouts rerender from recovered original PDFs. Source colors, Notein layer order/visibility and mixed image/ink/text ordering persist. Per the user's instruction, 126 pages from Notein notes lacking original PDFs were deleted, including 57 annotation pages and 69 placeholders; use `--skip-missing-notein-pdfs` on future rebuilds. Old `C:\Users\Meta\Documents\Mojian` and source backups remain for recovery. Notein contours are reconstructed. See `docs/design/data-migration.md`; Android has no equivalent source-backup importer/native-scene renderer.
@@ -84,6 +86,8 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [x] Add the shared 1 mm default pressure-eraser travel cutoff, eraser-only persistent slider and regressions for low-pressure travel, retraced paths, pending-timer cancellation, lift reset and free movement after activation.
 
 - [x] Implement and persist the shared Shapes tool and configurable pen/highlighter hold-to-straighten; inspect current Notein resources without accessing live notes. Native Android seven-shape rendering/editing/storage codec checks and an isolated real WPF shape panel/canvas check pass. See the design record for the remaining physical-pen acceptance boundary.
 

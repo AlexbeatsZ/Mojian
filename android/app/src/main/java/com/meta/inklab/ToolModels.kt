@@ -38,6 +38,7 @@ data class ToolPreset(
     var shapeKind: ShapeKind = ShapeKind.LINE,
     var holdToStraightenEnabled: Boolean = true,
     var straightenDelayMillis: Long = 1000L,
+    var pressureEraseTravelLimitMm: Float = 1f,
 ) {
     val displayName: String
         get() =
@@ -62,6 +63,7 @@ data class ToolPreset(
             put("pressureEraseEnabled", pressureEraseEnabled)
             put("pressureEraseThresholdPercent", pressureEraseThresholdPercent)
             put("pressureEraseDwellMillis", pressureEraseDwellMillis)
+            put("pressureEraseTravelLimitMm", pressureEraseTravelLimitMm.toDouble())
             put("lassoShape", lassoShape.name)
             put("shapeKind", shapeKind.name)
             put("holdToStraightenEnabled", holdToStraightenEnabled)
@@ -99,6 +101,7 @@ data class ToolPreset(
                     pressureEraseEnabled = pressureEraseEnabled,
                     pressureEraseThresholdPercent = pressureEraseThresholdPercent,
                     pressureEraseDwellMillis = pressureEraseDwellMillis,
+                    pressureEraseTravelLimitMm = json.optDouble("pressureEraseTravelLimitMm", 1.0).toFloat().coerceIn(.1f, 10f),
                     lassoShape = lassoShape,
                     shapeKind = runCatching { ShapeKind.valueOf(json.optString("shapeKind", "LINE")) }.getOrDefault(ShapeKind.LINE),
                     holdToStraightenEnabled = json.optBoolean("holdToStraightenEnabled", true),

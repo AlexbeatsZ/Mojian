@@ -205,6 +205,20 @@ public class UiRenderTests
                 shapePanel.Measure(new Size(316, double.PositiveInfinity));
                 CaptureVisual(shapePanel, 316, (int)Math.Ceiling(shapePanel.DesiredSize.Height), "win_12_shapes.png");
                 shapePopup.IsOpen = false;
+                vm.SelectToolFromToolbar("eraser-stroke", false);
+                vm.IsToolFlyoutOpen = true;
+                shapePopup.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, true);
+                window.UpdateLayout();
+                var travelSlider = Assert.IsType<Slider>(window.FindName("EraserTravelLimitSlider"));
+                Assert.True(travelSlider.IsVisible);
+                Assert.Equal(.1, travelSlider.Minimum); Assert.Equal(10, travelSlider.Maximum);
+                Assert.Equal(1, travelSlider.Value); travelSlider.Value = 2.3;
+                vm.SaveToolSettings();
+                var restoredEraser = new MainViewModel(testRoot, new PreferencesStore(Path.Combine(testRoot, "preferences.json")));
+                Assert.Equal(2.3f, restoredEraser.PressureEraserTool.PressureEraseTravelLimitMm);
+                shapePanel.Measure(new Size(316, double.PositiveInfinity));
+                CaptureVisual(shapePanel, 316, (int)Math.Ceiling(shapePanel.DesiredSize.Height), "win_13_eraser_travel.png");
+                shapePopup.IsOpen = false;
                 window.Close();
             }
             catch (Exception ex)
