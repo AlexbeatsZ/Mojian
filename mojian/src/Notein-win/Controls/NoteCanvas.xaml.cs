@@ -23,6 +23,18 @@ public sealed class CanvasPointerOverlay : FrameworkElement
     protected override void OnRender(DrawingContext context) => Owner?.DrawPointerFeedback(context);
 }
 
+public sealed class CanvasWetInkOverlay : FrameworkElement
+{
+    internal NoteCanvas? Owner { get; set; }
+    protected override void OnRender(DrawingContext context) => Owner?.DrawWetInk(context);
+}
+
+public sealed class CanvasDocumentScene : FrameworkElement
+{
+    internal NoteCanvas? Owner { get; set; }
+    protected override void OnRender(DrawingContext context) => Owner?.DrawScreenScene(context);
+}
+
 public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 {
     public PageObject Value { get; } = value;
@@ -62,6 +74,8 @@ public partial class NoteCanvas : UserControl
     private static SelectionClipboardData? _selectionClipboard;
     private readonly Stopwatch _strokeClock = new();
     private readonly StrokeDrawingCache _strokeDrawings = new();
+    private bool _drawingDryScene;
+    internal int SceneRenderCount { get; private set; }
 
     private StrokeRecord? _activeStroke;
     private Point _shapeStart;
@@ -176,6 +190,8 @@ public partial class NoteCanvas : UserControl
     {
         InitializeComponent();
         PointerOverlay.Owner = this;
+        WetInkOverlay.Owner = this;
+        SceneLayer.Owner = this;
         Focusable = true;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); RaiseDocumentChanged(); };
@@ -1755,7 +1771,7 @@ public partial class NoteCanvas : UserControl
             if (_explicitShape || _straighten.Snapped)
             {
                 _activeStroke.Points = ShapeGeometry.Points(_explicitShape ? SelectedTool?.ShapeKind ?? ShapeKind.Line : ShapeKind.Line, _shapeStart, docPoint);
-                InvalidateVisual();
+                RefreshWetInk();
                 return;
             }
             _straighten.Move(viewPoint, Environment.TickCount64, 2.5);
@@ -1767,7 +1783,7 @@ public partial class NoteCanvas : UserControl
                 _pressureStartView = viewPoint;
             }
             AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
-            InvalidateVisual();
+            RefreshWetInk();
             return;
         }
         if (_eraserViewPoint.HasValue && (SelectedTool?.Kind == DrawingToolKind.Eraser || _stylusEraserActive))
@@ -2497,16 +2513,48 @@ public partial class NoteCanvas : UserControl
     {
         base.OnRender(dc);
         PointerOverlay.InvalidateVisual();
+        WetInkOverlay.InvalidateVisual();
+        SceneLayer.InvalidateVisual();
         dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(10, 10, 10)), null, new Rect(0, 0, ActualWidth, ActualHeight));
         if (Document == null)
         {
             DrawText(dc, "选择或新建一个页面", new Point(48, 48), 18, new SolidColorBrush(Color.FromRgb(185, 185, 185)));
             return;
         }
+    }
+
+    // Imported layers and tags can cover ink; keep those scenes in their
+    // canonical painter order instead of moving a lower stroke to an overlay.
+    private bool SeparateWetInk => _activeStroke != null && Document is { Layers.Count: 0, Tags.Count: 0 };
+
+    private void RefreshWetInk()
+    {
+        if (SeparateWetInk) { WetInkOverlay.InvalidateVisual(); PointerOverlay.InvalidateVisual(); }
+        else InvalidateVisual();
+    }
+
+    internal void DrawWetInk(DrawingContext dc)
+    {
+        if (!SeparateWetInk) return;
         dc.PushTransform(new MatrixTransform(_viewport.DocumentToViewMatrix()));
-        DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, VisibleDocumentBounds());
+        var stroke = _activeStroke!;
+        dc.DrawDrawing(_strokeDrawings.Get(stroke, Appearance.Theme == PageTheme.Dark, false,
+            context => DrawStroke(context, stroke, lightExport: false)));
         dc.Pop();
-        DrawOverlays(dc);
+    }
+
+    internal void DrawScreenScene(DrawingContext dc)
+    {
+        if (Document == null) return;
+        SceneRenderCount++;
+        _drawingDryScene = SeparateWetInk;
+        try
+        {
+            dc.PushTransform(new MatrixTransform(_viewport.DocumentToViewMatrix()));
+            DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, VisibleDocumentBounds());
+            dc.Pop();
+        }
+        finally { _drawingDryScene = false; }
     }
 
     private void DrawDocument(DrawingContext dc, CanvasRenderLayer layer, bool lightExport, Rect extent)
@@ -2691,6 +2739,7 @@ public partial class NoteCanvas : UserControl
         if (Document == null) return;
         foreach (var stroke in strokes ?? Document.Strokes)
         {
+            if (_drawingDryScene && ReferenceEquals(stroke, _activeStroke)) continue;
             if (!PageScene.IsVisible(Document, stroke.LayerId) || !StrokeViewportCulling.IsVisible(stroke, extent)) continue;
             // Imported vectors already retain their geometry. Wet ink is the only
             // freehand stroke whose shape is rebuilt while the nib moves.
@@ -2737,13 +2786,7 @@ public partial class NoteCanvas : UserControl
                 return;
             }
 
-            for (var i = 1; i < stroke.Points.Count; i++)
-            {
-                var p0 = HandwritingEngine.SmoothedPoint(stroke.Points, i - 1);
-                var p1 = HandwritingEngine.SmoothedPoint(stroke.Points, i);
-                var width = HandwritingEngine.SegmentWidth(stroke, i);
-                dc.DrawLine(new Pen(brush, width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, p0, p1);
-            }
+            dc.DrawGeometry(brush, null, FountainStrokeGeometry.Create(stroke));
     }
 
     private static void DrawPolyline(DrawingContext dc, IReadOnlyList<InkPoint> points, Pen pen)
@@ -2834,6 +2877,7 @@ public partial class NoteCanvas : UserControl
     internal void DrawPointerFeedback(DrawingContext dc)
     {
         if (Document == null) return;
+        DrawOverlays(dc);
         if (!InsertSpaceModeEnabled && _hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
         {
             var fill = TextBrush(SelectedTool?.Color ?? InkPalette.Black, Appearance.Theme == PageTheme.Dark, false);

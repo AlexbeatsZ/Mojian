@@ -112,6 +112,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 - Completed authored strokes also retain frozen document-space drawings; hovering updates a
   separate pen-feedback visual, without invalidating the document. New strokes use append undo
   entries rather than serializing the whole page at pen-down. Complex edits retain snapshots.
+- Fountain strokes fill one pressure-sized vector outline rather than thousands of individually
+  stroked segments. Ordinary wet ink has its own visual, so each sample reuses the completed
+  scene; imported layers or tags keep their canonical painter order. Render-performance evidence
+  must include rasterization and low-zoom visibility, not only command-recording CPU time.
 - Viewport pan/zoom copies state into the in-memory document but does not schedule a complete page
   autosave. Navigation and shutdown already flush that state. Viewport-driven A4 sheet growth saves
   only lightweight library metadata; content mutations retain the debounced atomic page save.

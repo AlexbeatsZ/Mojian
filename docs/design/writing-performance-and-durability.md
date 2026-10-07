@@ -30,9 +30,43 @@ Two independent storage faults were reproduced with failing regressions:
   corruption. Preferences errors could silently fall back to another workspace.
 
 These are confirmed defects, not proof of the user's particular past loss.
-The earlier missing page/date has not been identified. Existing local recovery
-folders remain intact; an older personal welcome page with 44 strokes still exists
-in the original Documents/Mojian workspace and has not been imported or overwritten.
+The earlier missing page/date has not been identified. The user explicitly declined
+further recovery on 2026-10-08; old workspace/recovery folders remain intact.
+
+### Follow-up: zoomed-out pen motion
+
+The user verified improvement at high zoom but still reported severe lag when
+zoomed out. The previous 0.5–1.4 ms result measured drawing command recording,
+not rasterization, so it was insufficient evidence for the remaining symptom.
+The old frozen groups still contained approximately 14,000 round-capped line
+commands. More strokes enter the viewport at low zoom, leaving substantial
+compositor/raster work even without rebuilding those commands.
+
+Actual 1400×1000 software `RenderTargetBitmap` snapshots of the reported page
+measured 86/68/47/31 ms at 50/100/200/400% in the first full-canvas run. The final
+same-run retained-reference comparison measured approximately 56/50/38/25 ms
+for the old per-segment path and 22/25/24/19 ms for the new renderer. Both figures
+include software snapshot overhead; neither is a physical pen latency measurement.
+
+`FountainStrokeGeometry` fills each stroke as one nonzero-winding stream geometry
+containing the union of the same pressure-sized, smoothed, round-ended segments.
+It retains the input points, brush width/pressure/flow/taper equations and editable
+vectors. Anti-aliasing at inner overlaps can differ from repeated line overdraw;
+the geometric silhouette is tested against independent point-to-segment distances.
+Shapes, highlighters and imported native contours retain their existing renderers.
+
+Ordinary authored pages have separate completed-scene, active-ink, editor and
+pointer/selection visuals. Moving the nib updates only the active stroke and
+feedback, then lift hands the frozen drawing to the scene. Source layers or tags
+can cover ink, so those pages keep the canonical composite painter order. Native
+imports are never sorted again for every raw pen sample to decide overlay eligibility.
+
+The 50% regression appends 30 samples without another completed-scene render;
+wet-to-dry pixel differences stay within two channel values. Undo and 64x zoom,
+pressure erasing and source-layer occlusion also pass. A WPF `BitmapCache` and an
+explicit screen bitmap were evaluated but rejected because they changed edge
+pixels at handoff. The delivered scene remains vector-backed, with no scaled-up
+page bitmap or additional synchronous raster task on the input dispatcher.
 
 ## Reference investigation
 
@@ -75,6 +109,9 @@ https://github.com/dotnet/wpf/blob/main/src/Microsoft.DotNet.Wpf/src/Presentatio
   `DrawingGroup` objects. Only the active stroke is rebuilt while writing. Source
   imported vector outlines retain their existing geometry cache. Zoom remains
   vector rendering, with no page raster flattening.
+- Fountain freehand uses one filled geometry per stroke instead of per-sample
+  stroked lines. Ordinary wet ink owns a separate visual and reuses the completed
+  scene; source-layer/tagged pages preserve their canonical occlusion path.
 - Cache identity includes point version/count, width, brush parameters, color,
   theme and export mode. Point replacement/transformation invalidates the version;
   weak stroke ownership does not retain deleted page content indefinitely.
@@ -119,3 +156,6 @@ cache invalidation, Undo/Redo/pressure rollback/history retention, split overwri
 serialized/coalesced background jobs, failed-write retry and temporary-file
 cleanup, read locks, corrupt current/previous recovery and real window Close flush.
 `MOJIAN_WRITING_PAGE_JSON` runs the optional read-only real-page timing check.
+It now measures actual software rasterization at 50/100/200/400%, alongside the
+retained old renderer. `MOJIAN_WRITING_RENDER_DIRECTORY` optionally writes the
+100% visual comparison to a caller-selected temporary directory.

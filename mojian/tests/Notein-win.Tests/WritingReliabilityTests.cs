@@ -217,6 +217,99 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
     });
 
     [Fact]
+    public void ZoomedOutWetInkReusesCompletedSceneAndPreservesHandoffPixels() => Sta(() =>
+    {
+        _ = Application.Current ?? new Application();
+        var canvas = new NoteCanvas { Width = 400, Height = 300, Document = new PageDocument("n", "p"),
+            SelectedTool = new ToolPreset("pen", DrawingToolKind.Pen) { WidthMm = 2 },
+            Appearance = new PageAppearance { ShowTitle = false, Background = CanvasBackgroundFormat.Blank } };
+        canvas.Document.Strokes.Add(new StrokeRecord { Points = [new InkPoint(10, 20), new InkPoint(100, 20)] });
+        canvas.SetZoom(.5f);
+        canvas.Measure(new Size(400, 300)); canvas.Arrange(new Rect(0, 0, 400, 300)); canvas.UpdateLayout();
+        void Call(string method, params object[] args) => typeof(NoteCanvas).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, args);
+        int Builds() => (int)typeof(NoteCanvas).GetProperty("SceneRenderCount", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(canvas)!;
+        byte[] Render()
+        {
+            canvas.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(400, 300, 96, 96, PixelFormats.Pbgra32); bitmap.Render(canvas);
+            var pixels = new byte[400 * 300 * 4]; bitmap.CopyPixels(pixels, 1600, 0); return pixels;
+        }
+        Render();
+        Call("BeginPointer", new Point(200, 100), .5f, 0f, 0f, true, false, false);
+        Render(); var builds = Builds();
+        for (var i = 1; i <= 30; i++)
+        {
+            Call("ContinuePointer", new Point(200 + i * 2, 100), .5f, 0f, 0f, true);
+            var pixels = Render();
+            Assert.Equal(builds, Builds());
+            Assert.True(pixels[(100 * 400 + 220) * 4] > 80 || i < 12);
+        }
+        var wet = Render();
+        Call("EndPointer", true); var completed = Render();
+        Assert.True(Builds() > builds);
+        Assert.True(completed[(100 * 400 + 220) * 4] > 40, $"completed_pixel={completed[(100 * 400 + 220) * 4]}");
+        var differences = wet.Zip(completed, (a, b) => Math.Abs(a - b)).ToArray();
+        var largest = Array.IndexOf(differences, differences.Max());
+        Assert.True(differences.Max() <= 2, $"handoff_diff={differences.Max()}, index={largest}, wet={wet[largest]}, dry={completed[largest]}");
+        canvas.Undo(); var undone = Render();
+        Assert.True(undone[(100 * 400 + 220) * 4] < 80);
+        canvas.SetZoom(64); Render(); Assert.Equal(64f, canvas.Viewport.Scale);
+    });
+
+    [Fact]
+    public void FountainOutlineMatchesPressureSizedRoundSegmentsEvenWhenRetraced() => Sta(() =>
+    {
+        var stroke = new StrokeRecord { WidthMm = 2, Points = [new InkPoint(20, 30, .3f), new InkPoint(60, 50, .8f),
+            new InkPoint(100, 30, .4f), new InkPoint(60, 50, .7f), new InkPoint(60, 50, .7f)] };
+        var outline = FountainStrokeGeometry.Create(stroke);
+        Assert.True(outline.IsFrozen);
+        var geometry = outline.GetFlattenedPathGeometry(.001, ToleranceType.Absolute);
+        for (var y = 20d; y < 60; y += .73)
+        for (var x = 10d; x < 110; x += .73)
+        {
+            var point = new Point(x, y);
+            var distanceFromEdge = double.PositiveInfinity;
+            for (var i = 1; i < stroke.Points.Count; i++)
+            {
+                var start = HandwritingEngine.SmoothedPoint(stroke.Points, i - 1);
+                var end = HandwritingEngine.SmoothedPoint(stroke.Points, i);
+                var direction = end - start;
+                var t = direction.LengthSquared < 1e-12 ? 0 : Math.Clamp(Vector.Multiply(point - start, direction) / direction.LengthSquared, 0, 1);
+                distanceFromEdge = Math.Min(distanceFromEdge, (point - (start + direction * t)).Length - HandwritingEngine.SegmentWidth(stroke, i) / 2);
+            }
+            if (Math.Abs(distanceFromEdge) < .02) continue;
+            Assert.True((distanceFromEdge < 0) == geometry.FillContains(point, .001, ToleranceType.Absolute), $"point={point}, edge={distanceFromEdge}");
+        }
+    });
+
+    [Fact]
+    public void WetInkBelowSourceCoverKeepsItsLayerOcclusion() => Sta(() =>
+    {
+        _ = Application.Current ?? new Application();
+        var document = new PageDocument("n", "p")
+        {
+            Layers = [new PageLayer { Id = "ink", Order = 0 }, new PageLayer { Id = "cover", Order = 1 }],
+            Objects = [new PageObject { Kind = PageObjectKind.Image, LayerId = "cover", X = 10, Y = 10, Width = 100, Height = 80 }],
+        };
+        var canvas = new NoteCanvas { Width = 200, Height = 150, Document = document,
+            SelectedTool = new ToolPreset("pen", DrawingToolKind.Pen) { WidthMm = 2, Color = InkPalette.Red },
+            Appearance = new PageAppearance { Theme = PageTheme.Light, Background = CanvasBackgroundFormat.Blank, ShowTitle = false } };
+        canvas.Measure(new Size(200, 150)); canvas.Arrange(new Rect(0, 0, 200, 150));
+        void Call(string method, params object[] args) => typeof(NoteCanvas).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, args);
+        Call("BeginPointer", new Point(30, 60), .5f, 0f, 0f, true, false, false);
+        document.Strokes[^1].LayerId = "ink";
+        Call("ContinuePointer", new Point(90, 60), .5f, 0f, 0f, true);
+        canvas.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(200, 150, 96, 96, PixelFormats.Pbgra32); bitmap.Render(canvas);
+        var pixels = new byte[200 * 150 * 4]; bitmap.CopyPixels(pixels, 800, 0);
+        var index = (60 * 200 + 70) * 4;
+        Assert.Equal(pixels[index], pixels[index + 2]);
+        Assert.Equal(pixels[index + 1], pixels[index + 2]);
+        Assert.True(pixels[index] > 20);
+        Call("EndPointer", true);
+    });
+
+    [Fact]
     public void CachedDrawingPreservesOriginalPenHighlighterAndShapePixels() => Sta(() =>
     {
         var stroke = new StrokeRecord { WidthMm = 2, Points = [new InkPoint(20, 30, .3f), new InkPoint(60, 50, .8f), new InkPoint(100, 30, .4f)] };
@@ -266,6 +359,65 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
                 }
                 var first = Render();
                 var frames = Enumerable.Range(0, 10).Select(_ => Render()).ToArray();
+                canvas.Measure(new Size(1400, 1000)); canvas.Arrange(new Rect(0, 0, 1400, 1000));
+                foreach (var zoom in new[] { .5f, 1f, 2f, 4f })
+                {
+                    canvas.SetZoom(zoom);
+                    canvas.UpdateLayout();
+                    double Raster()
+                    {
+                        var timer = Stopwatch.StartNew();
+                        var bitmap = new RenderTargetBitmap(1400, 1000, 96, 96, PixelFormats.Pbgra32);
+                        bitmap.Render(canvas);
+                        return timer.Elapsed.TotalMilliseconds;
+                    }
+                    Raster();
+                    // Keep a reference to the previous per-segment renderer, so
+                    // the same software raster path compares both implementations.
+                    var reference = new DrawingVisual();
+                    using (var dc = reference.RenderOpen())
+                    {
+                        dc.PushClip(new RectangleGeometry(new Rect(0, 0, 1400, 1000)));
+                        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(10, 10, 10)), null, new Rect(0, 0, 1400, 1000));
+                        dc.PushTransform(new MatrixTransform(canvas.Viewport.DocumentToViewMatrix()));
+                        var bounds = new Rect(canvas.Viewport.ViewToDocument(0, 0), canvas.Viewport.ViewToDocument(1400, 1000));
+                        typeof(NoteCanvas).GetMethod("DrawPaper", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, [dc, false, bounds]);
+                        foreach (var stroke in doc.Strokes.Where(stroke => StrokeViewportCulling.IsVisible(stroke, bounds)))
+                        {
+                            if (stroke.BrushProfile == "shape-v1" || stroke.Kind == DrawingToolKind.Highlighter || !string.IsNullOrEmpty(stroke.VectorPath))
+                            {
+                                typeof(NoteCanvas).GetMethod("DrawStroke", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, [dc, stroke, false]);
+                                continue;
+                            }
+                            var brush = (Brush)typeof(NoteCanvas).GetMethod("TextBrush", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [stroke.Color, true, false])!;
+                            for (var i = 1; i < stroke.Points.Count; i++)
+                                dc.DrawLine(new Pen(brush, HandwritingEngine.SegmentWidth(stroke, i)) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round },
+                                    HandwritingEngine.SmoothedPoint(stroke.Points, i - 1), HandwritingEngine.SmoothedPoint(stroke.Points, i));
+                        }
+                        dc.Pop(); dc.Pop();
+                    }
+                    double ReferenceRaster()
+                    {
+                        var timer = Stopwatch.StartNew();
+                        var bitmap = new RenderTargetBitmap(1400, 1000, 96, 96, PixelFormats.Pbgra32); bitmap.Render(reference);
+                        return timer.Elapsed.TotalMilliseconds;
+                    }
+                    ReferenceRaster();
+                    var builds = typeof(NoteCanvas).GetProperty("SceneRenderCount", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                    var before = builds.GetValue(canvas);
+                    output.WriteLine($"zoom={zoom:F2}, previous_raster_ms={Enumerable.Range(0, 5).Select(_ => ReferenceRaster()).Average():F2}, raster_ms={Enumerable.Range(0, 5).Select(_ => Raster()).Average():F2}, scene_builds={before}->{builds.GetValue(canvas)}");
+                    var imageDirectory = Environment.GetEnvironmentVariable("MOJIAN_WRITING_RENDER_DIRECTORY");
+                    if (!string.IsNullOrEmpty(imageDirectory) && zoom == 1)
+                    {
+                        Directory.CreateDirectory(imageDirectory);
+                        foreach (var (visual, name) in new[] { ((Visual)canvas, "current.png"), ((Visual)reference, "previous.png") })
+                        {
+                            var bitmap = new RenderTargetBitmap(1400, 1000, 96, 96, PixelFormats.Pbgra32); bitmap.Render(visual);
+                            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                            using var file = File.Create(Path.Combine(imageDirectory, name)); encoder.Save(file);
+                        }
+                    }
+                }
                 var watch = Stopwatch.StartNew();
                 for (var i = 0; i < 10; i++) JsonSerializer.Serialize(doc);
                 var snapshot = watch.Elapsed.TotalMilliseconds / 10;

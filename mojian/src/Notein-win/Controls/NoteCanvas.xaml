@@ -6,6 +6,8 @@
              IsManipulationEnabled="True"
              ClipToBounds="True">
     <Grid>
+        <local:CanvasDocumentScene x:Name="SceneLayer" IsHitTestVisible="False" ClipToBounds="True" />
+        <local:CanvasWetInkOverlay x:Name="WetInkOverlay" IsHitTestVisible="False" />
         <Canvas x:Name="EditorLayer" Background="Transparent" />
         <local:CanvasPointerOverlay x:Name="PointerOverlay" IsHitTestVisible="False" />
     </Grid>

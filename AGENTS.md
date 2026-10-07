@@ -6,14 +6,25 @@
 
 # Current State
 
+- On 2026-10-08 the user's follow-up confirmed that the previous EXE was running but low zoom
+  remained slow. Actual software rasterization exposed the old cache's roughly 14,000 retained
+  line commands. Fountain ink now uses one filled vector geometry per stroke, and ordinary wet
+  ink has its own visual without rebuilding the completed scene on each sample. Source-layer/tag
+  occlusion retains its canonical path. The same-run 50% reference improved from about 56 to 22 ms
+  (software snapshot timing, not physical pen latency); 30-sample scene reuse and handoff pixels
+  pass. Windows 128/128 tests and a zero-warning build passed. The sole EXE was republished and
+  opened in the same five-notebook workspace; all 584 strokes / 14,396 points were identical after
+  normal closing and replacement. The user declined historical note recovery. Physical low-zoom
+  pen acceptance remains pending. This WPF rendering repair does not change Android.
+
 - On 2026-10-08 the Windows small-page/pen-hover slowdown and save reliability defects were traced
   using the user's 584-stroke / 14,396-point page. Hover now owns a separate visual; completed ink
   retains frozen vector drawings; ordinary ink Undo is append-based; JSON/page/library autosave
   runs on a serial background worker with close/navigation flush and retry. Same-page split slots
   share one document, and the desktop rejects a second writer process. Durable atomic JSON writes
   retain one `.previous` revision and recover valid prior data; corrupt/unreadable data cannot
-  silently become empty pages or switch workspaces. The prior missing note's exact page/date remains
-  unknown. See `docs/design/writing-performance-and-durability.md` for measured evidence, source
+  silently become empty pages or switch workspaces. The user declined further historical recovery.
+  See `docs/design/writing-performance-and-durability.md` for measured evidence, source
   reference boundaries, platform scope and recovery candidates. Windows 125/125 tests passed;
   cached-versus-original stroke pixels and pointer-only redraw checks passed. The sole self-contained
   EXE was republished and normally reopened in the same five-notebook workspace; normal close/reopen
@@ -45,7 +56,7 @@
 - `Notein-win` is now the persistent Windows edition of the project's own Android app, `墨笺` (`com.meta.inklab`), around `docs/design/windows-desktop.md`: atomic folder-based persistence, real per-page documents/assets, independent desktop navigation state, stylus-aware canvas input, working import/export, a user-selectable Syncthing workspace, and Android-compatible `.mjn` exchange. It is not a Notein Windows client.
 - Android `app/src/main` vectors, colors, ribbon order, dimensions, selection states, and preserved multi-color paths are the Windows UI source of truth. ADB screenshots of the installed tablet build were compared against the real WPF window; 62 Android vectors are deterministically converted into `Themes/IconResources.xaml` by `tools/Generate-FluentIconResources.ps1`, so the Windows port no longer substitutes generic icons or clipped fragments.
 - The Windows title row uses `WindowChrome` with DWM-owned minimize/maximize/close controls integrated into the 34 px app header. No character-glyph caption buttons or custom drag/double-click handlers remain. Release-window `WM_NCHITTEST` returned `HTMINBUTTON=8`, `HTMAXBUTTON=9`, and `HTCLOSE=20`; native minimize/maximize/restore actions all changed actual window state successfully.
-- The current Windows solution builds with zero warnings and passes 125/125 tests, including isolated real-window checks, writing/save reliability checks and imported Notein/OneNote canvas movement, erasing, layer occlusion/hit testing, 8x imported-page rendering and a 64x thin-vector check. The migration suite passed 9/9 on 2026-10-02. Physical pen/mouse interaction remains user-owned acceptance. Exactly one self-contained win-x64 build is retained at `mojian/artifacts/release/Mojian.exe`; the old desktop test shortcut was not present on this host during the 2026-10-02 check. Section/page management menus expose the Android operations, including rename/delete, move/copy, merge/section export, links, page cut/copy/paste, copied assets, and page-owned-data deletion.
+- The current Windows solution builds with zero warnings and passes 128/128 tests, including isolated real-window checks, writing/save reliability checks and imported Notein/OneNote canvas movement, erasing, layer occlusion/hit testing, 8x imported-page rendering and a 64x thin-vector check. The migration suite passed 9/9 on 2026-10-02. Physical pen/mouse interaction remains user-owned acceptance. Exactly one self-contained win-x64 build is retained at `mojian/artifacts/release/Mojian.exe`; the old desktop test shortcut was not present on this host during the 2026-10-02 check. Section/page management menus expose the Android operations, including rename/delete, move/copy, merge/section export, links, page cut/copy/paste, copied assets, and page-owned-data deletion.
 - On 2026-10-06 both clients gained notebook-row management (`重命名`, `删除`, `新建分区`): Windows right-click and Android long-press/mouse right-click. Confirmed deletion removes the notebook-owned directory, clears split/session references, and cannot be resurrected by late Windows autosave. Deleting the last notebook leaves a fresh empty notebook. Windows menu routing was exercised in a real isolated WPF window; 97/97 Windows and 121/121 Android tests plus Android lint passed. The current Windows EXE was republished/reopened against the unchanged five-notebook workspace; the tablet APK was updated in place over the existing `192.168.31.242:5555` connection and cold-launched in 1,406 ms. Physical Android notebook-menu interaction remains unverified.
 - The Windows full-page chrome now uses transient pane state: entering full page closes both panes without changing the normal-workspace preferences, removes the hidden rail's 32 px layout column, keeps the top controls interactive inside `WindowChrome`, and uses raster-checked centered enter/exit glyphs inside complete 34 px buttons.
 - Windows Ctrl+middle/stylus-hand drag zoom uses a fixed screen diagonal: down-right enlarges and up-left shrinks regardless of canvas center or starting quadrant, while retaining the contact anchor. Holding middle is the sole trigger: in-air stylus movement immediately pans, while Ctrl changes that same in-air movement to zoom; no nib contact or second click is required. This device's promoted mouse coordinates exclusively drive the in-air phase, then the newest high-resolution stylus point takes over after contact so the motion is never applied twice. Windows no longer draws a visible extrapolated line ahead of the nib dot. The hand tool changes only stylus input; ordinary mouse input keeps the arrow cursor, while a physical stylus in range uses a small screen-space pen dot for pen/highlighter input.
@@ -107,6 +118,11 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [x] Diagnose the residual zoomed-out Windows pen slowdown with actual rasterization, replace
+  per-segment fountain drawing with filled vector geometry, separate ordinary wet ink, reject
+  handoff-altering bitmap caches, verify 128 tests and refresh/reopen the sole EXE with identical
+  saved stroke/point data. Historical recovery is no longer requested.
 
 - [x] Repair Windows small-page/hover performance and save reliability, verify pixel parity and
   real-window close flush, normally replace/reopen the Release against the existing workspace,
