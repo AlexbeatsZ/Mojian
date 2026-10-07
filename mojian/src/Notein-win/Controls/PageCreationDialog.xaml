@@ -124,7 +124,7 @@
         <ControlTemplate x:Key="DarkComboBoxToggleButton" TargetType="ToggleButton">
             <Border x:Name="templateRoot" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2">
                 <Border x:Name="splitBorder" Width="24" HorizontalAlignment="Right" Background="Transparent">
-                    <Path x:Name="arrow" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center" Width="10" Height="10" Stretch="Uniform" />
+                    <Path x:Name="arrow" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center" Width="9" Height="5" Stretch="Uniform" />
                 </Border>
             </Border>
             <ControlTemplate.Triggers>

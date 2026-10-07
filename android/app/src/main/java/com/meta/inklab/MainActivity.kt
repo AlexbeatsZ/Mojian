@@ -2070,9 +2070,15 @@ class MainActivity : Activity() {
 
     private fun homeDropdownButton(label: String, command: HomeCommand): TextView =
         TextView(this).apply {
-            text = "$label  ⌄"
+            text = label
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(9), 0, dp(5), 0)
+            fluentIcon("caret_down")?.let { caret ->
+                caret.setTint(TEXT_SECONDARY)
+                caret.setBounds(0, 0, dp(18), dp(18))
+                setCompoundDrawablesRelative(null, null, caret, null)
+                compoundDrawablePadding = dp(2)
+            }
             setTextColor(TEXT_PRIMARY)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             maxLines = 1
@@ -2537,11 +2543,14 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(0, MATCH, 1f),
             )
             addView(
-                TextView(this@MainActivity).apply {
-                    text = "⌄"
-                    setTextColor(TEXT_SECONDARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                    gravity = Gravity.CENTER
+                FrameLayout(this@MainActivity).apply {
+                    addView(
+                        ImageView(this@MainActivity).apply {
+                            setImageDrawable(fluentIcon("caret_down"))
+                            imageTintList = ColorStateList.valueOf(TEXT_SECONDARY)
+                        },
+                        FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER),
+                    )
                 },
                 LinearLayout.LayoutParams(dp(22), MATCH),
             )
@@ -3026,15 +3035,9 @@ class MainActivity : Activity() {
                     }
                 }
             notebookRow.addView(
-                TextView(this).apply {
-                    text = if (notebook.expanded) "⌄" else "›"
-                    gravity = Gravity.CENTER
-                    setTextColor(TEXT_PRIMARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-                    setOnClickListener {
-                        notebook.expanded = !notebook.expanded
-                        renderSections()
-                    }
+                navigationChevron(expanded = notebook.expanded, visible = true, tint = TEXT_PRIMARY) {
+                    notebook.expanded = !notebook.expanded
+                    renderSections()
                 },
                 LinearLayout.LayoutParams(dp(24), MATCH),
             )
@@ -3085,20 +3088,13 @@ class MainActivity : Activity() {
                     NavigationDragPayload.Section(notebook.id, section.id),
                 ) { showSectionMenu(item, notebook, section) }
                 val chevron =
-                    TextView(this).apply {
-                        text =
-                            when {
-                                section.children.isEmpty() -> ""
-                                section.expanded -> "⌄"
-                                else -> "›"
-                            }
-                        gravity = Gravity.CENTER
-                        setTextColor(TEXT_SECONDARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-                        setOnClickListener {
-                            notebook.toggleExpanded(section.id)
-                            renderSections()
-                        }
+                    navigationChevron(
+                        expanded = section.expanded,
+                        visible = section.children.isNotEmpty(),
+                        tint = TEXT_SECONDARY,
+                    ) {
+                        notebook.toggleExpanded(section.id)
+                        renderSections()
                     }
                 item.addView(chevron, LinearLayout.LayoutParams(dp(24), MATCH))
                 item.addView(
@@ -5649,15 +5645,12 @@ class MainActivity : Activity() {
             )
             if (selected) {
                 addView(
-                    TextView(this@MainActivity).apply {
-                        text = "⌄"
-                        gravity = Gravity.CENTER
-                        setTextColor(ACCENT_PURPLE)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    ImageView(this@MainActivity).apply {
+                        setImageDrawable(fluentIcon("caret_down"))
+                        imageTintList = ColorStateList.valueOf(ACCENT_PURPLE)
                     },
-                    FrameLayout.LayoutParams(dp(14), dp(14), Gravity.END or Gravity.BOTTOM).apply {
-                        rightMargin = dp(2)
-                        bottomMargin = dp(1)
+                    FrameLayout.LayoutParams(dp(16), dp(16), Gravity.END or Gravity.BOTTOM).apply {
+                        rightMargin = dp(1)
                     },
                 )
             }
@@ -6783,6 +6776,26 @@ class MainActivity : Activity() {
     private fun showShell(name: String) {
         Toast.makeText(this, "${name}已保留入口，后续接入", Toast.LENGTH_SHORT).show()
     }
+
+    /**
+     * Tree disclosure arrow: one Fluent vector rotated 90 degrees when expanded, so both states keep the
+     * same size, weight and center. Rows without children keep the 24 dp slot for alignment but pass
+     * taps through to the row.
+     */
+    private fun navigationChevron(expanded: Boolean, visible: Boolean, tint: Int, onToggle: () -> Unit): View =
+        FrameLayout(this).apply {
+            if (!visible) return@apply
+            addView(
+                ImageView(this@MainActivity).apply {
+                    setImageDrawable(fluentIcon("chevron_right"))
+                    imageTintList = ColorStateList.valueOf(tint)
+                    rotation = if (expanded) 90f else 0f
+                },
+                FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER),
+            )
+            contentDescription = if (expanded) "折叠" else "展开"
+            setOnClickListener { onToggle() }
+        }
 
     private fun fluentIcon(primary: String, fallback: String? = null): Drawable? {
         val names = buildList {

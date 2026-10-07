@@ -45,6 +45,13 @@ the OneNote logo, brand illustrations, application screenshots, or proprietary O
 
 The two left panes have deliberately non-overlapping responsibilities.
 
+Both clients render disclosure arrows from the same Fluent `chevron_right` vector in a 16 px/dp
+viewport, rotating it 90 degrees when expanded. The enclosing 24 px/dp slot remains present for
+childless sections but does not consume their row clicks. Do not switch font glyphs between the
+expanded and collapsed states: font fallback changes their apparent size, baseline, and center.
+Dropdowns and selected-tool indicators use the shared filled `caret_down` vector. Android submenu
+arrows use the same `chevron_right` source; Windows resources are generated from these Android assets.
+
 ### Black pane: sections only
 
 - Display notebook nodes in the black tree; expanding a notebook reveals only its section tree.

@@ -155,15 +155,28 @@ class MojianCommandMenu private constructor(
                 },
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f),
             )
-            if (item.trailingText != null || item.submenu.isNotEmpty()) {
+            if (item.submenu.isNotEmpty()) {
+                addView(
+                    FrameLayout(context).apply {
+                        addView(
+                            ImageView(context).apply {
+                                setImageDrawable(icon("chevron_right"))
+                                imageTintList = ColorStateList.valueOf(TEXT_SECONDARY)
+                            },
+                            FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER),
+                        )
+                    },
+                    LinearLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.MATCH_PARENT),
+                )
+            } else if (item.trailingText != null) {
                 addView(
                     TextView(context).apply {
-                        text = item.trailingText ?: "›"
+                        text = item.trailingText
                         gravity = Gravity.CENTER
                         setTextColor(TEXT_SECONDARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, if (item.submenu.isEmpty()) 10f else 20f)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
                     },
-                    LinearLayout.LayoutParams(if (item.submenu.isEmpty()) dp(82) else dp(24), ViewGroup.LayoutParams.MATCH_PARENT),
+                    LinearLayout.LayoutParams(dp(82), ViewGroup.LayoutParams.MATCH_PARENT),
                 )
             }
             setOnClickListener {
@@ -196,6 +209,7 @@ class MojianCommandMenu private constructor(
             context,
             when (name) {
                 "add" -> R.drawable.ic_fluent_add_24_regular
+                "chevron_right" -> R.drawable.ic_fluent_chevron_right_24_regular
                 "arrow_redo" -> R.drawable.ic_fluent_arrow_redo_24_regular
                 "arrow_undo" -> R.drawable.ic_fluent_arrow_undo_24_regular
                 "clipboard_paste" -> R.drawable.ic_fluent_clipboard_paste_24_regular

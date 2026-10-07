@@ -93,6 +93,21 @@
             <Setter Property="Background" Value="Transparent" />
         </Style>
 
+        <!-- One vector chevron rotated 90 degrees when expanded, so both states share size, weight and center. -->
+        <Style x:Key="NavigationChevronGlyph" TargetType="Viewbox">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+            <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="0" /></Setter.Value></Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="90" /></Setter.Value></Setter>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="HomeDropdownButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
             <Setter Property="Background" Value="#2A2A2A" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderHairline}" />
@@ -125,9 +140,9 @@
                                 BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2">
                             <Grid>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <TextBlock x:Name="chevron" Text="⌄" Foreground="{StaticResource AccentPurple}" FontSize="11"
-                                           Width="14" Height="14" TextAlignment="Center" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                           Margin="0,0,2,1" Visibility="Collapsed" />
+                                <Path x:Name="chevron" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource AccentPurple}"
+                                      Width="8" Height="4" Stretch="Uniform" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                      Margin="0,0,4,4" Visibility="Collapsed" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -170,8 +185,8 @@
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="复制" Tag="Copy" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_copy}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="格式刷" Tag="FormatPainter" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_paint_brush}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="90" ToolTip="字体" Tag="FontFamily" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="10" Height="10" /><TextBlock Text="无衬线" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
-                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="52" ToolTip="字号" Tag="FontSize" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" /><TextBlock Text="16" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="90" ToolTip="字体" Tag="FontFamily" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="5" Stretch="Uniform" VerticalAlignment="Center" Margin="4,0,0,0" /><TextBlock Text="无衬线" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="52" ToolTip="字号" Tag="FontSize" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="5" Stretch="Uniform" VerticalAlignment="Center" Margin="4,0,0,0" /><TextBlock Text="16" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="加粗" Tag="Bold" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_bold}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="倾斜" Tag="Italic" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_italic}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="下划线" Tag="Underline" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_text_underline}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
@@ -193,7 +208,7 @@
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="标记" Tag="Tag" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_tag}" Fill="{StaticResource TagRed}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="36" Height="42" Margin="0" ToolTip="查找标记" Tag="FindTags" Click="OnHomeCommandClick"><Path Data="{StaticResource Fluent_tag_search}" Fill="{StaticResource TagRed}" Width="21" Height="21" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
-                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="样式" Tag="Styles" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="10" Height="10" /><TextBlock Text="样式" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="样式" Tag="Styles" Click="OnHomeCommandClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="5" Stretch="Uniform" VerticalAlignment="Center" Margin="4,0,0,0" /><TextBlock Text="样式" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
                             </StackPanel>
                         </ScrollViewer>
 
@@ -241,7 +256,7 @@
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="拆分视图" IsChecked="{Binding IsSplitView, Mode=OneWay}" Command="{Binding ToggleSplitViewCommand}"><Path Data="{StaticResource Fluent_split_view}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <ToggleButton Style="{StaticResource RibbonToggleButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="锁定显示比例" IsChecked="{Binding ZoomLocked}"><Path Data="{StaticResource Fluent_lock_closed}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></ToggleButton>
-                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="显示比例" Click="OnZoomPercentClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_chevron_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="9" /><TextBlock x:Name="ZoomStatus" Text="100%" FontFamily="Cascadia Mono" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
+                                <Button Style="{StaticResource HomeDropdownButtonStyle}" Width="70" ToolTip="显示比例" Click="OnZoomPercentClick"><DockPanel><Path DockPanel.Dock="Right" Data="{StaticResource Fluent_caret_down}" Fill="{StaticResource TextSecondary}" Width="9" Height="5" Stretch="Uniform" VerticalAlignment="Center" Margin="4,0,0,0" /><TextBlock x:Name="ZoomStatus" Text="100%" FontFamily="Cascadia Mono" FontSize="11" VerticalAlignment="Center" /></DockPanel></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="放大" Click="OnZoomInClick"><Path Data="{StaticResource Fluent_zoom_in}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="42" Margin="0" ToolTip="缩小" Click="OnZoomOutClick"><Path Data="{StaticResource Fluent_zoom_out}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="54" Height="34" ToolTip="100%" Click="OnResetZoomClick"><TextBlock Text="100%" Foreground="{StaticResource TextPrimary}" FontFamily="Cascadia Mono" FontSize="10" /></Button>
@@ -300,7 +315,7 @@
                                             <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectNotebookCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" /></Grid.InputBindings>
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Left" Style="{StaticResource NavigationChevronButton}" Command="{Binding DataContext.ToggleNotebookExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}">
-                                                    <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextPrimary}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Viewbox Style="{StaticResource NavigationChevronGlyph}"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_chevron_right}" Fill="{StaticResource TextPrimary}" Stretch="None" /></Canvas></Viewbox>
                                                 </Button>
                                                 <Viewbox DockPanel.Dock="Left" Width="22" Height="22" Margin="0,0,8,0" VerticalAlignment="Center">
                                                     <Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_notebook}" Fill="{Binding AccentBrush}" /></Canvas>
@@ -324,8 +339,8 @@
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectSectionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" /></Grid.InputBindings>
                                                 <DockPanel>
-                                                    <Button DockPanel.Dock="Left" Style="{StaticResource NavigationChevronButton}" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}">
-                                                        <TextBlock Text="{Binding Chevron}" Foreground="{StaticResource TextSecondary}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <Button DockPanel.Dock="Left" Style="{StaticResource NavigationChevronButton}" Command="{Binding DataContext.ToggleSectionExpandCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Section.Id}" IsHitTestVisible="{Binding HasChildren}" Focusable="{Binding HasChildren}">
+                                                        <Viewbox Style="{StaticResource NavigationChevronGlyph}" Visibility="{Binding HasChildren, Converter={StaticResource BoolToVisibility}}"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_chevron_right}" Fill="{StaticResource TextSecondary}" Stretch="None" /></Canvas></Viewbox>
                                                     </Button>
                                                     <Border DockPanel.Dock="Left" Width="4" Height="22" Background="{Binding SectionColorBrush}" CornerRadius="2" Margin="0,0,8,0" VerticalAlignment="Center" />
                                                     <TextBlock Text="{Binding Section.Title}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">

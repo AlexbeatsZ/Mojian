@@ -131,7 +131,7 @@ public sealed class SectionRow : INotebookTreeRow
     public int Depth { get; }
     public Thickness Indent => new(14 + Depth * 15, 0, 7, 0);
     public bool HasChildren => Section.Children.Count > 0;
-    public string Chevron => HasChildren ? (Section.Expanded ? "⌄" : "›") : string.Empty;
+    public bool IsExpanded => HasChildren && Section.Expanded;
     public bool IsSelected { get; }
     public string SectionColorHex => SectionColors[Math.Abs(Depth + 1) % SectionColors.Length];
     public System.Windows.Media.Brush SectionColorBrush => new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SectionColorHex));
@@ -151,7 +151,7 @@ public sealed class NotebookPaneRow : INotebookTreeRow
     public NotebookWorkspace Notebook { get; }
     public string Id => Notebook.Id;
     public string Title => Notebook.Title;
-    public string Chevron => Notebook.Expanded ? "⌄" : "›";
+    public bool IsExpanded => Notebook.Expanded;
     public bool IsActive { get; }
     public bool IsFocused { get; }
     public string AccentHex { get; }

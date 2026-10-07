@@ -222,7 +222,7 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 
 Release output is replaceable state, not an archive. Before publishing, remove every prior project-owned
 release/candidate directory after confirming no delivered EXE is running. Publish only to
-`Notein-win/artifacts/release`, then clean project-local `bin/obj`; do not retain parallel dated or
+`mojian/artifacts/release`, then clean project-local `bin/obj`; do not retain parallel dated or
 candidate copies. Reusable package caches and user workspace data are outside this cleanup boundary.
 
 1. Start from an empty temporary workspace; create notebook, nested section, and pages.

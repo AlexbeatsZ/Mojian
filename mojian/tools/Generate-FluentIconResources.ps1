@@ -31,8 +31,6 @@ foreach ($file in $files) {
         $lines.Add('    </DrawingImage>')
     }
 }
-$lines.Add('    <Geometry x:Key="Fluent_chevron_down">M7 9l5 5 5-5z</Geometry>')
-$lines.Add('    <Geometry x:Key="Fluent_chevron_right">M9 7l5 5-5 5z</Geometry>')
 $lines.Add('</ResourceDictionary>')
 
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputPath)
