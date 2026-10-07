@@ -43,7 +43,7 @@ public sealed class StrokeRecord
         set
         {
             _widthMm = value;
-            _cachedBounds = null;
+            InvalidateBounds();
         }
     }
     public int PressurePercent { get; set; } = 200;
@@ -102,7 +102,7 @@ public sealed class StrokeRecord
         set
         {
             _points = value ?? new List<InkPoint>();
-            _cachedBounds = null;
+            InvalidateBounds();
         }
     }
 
@@ -152,7 +152,21 @@ public sealed class StrokeRecord
 
     public void ComputeBounds() => _ = Bounds;
 
-    public void InvalidateBounds() => _cachedBounds = null;
+    [JsonIgnore] public long RenderVersion { get; private set; }
+
+    public void InvalidateBounds() { _cachedBounds = null; RenderVersion++; }
+
+    public StrokeRecord CopyForSave()
+    {
+        var copy = (StrokeRecord)MemberwiseClone();
+        copy.Points = Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
+        copy.VectorBounds = VectorBounds?.ToArray();
+        copy.VectorTransform = VectorTransform.ToArray();
+        // UI-owned geometry is never carried into a background writer.
+        copy._vectorGeometry = copy._transformedVectorGeometry = null;
+        copy._cachedVectorPath = null;
+        return copy;
+    }
 }
 
 public enum CanvasTagKind { Important, Question }
@@ -171,11 +185,13 @@ public sealed class CanvasTag
     public float Scale { get; set; } = 1f;
 
     public CanvasTag() { }
+    public CanvasTag CopyForSave() => (CanvasTag)MemberwiseClone();
     public CanvasTag(CanvasTagKind kind, float documentX, float documentY) { Kind = kind; DocumentX = documentX; DocumentY = documentY; }
 }
 
 public sealed class TextItem
 {
+    public TextItem CopyForSave() => (TextItem)MemberwiseClone();
     public string LayerId { get; set; } = string.Empty;
     public long ZOrder { get; set; }
     public string Id { get; set; } = IdFactory.New("text");
@@ -223,6 +239,17 @@ public sealed class PageDocument
 
     public PageDocument() { }
     public PageDocument(string notebookId, string pageId) { NotebookId = notebookId; PageId = pageId; }
+
+    public PageDocument CopyForSave() => new(NotebookId, PageId)
+    {
+        Version = Version, Revision = Revision, UpdatedAt = UpdatedAt,
+        Viewport = new PageViewport { Scale = Viewport.Scale, TranslationX = Viewport.TranslationX, TranslationY = Viewport.TranslationY },
+        Strokes = Strokes.Select(stroke => stroke.CopyForSave()).ToList(),
+        Tags = Tags.Select(tag => tag.CopyForSave()).ToList(),
+        TextItems = TextItems.Select(text => text.CopyForSave()).ToList(),
+        Objects = Objects.Select(item => item.CopyForSave()).ToList(),
+        Layers = Layers.Select(layer => new PageLayer { Id = layer.Id, Name = layer.Name, Visible = layer.Visible, Order = layer.Order }).ToList(),
+    };
 }
 
 public sealed class PageLayer

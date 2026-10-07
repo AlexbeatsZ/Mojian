@@ -17,6 +17,12 @@ namespace Notein_win.Controls;
 
 public enum CanvasRenderLayer { Background, Inserts, InkAndText, Composite }
 
+public sealed class CanvasPointerOverlay : FrameworkElement
+{
+    internal NoteCanvas? Owner { get; set; }
+    protected override void OnRender(DrawingContext context) => Owner?.DrawPointerFeedback(context);
+}
+
 public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 {
     public PageObject Value { get; } = value;
@@ -32,7 +38,11 @@ public partial class NoteCanvas : UserControl
     private static extern uint GetDoubleClickTime();
 
     private readonly ViewportState _viewport = new();
-    private readonly Stack<string> _undo = new();
+    private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null)
+    {
+        public static implicit operator UndoEntry(string json) => new(Json: json);
+    }
+    private readonly Stack<UndoEntry> _undo = new();
     private readonly Stack<string> _redo = new();
     private readonly List<Point> _lasso = new();
     private readonly List<StrokeRecord> _selectedStrokes = new();
@@ -51,6 +61,7 @@ public partial class NoteCanvas : UserControl
     private readonly DispatcherTimer _stylusContextMenuTimer;
     private static SelectionClipboardData? _selectionClipboard;
     private readonly Stopwatch _strokeClock = new();
+    private readonly StrokeDrawingCache _strokeDrawings = new();
 
     private StrokeRecord? _activeStroke;
     private Point _shapeStart;
@@ -164,6 +175,7 @@ public partial class NoteCanvas : UserControl
     public NoteCanvas()
     {
         InitializeComponent();
+        PointerOverlay.Owner = this;
         Focusable = true;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); RaiseDocumentChanged(); };
@@ -787,7 +799,7 @@ public partial class NoteCanvas : UserControl
             _stylusInRange = true;
             _hoverViewPoint = e.GetPosition(this);
             UpdatePointerCursor();
-            InvalidateVisual();
+            PointerOverlay.InvalidateVisual();
         }
         if (_rightLassoArmed)
         {
@@ -822,7 +834,9 @@ public partial class NoteCanvas : UserControl
             else ContinuePointer(_hoverViewPoint.Value, 0.65f, 0, 0, isStylus: false);
             e.Handled = true;
         }
-        InvalidateVisual();
+        if (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured)
+            InvalidateVisual();
+        else PointerOverlay.InvalidateVisual();
     }
 
     protected override void OnMouseEnter(MouseEventArgs e)
@@ -831,7 +845,7 @@ public partial class NoteCanvas : UserControl
         if (IsPhysicalStylus(e.StylusDevice)) _stylusInRange = true;
         _hoverViewPoint = e.GetPosition(this);
         UpdatePointerCursor();
-        InvalidateVisual();
+        PointerOverlay.InvalidateVisual();
     }
 
     protected override void OnMouseLeave(MouseEventArgs e)
@@ -840,7 +854,7 @@ public partial class NoteCanvas : UserControl
         if (IsMouseCaptured || _stylusActive || _rightLassoArmed) return;
         _hoverViewPoint = null;
         UpdatePointerCursor();
-        InvalidateVisual();
+        PointerOverlay.InvalidateVisual();
     }
 
     protected override void OnLostMouseCapture(MouseEventArgs e)
@@ -896,7 +910,7 @@ public partial class NoteCanvas : UserControl
         _stylusInRange = true;
         _hoverViewPoint = e.GetPosition(this);
         UpdatePointerCursor();
-        InvalidateVisual();
+        PointerOverlay.InvalidateVisual();
     }
 
     private void HandleStylusDown(object sender, StylusDownEventArgs e)
@@ -969,7 +983,7 @@ public partial class NoteCanvas : UserControl
         }
         if (!_stylusActive)
         {
-            InvalidateVisual();
+            PointerOverlay.InvalidateVisual();
             return;
         }
         if (CanvasPointerFeedback.UseLatestStylusSample(_isPanning, _isDragZooming, stylusDrivenMiddleNavigation: false) && points.Count > 0)
@@ -1027,7 +1041,7 @@ public partial class NoteCanvas : UserControl
         _stylusInRange = false;
         _hoverViewPoint = null;
         UpdatePointerCursor();
-        InvalidateVisual();
+        PointerOverlay.InvalidateVisual();
     }
 
     private void HandleStylusUp(object sender, StylusEventArgs e)
@@ -1588,18 +1602,17 @@ public partial class NoteCanvas : UserControl
         {
             case DrawingToolKind.Shape:
                 ClearSelection();
-                PushUndo();
                 _shapeStart = docPoint;
                 _explicitShape = true;
                 _activeStroke = new StrokeRecord(IdFactory.New("shape"), DrawingToolKind.Pen, tool.Color, tool.WidthMm, 100) { BrushProfile = "shape-v1" };
                 _activeStroke.Points = ShapeGeometry.Points(tool.ShapeKind, docPoint, docPoint);
+                PushInkUndo(_activeStroke.Id);
                 Document.Strokes.Add(_activeStroke);
                 CaptureInput(isStylus);
                 break;
             case DrawingToolKind.Pen:
             case DrawingToolKind.Highlighter:
                 ClearSelection();
-                PushUndo();
                 _strokeClock.Restart();
                 _activeStroke = new StrokeRecord(IdFactory.New("stroke"), tool.Kind, tool.Color, tool.WidthMm, tool.OpacityPercent)
                 {
@@ -1607,6 +1620,7 @@ public partial class NoteCanvas : UserControl
                     InkFlowPercent = tool.InkFlowPercent,
                 };
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
+                PushInkUndo(_activeStroke.Id);
                 Document.Strokes.Add(_activeStroke);
                 _shapeStart = docPoint;
                 _pressureTravel.Begin(docPoint.X / UnitsPerMillimeter, docPoint.Y / UnitsPerMillimeter,
@@ -1937,6 +1951,10 @@ public partial class NoteCanvas : UserControl
         if (activeStroke == null) return;
         _straightenTimer.Stop(); _straighten.Cancel();
         Document?.Strokes.Remove(activeStroke);
+        // Upgrade the append-only undo entry before this gesture can remove
+        // existing ink. Ordinary writing never snapshots the whole document.
+        if (_undo.Count > 0 && _undo.Peek().AddedStrokeId == activeStroke.Id) _undo.Pop();
+        PushUndo();
         _activeStroke = null;
         _pressureCandidate = false;
         _pressureCandidateEraserTool = null;
@@ -2478,6 +2496,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnRender(DrawingContext dc)
     {
         base.OnRender(dc);
+        PointerOverlay.InvalidateVisual();
         dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(10, 10, 10)), null, new Rect(0, 0, ActualWidth, ActualHeight));
         if (Document == null)
         {
@@ -2673,6 +2692,17 @@ public partial class NoteCanvas : UserControl
         foreach (var stroke in strokes ?? Document.Strokes)
         {
             if (!PageScene.IsVisible(Document, stroke.LayerId) || !StrokeViewportCulling.IsVisible(stroke, extent)) continue;
+            // Imported vectors already retain their geometry. Wet ink is the only
+            // freehand stroke whose shape is rebuilt while the nib moves.
+            if (stroke != _activeStroke && string.IsNullOrEmpty(stroke.VectorPath))
+                dc.DrawDrawing(_strokeDrawings.Get(stroke, Appearance.Theme == PageTheme.Dark, lightExport,
+                    context => DrawStroke(context, stroke, lightExport)));
+            else DrawStroke(dc, stroke, lightExport);
+        }
+    }
+
+    private void DrawStroke(DrawingContext dc, StrokeRecord stroke, bool lightExport)
+    {
             var brush = TextBrush(stroke.Color, Appearance.Theme == PageTheme.Dark, lightExport);
             if (!string.IsNullOrEmpty(stroke.ColorHex))
             {
@@ -2687,15 +2717,15 @@ public partial class NoteCanvas : UserControl
                 dc.PushOpacity(Math.Clamp(stroke.OpacityPercent / 100d, 0, 1));
                 dc.DrawGeometry(brush, null, vector);
                 dc.Pop();
-                continue;
+                return;
             }
-            if (stroke.Points.Count == 0) continue;
+            if (stroke.Points.Count == 0) return;
             if (stroke.BrushProfile == "shape-v1")
             {
                 dc.PushOpacity(Math.Clamp(stroke.OpacityPercent / 100d, 0, 1));
                 DrawPolyline(dc, stroke.Points, new Pen(brush, stroke.WidthMm * UnitsPerMillimeter) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round });
                 dc.Pop();
-                continue;
+                return;
             }
             if (stroke.Kind == DrawingToolKind.Highlighter)
             {
@@ -2704,7 +2734,7 @@ public partial class NoteCanvas : UserControl
                 var pen = new Pen(new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B)), stroke.WidthMm * UnitsPerMillimeter)
                 { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
                 DrawPolyline(dc, stroke.Points, pen);
-                continue;
+                return;
             }
 
             for (var i = 1; i < stroke.Points.Count; i++)
@@ -2714,8 +2744,6 @@ public partial class NoteCanvas : UserControl
                 var width = HandwritingEngine.SegmentWidth(stroke, i);
                 dc.DrawLine(new Pen(brush, width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, p0, p1);
             }
-        }
-
     }
 
     private static void DrawPolyline(DrawingContext dc, IReadOnlyList<InkPoint> points, Pen pen)
@@ -2793,12 +2821,6 @@ public partial class NoteCanvas : UserControl
             var radius = (eraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter * _viewport.Scale;
             dc.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromRgb(185, 185, 185)), 1.2), eraser, radius, radius);
         }
-        if (!InsertSpaceModeEnabled && _hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
-        {
-            var fill = TextBrush(SelectedTool?.Color ?? InkPalette.Black, Appearance.Theme == PageTheme.Dark, false);
-            var outline = new Pen(Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black, 1);
-            dc.DrawEllipse(fill, outline, hover, 2.25, 2.25);
-        }
         if (_isInsertingSpace)
         {
             var start = _viewport.DocumentToView(0, _insertStartY).Y;
@@ -2807,7 +2829,18 @@ public partial class NoteCanvas : UserControl
             dc.DrawLine(pen, new Point(0, start), new Point(ActualWidth, start));
             dc.DrawLine(pen, new Point(0, current), new Point(ActualWidth, current));
         }
-        else if (InsertSpaceModeEnabled && _hoverViewPoint is { } insertHover &&
+    }
+
+    internal void DrawPointerFeedback(DrawingContext dc)
+    {
+        if (Document == null) return;
+        if (!InsertSpaceModeEnabled && _hoverViewPoint is { } hover && CurrentPointerCursorMode() == CanvasPointerCursorMode.PenDot)
+        {
+            var fill = TextBrush(SelectedTool?.Color ?? InkPalette.Black, Appearance.Theme == PageTheme.Dark, false);
+            var outline = new Pen(Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black, 1);
+            dc.DrawEllipse(fill, outline, hover, 2.25, 2.25);
+        }
+        else if (!_isInsertingSpace && InsertSpaceModeEnabled && _hoverViewPoint is { } insertHover &&
                  DirectInputPolicy.ShowsInsertSpaceHover(_stylusInRange ? DirectInputDevice.Pen : DirectInputDevice.Mouse))
         {
             var pen = new Pen(new SolidColorBrush(Color.FromRgb(218, 178, 233)), 1.2) { DashStyle = DashStyles.Dash };
@@ -3027,16 +3060,33 @@ public partial class NoteCanvas : UserControl
     private void PushUndo()
     {
         if (Document == null) return;
-        _undo.Push(Snapshot(Document));
+        PushHistory(new UndoEntry(Json: Snapshot(Document)));
+    }
+
+    private void PushInkUndo(string strokeId) => PushHistory(new UndoEntry(AddedStrokeId: strokeId));
+
+    private void PushHistory(UndoEntry entry)
+    {
+        _undo.Push(entry);
         while (_undo.Count > 80)
         {
-            var keep = _undo.Reverse().Take(80).Reverse().ToArray();
-            _undo.Clear(); foreach (var entry in keep) _undo.Push(entry);
+            var keep = _undo.Take(80).Reverse().ToArray();
+            _undo.Clear(); foreach (var item in keep) _undo.Push(item);
         }
         _redo.Clear();
     }
 
     private static string Snapshot(PageDocument document) => JsonSerializer.Serialize(document, SnapshotJson);
+
+    private void RestoreSnapshot(UndoEntry entry)
+    {
+        if (entry.Json != null) { RestoreSnapshot(entry.Json); return; }
+        if (Document == null) return;
+        Document.Strokes.RemoveAll(stroke => stroke.Id == entry.AddedStrokeId);
+        ClearSelection();
+        MarkChanged(immediate: true);
+        InvalidateVisual();
+    }
 
     private void RestoreSnapshot(string json)
     {
@@ -3047,6 +3097,7 @@ public partial class NoteCanvas : UserControl
         Document.Tags = restored.Tags;
         Document.TextItems = restored.TextItems;
         Document.Objects = restored.Objects;
+        Document.Layers = restored.Layers;
         Document.Viewport = restored.Viewport;
         _viewport.Restore(Document.Viewport);
         ClearSelection();

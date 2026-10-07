@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     {
         if (_eventsWired) return;
         _eventsWired = true;
+        ViewModel.ObserveSaveCompletion(Dispatcher);
         ConfigureCanvas(LeftCanvas);
         ConfigureCanvas(RightCanvas);
         ViewModel.RequestUndo += () => FocusedCanvas.Undo();
@@ -87,7 +88,12 @@ public partial class MainWindow : Window
         canvas.ResolveShapeSettings = () => ViewModel.ShapeSettings;
         canvas.BeginSpringLoadedTool = ViewModel.BeginSpringLoadedTool;
         canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
-        canvas.DocumentChanged += (_, _) => ViewModel.SaveDocument(canvas.Document);
+        canvas.DocumentChanged += (_, _) =>
+        {
+            ViewModel.QueueSaveDocument(canvas.Document);
+            var other = canvas == LeftCanvas ? RightCanvas : LeftCanvas;
+            if (ReferenceEquals(other.Document, canvas.Document)) other.InvalidateVisual();
+        };
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
         canvas.PageMetadataChanged += (_, _) => ViewModel.SavePageMetadata();
         canvas.ObjectContextRequested += OnObjectContextRequested;
@@ -1204,7 +1210,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnWindowClosing(object? sender, CancelEventArgs e) => ViewModel.SaveAll();
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        try { ViewModel.SaveAll(); }
+        catch (Exception error)
+        {
+            e.Cancel = true;
+            MessageBox.Show(this, $"笔记保存失败，窗口将保持打开。请重试保存。\n{error.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 
     private void NewNotebook()
     {

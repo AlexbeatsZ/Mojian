@@ -33,6 +33,13 @@ public static class ImageImportDisplayModeExtensions
 
 public sealed class PageObject
 {
+    public PageObject CopyForSave()
+    {
+        var copy = (PageObject)MemberwiseClone();
+        copy.Cells = Cells.ToList();
+        copy.PreviewRows = PreviewRows.Select(row => row.ToList()).ToList();
+        return copy;
+    }
     public string LayerId { get; set; } = string.Empty;
     public long ZOrder { get; set; }
     public string Id { get; set; } = IdFactory.New("object");

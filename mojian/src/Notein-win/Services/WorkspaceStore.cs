@@ -36,6 +36,7 @@ public sealed class WorkspaceStore
 
     public NotebookLibrary LoadLibrary()
     {
+        RestoreMissingCurrent(LibraryPath);
         if (!File.Exists(LibraryPath))
         {
             var created = NotebookLibrary.Sample();
@@ -44,44 +45,22 @@ public sealed class WorkspaceStore
             return created;
         }
 
-        try
+        var library = ReadRecoverable<NotebookLibrary>(LibraryPath, JsonOptions, value => value.Notebooks.Count > 0);
+        if (library.Notebooks.All(notebook => notebook.Id != library.ActiveNotebookId))
         {
-            var library = JsonSerializer.Deserialize<NotebookLibrary>(File.ReadAllText(LibraryPath), JsonOptions);
-            if (library?.Notebooks.Count > 0)
-            {
-                if (library.Notebooks.All(notebook => notebook.Id != library.ActiveNotebookId))
-                {
-                    library.ActiveNotebookId = library.Notebooks[0].Id;
-                }
-                NormalizeSelections(library);
-                return library;
-            }
+            library.ActiveNotebookId = library.Notebooks[0].Id;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            PreserveCorruptFile(LibraryPath);
-        }
-
-        var recovered = NotebookLibrary.Sample();
-        SaveLibrary(recovered);
-        SaveWelcomePage(recovered.ActiveNotebook);
-        return recovered;
+        NormalizeSelections(library);
+        return library;
     }
 
     public void SaveLibrary(NotebookLibrary library) => AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, JsonOptions));
 
     public WorkspaceSettings LoadSettings()
     {
+        RestoreMissingCurrent(SettingsPath);
         if (!File.Exists(SettingsPath)) return new WorkspaceSettings();
-        try
-        {
-            return JsonSerializer.Deserialize<WorkspaceSettings>(File.ReadAllText(SettingsPath), JsonOptions) ?? new WorkspaceSettings();
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            PreserveCorruptFile(SettingsPath);
-            return new WorkspaceSettings();
-        }
+        return ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions);
     }
 
     public void SaveSettings(WorkspaceSettings settings) => AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
@@ -89,31 +68,23 @@ public sealed class WorkspaceStore
     public PageDocument LoadPage(string notebookId, string pageId)
     {
         var path = GetPageDocumentPath(notebookId, pageId);
+        RestoreMissingCurrent(path);
         if (!File.Exists(path)) return new PageDocument(notebookId, pageId);
-        try
-        {
-            using var stream = File.OpenRead(path);
-            var document = JsonSerializer.Deserialize<PageDocument>(stream, PageJsonOptions);
-            if (document != null)
-            {
-                document.NotebookId = notebookId;
-                document.PageId = pageId;
-                return document;
-            }
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            PreserveCorruptFile(path);
-        }
-        return new PageDocument(notebookId, pageId);
+        var document = ReadRecoverable<PageDocument>(path, PageJsonOptions);
+        document.NotebookId = notebookId;
+        document.PageId = pageId;
+        return document;
     }
 
     public void SavePage(PageDocument document)
     {
         document.Revision++;
         document.UpdatedAt = DateTime.UtcNow;
-        AtomicWrite(GetPageDocumentPath(document.NotebookId, document.PageId), JsonSerializer.SerializeToUtf8Bytes(document, PageJsonOptions));
+        WritePageSnapshot(document);
     }
+
+    public void WritePageSnapshot(PageDocument snapshot) =>
+        AtomicWrite(GetPageDocumentPath(snapshot.NotebookId, snapshot.PageId), JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions));
 
     public string GetNotebookDirectory(string notebookId)
     {
@@ -193,6 +164,7 @@ public sealed class WorkspaceStore
     {
         var documentPath = GetPageDocumentPath(notebookId, pageId);
         if (File.Exists(documentPath)) File.Delete(documentPath);
+        if (File.Exists(documentPath + ".previous")) File.Delete(documentPath + ".previous");
         var assetDirectory = GetAssetDirectory(notebookId, pageId);
         if (Directory.Exists(assetDirectory)) Directory.Delete(assetDirectory, recursive: true);
     }
@@ -210,19 +182,23 @@ public sealed class WorkspaceStore
     }
 
     public static void AtomicWrite(string path, string content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + $".{Guid.NewGuid():N}.tmp";
-        File.WriteAllText(temporary, content);
-        File.Move(temporary, path, overwrite: true);
-    }
+        => AtomicWrite(path, System.Text.Encoding.UTF8.GetBytes(content));
 
     public static void AtomicWrite(string path, ReadOnlySpan<byte> content)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + $".{Guid.NewGuid():N}.tmp";
-        File.WriteAllBytes(temporary, content.ToArray());
-        File.Move(temporary, path, overwrite: true);
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(content);
+                stream.Flush(flushToDisk: true);
+            }
+            if (File.Exists(path)) File.Replace(temporary, path, path + ".previous");
+            else File.Move(temporary, path);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     private void SaveWelcomePage(NotebookWorkspace notebook)
@@ -255,11 +231,42 @@ public sealed class WorkspaceStore
         }
     }
 
+    internal static void RestoreMissingCurrent(string path)
+    {
+        if (!File.Exists(path) && File.Exists(path + ".previous")) File.Copy(path + ".previous", path);
+    }
+
+    internal static T ReadRecoverable<T>(string path, JsonSerializerOptions options, Func<T, bool>? valid = null) where T : class
+    {
+        T Read(string source)
+        {
+            using var stream = File.OpenRead(source);
+            var result = JsonSerializer.Deserialize<T>(stream, options);
+            if (result == null || valid?.Invoke(result) == false) throw new JsonException("笔记数据无效。");
+            return result;
+        }
+        try { return Read(path); }
+        catch (JsonException error)
+        {
+            PreserveCorruptFile(path);
+            if (!File.Exists(path + ".previous"))
+                throw new InvalidDataException($"无法读取笔记数据，原文件已保留：{path}", error);
+            T recovered;
+            try { recovered = Read(path + ".previous"); }
+            catch (JsonException previousError)
+            {
+                throw new InvalidDataException($"当前和恢复版本均无效，已停止加载：{path}", previousError);
+            }
+            File.Copy(path + ".previous", path, overwrite: true);
+            return recovered;
+        }
+    }
+
     private static void PreserveCorruptFile(string path)
     {
         if (!File.Exists(path)) return;
-        var backup = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
-        File.Move(path, backup, overwrite: false);
+        var backup = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
+        File.Copy(path, backup, overwrite: false);
     }
 }
 
@@ -283,15 +290,9 @@ public sealed class PreferencesStore
 
     public AppPreferences Load()
     {
+        WorkspaceStore.RestoreMissingCurrent(FilePath);
         if (!File.Exists(FilePath)) return new AppPreferences();
-        try
-        {
-            return JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(FilePath), JsonOptions) ?? new AppPreferences();
-        }
-        catch
-        {
-            return new AppPreferences();
-        }
+        return WorkspaceStore.ReadRecoverable<AppPreferences>(FilePath, JsonOptions);
     }
 
     public void Save(AppPreferences preferences) => WorkspaceStore.AtomicWrite(FilePath, JsonSerializer.Serialize(preferences, JsonOptions));

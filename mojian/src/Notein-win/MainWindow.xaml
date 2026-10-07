@@ -520,12 +520,9 @@
                         </DockPanel>
                     </Border>
 
-                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,10" Padding="8,4" CornerRadius="3" Background="#CC232323" IsHitTestVisible="False" Visibility="Collapsed">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding SaveStateText}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
-                            <TextBlock Text="  ·  " Foreground="{StaticResource TextMuted}" />
-                            <TextBlock Text="{Binding WorkspaceRoot}" Foreground="{StaticResource TextMuted}" FontSize="10" FontFamily="Cascadia Mono" MaxWidth="360" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
+                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,10" Padding="8,4" CornerRadius="3" Background="#EE232323" IsHitTestVisible="False">
+                        <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding HasSaveError}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Border.Style>
+                        <TextBlock Text="{Binding SaveStateText}" Foreground="#FFB4AB" FontSize="11" />
                     </Border>
                 </Grid>
             </Grid>

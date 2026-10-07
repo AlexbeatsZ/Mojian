@@ -1,8 +1,12 @@
 <UserControl x:Class="Notein_win.Controls.NoteCanvas"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Notein_win.Controls"
              Focusable="True"
              IsManipulationEnabled="True"
              ClipToBounds="True">
-    <Canvas x:Name="EditorLayer" Background="Transparent" />
+    <Grid>
+        <Canvas x:Name="EditorLayer" Background="Transparent" />
+        <local:CanvasPointerOverlay x:Name="PointerOverlay" IsHitTestVisible="False" />
+    </Grid>
 </UserControl>

@@ -6,6 +6,21 @@
 
 # Current State
 
+- On 2026-10-08 the Windows small-page/pen-hover slowdown and save reliability defects were traced
+  using the user's 584-stroke / 14,396-point page. Hover now owns a separate visual; completed ink
+  retains frozen vector drawings; ordinary ink Undo is append-based; JSON/page/library autosave
+  runs on a serial background worker with close/navigation flush and retry. Same-page split slots
+  share one document, and the desktop rejects a second writer process. Durable atomic JSON writes
+  retain one `.previous` revision and recover valid prior data; corrupt/unreadable data cannot
+  silently become empty pages or switch workspaces. The prior missing note's exact page/date remains
+  unknown. See `docs/design/writing-performance-and-durability.md` for measured evidence, source
+  reference boundaries, platform scope and recovery candidates. Windows 125/125 tests passed;
+  cached-versus-original stroke pixels and pointer-only redraw checks passed. The sole self-contained
+  EXE was republished and normally reopened in the same five-notebook workspace; normal close/reopen
+  retained all 584 strokes / 14,396 points, and a second launch exited into the existing native window.
+  Physical pen feel remains user acceptance. Android was inspected but this WPF/desktop-store
+  incident does not change its separate session-boundary freehand model.
+
 - On 2026-10-08 both clients' canvas zoom increased from 50–800% to 50–6400% (0.5–64x). `ViewportState` owns each client's limits and the 50/75/100/125/150/200/400/800/1600/3200/6400% catalog; Android's preset shortcuts reuse that catalog. Gesture/menu/button zoom and restored viewports use the expanded bounds. Windows displays `6400%` without a thousands separator so it fits the existing control. Windows 113/113 and Android 134/134 tests, Android debug build and lint (zero errors, 110 warnings) passed. The real isolated WPF window exercised the 6400% menu action/status, and the canvas raster check retained a thin editable vector at 64x. Both deliverables were refreshed, build intermediates cleaned, and the current Windows EXE reopened in the existing five-notebook workspace. No tablet was connected and two mDNS checks returned no endpoint; this APK has not been installed or physically tested on the tablet.
 
 - Pressure erasing now has an eraser-owned accumulated-contact travel limit: default 1 mm, adjustable 0.1–10 mm in 0.1 mm steps. Real document-space path length includes low-pressure movement and historical points; strictly exceeding the limit cancels/latches out activation until lift/cancel, while an already activated/manual eraser remains movable. Old presets gain the default. Windows 106/106 tests (including real canvas and eraser panel persistence) and Android 130/130 plus build/lint passed on 2026-10-07. Both current deliverables were refreshed, the tablet update cold-launched in 931 ms, and the Windows five-notebook workspace retained. Physical pen acceptance remains pending; see `docs/design/input-gestures.md` section 10.
@@ -30,7 +45,7 @@
 - `Notein-win` is now the persistent Windows edition of the project's own Android app, `墨笺` (`com.meta.inklab`), around `docs/design/windows-desktop.md`: atomic folder-based persistence, real per-page documents/assets, independent desktop navigation state, stylus-aware canvas input, working import/export, a user-selectable Syncthing workspace, and Android-compatible `.mjn` exchange. It is not a Notein Windows client.
 - Android `app/src/main` vectors, colors, ribbon order, dimensions, selection states, and preserved multi-color paths are the Windows UI source of truth. ADB screenshots of the installed tablet build were compared against the real WPF window; 62 Android vectors are deterministically converted into `Themes/IconResources.xaml` by `tools/Generate-FluentIconResources.ps1`, so the Windows port no longer substitutes generic icons or clipped fragments.
 - The Windows title row uses `WindowChrome` with DWM-owned minimize/maximize/close controls integrated into the 34 px app header. No character-glyph caption buttons or custom drag/double-click handlers remain. Release-window `WM_NCHITTEST` returned `HTMINBUTTON=8`, `HTMAXBUTTON=9`, and `HTCLOSE=20`; native minimize/maximize/restore actions all changed actual window state successfully.
-- The current Windows solution builds with zero warnings and passes 113/113 tests, including isolated real-window checks and imported Notein/OneNote canvas movement, erasing, layer occlusion/hit testing, 8x imported-page rendering and a 64x thin-vector check. The migration suite passed 9/9 on 2026-10-02. Physical pen/mouse interaction remains user-owned acceptance. Exactly one self-contained win-x64 build is retained at `mojian/artifacts/release/Mojian.exe`; the old desktop test shortcut was not present on this host during the 2026-10-02 check. Section/page management menus expose the Android operations, including rename/delete, move/copy, merge/section export, links, page cut/copy/paste, copied assets, and page-owned-data deletion.
+- The current Windows solution builds with zero warnings and passes 125/125 tests, including isolated real-window checks, writing/save reliability checks and imported Notein/OneNote canvas movement, erasing, layer occlusion/hit testing, 8x imported-page rendering and a 64x thin-vector check. The migration suite passed 9/9 on 2026-10-02. Physical pen/mouse interaction remains user-owned acceptance. Exactly one self-contained win-x64 build is retained at `mojian/artifacts/release/Mojian.exe`; the old desktop test shortcut was not present on this host during the 2026-10-02 check. Section/page management menus expose the Android operations, including rename/delete, move/copy, merge/section export, links, page cut/copy/paste, copied assets, and page-owned-data deletion.
 - On 2026-10-06 both clients gained notebook-row management (`重命名`, `删除`, `新建分区`): Windows right-click and Android long-press/mouse right-click. Confirmed deletion removes the notebook-owned directory, clears split/session references, and cannot be resurrected by late Windows autosave. Deleting the last notebook leaves a fresh empty notebook. Windows menu routing was exercised in a real isolated WPF window; 97/97 Windows and 121/121 Android tests plus Android lint passed. The current Windows EXE was republished/reopened against the unchanged five-notebook workspace; the tablet APK was updated in place over the existing `192.168.31.242:5555` connection and cold-launched in 1,406 ms. Physical Android notebook-menu interaction remains unverified.
 - The Windows full-page chrome now uses transient pane state: entering full page closes both panes without changing the normal-workspace preferences, removes the hidden rail's 32 px layout column, keeps the top controls interactive inside `WindowChrome`, and uses raster-checked centered enter/exit glyphs inside complete 34 px buttons.
 - Windows Ctrl+middle/stylus-hand drag zoom uses a fixed screen diagonal: down-right enlarges and up-left shrinks regardless of canvas center or starting quadrant, while retaining the contact anchor. Holding middle is the sole trigger: in-air stylus movement immediately pans, while Ctrl changes that same in-air movement to zoom; no nib contact or second click is required. This device's promoted mouse coordinates exclusively drive the in-air phase, then the newest high-resolution stylus point takes over after contact so the motion is never applied twice. Windows no longer draws a visible extrapolated line ahead of the nib dot. The hand tool changes only stylus input; ordinary mouse input keeps the arrow cursor, while a physical stylus in range uses a small screen-space pen dot for pen/highlighter input.
@@ -78,6 +93,8 @@
 - Android canvas background patterns now render in a dedicated layer below inserted images/PDF printouts/stickers/tables/attachments, while dry and wet ink remain above inserted content. The fix passed unit tests, debug assembly, and lint; an installed tablet screenshot with two existing imported images verified that the grid remains visible around them without crossing their opaque pixels.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
+  - `docs/design/writing-performance-and-durability.md` (read before Windows wet/dry rendering,
+    pen feedback, Undo, autosave/recovery, or same-page split ownership).
   - `docs/design/shapes-and-straightening.md` (read before shape geometry, hold-to-straighten, shape settings, or generated-stroke persistence).
   - `docs/design/boundless-canvas.md` (read before boundless page growth, paper extents, or smart-cropped PDF export).
   - `docs/design/cross-platform-parity.md` (read before any shared Windows/Android product feature or defect; shared behavior is updated, tested, and delivered on both clients by default).
@@ -90,6 +107,11 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [x] Repair Windows small-page/hover performance and save reliability, verify pixel parity and
+  real-window close flush, normally replace/reopen the Release against the existing workspace,
+  preserve the current handwritten page and verify single-process ownership. Physical pen
+  acceptance and identification/recovery of the exact earlier missing page remain pending.
 
 - [x] Expand both clients' zoom to 6400%, add the shared high-zoom presets and Android shortcut actions, verify clamped anchor-preserving gestures and viewport restore, exercise the real WPF menu/raster path, and refresh both deliverables. Windows reopened; tablet installation remains pending a current ADB connection.
 
@@ -202,6 +224,10 @@
 - Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
 # Durable Lessons
+
+- A .NET dictionary can reuse a removed entry's old slot. Coalesced autosave jobs must select by an
+  explicit submission sequence; remove/reinsert does not guarantee current enqueue order and can
+  otherwise regress shared library metadata after a newer page save.
 
 - A successful import count does not prove native content: validate independent outline edits, source stacking/hit testing and zoomed raster output. Notein ColorLong's upper ARGB word and OneNote cache-only `InsertedFile` attachments were both missed by the older converter.
 - WPF asynchronous PDF completion must dispatch cache mutation/invalidation onto the owning canvas dispatcher. An STA alone does not guarantee that an await resumes on that UI dispatcher; frozen bitmaps can cross threads, visual invalidation cannot. WPF tests also share one Application and must not race its creation.

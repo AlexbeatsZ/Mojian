@@ -14,6 +14,7 @@ public sealed class MainViewModel : ObservableObject
     public const double MaximumPanoramaSensitivity = 3d;
 
     private readonly PreferencesStore _preferencesStore;
+    private readonly PageSaveQueue _pageSaves = new();
     private AppPreferences _preferences;
     private WorkspaceStore _store;
     private WorkspaceSettings _settings;
@@ -156,7 +157,12 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public string BreadcrumbText => string.Join("  /  ", ActiveWorkspace.Breadcrumb().Select(section => section.Title));
-    public string SaveStateText { get => _saveStateText; private set => SetField(ref _saveStateText, value); }
+    public string SaveStateText
+    {
+        get => _saveStateText;
+        private set { if (SetField(ref _saveStateText, value)) OnPropertyChanged(nameof(HasSaveError)); }
+    }
+    public bool HasSaveError => SaveStateText.StartsWith("保存失败", StringComparison.Ordinal);
     public bool HasActivePage => FocusedDocument != null;
 
     public bool IsSectionPaneVisible
@@ -786,6 +792,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void SaveDocument(PageDocument? document)
     {
+        _pageSaves.Flush();
         if (document == null || string.IsNullOrWhiteSpace(document.PageId)) return;
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
         var page = notebook?.FindPage(document.PageId, out _);
@@ -796,6 +803,27 @@ public sealed class MainViewModel : ObservableObject
         _store.SaveLibrary(_library);
         SaveStateText = "已保存";
         RefreshPagePaneRows();
+    }
+
+    public void QueueSaveDocument(PageDocument? document)
+    {
+        if (document == null) return;
+        var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
+        var page = notebook?.FindPage(document.PageId, out _);
+        if (page == null) return;
+        document.UpdatedAt = page.UpdatedAt = DateTime.UtcNow;
+        document.Revision++;
+        var snapshot = document.CopyForSave();
+        SaveStateText = "正在保存…";
+        _pageSaves.Enqueue(_store, snapshot, _library.CopyForSave());
+    }
+
+    public void ObserveSaveCompletion(System.Windows.Threading.Dispatcher dispatcher)
+    {
+        _pageSaves.Completed += error => dispatcher.BeginInvoke(() =>
+        {
+            SaveStateText = error != null ? "保存失败，请重试" : _pageSaves.IsIdle ? "已保存" : "正在保存…";
+        });
     }
 
     public void SavePageMetadata() => SaveLibrary();
@@ -1176,7 +1204,7 @@ public sealed class MainViewModel : ObservableObject
             var pages = ActiveWorkspace.FlattenAllSections().SelectMany(section => section.Pages.Select(page => (section, page))).ToList();
             var index = pages.FindIndex(entry => entry.page.Id == current.PageId);
             var next = pages.Count > 1 ? pages[(Math.Max(0, index) + 1) % pages.Count] : default;
-            SecondaryDocument = next.page == null ? _store.LoadPage(current.NotebookId, current.PageId) : _store.LoadPage(ActiveWorkspace.Id, next.page.Id);
+            SecondaryDocument = next.page == null ? current : _store.LoadPage(ActiveWorkspace.Id, next.page.Id);
             IsSplitView = true;
             FocusedSlot = CanvasSlot.Left;
         }
@@ -1250,7 +1278,10 @@ public sealed class MainViewModel : ObservableObject
     private void LoadSelectedIntoFocusedSlot()
     {
         var page = ActiveWorkspace.SelectedPage();
-        var document = page == null ? null : _store.LoadPage(ActiveWorkspace.Id, page.Id);
+        var other = FocusedSlot == CanvasSlot.Right ? PrimaryDocument : SecondaryDocument;
+        var document = page == null ? null :
+            other?.NotebookId == ActiveWorkspace.Id && other.PageId == page.Id ? other :
+            _store.LoadPage(ActiveWorkspace.Id, page.Id);
         AssignFocusedDocument(document);
         RefreshPageAppearance();
         OnPropertyChanged(nameof(HasActivePage));
@@ -1419,7 +1450,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
-    private void SaveLibrary() => _store.SaveLibrary(_library);
+    private void SaveLibrary() { _pageSaves.Flush(); _store.SaveLibrary(_library); }
 
     private bool MigrateWorkspaceSettings()
     {

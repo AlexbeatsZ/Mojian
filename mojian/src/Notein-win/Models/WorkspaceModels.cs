@@ -74,6 +74,12 @@ public sealed class PageAppearance
 
 public sealed class NotePage
 {
+    public NotePage CopyForSave()
+    {
+        var copy = (NotePage)MemberwiseClone();
+        copy.Appearance = Appearance.Clone();
+        return copy;
+    }
     public string Id { get; set; } = IdFactory.New("page");
     public string Title { get; set; } = "无标题页";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -103,6 +109,13 @@ public sealed class NotePage
 
 public sealed class SectionNode
 {
+    public SectionNode CopyForSave()
+    {
+        var copy = (SectionNode)MemberwiseClone();
+        copy.Pages = Pages.Select(page => page.CopyForSave()).ToList();
+        copy.Children = Children.Select(child => child.CopyForSave()).ToList();
+        return copy;
+    }
     public string Id { get; set; } = IdFactory.New("section");
     public string Title { get; set; } = "新分区";
     public List<NotePage> Pages { get; set; } = new();
@@ -191,6 +204,12 @@ public sealed class PagePaneRow
 
 public sealed class NotebookWorkspace
 {
+    public NotebookWorkspace CopyForSave()
+    {
+        var copy = (NotebookWorkspace)MemberwiseClone();
+        copy.Sections = Sections.Select(section => section.CopyForSave()).ToList();
+        return copy;
+    }
     public string Id { get; set; } = IdFactory.New("notebook");
     public string Title { get; set; } = "新笔记本";
     public List<SectionNode> Sections { get; set; } = new();
@@ -622,6 +641,11 @@ public sealed class NotebookWorkspace
 
 public sealed class NotebookLibrary
 {
+    public NotebookLibrary CopyForSave() => new()
+    {
+        Version = Version, ActiveNotebookId = ActiveNotebookId,
+        Notebooks = Notebooks.Select(notebook => notebook.CopyForSave()).ToList(),
+    };
     public int Version { get; set; } = 2;
     public List<NotebookWorkspace> Notebooks { get; set; } = new();
     public string ActiveNotebookId { get; set; } = string.Empty;
