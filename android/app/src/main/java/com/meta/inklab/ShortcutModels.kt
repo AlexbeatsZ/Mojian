@@ -88,7 +88,7 @@ object ShortcutActionCatalog {
             add(ShortcutCategory.VIEW, "view:zoom-out", "缩小")
             add(ShortcutCategory.VIEW, "view:zoom-reset", "缩放到 100%")
             add(ShortcutCategory.VIEW, "view:fit-width", "适应页宽")
-            listOf(50, 75, 100, 125, 150, 200, 400, 800).forEach { percent ->
+            ViewportState.ZOOM_PRESETS.forEach { percent ->
                 add(ShortcutCategory.VIEW, "view:zoom:$percent", "缩放到 $percent%")
             }
             add(ShortcutCategory.VIEW, "view:toggle-title", "显示或隐藏页面标题")

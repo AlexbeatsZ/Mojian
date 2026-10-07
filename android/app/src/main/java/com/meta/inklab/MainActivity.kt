@@ -6892,7 +6892,7 @@ class MainActivity : Activity() {
         private const val DARK_TOOLTIP_DELAY_MILLIS = 500L
         private const val NAVIGATION_DRAG_ARM_MILLIS = 180L
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
-        private val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800)
+        private val ZOOM_PRESETS = ViewportState.ZOOM_PRESETS
         private val TITLE_PURPLE = Color.rgb(20, 20, 20)
         private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
         private val ACCENT_PURPLE = Color.rgb(218, 178, 233)

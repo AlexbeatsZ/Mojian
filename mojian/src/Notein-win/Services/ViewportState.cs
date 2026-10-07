@@ -6,14 +6,18 @@ namespace Notein_win.Services;
 
 public class ViewportState
 {
-    public float MinScale { get; } = 0.5f;
-    public float MaxScale { get; } = 8.0f;
+    public const float DefaultMinScale = 0.5f;
+    public const float DefaultMaxScale = 64f;
+    public static IReadOnlyList<int> ZoomPresets { get; } = Array.AsReadOnly(new[] { 50, 75, 100, 125, 150, 200, 400, 800, 1600, 3200, 6400 });
+
+    public float MinScale { get; }
+    public float MaxScale { get; }
 
     public float Scale { get; private set; } = 1.0f;
     public float TranslationX { get; private set; } = 0.0f;
     public float TranslationY { get; private set; } = 0.0f;
 
-    public ViewportState(float minScale = 0.5f, float maxScale = 8.0f)
+    public ViewportState(float minScale = DefaultMinScale, float maxScale = DefaultMaxScale)
     {
         MinScale = minScale;
         MaxScale = maxScale;

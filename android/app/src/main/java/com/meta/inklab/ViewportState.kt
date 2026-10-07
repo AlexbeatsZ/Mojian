@@ -16,9 +16,15 @@ data class ViewportSnapshot(
  * Keeping this as explicit scale/translation values avoids accumulating Matrix rounding error.
  */
 class ViewportState(
-    val minScale: Float = 0.5f,
-    val maxScale: Float = 8f,
+    val minScale: Float = DEFAULT_MIN_SCALE,
+    val maxScale: Float = DEFAULT_MAX_SCALE,
 ) {
+    companion object {
+        const val DEFAULT_MIN_SCALE = 0.5f
+        const val DEFAULT_MAX_SCALE = 64f
+        val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800, 1600, 3200, 6400)
+    }
+
     var scale: Float = 1f
         private set
     var translationX: Float = 0f

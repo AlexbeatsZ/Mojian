@@ -1,6 +1,6 @@
 # 墨笺 Windows Desktop Product Contract
 
-Last verified: 2026-10-07
+Last verified: 2026-10-08
 
 Read this document before changing `Notein-win` storage, navigation, canvas input, desktop chrome,
 import/export, or release packaging.
@@ -127,7 +127,9 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   stylus stroke. Only a real stylus authors/erases ink. Mouse and touch use direct content handling:
   click/tap selects, a second click/tap on selected text edits, dragging selected content transforms
   it, and every other primary drag creates a containment marquee even when it starts over an object.
-- Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-800%. Holding the middle
+- Wheel/pinch zoom anchors to the pointer/centroid. The shared range is 50-6400%, with additional
+  1600/3200/6400% presets. `ViewportState` owns both the limits and the preset catalog; viewport
+  restoration uses the same limits. Holding the middle
   button pans; holding Ctrl with middle drag continuously zooms.
   Ctrl-drag uses a fixed screen diagonal: down-right zooms in and up-left zooms out regardless of
   canvas center or starting quadrant, with the original contact point kept as the content anchor.

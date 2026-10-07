@@ -657,8 +657,9 @@ public partial class MainWindow : Window
     {
         if (sender is not Button button) return;
         var menu = new ContextMenu();
-        foreach (var percent in new[] { 50, 75, 100, 125, 150, 200, 400, 800 })
+        foreach (var percent in ViewportState.ZoomPresets)
             AddMenuItem(menu, $"{percent}%", () => FocusedCanvas.SetZoom(percent / 100f));
+        button.ContextMenu = menu;
         menu.PlacementTarget = button;
         menu.IsOpen = true;
     }
@@ -1089,7 +1090,7 @@ public partial class MainWindow : Window
     private void OnZoomOutClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale / 1.25f);
     private void OnZoomInClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale * 1.25f);
     private void OnResetZoomClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(1f);
-    private void UpdateZoomStatus() => ZoomStatus.Text = $"{FocusedCanvas.Viewport.Scale:P0}";
+    private void UpdateZoomStatus() => ZoomStatus.Text = $"{MathF.Round(FocusedCanvas.Viewport.Scale * 100f)}%";
     private void OnLeftCanvasFocus(object sender, MouseButtonEventArgs e) { ViewModel.FocusCanvas(CanvasSlot.Left); UpdateZoomStatus(); }
     private void OnRightCanvasFocus(object sender, MouseButtonEventArgs e) { ViewModel.FocusCanvas(CanvasSlot.Right); UpdateZoomStatus(); }
 

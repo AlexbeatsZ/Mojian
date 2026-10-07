@@ -7,6 +7,64 @@ namespace Notein_win.Tests;
 
 public class ViewportStateTests
 {
+    [Theory]
+    [InlineData(8f)]
+    [InlineData(16f)]
+    [InlineData(32f)]
+    [InlineData(64f)]
+    public void HighZoomPresetsKeepTheAnchorAndCoordinateConversion(float scale)
+    {
+        var viewport = new ViewportState();
+        viewport.Pan(45, 70);
+        var anchor = viewport.ViewToDocument(300, 180);
+
+        viewport.SetScale(scale, 300, 180);
+
+        Assert.Equal(scale, viewport.Scale);
+        Assert.Equal(anchor, viewport.ViewToDocument(300, 180));
+        var point = viewport.DocumentToView(42.5, 98.2);
+        var restored = viewport.ViewToDocument(point.X, point.Y);
+        Assert.Equal(42.5, restored.X, precision: 3);
+        Assert.Equal(98.2, restored.Y, precision: 3);
+    }
+
+    [Fact]
+    public void GestureAtTheNewMaximumStillPansAndCanZoomBackOut()
+    {
+        var viewport = new ViewportState();
+        viewport.ApplyGesture(100, 120, 100, 120, 100);
+        Assert.Equal(64f, viewport.Scale);
+        var anchor = viewport.ViewToDocument(100, 120);
+
+        viewport.ApplyGesture(100, 120, 135, 170, 2);
+        Assert.Equal(64f, viewport.Scale);
+        Assert.Equal(anchor, viewport.ViewToDocument(135, 170));
+
+        viewport.ZoomAt(135, 170, 0.5f);
+        Assert.Equal(32f, viewport.Scale);
+        Assert.Equal(anchor, viewport.ViewToDocument(135, 170));
+        viewport.ZoomAt(135, 170, 0.001f);
+        Assert.Equal(0.5f, viewport.Scale);
+    }
+
+    [Fact]
+    public void PersistedHighZoomRestoresWithoutFallingBackToTheOldMaximum()
+    {
+        var viewport = new ViewportState();
+        viewport.SetScale(64, 300, 180);
+        var saved = new PageViewport();
+        viewport.CopyTo(saved);
+        var roundTrip = System.Text.Json.JsonSerializer.Deserialize<PageViewport>(System.Text.Json.JsonSerializer.Serialize(saved))!;
+        var restored = new ViewportState();
+        restored.Restore(roundTrip);
+
+        Assert.Equal(64f, restored.Scale);
+        Assert.Equal(viewport.TranslationX, restored.TranslationX);
+        Assert.Equal(viewport.TranslationY, restored.TranslationY);
+        restored.Restore(new PageViewport { Scale = 128 });
+        Assert.Equal(64f, restored.Scale);
+    }
+
     [Fact]
     public void CoordinateConversion_IsReversible()
     {

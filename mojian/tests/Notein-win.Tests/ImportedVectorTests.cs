@@ -108,6 +108,41 @@ public class ImportedVectorTests
     });
 
     [Fact]
+    public void RealCanvasRendersThinEditableVectorAtSixtyFourTimesZoom() => Sta(() =>
+    {
+        _ = Application.Current ?? new Application();
+        var stroke = Vector();
+        stroke.VectorPath = "M 20,20 L 120,20 120,20.1 20,20.1 Z";
+        var sourcePath = stroke.VectorPath;
+        var document = new PageDocument("n", "p") { Strokes = [stroke], Layers = [new PageLayer { Id = "ink" }] };
+        var canvas = new NoteCanvas
+        {
+            Width = 400, Height = 300, Document = document,
+            Appearance = new PageAppearance { ShowTitle = false, Theme = PageTheme.Light, Background = CanvasBackgroundFormat.Blank },
+        };
+        canvas.Measure(new Size(400, 300));
+        canvas.Arrange(new Rect(0, 0, 400, 300));
+        canvas.SetZoom(64f);
+        canvas.CenterOnDocumentPoint(70, 20.05);
+        canvas.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(400, 300, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(canvas);
+        var pixels = new byte[400 * 300 * 4];
+        bitmap.CopyPixels(pixels, 400 * 4, 0);
+        bool IsRed(int x, int y)
+        {
+            var index = (y * 400 + x) * 4;
+            return pixels[index + 2] > 200 && pixels[index + 1] < 80 && pixels[index] < 80;
+        }
+        Assert.True(IsRed(200, 150));
+        Assert.False(IsRed(200, 140));
+        Assert.False(IsRed(200, 160));
+        Assert.Equal(64f, document.Viewport.Scale);
+        Assert.Equal(sourcePath, stroke.VectorPath);
+        Assert.Single(document.Strokes);
+    });
+
+    [Fact]
     public void SuppliedMigrationPageRendersVectorsAtEightTimesZoomAndMovesWithoutFlattening() => Sta(() =>
     {
         var path=Environment.GetEnvironmentVariable("MOJIAN_VECTOR_PAGE_JSON");

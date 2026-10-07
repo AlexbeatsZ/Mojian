@@ -1,6 +1,6 @@
 # Workspace Navigation and Drawing UI
 
-Last verified: 2026-10-07
+Last verified: 2026-10-08
 
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
@@ -202,11 +202,11 @@ paper-size menu names are visible. Accessibility descriptions and hover tooltips
 - `整页视图` and `普通视图` drive the existing full-page chrome state. Normal view exposes search
   and enter-full-page at the paper's top-right; full-page view exposes the floating-toolbar pen,
   search, and exit-full-page controls.
-- Zoom uses the shared `ViewportState`: the preset menu contains 50/75/100/125/150/200/400/800%,
+- Zoom uses the shared `ViewportState`: the preset menu contains 50/75/100/125/150/200/400/800/1600/3200/6400%,
   with discrete zoom in/out, 100% reset, and page-width fit. A lock icon directly to the left of
   the percentage disables only finger-pinch scale changes while continuing to allow two-finger
   translation; presets and ribbon buttons still change the locked scale, and the lock state
-  persists. The accepted range remains 50–800%, and every scale change preserves wet/dry
+  persists. The accepted range is 50–6400%, and every scale change preserves wet/dry
   document-coordinate parity.
 - The View-ribbon baseline icon directly reuses the drawing ribbon's background-format menu instead
   of creating a second grid/rule implementation. The selected baseline is stored per page.

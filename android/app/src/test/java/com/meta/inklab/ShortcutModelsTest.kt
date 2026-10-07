@@ -9,6 +9,19 @@ import org.junit.Test
 
 class ShortcutModelsTest {
     @Test
+    fun highZoomPresetsCanBeAssignedToKeyboardShortcuts() {
+        val ids = ShortcutActionCatalog.actions(ToolShelf.defaults()).map { it.id }
+        val settings = KeyboardShortcutSettings()
+        listOf(1600, 3200, 6400).forEach { percent ->
+            val id = "view:zoom:$percent"
+            val chord = ShortcutKeyChord(KeyEvent.KEYCODE_Z, ctrl = true)
+            assertTrue(id in ids)
+            settings.assign(id, chord)
+            assertEquals(id, settings.actionFor(chord))
+        }
+    }
+
+    @Test
     fun catalogUsesConcreteTagActionsInsteadOfParentMenu() {
         val ids = ShortcutActionCatalog.actions(ToolShelf.defaults()).map { it.id }
 

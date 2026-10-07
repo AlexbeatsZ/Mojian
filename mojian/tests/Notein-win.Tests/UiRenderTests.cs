@@ -87,6 +87,18 @@ public class UiRenderTests
                 var normalFullPageButton = Assert.IsType<Button>(window.FindName("EnterFullPageButton"));
                 AssertRenderedIconIsCentered(normalFullPageButton);
                 var leftCanvas = Assert.IsType<NoteCanvas>(window.FindName("LeftCanvas"));
+                var zoomStatus = Assert.IsType<TextBlock>(window.FindName("ZoomStatus"));
+                var zoomButton = Assert.IsType<Button>(((FrameworkElement)zoomStatus.Parent).Parent);
+                zoomButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var zoomMenu = Assert.IsType<ContextMenu>(zoomButton.ContextMenu);
+                Assert.True(zoomMenu.IsOpen);
+                Assert.Equal(new[] { "50%", "75%", "100%", "125%", "150%", "200%", "400%", "800%", "1600%", "3200%", "6400%" }, zoomMenu.Items.OfType<MenuItem>().Select(item => item.Header?.ToString()));
+                zoomMenu.Items.OfType<MenuItem>().Last().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                zoomMenu.IsOpen = false;
+                Assert.Equal(64f, leftCanvas.Viewport.Scale);
+                Assert.Equal("6400%", zoomStatus.Text);
+                CaptureVisual(window, 1440, 900, "win_4_view_6400.png");
+                leftCanvas.SetZoom(1f);
                 vm.SingleFingerPanEnabled = true;
                 Assert.Same(System.Windows.Input.Cursors.Arrow, leftCanvas.Cursor);
                 vm.SingleFingerPanEnabled = false;
