@@ -41,8 +41,8 @@ Parity means the same product outcome, not identical operating-system APIs. For 
   picker, clipboard, pointer, or window integration differs.
 - Boundless paper is anchored at document origin and grows only to the right/down when any actual
   content reaches its 24 mm edge margin. Stored extents never shrink and viewport navigation never
-  grows them. PDF export crops current content with 6 mm padding instead of retaining historical
-  blank paper; both clients follow `docs/design/boundless-canvas.md`.
+  grows them. Physical export/printing paginate current content on chosen paper rather than retaining
+  historical blank extents; both clients follow `docs/design/boundless-canvas.md` and `export-and-print.md`.
 
 ## Completion gate
 

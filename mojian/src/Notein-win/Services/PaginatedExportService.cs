@@ -16,6 +16,7 @@ public static class PaginatedExportService
     public static IReadOnlyList<PdfVectorPage> Capture(NoteCanvas canvas, NotePage page, ExportOptions options)
     {
         if (canvas.Document == null) throw new InvalidOperationException("没有可导出的页面。");
+        var appearance = new OutputAppearance(options.Printing, options.InvertedImageIds, options.HideBackgroundFormat);
         return ExportLayout.Plan(page, canvas.Document, options).Select(sheet =>
         {
             var kinds = canvas.Document.Layers.Count > 0
@@ -27,13 +28,13 @@ public static class PaginatedExportService
                 using (var dc = drawing.Open())
                 {
                     if (pair.Item2 is CanvasRenderLayer.Background or CanvasRenderLayer.Composite)
-                        dc.DrawRectangle(Brushes.White, null, sheet.Output);
+                        dc.DrawRectangle(canvas.ResolveOutputPaperBrush(appearance), null, sheet.Output);
                     dc.PushClip(new RectangleGeometry(new Rect(sheet.Margin, sheet.Margin,
                         sheet.Width - 2 * sheet.Margin, sheet.Height - 2 * sheet.Margin)));
                     dc.PushTransform(new MatrixTransform(sheet.Scale, 0, 0, sheet.Scale,
                         sheet.Margin - sheet.Source.Left * sheet.Scale, sheet.Margin - sheet.Source.Top * sheet.Scale));
                     dc.PushClip(new RectangleGeometry(sheet.Source));
-                    dc.DrawDrawing(canvas.RenderLayerDrawing(pair.Item2, sheet.Source));
+                    dc.DrawDrawing(canvas.RenderLayerDrawing(pair.Item2, sheet.Source, appearance));
                     dc.Pop(); dc.Pop(); dc.Pop();
                 }
                 drawing.Freeze();

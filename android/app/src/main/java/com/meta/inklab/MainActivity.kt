@@ -416,6 +416,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data == null) {
+            if (requestCode == REQUEST_EXPORT) { pendingExport=null; pendingRichExport=null; pendingSectionExport=null }
             if (requestCode == REQUEST_PDF_PAGES) pendingPdfPageTarget = null
             if (requestCode == REQUEST_SAVE_IMAGE) pendingImageSaveFile = null
             return
@@ -6694,24 +6695,30 @@ class MainActivity : Activity() {
         val key=PageSessionKey(workspace.id,page.id)
         val session=pageSessions[key]
         val stored=pageContentRepository.load(workspace.id,page.id)
-        val strokes=session?.strokes ?: (0 until stored.strokes.length()).mapNotNull { ShapeStrokeCodec.decode(stored.strokes.getJSONObject(it),::displayColor) }
         val settings=page.viewSettings.copy()
+        val strokes=session?.strokes ?: (0 until stored.strokes.length()).mapNotNull { index ->
+            ShapeStrokeCodec.decode(stored.strokes.getJSONObject(index)) { color ->
+                if(color==InkPalette.BLACK && settings.darkBackground) Color.rgb(239,239,239) else color.argb
+            }
+        }
         val exportViewport=ViewportState()
-        val ink=DryInkView(this).apply { backgroundFormat=settings.backgroundFormat; replaceStrokes(strokes) }
-        val inserts=InsertContentLayer(this,exportViewport,pageContentRepository).apply { bind(stored) }
+        val ink=DryInkView(this).apply { configureOutputPage(settings,page.title); setDarkBackground(settings.darkBackground); replaceStrokes(strokes) }
+        val inserts=InsertContentLayer(this,exportViewport,pageContentRepository).apply { setDarkBackground(settings.darkBackground); bind(stored) }
         val tags=CanvasTagLayer(this,exportViewport).apply { replaceTags(session?.tags.orEmpty()) }
         val text=CanvasTextInputLayer(this,exportViewport).apply {
+            setDarkBackground(settings.darkBackground)
             replaceEditors(session?.textBoxes.orEmpty())
             measure(View.MeasureSpec.makeMeasureSpec(dp(900),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(dp(1200),View.MeasureSpec.EXACTLY))
             layout(0,0,measuredWidth,measuredHeight)
         }
         val bounds=(ink.contentBounds()+inserts.contentBounds()+tags.contentBounds()+text.contentBounds()).toList()
-        return VectorPdfSource(settings,bounds,page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) { canvas,matrix,_ ->
-            ink.renderBackgroundForExport(canvas,matrix)
-            inserts.renderForExport(canvas,matrix)
-            ink.renderVectorInkForExport(canvas,matrix)
-            tags.renderForExport(canvas,matrix)
-            text.renderForExport(canvas,matrix)
+        return VectorPdfSource(settings,bounds,page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) { canvas,matrix,options ->
+            val output=OutputAppearance(options.printing,options.invertedImageIds,options.hideBackgroundFormat)
+            ink.renderBackgroundForExport(canvas,matrix,output)
+            inserts.renderForExport(canvas,matrix,output=output)
+            ink.renderVectorInkForExport(canvas,matrix,output=output)
+            tags.renderForExport(canvas,matrix,output=output)
+            text.renderForExport(canvas,matrix,output=output)
         }
     }
 
@@ -6783,7 +6790,7 @@ class MainActivity : Activity() {
         ExportOptionsDialog(this,printing,images = { options ->
             val darkPages=exportPages(options.scope).filter { it.viewSettings.darkBackground }
             darkPages.isNotEmpty() to darkPages.flatMap { page -> pageContentRepository.load(workspace.id,page.id).objects.filterIsInstance<InsertObject.Image>()
-                .map { ExportImageChoice(it.id,"${page.title} · ${it.displayName}",it.viewInverted) } }
+                .mapIndexed { index,image -> ExportImageChoice(image.id,"${page.title} · 图片 ${index+1} · ${image.displayName}",image.viewInverted) } }
         },describe = { options ->
             val pages=exportPages(options.scope)
             require(pages.isNotEmpty()) { "请先选择要导出的${options.scope.label}" }
@@ -6838,7 +6845,11 @@ class MainActivity : Activity() {
     }
 
     private fun exportToUri(uri: Uri, type: PendingExport) {
-        pendingRichExport?.let { action -> pendingRichExport=null; action(uri); return }
+        pendingRichExport?.let { action ->
+            pendingRichExport=null
+            runCatching { action(uri) }.onFailure { reportBackgroundFailure("导出失败",it) }
+            return
+        }
         if (type == PendingExport.PDF) {
             val pdf = runCatching { captureVectorPdf() }.getOrElse {
                 reportBackgroundFailure("导出失败", it)

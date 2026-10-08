@@ -81,7 +81,7 @@ public class ExportPaginationTests
                 new StrokeRecord { Color = InkPalette.Black, WidthMm = 1, Points = [new InkPoint(40, 80), new InkPoint(400, 250)] },
                 new StrokeRecord { Color = InkPalette.Red, WidthMm = 1, Points = [new InkPoint(40, (float)stride + 80), new InkPoint(400, (float)stride + 250)] } ] };
             var canvas = new NoteCanvas { Document = document, Appearance = page.Appearance };
-            var pages = PaginatedExportService.Capture(canvas, page, new ExportOptions());
+            var pages = PaginatedExportService.Capture(canvas, page, new ExportOptions(Printing: true));
             Assert.Equal(2, pages.Count);
             Assert.Equal(2, PaginatedExportService.FixedDocument(pages).Pages.Count);
             VectorPdfExportService.Write(path, pages);
@@ -134,8 +134,16 @@ public class ExportPaginationTests
                 app.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
             var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-export-pagination", Guid.NewGuid().ToString("N"));
             var model = new MainViewModel(root, new PreferencesStore(Path.Combine(root, "preferences.json")));
+            var nestedPage = new NotePage { Title = "nested" };
+            model.ActiveWorkspace.SelectedSection()!.Children.Add(new SectionNode { Title = "child", Pages = [nestedPage] });
+            model.Store.SavePage(new PageDocument(model.ActiveWorkspace.Id, nestedPage.Id)
+                { Objects = [new PageObject { X = 20, Y = 30, Width = 200, Height = 2000 }] });
+            var imageA = new PageObject { Id = "print-image-a", Kind = PageObjectKind.Image, DisplayName = "same.png", X = 20, Y = 30, Width = 40, Height = 40, ViewInverted = true };
+            var imageB = new PageObject { Id = "print-image-b", Kind = PageObjectKind.Image, DisplayName = "same.png", X = 80, Y = 30, Width = 40, Height = 40 };
+            model.FocusedDocument!.Objects.AddRange([imageA, imageB]);
             var window = new MainWindow(model) { Width = 1280, Height = 1050 };
             window.Show();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
             try
             {
                 model.IsBackstageOpen = true;
@@ -143,8 +151,15 @@ public class ExportPaginationTests
                 window.UpdateLayout();
                 var backstage = Assert.IsType<BackstageView>(window.FindName("Backstage"));
                 var panel = Assert.IsType<ExportPanel>(backstage.FindName("ExportSettings"));
+                Assert.Equal(Visibility.Collapsed, ((StackPanel)panel.FindName("PrintColorPanel")).Visibility);
+                Assert.Equal(Visibility.Collapsed, ((CheckBox)panel.FindName("HideFormatCheck")).Visibility);
                 Assert.Contains("张纸", ((TextBlock)panel.FindName("Summary")).Text);
                 Assert.True(((Button)panel.FindName("ActionButton")).IsEnabled);
+                ((ListBox)panel.FindName("ScopeList")).SelectedIndex = 1;
+                Assert.Contains("2 个笔记页面", ((TextBlock)panel.FindName("Summary")).Text);
+                var capture = typeof(MainWindow).GetMethod("CaptureExport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+                var sectionPages = (IReadOnlyList<PdfVectorPage>)capture.Invoke(window, [new ExportOptions(Scope: ExportScope.Section)])!;
+                Assert.Equal(3, sectionPages.Count);
                 ((ListBox)panel.FindName("ScopeList")).SelectedIndex = 2;
                 Assert.Contains("张纸", ((TextBlock)panel.FindName("Summary")).Text);
                 var output = Path.Combine(Path.GetTempPath(), ".agents", "mojian-export-pagination", "qa"); Directory.CreateDirectory(output);
@@ -152,6 +167,26 @@ public class ExportPaginationTests
                 model.SelectBackstageTabCommand.Execute("Print"); window.UpdateLayout();
                 var printPanel = Assert.IsType<ExportPanel>(backstage.FindName("PrintSettings"));
                 Assert.Equal(Visibility.Collapsed, ((StackPanel)printPanel.FindName("FormatPanel")).Visibility);
+                Assert.Equal(Visibility.Visible, ((StackPanel)printPanel.FindName("PrintColorPanel")).Visibility);
+                var checkboxes = ((StackPanel)printPanel.FindName("PrintImageList")).Children.OfType<CheckBox>().ToArray();
+                Assert.Equal(2, checkboxes.Length);
+                Assert.True(checkboxes[0].IsChecked);
+                Assert.False(checkboxes[1].IsChecked);
+                Assert.Equal(new[] { imageA.Id }, printPanel.Options.InvertedImageIds);
+                checkboxes[0].IsChecked = false;
+                checkboxes[1].IsChecked = true;
+                Assert.Equal(new[] { imageB.Id }, printPanel.Options.InvertedImageIds);
+                Assert.True(imageA.ViewInverted);
+                Assert.False(imageB.ViewInverted);
+                ((CheckBox)printPanel.FindName("HideFormatCheck")).IsChecked = true;
+                Assert.True(printPanel.Options.HideBackgroundFormat);
+                Assert.False(panel.Options.Printing);
+                Assert.False(panel.Options.HideBackgroundFormat);
+                model.ActiveWorkspace.SelectedPage()!.Appearance.Theme = PageTheme.Light;
+                printPanel.Refresh();
+                Assert.Equal(Visibility.Collapsed, ((StackPanel)printPanel.FindName("PrintColorPanel")).Visibility);
+                Assert.Equal(Visibility.Visible, ((CheckBox)printPanel.FindName("HideFormatCheck")).Visibility);
+                model.ActiveWorkspace.SelectedPage()!.Appearance.Theme = PageTheme.Dark; printPanel.Refresh();
                 Capture(window, Path.Combine(output, "print-panel.png"));
             }
             finally { window.Close(); Directory.Delete(root, true); }

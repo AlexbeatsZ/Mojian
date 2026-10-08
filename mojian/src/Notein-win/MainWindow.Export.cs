@@ -22,7 +22,7 @@ public partial class MainWindow
             var pages = ExportPages(options.Scope).Where(p => p.Appearance.Theme == PageTheme.Dark).ToArray();
             return (pages.Length > 0, pages.SelectMany(page => ExportDocument(page).Objects
                 .Where(o => o.Kind is PageObjectKind.Image or PageObjectKind.Sticker or PageObjectKind.PdfPrintout)
-                .Select(o => new ExportImageChoice(o.Id, $"{page.Title} · {o.DisplayName}", o.ViewInverted))).ToArray());
+                .Select((o, i) => new ExportImageChoice(o.Id, $"{page.Title} · 图片 {i + 1} · {o.DisplayName}", o.ViewInverted))).ToArray());
         };
         Backstage.ExportSettings.Requested += RunExport;
         Backstage.PrintSettings.Requested += RunExport;

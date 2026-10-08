@@ -136,9 +136,11 @@ is product-owned and is not Notein's proprietary backup format.
 
 ### Layered PDF
 
-Boundless pages follow `docs/design/boundless-canvas.md`: export current mixed-content bounds with
-6 mm padding, independently of saved paper size and viewport. Content deletion may reduce the PDF
-crop without shrinking the canvas. Imported PDF MediaBox and A4 export behavior remain unchanged.
+Physical output follows `docs/design/export-and-print.md`: current mixed-content bounds are
+paginated into fixed paper sizes independently of saved boundless size and viewport. Automatic
+paper preserves imported PDF MediaBoxes; A4 continuous notes output separate sheets and omit
+historically grown trailing blank paper by default. Export, printing and physical page ranges
+share the same planner.
 
 Visual export preserves the current page appearance: paper color, ink/text colors, patterns and
 image inversion. It never applies print-only appearance settings. The 2026-10-08 user correction
