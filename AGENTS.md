@@ -13,8 +13,10 @@
   backgrounds also hide its divider. Existing numeric Windows format values remain unchanged.
   Isolated Windows 151/151 and Android 143/143, APK/lint/test-APK
   builds passed (0 lint errors, 113 warnings). Real WPF menu, save/reopen and new-page chooser
-  checks passed; Android native checks were compiled, not run. The only connected ADB target is
-  Redmi `23113RKC6C`; tablet installation remains pending. Final unified EXE/APK delivery is still
+  checks passed; Android native checks were compiled, not run. Tablet ADB has since returned;
+  installation remains coordinated with delivery to preserve its running handwriting session.
+  The unified current APK includes all three formats (147 merged Android unit tests pass).
+  Final unified Windows EXE delivery is still
   owned by the paginated-export integration. Read `docs/design/workspace-ui.md`.
 
 - On 2026-10-08 output colors were separated from page editing on both clients. Dark-page image
