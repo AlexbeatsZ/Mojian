@@ -57,6 +57,18 @@ public static class SelectionGeometry
     public static Rect ResizeBounds(Rect start, int handle, Point point, double minimumSize)
     {
         if (start.IsEmpty || handle is < 0 or > 7) return start;
+        minimumSize = Math.Min(minimumSize, Math.Min(start.Width, start.Height));
+        if (handle % 2 == 0 && start.Width > 0 && start.Height > 0)
+        {
+            var anchor = SelectionHandles(start)[(handle + 4) % 8];
+            var corner = SelectionHandles(start)[handle];
+            var diagonal = corner - anchor;
+            var offset = point - anchor;
+            var factor = Math.Max(
+                (offset.X * diagonal.X + offset.Y * diagonal.Y) / diagonal.LengthSquared,
+                Math.Max(minimumSize / start.Width, minimumSize / start.Height));
+            return new Rect(anchor, anchor + diagonal * factor);
+        }
         var left = start.Left;
         var top = start.Top;
         var right = start.Right;
@@ -73,6 +85,28 @@ public static class SelectionGeometry
             case 7: left = Math.Min(point.X, right - minimumSize); break;
         }
         return new Rect(new Point(left, top), new Point(right, bottom));
+    }
+
+    public static int HitSelectionHandle(Point point, Rect contentBounds, double radius)
+    {
+        if (contentBounds.IsEmpty) return -1;
+        // Keep a body target even when all eight handle targets overlap a tiny image.
+        var body = contentBounds;
+        body.Inflate(-Math.Min(radius, body.Width / 4), -Math.Min(radius, body.Height / 4));
+        if (body.Contains(point)) return -1;
+        var handles = SelectionHandles(contentBounds);
+        var bestDistance = radius * radius;
+        var bestIndex = -1;
+        for (var index = 0; index < handles.Count; index++)
+        {
+            var distance = SquaredDistance(point.X, point.Y, handles[index].X, handles[index].Y);
+            if (distance <= bestDistance && (bestIndex < 0 || distance < bestDistance))
+            {
+                bestDistance = distance;
+                bestIndex = index;
+            }
+        }
+        return bestIndex;
     }
 
     public static bool PolygonIntersectsRect(IList<Point> polygon, Rect rect)

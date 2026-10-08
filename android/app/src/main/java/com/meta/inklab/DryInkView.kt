@@ -367,13 +367,12 @@ class DryInkView(context: Context) : View(context) {
         if (selectedStrokes.isEmpty()) return null
         var bounds: RectF? = null
         for (stroke in selectedStrokes) {
-            val inputs = stroke.inputs
-            for (index in 0 until inputs.size) {
-                val input = inputs.get(index)
-                val current = bounds
-                if (current == null) bounds = RectF(input.x, input.y, input.x, input.y)
-                else current.union(input.x, input.y)
-            }
+            if (stroke.inputs.isEmpty()) continue
+            // Include the brush extent so a horizontal/vertical stroke has resizeable bounds.
+            val cached = boundsFor(stroke)
+            val rect = RectF(cached.left, cached.top, cached.right, cached.bottom)
+            val current = bounds
+            if (current == null) bounds = rect else current.union(rect)
         }
         return bounds
     }
@@ -382,10 +381,10 @@ class DryInkView(context: Context) : View(context) {
         transformSelection(pointTransform = { x, y -> SelectionGeometry.translate(x, y, deltaX, deltaY) })
     }
 
-    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+    fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
         transformSelection(
-            pointTransform = { x, y -> SelectionGeometry.scale(x, y, anchorX, anchorY, factor) },
-            brushScale = factor,
+            pointTransform = { x, y -> SelectionGeometry.scale(x, y, anchorX, anchorY, factorX, factorY) },
+            brushScale = kotlin.math.sqrt(factorX * factorY),
         )
     }
 

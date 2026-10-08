@@ -2731,11 +2731,11 @@ class MainActivity : Activity() {
                     textInputLayer.translateSelection(deltaX, deltaY)
                     insertContentLayer.translateSelection(deltaX, deltaY)
                 }
-                onScaleSelection = { anchorX, anchorY, factor ->
-                    dryInkView.scaleSelection(anchorX, anchorY, factor)
-                    tagLayer.scaleSelection(anchorX, anchorY, factor)
-                    textInputLayer.scaleSelection(anchorX, anchorY, factor)
-                    insertContentLayer.scaleSelection(anchorX, anchorY, factor)
+                onScaleSelection = { anchorX, anchorY, factorX, factorY ->
+                    dryInkView.scaleSelection(anchorX, anchorY, factorX, factorY)
+                    tagLayer.scaleSelection(anchorX, anchorY, factorX, factorY)
+                    textInputLayer.scaleSelection(anchorX, anchorY, factorX, factorY)
+                    insertContentLayer.scaleSelection(anchorX, anchorY, factorX, factorY)
                 }
                 onTransformFinished = {
                     insertContentLayer.finishSelectionTransform()

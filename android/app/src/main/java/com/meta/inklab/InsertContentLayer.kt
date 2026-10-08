@@ -157,13 +157,14 @@ class InsertContentLayer(
         invalidate()
     }
 
-    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+    fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
         selectedItems().forEach { item ->
-            val scaled = SelectionGeometry.scale(item.documentX, item.documentY, anchorX, anchorY, factor)
+            val scaled = SelectionGeometry.scale(item.documentX, item.documentY, anchorX, anchorY, factorX, factorY)
             item.documentX = scaled.x
             item.documentY = scaled.y
-            item.width = (item.width * factor).coerceAtLeast(dp(24f) / viewport.scale.coerceAtLeast(0.01f))
-            item.height = (item.height * factor).coerceAtLeast(dp(24f) / viewport.scale.coerceAtLeast(0.01f))
+            // The shared frame clamps the transform once; per-object clamps break image ratios.
+            item.width *= factorX
+            item.height *= factorY
         }
         if (selectedCount() > 0) selectionTransformMutated = true
         invalidate()

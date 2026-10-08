@@ -199,9 +199,9 @@ class CanvasTagLayer(
         if (selectedTags.isNotEmpty()) invalidate()
     }
 
-    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+    fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
         selectedTags.forEach { tag ->
-            val point = SelectionGeometry.scale(tag.documentX, tag.documentY, anchorX, anchorY, factor)
+            val point = SelectionGeometry.scale(tag.documentX, tag.documentY, anchorX, anchorY, factorX, factorY)
             tag.documentX = point.x
             tag.documentY = point.y
         }

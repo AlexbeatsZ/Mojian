@@ -22,10 +22,56 @@ object SelectionGeometry {
         scale(point.x, point.y, anchor.x, anchor.y, factor)
 
     fun scale(x: Float, y: Float, anchorX: Float, anchorY: Float, factor: Float): DocumentPoint =
+        scale(x, y, anchorX, anchorY, factor, factor)
+
+    fun scale(x: Float, y: Float, anchorX: Float, anchorY: Float, factorX: Float, factorY: Float): DocumentPoint =
         DocumentPoint(
-            anchorX + (x - anchorX) * factor,
-            anchorY + (y - anchorY) * factor,
+            anchorX + (x - anchorX) * factorX,
+            anchorY + (y - anchorY) * factorY,
         )
+
+    fun selectionHandles(bounds: DocumentRect): List<DocumentPoint> = listOf(
+        DocumentPoint(bounds.left, bounds.top),
+        DocumentPoint((bounds.left + bounds.right) / 2, bounds.top),
+        DocumentPoint(bounds.right, bounds.top),
+        DocumentPoint(bounds.right, (bounds.top + bounds.bottom) / 2),
+        DocumentPoint(bounds.right, bounds.bottom),
+        DocumentPoint((bounds.left + bounds.right) / 2, bounds.bottom),
+        DocumentPoint(bounds.left, bounds.bottom),
+        DocumentPoint(bounds.left, (bounds.top + bounds.bottom) / 2),
+    )
+
+    fun hitSelectionHandle(point: DocumentPoint, contentBounds: DocumentRect, displayBounds: DocumentRect, radius: Float): Int {
+        if (contentBounds.isEmpty) return -1
+        val insetX = minOf(radius, (contentBounds.right - contentBounds.left) / 4)
+        val insetY = minOf(radius, (contentBounds.bottom - contentBounds.top) / 4)
+        val body = DocumentRect(contentBounds.left + insetX, contentBounds.top + insetY, contentBounds.right - insetX, contentBounds.bottom - insetY)
+        if (body.contains(point.x, point.y)) return -1
+        return nearestPointIndexWithinRadius(point.x, point.y, selectionHandles(displayBounds), radius)
+    }
+
+    fun resizeBounds(start: DocumentRect, handle: Int, point: DocumentPoint, minimumSize: Float): DocumentRect {
+        if (start.isEmpty || handle !in 0..7) return start
+        val width = start.right - start.left
+        val height = start.bottom - start.top
+        val minimum = minOf(minimumSize, width, height)
+        if (handle % 2 == 0) {
+            val anchor = selectionHandles(start)[(handle + 4) % 8]
+            val corner = selectionHandles(start)[handle]
+            val dx = corner.x - anchor.x
+            val dy = corner.y - anchor.y
+            val factor = maxOf(((point.x - anchor.x) * dx + (point.y - anchor.y) * dy) / (dx * dx + dy * dy), minimum / width, minimum / height)
+            val x = anchor.x + dx * factor
+            val y = anchor.y + dy * factor
+            return DocumentRect(minOf(anchor.x, x), minOf(anchor.y, y), maxOf(anchor.x, x), maxOf(anchor.y, y))
+        }
+        return when (handle) {
+            1 -> start.copy(top = minOf(point.y, start.bottom - minimum))
+            3 -> start.copy(right = maxOf(point.x, start.left + minimum))
+            5 -> start.copy(bottom = maxOf(point.y, start.top + minimum))
+            else -> start.copy(left = minOf(point.x, start.right - minimum))
+        }
+    }
 
     fun pointInPolygon(x: Float, y: Float, polygon: List<DocumentPoint>): Boolean {
         if (polygon.size < 3) return false

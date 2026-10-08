@@ -43,7 +43,7 @@ class SelectionOverlayView(
     var fingerDirectInputEnabled = true
     var selectionBoundsProvider: (() -> RectF?)? = null
     var onTranslateSelection: ((Float, Float) -> Unit)? = null
-    var onScaleSelection: ((Float, Float, Float) -> Unit)? = null
+    var onScaleSelection: ((Float, Float, Float, Float) -> Unit)? = null
     var onTransformFinished: (() -> Unit)? = null
     var onDirectTap: ((Float, Float, Boolean) -> Unit)? = null
     var onDirectLongPress: ((Float, Float) -> Boolean)? = null
@@ -61,7 +61,9 @@ class SelectionOverlayView(
     private var downViewY = 0f
     private var lastPoint = DocumentPoint(0f, 0f)
     private var scaleAnchor = DocumentPoint(0f, 0f)
-    private var lastScaleDistance = 1f
+    private var resizeHandle = -1
+    private var resizeStartBounds = DocumentRect(0f, 0f, 0f, 0f)
+    private var resizeAppliedBounds = resizeStartBounds
     private var longPressTriggered = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val longPressDetector =
@@ -123,13 +125,10 @@ class SelectionOverlayView(
             MotionEvent.ACTION_DOWN -> {
                 val bounds = selectionBoundsProvider?.invoke()
                 val displayBounds = bounds?.let { RectF(it).apply { inset(-dp(8f) / viewport.scale, -dp(8f) / viewport.scale) } }
-                val handles = displayBounds?.let(::handles).orEmpty()
-                val handleIndex = SelectionGeometry.nearestPointIndexWithinRadius(
-                    point.x,
-                    point.y,
-                    handles,
-                    dp(24f) / viewport.scale,
-                ).takeIf { it >= 0 }
+                val handleIndex = if (bounds != null && displayBounds != null) {
+                    SelectionGeometry.hitSelectionHandle(point, bounds.documentRect(), displayBounds.documentRect(), dp(if (isFinger) 24f else 12f) / viewport.scale)
+                        .takeIf { it >= 0 }
+                } else null
                 val intent =
                     DirectInputPolicy.pointerDownIntent(
                         pointerCount = 1,
@@ -140,10 +139,12 @@ class SelectionOverlayView(
                     )
                 if (intent == DirectPointerDownIntent.NATIVE_TEXT_EDIT) return false
                 if (intent == DirectPointerDownIntent.IGNORE) return false
-                if (handleIndex != null && displayBounds != null) {
+                if (handleIndex != null && bounds != null) {
                     gestureMode = GestureMode.SCALE
-                    scaleAnchor = oppositeHandle(displayBounds, handleIndex)
-                    lastScaleDistance = hypot(point.x - scaleAnchor.x, point.y - scaleAnchor.y).coerceAtLeast(0.001f)
+                    resizeHandle = handleIndex
+                    resizeStartBounds = bounds.documentRect()
+                    resizeAppliedBounds = resizeStartBounds
+                    scaleAnchor = SelectionGeometry.selectionHandles(resizeStartBounds)[(handleIndex + 4) % 8]
                 } else if (intent == DirectPointerDownIntent.TRANSFORM_SELECTION) {
                     gestureMode = GestureMode.MOVE
                 } else {
@@ -171,10 +172,13 @@ class SelectionOverlayView(
                         lastPoint = point
                     }
                     GestureMode.SCALE -> {
-                        val distance = hypot(point.x - scaleAnchor.x, point.y - scaleAnchor.y).coerceAtLeast(0.001f)
-                        val factor = (distance / lastScaleDistance).coerceIn(0.25f, 4f)
-                        onScaleSelection?.invoke(scaleAnchor.x, scaleAnchor.y, factor)
-                        lastScaleDistance = distance
+                        val handle = SelectionGeometry.selectionHandles(resizeStartBounds)[resizeHandle]
+                        val target = DocumentPoint(handle.x + point.x - downPoint.x, handle.y + point.y - downPoint.y)
+                        val resized = SelectionGeometry.resizeBounds(resizeStartBounds, resizeHandle, target, dp(24f) / viewport.scale)
+                        val factorX = (resized.right - resized.left) / (resizeAppliedBounds.right - resizeAppliedBounds.left)
+                        val factorY = (resized.bottom - resized.top) / (resizeAppliedBounds.bottom - resizeAppliedBounds.top)
+                        onScaleSelection?.invoke(scaleAnchor.x, scaleAnchor.y, factorX, factorY)
+                        resizeAppliedBounds = resized
                         lastPoint = point
                     }
                     GestureMode.MARQUEE -> onExtendMarquee?.invoke(event.x, event.y)
@@ -251,29 +255,9 @@ class SelectionOverlayView(
         parent?.requestDisallowInterceptTouchEvent(false)
     }
 
-    private fun handles(bounds: RectF): List<DocumentPoint> =
-        listOf(
-            DocumentPoint(bounds.left, bounds.top),
-            DocumentPoint(bounds.centerX(), bounds.top),
-            DocumentPoint(bounds.right, bounds.top),
-            DocumentPoint(bounds.right, bounds.centerY()),
-            DocumentPoint(bounds.right, bounds.bottom),
-            DocumentPoint(bounds.centerX(), bounds.bottom),
-            DocumentPoint(bounds.left, bounds.bottom),
-            DocumentPoint(bounds.left, bounds.centerY()),
-        )
+    private fun handles(bounds: RectF): List<DocumentPoint> = SelectionGeometry.selectionHandles(bounds.documentRect())
 
-    private fun oppositeHandle(bounds: RectF, handle: Int): DocumentPoint =
-        when (handle) {
-            0 -> DocumentPoint(bounds.right, bounds.bottom)
-            1 -> DocumentPoint(bounds.centerX(), bounds.bottom)
-            2 -> DocumentPoint(bounds.left, bounds.bottom)
-            3 -> DocumentPoint(bounds.left, bounds.centerY())
-            4 -> DocumentPoint(bounds.left, bounds.top)
-            5 -> DocumentPoint(bounds.centerX(), bounds.top)
-            6 -> DocumentPoint(bounds.right, bounds.top)
-            else -> DocumentPoint(bounds.right, bounds.centerY())
-        }
+    private fun RectF.documentRect() = DocumentRect(left, top, right, bottom)
 
     private fun dp(value: Float): Float =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics)

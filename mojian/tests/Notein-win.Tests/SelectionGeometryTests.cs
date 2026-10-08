@@ -89,4 +89,54 @@ public class SelectionGeometryTests
         Assert.False(SelectionGeometry.HasVisibleText("  \r\n"));
         Assert.True(SelectionGeometry.HasVisibleText("字"));
     }
+
+    [Fact]
+    public void TinyAndNarrowSelectionsRetainABodyTargetAtEveryZoom()
+    {
+        foreach (var scale in new[] { .5, 1, 8, 64 })
+        foreach (var size in new[] { new Size(8, 6), new Size(4, 100), new Size(100, 4) })
+        foreach (var radius in new[] { 12d, 24d })
+        {
+            var bounds = new Rect(100, 200, size.Width * scale, size.Height * scale);
+            foreach (var fraction in new[] { .3, .5, .7 })
+                Assert.Equal(-1, SelectionGeometry.HitSelectionHandle(new Point(bounds.Left + bounds.Width * fraction, bounds.Top + bounds.Height * fraction), bounds, radius));
+            var handles = SelectionGeometry.SelectionHandles(bounds);
+            for (var index = 0; index < handles.Count; index++)
+                Assert.Equal(index, SelectionGeometry.HitSelectionHandle(handles[index], bounds, radius));
+            Assert.Equal(-1, SelectionGeometry.HitSelectionHandle(new Point(bounds.Right + radius + 1, bounds.Bottom + radius + 1), bounds, radius));
+        }
+    }
+
+    [Fact]
+    public void AllCornersPreserveRatioAndOppositeAnchorIncludingMinimumClamp()
+    {
+        var start = new Rect(10, 20, 80, 40);
+        foreach (var handle in new[] { 0, 2, 4, 6 })
+        {
+            var points = SelectionGeometry.SelectionHandles(start);
+            var corner = points[handle];
+            var anchor = points[(handle + 4) % 8];
+            foreach (var target in new[] { corner + new Vector(91, -27), anchor, anchor + (anchor - corner) })
+            {
+                var resized = SelectionGeometry.ResizeBounds(start, handle, target, 24);
+                Assert.Equal(2, resized.Width / resized.Height, 8);
+                Assert.Equal(anchor, SelectionGeometry.SelectionHandles(resized)[(handle + 4) % 8]);
+                Assert.True(resized.Height >= 24);
+            }
+        }
+        var tiny = new Rect(10, 20, 8, 4);
+        Assert.Equal(tiny, SelectionGeometry.ResizeBounds(tiny, 4, tiny.BottomRight, 24));
+    }
+
+    [Fact]
+    public void AllEdgeHandlesChangeOnlyTheirOwnAxis()
+    {
+        var start = new Rect(10, 20, 80, 40);
+        foreach (var handle in new[] { 1, 3, 5, 7 })
+        {
+            var resized = SelectionGeometry.ResizeBounds(start, handle, new Point(200, 200), 24);
+            if (handle is 1 or 5) { Assert.Equal(start.Left, resized.Left); Assert.Equal(start.Width, resized.Width); }
+            else { Assert.Equal(start.Top, resized.Top); Assert.Equal(start.Height, resized.Height); }
+        }
+    }
 }

@@ -6,6 +6,14 @@
 
 # Current State
 
+- On 2026-10-08 both clients' selection handles gained an interior body-move region for tiny/narrow
+  images, mouse/touch-specific target radii, aspect-preserving corner resize and single-axis edge
+  resize. Resize derives from starting content geometry and pointer displacement, keeping the
+  opposite anchor fixed without off-center/padded-frame jumps. Android clamps at the shared frame
+  rather than individual image dimensions. Focused geometry and native canvas regression coverage
+  is added; final isolated builds/delivery are in progress. See `docs/design/input-gestures.md` and
+  `docs/design/insert-and-export.md`.
+
 - On 2026-10-08 the user's `Chemistry / Chemical Kinetics / 作业 1` (edited 09:09 SGT)
   was re-exported as two occupied A4 pages with vector black ink on white paper after the user
   rejected the first low-resolution raster result. All 1,110 strokes / 26,821 points remain in
@@ -130,6 +138,9 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [ ] Verify and deliver the shared small-image move / aspect-preserving corner-resize repair;
+  use an isolated build checkout while the separate clipboard task edits this same workspace.
 
 - [x] Re-export the 2026-10-08 Chemical Kinetics homework as a true white-paper/black-ink vector PDF; replace both clients' raster PDF routes, validate native paths/opacity/color with independent PDF readers, and refresh both deliverables while preserving notes.
 

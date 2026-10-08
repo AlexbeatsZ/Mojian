@@ -53,13 +53,22 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - On Android and Windows, one ordinary finger/primary-mouse click selects any non-background
   inserted object, including an image, PDF printout, sticker, table, attachment, spreadsheet, or
   note link. Only an already selected object can be dragged by its body or resized from eight compact
-  square handles on the shared light dotted frame. Each
-  handle keeps an approximately 48 dp invisible touch target; corner handles change two
-  axes and edge handles change one axis. Holding reaches the context menu before release.
+  square handles on the shared light dotted frame. Handles use a maximum 24 dp touch radius
+  (12 px/dp for mouse). Inside the content bounds, the body inset is capped at a quarter of each
+  dimension, leaving at least the central half of both dimensions available for body movement
+  even on a tiny or narrow image. This body target takes priority over invisible handle targets.
+  Corner handles preserve the starting aspect ratio around the opposite corner; edge handles
+  change only their corresponding axis. Holding reaches the context menu before release.
   Immutable PDF page-background objects never participate in this direct selection path.
 - Overlapping handle hit regions resolve to the nearest handle, not the first handle in drawing
   order. Body move and resize commit only after platform touch slop. Canvas pan/pinch keeps the
   object selected; a confirmed single tap elsewhere is the sole deselection gesture.
+- Resize uses pointer displacement from the original down position, applied to the original
+  content handle. It does not snap content to an off-center hit or Android's padded frame.
+  Corner displacement projects onto the starting diagonal; crossing the fixed anchor clamps
+  without flipping. The frame minimum is 24 screen units, capped by the starting shorter side
+  so an already smaller image does not jump larger. Clamp once at the shared frame, never
+  independently at each image's width/height, which would distort small items in a mixed selection.
 - The stylus lasso's rectangle/freeform variants and the direct-input rectangular marquee select
   every non-background inserted object whose complete document bounds are contained by the completed
   region; partial overlap is not enough. Images can therefore join ink, tags, and text

@@ -224,13 +224,21 @@ class CanvasTextInputLayer(
         }
     }
 
-    fun scaleSelection(anchorX: Float, anchorY: Float, factor: Float) {
+    fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
         selectedEditors.forEach { editor ->
             state(editor).apply {
-                val scaled = SelectionGeometry.scale(documentX, documentY, anchorX, anchorY, factor)
+                val scaled = SelectionGeometry.scale(documentX, documentY, anchorX, anchorY, factorX, factorY)
                 documentX = scaled.x
                 documentY = scaled.y
-                contentScale = (contentScale * factor).coerceIn(0.2f, 8f)
+                val previousScale = contentScale
+                contentScale = (contentScale * kotlin.math.sqrt(factorX * factorY)).coerceIn(0.2f, 8f)
+                val appliedScale = contentScale / previousScale
+                val params = editor.layoutParams
+                val width = params.width.takeIf { it > 0 } ?: editor.width.takeIf { it > 0 } ?: dp(300)
+                val height = params.height.takeIf { it > 0 } ?: editor.height.takeIf { it > 0 } ?: dp(32)
+                params.width = (width * factorX / appliedScale).toInt().coerceAtLeast(1)
+                params.height = (height * factorY / appliedScale).toInt().coerceAtLeast(1)
+                editor.layoutParams = params
             }
             applyEditorTransform(editor)
         }

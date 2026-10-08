@@ -7,6 +7,55 @@ import org.junit.Test
 
 class SelectionGeometryTest {
     @Test
+    fun tinyAndNarrowSelectionsRetainBodyAndAllHandlesAtEveryZoom() {
+        for (scale in listOf(.5f, 1f, 8f, 64f))
+        for ((width, height) in listOf(8f to 6f, 4f to 100f, 100f to 4f))
+        for (radius in listOf(12f, 24f)) {
+            val bounds = DocumentRect(100f, 200f, 100f + width * scale, 200f + height * scale)
+            val display = DocumentRect(bounds.left - 8f, bounds.top - 8f, bounds.right + 8f, bounds.bottom + 8f)
+            for (fraction in listOf(.3f, .5f, .7f)) {
+                val point = DocumentPoint(bounds.left + width * scale * fraction, bounds.top + height * scale * fraction)
+                assertEquals(-1, SelectionGeometry.hitSelectionHandle(point, bounds, display, radius))
+            }
+            SelectionGeometry.selectionHandles(display).forEachIndexed { index, point ->
+                assertEquals(index, SelectionGeometry.hitSelectionHandle(point, bounds, display, radius))
+            }
+            assertEquals(-1, SelectionGeometry.hitSelectionHandle(DocumentPoint(display.right + radius + 1, display.bottom + radius + 1), bounds, display, radius))
+        }
+    }
+
+    @Test
+    fun allCornersPreserveRatioAndOppositeAnchorIncludingMinimumClamp() {
+        val start = DocumentRect(10f, 20f, 90f, 60f)
+        for (handle in listOf(0, 2, 4, 6)) {
+            val points = SelectionGeometry.selectionHandles(start)
+            val corner = points[handle]
+            val anchor = points[(handle + 4) % 8]
+            for (target in listOf(DocumentPoint(corner.x + 91, corner.y - 27), anchor, DocumentPoint(2 * anchor.x - corner.x, 2 * anchor.y - corner.y))) {
+                val resized = SelectionGeometry.resizeBounds(start, handle, target, 24f)
+                assertEquals(2f, (resized.right - resized.left) / (resized.bottom - resized.top), .0001f)
+                assertEquals(anchor, SelectionGeometry.selectionHandles(resized)[(handle + 4) % 8])
+                assertTrue(resized.bottom - resized.top >= 24f)
+            }
+        }
+        val tiny = DocumentRect(10f, 20f, 18f, 24f)
+        assertEquals(tiny, SelectionGeometry.resizeBounds(tiny, 4, DocumentPoint(18f, 24f), 24f))
+    }
+
+    @Test
+    fun edgeHandlesChangeOnlyTheirOwnAxis() {
+        val start = DocumentRect(10f, 20f, 90f, 60f)
+        for (handle in listOf(1, 3, 5, 7)) {
+            val resized = SelectionGeometry.resizeBounds(start, handle, DocumentPoint(200f, 200f), 24f)
+            if (handle == 1 || handle == 5) {
+                assertEquals(start.left, resized.left, .0001f); assertEquals(start.right, resized.right, .0001f)
+            } else {
+                assertEquals(start.top, resized.top, .0001f); assertEquals(start.bottom, resized.bottom, .0001f)
+            }
+        }
+    }
+
+    @Test
     fun polygonHitTestDistinguishesInsideAndOutsidePoints() {
         val polygon =
             listOf(

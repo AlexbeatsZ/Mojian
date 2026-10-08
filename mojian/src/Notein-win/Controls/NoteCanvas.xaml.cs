@@ -96,6 +96,9 @@ public partial class NoteCanvas : UserControl
     private bool _stylusSelectionTransformActive;
     private bool _stylusSelectionTransformMoved;
     private int _resizeHandle = -1;
+    private Rect _resizeStartBounds;
+    private Rect _resizeAppliedBounds;
+    private Point _resizeDownPoint;
     private bool _isInsertingSpace;
     private bool _insertSpaceUndoPushed;
     private double _insertStartY;
@@ -1231,7 +1234,10 @@ public partial class NoteCanvas : UserControl
         var handleHit = false;
         var handle = -1;
         if (_selectionBounds is { } bounds)
-            handleHit = HitSelectionHandle(viewPoint, _viewport.DocumentToView(bounds), out handle);
+        {
+            handle = SelectionGeometry.HitSelectionHandle(viewPoint, _viewport.DocumentToView(bounds), fromTouch ? 24 : 12);
+            handleHit = handle >= 0;
+        }
         var intent = DirectInputPolicy.PointerDownIntent(1, true, editingHit, selectedHit, handleHit);
         if (intent == DirectPointerDownIntent.NativeTextEdit) return;
 
@@ -1246,6 +1252,11 @@ public partial class NoteCanvas : UserControl
         _directDownView = viewPoint;
         _directLastDocument = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         _transformPoint = _directLastDocument;
+        if (handleHit && _selectionBounds is { } resizeBounds)
+        {
+            _resizeStartBounds = _resizeAppliedBounds = resizeBounds;
+            _resizeDownPoint = _directLastDocument;
+        }
         if (fromTouch) _directLongPressTimer.Start();
         else CaptureMouse();
     }
@@ -2329,13 +2340,16 @@ public partial class NoteCanvas : UserControl
 
     private void ResizeSelection(Point documentPoint)
     {
-        if (_selectionBounds is not { } current || _resizeHandle is < 0 or > 7) return;
-        var resized = SelectionGeometry.ResizeBounds(current, _resizeHandle, documentPoint, 24 / Math.Max(0.01, _viewport.Scale));
+        if (!_selectionBounds.HasValue || _resizeHandle is < 0 or > 7) return;
+        var current = _resizeAppliedBounds;
+        var target = SelectionGeometry.SelectionHandles(_resizeStartBounds)[_resizeHandle] + (documentPoint - _resizeDownPoint);
+        var resized = SelectionGeometry.ResizeBounds(_resizeStartBounds, _resizeHandle, target, 24 / Math.Max(0.01, _viewport.Scale));
         if (resized == current || current.Width <= 0 || current.Height <= 0) return;
-        var anchor = OppositeHandlePoint(current, _resizeHandle);
+        var anchor = OppositeHandlePoint(_resizeStartBounds, _resizeHandle);
         var factorX = resized.Width / current.Width;
         var factorY = resized.Height / current.Height;
         ScaleSelection(anchor, factorX, factorY);
+        _resizeAppliedBounds = resized;
         RecomputeSelectionBounds();
     }
 
@@ -3345,21 +3359,6 @@ public partial class NoteCanvas : UserControl
         _selectedStrokes.Add(stroke);
         RecomputeSelectionBounds();
         InvalidateVisual();
-    }
-
-    private static bool HitSelectionHandle(Point point, Rect bounds, out int handle)
-    {
-        var points = SelectionGeometry.SelectionHandles(bounds);
-        var bestDistance = double.PositiveInfinity;
-        var bestIndex = -1;
-        for (var index = 0; index < points.Count; index++)
-        {
-            var distance = Distance(point, points[index]);
-            if (distance <= 12 && distance < bestDistance) { bestDistance = distance; bestIndex = index; }
-        }
-        if (bestIndex >= 0) { handle = bestIndex; return true; }
-        handle = bounds.Contains(point) ? -1 : int.MinValue;
-        return false;
     }
 
     private static Point OppositeHandlePoint(Rect bounds, int handle) => handle switch

@@ -199,7 +199,9 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   paper without changing the stored color. The Windows wet layer never draws a visible extrapolated
   segment ahead of the pen-tip feedback dot.
 - Whole-stroke eraser, pen freeform/rectangle lasso, direct-pointer rectangle marquee, mixed-content move, and eight-handle
-  non-uniform scaling are document operations and participate in autosave. The eraser removes ink
+  scaling (aspect-preserving corners and single-axis edges) are document operations and participate
+  in autosave. Handle targets preserve an interior body-move region even for tiny selections; see
+  `input-gestures.md`. The eraser removes ink
   and tags but never treats inserted objects as strokes; immutable PDF page backgrounds also survive
   clear-page operations.
 - Pressure erasing is a spring-loaded use of the designated real eraser preset, not a second canvas
