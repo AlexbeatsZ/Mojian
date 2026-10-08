@@ -24,6 +24,9 @@ public enum CanvasBackgroundFormat
     DotsDense,
     DotsStandard,
     DotsWide,
+    RuledTwoColumnStandard,
+    RuledTwoColumnNarrow,
+    RuledTwoColumnWide,
 }
 
 public static class CanvasBackgroundFormatExtensions
@@ -34,6 +37,9 @@ public static class CanvasBackgroundFormatExtensions
         CanvasBackgroundFormat.RuledNarrow => "窄横线",
         CanvasBackgroundFormat.RuledStandard => "标准横线",
         CanvasBackgroundFormat.RuledWide => "宽横线",
+        CanvasBackgroundFormat.RuledTwoColumnStandard => "标准双栏横线",
+        CanvasBackgroundFormat.RuledTwoColumnNarrow => "窄双栏横线",
+        CanvasBackgroundFormat.RuledTwoColumnWide => "宽双栏横线",
         CanvasBackgroundFormat.GridDense => "密集网格",
         CanvasBackgroundFormat.GridStandard => "标准网格",
         CanvasBackgroundFormat.GridWide => "宽网格",

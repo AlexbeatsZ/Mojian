@@ -32,12 +32,16 @@ enum class CanvasBackgroundFormat(
     val category: BackgroundCategory,
     val stepMultiplier: Float = 1f,
     val showMarginLine: Boolean = false,
+    val showColumnDivider: Boolean = false,
 ) {
     BLANK("空白 (无底纹)", BackgroundCategory.BLANK),
     RULE_STANDARD("标准横线 (带边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = true),
     RULE_NARROW("窄行距横线", BackgroundCategory.RULE_LINES, 0.75f, showMarginLine = true),
     RULE_WIDE("宽行距横线", BackgroundCategory.RULE_LINES, 1.35f, showMarginLine = true),
     RULE_CLEAN("纯横线 (无边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = false),
+    RULE_TWO_COLUMN_STANDARD("标准双栏横线", BackgroundCategory.RULE_LINES, 1f, showMarginLine = true, showColumnDivider = true),
+    RULE_TWO_COLUMN_NARROW("窄双栏横线", BackgroundCategory.RULE_LINES, 0.75f, showMarginLine = true, showColumnDivider = true),
+    RULE_TWO_COLUMN_WIDE("宽双栏横线", BackgroundCategory.RULE_LINES, 1.35f, showMarginLine = true, showColumnDivider = true),
     GRID_STANDARD("标准方格", BackgroundCategory.GRID, 1f),
     GRID_DENSE("密集方格", BackgroundCategory.GRID, 0.5f),
     GRID_WIDE("宽距方格", BackgroundCategory.GRID, 1.5f),
@@ -687,6 +691,13 @@ class DryInkView(context: Context) : View(context) {
             BackgroundCategory.BLANK -> return
 
             BackgroundCategory.RULE_LINES -> {
+                if (backgroundFormat.showColumnDivider) {
+                    // Paper width is independent of the visible viewport/export crop.
+                    val centerX = (outputPageSettings.documentWidth ?: A4PageLayout.pageWidth) * 0.5f
+                    if (visible.left <= centerX && visible.right >= centerX) {
+                        canvas.drawLine(centerX, visible.top, centerX, visible.bottom, if (exportTheme) exportMajorGridPaint else majorGridPaint)
+                    }
+                }
                 if (backgroundFormat.showMarginLine) {
                     val marginX = 64f * resources.displayMetrics.density
                     if (visible.left <= marginX && visible.right >= marginX) {

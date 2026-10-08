@@ -601,6 +601,9 @@ public partial class MainWindow : Window
         AddBackground(menu, "标准横线", CanvasBackgroundFormat.RuledStandard);
         AddBackground(menu, "窄横线", CanvasBackgroundFormat.RuledNarrow);
         AddBackground(menu, "宽横线", CanvasBackgroundFormat.RuledWide);
+        AddBackground(menu, "标准双栏横线", CanvasBackgroundFormat.RuledTwoColumnStandard);
+        AddBackground(menu, "窄双栏横线", CanvasBackgroundFormat.RuledTwoColumnNarrow);
+        AddBackground(menu, "宽双栏横线", CanvasBackgroundFormat.RuledTwoColumnWide);
         menu.Items.Add(new Separator());
         AddBackground(menu, "标准点阵", CanvasBackgroundFormat.DotsStandard);
         AddBackground(menu, "密集点阵", CanvasBackgroundFormat.DotsDense);

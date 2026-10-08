@@ -2750,18 +2750,26 @@ public partial class NoteCanvas : UserControl
         if (Appearance.Background == CanvasBackgroundFormat.Blank) return;
         var spacing = Appearance.Background switch
         {
-            CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.DotsDense => 24d,
-            CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.GridWide or CanvasBackgroundFormat.DotsWide => 48d,
+            CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledTwoColumnNarrow or CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.DotsDense => 24d,
+            CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.RuledTwoColumnWide or CanvasBackgroundFormat.GridWide or CanvasBackgroundFormat.DotsWide => 48d,
             _ => 32d,
         };
         var color = Color.FromRgb(45, 50, 56);
         var pen = new Pen(new SolidColorBrush(color), _outputAppearance != null ? 0.8 : 0.8 / Math.Max(0.1, _viewport.Scale));
-        var isRuled = Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide;
+        var isTwoColumn = Appearance.Background is CanvasBackgroundFormat.RuledTwoColumnStandard or CanvasBackgroundFormat.RuledTwoColumnNarrow or CanvasBackgroundFormat.RuledTwoColumnWide;
+        var isRuled = isTwoColumn || Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide;
         var isGrid = Appearance.Background is CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.GridStandard or CanvasBackgroundFormat.GridWide;
         var isDots = Appearance.Background is CanvasBackgroundFormat.DotsDense or CanvasBackgroundFormat.DotsStandard or CanvasBackgroundFormat.DotsWide;
         if (isRuled || isGrid)
         {
             for (var y = Math.Ceiling(bounds.Top / spacing) * spacing; y <= bounds.Bottom; y += spacing) dc.DrawLine(pen, new Point(bounds.Left, y), new Point(bounds.Right, y));
+        }
+        if (isTwoColumn)
+        {
+            // Use the paper center, never the culled viewport or export crop center.
+            var centerX = (Appearance.PaperKind == PaperKind.Infinite ? Appearance.InfiniteWidth : Appearance.Width) / 2;
+            if (centerX >= bounds.Left && centerX <= bounds.Right)
+                dc.DrawLine(pen, new Point(centerX, bounds.Top), new Point(centerX, bounds.Bottom));
         }
         if (isGrid)
         {

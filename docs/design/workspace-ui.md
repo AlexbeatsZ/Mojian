@@ -210,6 +210,15 @@ paper-size menu names are visible. Accessibility descriptions and hover tooltips
   document-coordinate parity.
 - The View-ribbon baseline icon directly reuses the drawing ribbon's background-format menu instead
   of creating a second grid/rule implementation. The selected baseline is stored per page.
+- Both baseline menus and the new-page chooser offer `标准双栏横线`, `窄双栏横线`, and
+  `宽双栏横线`. Each keeps its existing ruled spacing and adds one full-height vertical rule at
+  half the current paper width. Its document coordinate is independent of viewport, zoom, split
+  slots and export crop. Boundless paper growth updates the center; each A4 sheet has its own
+  clipped divider with no rule in the page gap. It is background formatting, never selectable ink.
+  Page settings and `.mjn` preserve the choice; export retains it and print's `隐藏背景格式`
+  hides both the horizontal rules and the divider. Windows appends new enum values to preserve
+  legacy numeric page settings; shared package names are `RULE_TWO_COLUMN_STANDARD`,
+  `RULE_TWO_COLUMN_NARROW`, and `RULE_TWO_COLUMN_WIDE`.
 - Page color, paper size, baseline, page-title visibility, and light-versus-dark page background are
   stored per page. Paper options are only unbounded and A4. A4 is a paginated document policy, not a
   fixed single sheet: it renders consecutive A4 sheets with visible gaps and appends sheets before
