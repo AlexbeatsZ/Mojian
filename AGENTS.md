@@ -11,7 +11,7 @@
   stays independent of viewport/export crop, and clips to each A4 sheet. Boundless growth updates
   the center. Persisted page settings and shared `.mjn` names retain the format; print-only hidden
   backgrounds also hide its divider. Existing numeric Windows format values remain unchanged.
-  Isolated Windows 150/150 initial plus 7/7 feature/UI checks and Android 143/143, APK/lint/test-APK
+  Isolated Windows 151/151 and Android 143/143, APK/lint/test-APK
   builds passed (0 lint errors, 113 warnings). Real WPF menu, save/reopen and new-page chooser
   checks passed; Android native checks were compiled, not run. The only connected ADB target is
   Redmi `23113RKC6C`; tablet installation remains pending. Final unified EXE/APK delivery is still
@@ -178,11 +178,12 @@
 
 - [x] Add shared standard/narrow/wide two-column ruled backgrounds in the ribbon menus and new-page
   chooser. Implementation and shared `.mjn` names are in the root checkout; isolated Windows
-  150/150 tests pass (paper-centered rendering, viewport/crop independence, A4 gaps, print hiding
-  and saved/package round trips), plus the actual menu/new-page chooser check. Android 143/143
+  151/151 tests pass (paper-centered rendering, viewport/crop independence, A4 gaps, print hiding,
+  saved/package round trips and actual menu/new-page chooser checks). Android 143/143
   tests, APK/lint/test-APK assembly passed in
   `C:\Users\Meta\AppData\Local\Temp\.agents\mojian-two-columns-20261008`.
-  Final EXE/APK delivery must include these changes together with the ongoing paginated-export
+  Commits `57f7bbe` and `dff4c43` are pushed to `origin/master`. Final EXE/APK delivery must
+  include these changes together with the ongoing paginated-export
   integration; no shared outputs have been overwritten by this task. See `docs/design/workspace-ui.md`.
 
 - [x] Verify and deliver the shared small-image move / aspect-preserving corner-resize repair
