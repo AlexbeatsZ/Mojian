@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.IO;
 using System.Text;
+using System.Globalization;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Notein_win.Services;
@@ -29,7 +30,28 @@ public class DocumentServicesTests
         var bytes = File.ReadAllBytes(path);
         Assert.Equal("%PDF-1.7", Encoding.ASCII.GetString(bytes, 0, 8));
         Assert.Contains("/OCProperties", Encoding.ASCII.GetString(bytes));
-        Assert.Contains("/OC0 BDC", Encoding.ASCII.GetString(bytes));
+        var pdf = Encoding.ASCII.GetString(bytes);
+        for (var index = 0; index < 3; index++) Assert.Contains($"/OC /OC{index} BDC", pdf);
+        Assert.Contains("<FEFF" + Convert.ToHexString(Encoding.BigEndianUnicode.GetBytes("墨迹与文字")) + ">", pdf);
+    }
+
+    [Fact]
+    public void LayeredPdf_UsesPdfDecimalSyntaxUnderCommaDecimalCulture()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = System.IO.Path.Combine(temp.Path, "locale.pdf");
+        var bitmap = BitmapSource.Create(1, 1, 96, 96, PixelFormats.Bgra32, null, new byte[] { 0, 0, 0, 255 }, 4);
+        bitmap.Freeze();
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            LayeredPdfExportService.Write(path, new[] { new PdfLayer("页面背景", bitmap) }, 595.275, 841.875);
+            var pdf = Encoding.ASCII.GetString(File.ReadAllBytes(path));
+            Assert.Contains("/MediaBox [0 0 595.275 841.875]", pdf);
+            Assert.Contains("q 595.275 0 0 841.875 0 0 cm", pdf);
+        }
+        finally { CultureInfo.CurrentCulture = previous; }
     }
 
     [Fact]

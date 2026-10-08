@@ -6605,6 +6605,23 @@ class MainActivity : Activity() {
     }
 
     private fun exportToUri(uri: Uri, type: PendingExport) {
+        if (type == PendingExport.PDF) {
+            val pdf = runCatching { captureVectorPdf() }.getOrElse {
+                reportBackgroundFailure("导出失败", it)
+                return
+            } ?: return
+            Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
+            ioExecutor.execute {
+                try {
+                    contentResolver.openOutputStream(uri, "w").use { output ->
+                        pdf.writeTo(requireNotNull(output) { "无法写入目标文件" })
+                    }
+                    runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() }
+                } catch (error: Exception) { reportBackgroundFailure("导出失败", error) }
+                finally { pdf.close() }
+            }
+            return
+        }
         val sectionExportTarget = pendingSectionExport
         val snapshot = captureExportLayers()
         if (type == PendingExport.PDF && snapshot == null) return
@@ -6619,8 +6636,7 @@ class MainActivity : Activity() {
                     val pngLayers = layers.entries.associate { (name, bitmap) -> name to bitmapToPng(bitmap) }
                     when (type) {
                         PendingExport.PDF -> {
-                            val rasterLayers = layers.map { (name, bitmap) -> bitmapToPdfLayer(name, bitmap) }
-                            LayeredPdfWriter.write(output, rasterLayers, requireNotNull(snapshot).pageSize)
+                            error("PDF must use the vector export route")
                         }
                         PendingExport.PRIVATE_PACKAGE ->
                             NotebookPackageExporter(pageContentRepository).write(output, notebook, pageId, pngLayers)
@@ -6640,6 +6656,30 @@ class MainActivity : Activity() {
             }.onSuccess { runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() } }
                 .onFailure { reportBackgroundFailure("导出失败", it) }
             layers.values.forEach(Bitmap::recycle)
+        }
+    }
+
+    private fun captureVectorPdf(): android.graphics.pdf.PdfDocument? {
+        val page = workspace.selectedPage() ?: return null
+        val settings = page.viewSettings
+        val bounds = if (settings.paperSize == PaperSize.BOUNDLESS) {
+            val crop = BoundlessPageLayout.exportBounds(documentContentBounds())
+            android.graphics.RectF(crop.left, crop.top, crop.right, crop.bottom)
+        } else {
+            val width = settings.documentWidth ?: A4PageLayout.pageWidth
+            val height = settings.documentHeight ?: A4PageLayout.pageHeight
+            val totalHeight = if (settings.paperSize == PaperSize.A4)
+                settings.a4PageCount.coerceAtLeast(1) * height + (settings.a4PageCount - 1).coerceAtLeast(0) * A4PageLayout.pageGap else height
+            android.graphics.RectF(0f, 0f, width, totalHeight).apply {
+                if (settings.paperSize != PaperSize.PDF) documentContentBounds().forEach { union(it.left, it.top, it.right, it.bottom) }
+            }
+        }
+        return VectorPdfExporter.capture(bounds, page.pdfPage?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) }) { canvas, matrix ->
+            dryInkView.renderBackgroundForExport(canvas, matrix)
+            insertContentLayer.renderForExport(canvas, matrix)
+            dryInkView.renderVectorInkForExport(canvas, matrix)
+            tagLayer.renderForExport(canvas, matrix)
+            textInputLayer.renderForExport(canvas, matrix)
         }
     }
 

@@ -6,6 +6,8 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.InputType
 import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
@@ -288,7 +290,26 @@ class CanvasTextInputLayer(
         canvas.concat(documentMatrix)
         forEachEditor { editor ->
             if (editor.text.isBlank()) return@forEachEditor
-            val textLayout = editor.layout ?: return@forEachEditor
+            val originalLayout = editor.layout ?: return@forEachEditor
+            val exportText = SpannableString(editor.text)
+            exportText.getSpans(0, exportText.length, ForegroundColorSpan::class.java).forEach { span ->
+                val color = ExportColorTransform.lightThemePixel(span.foregroundColor)
+                if (color != span.foregroundColor) {
+                    val start = exportText.getSpanStart(span)
+                    val end = exportText.getSpanEnd(span)
+                    val flags = exportText.getSpanFlags(span)
+                    exportText.removeSpan(span)
+                    exportText.setSpan(ForegroundColorSpan(color), start, end, flags)
+                }
+            }
+            val exportPaint = TextPaint(originalLayout.paint).apply { color = ExportColorTransform.lightThemePixel(color) }
+            val textLayout = StaticLayout.Builder.obtain(exportText, 0, exportText.length, exportPaint, originalLayout.width)
+                .setAlignment(originalLayout.alignment)
+                .setIncludePad(editor.includeFontPadding)
+                .setLineSpacing(editor.lineSpacingExtra, editor.lineSpacingMultiplier)
+                .setBreakStrategy(editor.breakStrategy)
+                .setHyphenationFrequency(editor.hyphenationFrequency)
+                .build()
             val state = state(editor)
             canvas.save()
             canvas.translate(state.documentX, state.documentY)

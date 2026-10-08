@@ -1,6 +1,6 @@
 # Insert Objects and Export Containers
 
-Last verified: 2026-08-24
+Last verified: 2026-10-08
 
 Read this document before changing insert commands, embedded assets, note links, sticker presets,
 spreadsheet/PDF previews, or export formats.
@@ -97,23 +97,51 @@ Boundless pages follow `docs/design/boundless-canvas.md`: export current mixed-c
 6 mm padding, independently of saved paper size and viewport. Content deletion may reduce the PDF
 crop without shrinking the canvas. Imported PDF MediaBox and A4 export behavior remain unchanged.
 
-PDF export writes the current page. It contains three Optional Content Groups (PDF layers):
+PDF export writes the current document page in a light theme: paper becomes white, logical black
+ink/text becomes black, and blue/red/other intentional pen colors remain unchanged. View-only image
+inversion is bypassed. The 2026-10-08 user correction explicitly requires **vector output**.
 
-1. `页面背景`
-2. `插入内容`
-3. `墨迹与文字`
+Windows now records `DrawingGroup` export scenes and writes filled native ink contours, shape
+outlines, paper patterns, and glyph outlines as PDF path operators. Cubic/quadratic curves are
+preserved; elliptical arcs are converted to cubic segments, rather than flattened into a page
+bitmap. Group transforms, clipping and uniform opacity are retained. Actual inserted images remain
+image XObjects with their own source pixels and soft masks. The handwriting and text layer must
+never become a screenshot, regardless of viewport/zoom or page dimensions. Unsupported drawing or
+brush types fail explicitly instead of silently rasterizing the page. Glyph outlines retain the
+font's appearance but are not searchable/OCR text. The old bitmap writer remains only for legacy
+fixtures, while `.mjn` PNG previews remain intentional snapshots.
 
-The live canvas follows the same semantic order. Paper color and rule/grid/dot patterns render below
-all inserted images, PDF printouts, stickers, tables, and attachments; dry/wet ink, text, and tags
-render above inserted content. Background patterns must not share a top-level view layer with ink,
-because doing so makes the pattern bleed across opaque inserted images.
+Ordinary Windows pages retain the `页面背景`, `插入内容`, and `墨迹与文字` Optional Content Groups.
+Imported scenes with source-layer interleaving use one vector composite group in canonical source
+order; separating all images below all ink would incorrectly expose covered source strokes.
+The Windows writer uses valid `/OC /OC0 BDC` syntax, UTF-16BE layer names and invariant PDF numbers.
+The earlier bitmap writer's invalid one-operand BDC was a separate file-syntax defect, not the
+cause of the user's reported low-resolution appearance. A correct canvas bitmap is insufficient
+proof: inspect and render the actual final PDF with an independent interpreter.
 
-Export is intentionally light-theme: the page background becomes white and logical black ink is
-rendered black; blue, red, and other pen colors remain unchanged. View-only image inversion is not
-applied. Each group is a separate raster XObject with alpha preserved through a soft mask. The PDF is
-viewable in ordinary readers; readers that expose Optional Content Groups can independently toggle
-the three layers. This is layered output, not a claim that individual ink strokes remain editable
-PDF vector paths.
+Android now uses native `PdfDocument` and draws AndroidX Ink 1.0.0 `PartitionedMesh` boundary
+outlines with `Canvas.drawPath`, rather than exporting GPU ink or a bitmap screenshot. Paper,
+tags, native text layouts and inserted-object geometry are recorded on the PDF canvas. Logical
+near-white text colors, including foreground spans, are adapted on a copied export layout, without
+mutating live editors. Bitmap assets remain native images. This native Android format has no
+Optional Content Group toggle; preserving vector ink takes priority over the former raster-layer
+format. Native page dimensions are integer PDF points, so fractional source PDF dimensions are
+rounded to the nearest point on this client. Both clients keep document coordinates independent
+of viewport position and scale. A4 remains a continuous document export in the product.
+
+PDF printout backgrounds are still drawn from the existing original-source raster renderer; the
+new guarantee covers authored/imported ink paths, text/glyphs and native geometry, not a claim that
+embedded source-PDF pages have been copied as original PDF operators. Original PDF/image assets
+remain preserved in `.mjn` and the workspace.
+
+The user's `Chemistry / Chemical Kinetics / 作业 1`, edited at 09:09 on 2026-10-08 (SGT), was
+re-exported after rejecting the first raster result. The final two-A4-page vector PDF retains all
+1,110 strokes / 26,821 points and omits the trailing blank third sheet in this one-off delivery.
+Independent PDF parsing finds zero image XObjects on both pages; ordinary and 600-DPI detail
+renders were visually checked with no interpreter errors. The native source workspace is unchanged.
+Windows 132/132 tests include independent PDF rendering of vector ink/glyphs, transparency, image
+orientation and light-theme color adaptation. Android's existing 134 unit tests and build/lint pass (0 errors, 110 warnings); the new native vector integration test is built separately, not run against the sole installed
+session-bound tablet product. Tablet runtime acceptance remains pending.
 
 ### Private notebook package
 

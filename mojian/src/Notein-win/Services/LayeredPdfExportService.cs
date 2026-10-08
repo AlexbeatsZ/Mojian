@@ -29,7 +29,7 @@ public static class LayeredPdfExportService
         var catalogId = Add(string.Empty);
         var pagesId = Add(string.Empty);
         var pageId = Add(string.Empty);
-        var ocgIds = layers.Select(layer => Add($"<< /Type /OCG /Name ({EscapePdfString(layer.Name)}) >>")).ToArray();
+        var ocgIds = layers.Select(layer => Add($"<< /Type /OCG /Name {PdfString(layer.Name)} >>")).ToArray();
         var imageIds = new List<int>();
         var maskIds = new List<int>();
         foreach (var layer in layers)
@@ -48,7 +48,7 @@ public static class LayeredPdfExportService
         var pageHeight = mediaBoxHeightPoints is > 0 ? mediaBoxHeightPoints.Value : height * 72d / 96d;
         for (var index = 0; index < layers.Count; index++)
         {
-            contentBuilder.AppendLine($"/OC{index} BDC q {pageWidth:0.###} 0 0 {pageHeight:0.###} 0 0 cm /Im{index} Do Q EMC");
+            contentBuilder.AppendLine(FormattableString.Invariant($"/OC /OC{index} BDC q {pageWidth:0.###} 0 0 {pageHeight:0.###} 0 0 cm /Im{index} Do Q EMC"));
         }
         var contentBytes = Encoding.ASCII.GetBytes(contentBuilder.ToString());
         var contentId = AddBytes(StreamObject($"<< /Length {contentBytes.Length} >>", contentBytes));
@@ -58,7 +58,7 @@ public static class LayeredPdfExportService
         var ocgRefs = string.Join(' ', ocgIds.Select(id => $"{id} 0 R"));
         objects[catalogId - 1] = Encoding.ASCII.GetBytes($"<< /Type /Catalog /Pages {pagesId} 0 R /OCProperties << /OCGs [{ocgRefs}] /D << /Order [{ocgRefs}] /ON [{ocgRefs}] >> >> >>");
         objects[pagesId - 1] = Encoding.ASCII.GetBytes($"<< /Type /Pages /Kids [{pageId} 0 R] /Count 1 >>");
-        objects[pageId - 1] = Encoding.ASCII.GetBytes($"<< /Type /Page /Parent {pagesId} 0 R /MediaBox [0 0 {pageWidth:0.###} {pageHeight:0.###}] /Resources << /Properties << {properties} >> /XObject << {images} >> >> /Contents {contentId} 0 R >>");
+        objects[pageId - 1] = Encoding.ASCII.GetBytes(FormattableString.Invariant($"<< /Type /Page /Parent {pagesId} 0 R /MediaBox [0 0 {pageWidth:0.###} {pageHeight:0.###}] /Resources << /Properties << {properties} >> /XObject << {images} >> >> /Contents {contentId} 0 R >>"));
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         using var output = File.Create(path);
@@ -113,5 +113,5 @@ public static class LayeredPdfExportService
     }
 
     private static void WriteAscii(Stream output, string value) => output.Write(Encoding.ASCII.GetBytes(value));
-    private static string EscapePdfString(string value) => value.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+    private static string PdfString(string value) => "<FEFF" + Convert.ToHexString(Encoding.BigEndianUnicode.GetBytes(value)) + ">";
 }

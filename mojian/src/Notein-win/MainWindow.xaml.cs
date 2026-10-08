@@ -1246,14 +1246,21 @@ public partial class MainWindow : Window
         try
         {
             var page = ViewModel.FocusedDocument == null ? null : ViewModel.ActiveWorkspace.FindPage(ViewModel.FocusedDocument.PageId, out _);
-            var contentCrop = page?.Appearance.PaperKind == PaperKind.Infinite && ViewModel.FocusedDocument is { } document
-                ? InfinitePageLayout.ExportBounds(document) : (Rect?)null;
-            LayeredPdfExportService.Write(dialog.FileName, new[]
+            var extent = FocusedCanvas.ExportDocumentExtent;
+            if (page?.Appearance.PaperKind == PaperKind.Pdf)
+                extent = new Rect(0, 0, page.Appearance.Width, page.Appearance.Height);
+            var layers = ViewModel.FocusedDocument?.Layers.Count > 0
+                ? new[] { new PdfVectorLayer("页面与内容（原始图层顺序）", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Composite, extent)) }
+                : new[]
+                {
+                    new PdfVectorLayer("页面背景", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Background, extent)),
+                    new PdfVectorLayer("插入内容", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Inserts, extent)),
+                    new PdfVectorLayer("墨迹与文字", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.InkAndText, extent)),
+                };
+            VectorPdfExportService.Write(dialog.FileName, new[]
             {
-                new PdfLayer("页面背景", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.Background)),
-                new PdfLayer("插入内容", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.Inserts)),
-                new PdfLayer("墨迹与文字", FocusedCanvas.RenderLayerBitmap(CanvasRenderLayer.InkAndText)),
-            }, page?.PdfWidthPoints ?? contentCrop?.Width * 72d / 96d, page?.PdfHeightPoints ?? contentCrop?.Height * 72d / 96d);
+                new PdfVectorPage(extent, layers, page?.PdfWidthPoints, page?.PdfHeightPoints),
+            });
             MessageBox.Show(this, "PDF 已导出。", "墨笺", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) { MessageBox.Show(this, $"PDF 导出失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error); }

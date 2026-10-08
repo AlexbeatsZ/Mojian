@@ -724,6 +724,23 @@ public partial class NoteCanvas : UserControl
         return bitmap;
     }
 
+    public DrawingGroup RenderLayerDrawing(CanvasRenderLayer layer, Rect? documentExtent = null)
+    {
+        if (Document == null) throw new InvalidOperationException("没有可导出的页面。");
+        var extent = documentExtent ?? CalculateDocumentExtent();
+        var drawing = new DrawingGroup();
+        using (var dc = drawing.Open())
+        {
+            if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite)
+                dc.DrawRectangle(Brushes.White, null, extent);
+            DrawDocument(dc, layer, lightExport: true, extent);
+        }
+        drawing.Freeze();
+        return drawing;
+    }
+
+    public Rect ExportDocumentExtent => CalculateDocumentExtent();
+
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         base.OnMouseWheel(e);

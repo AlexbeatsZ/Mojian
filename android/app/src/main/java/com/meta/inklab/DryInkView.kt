@@ -15,6 +15,7 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.rendering.android.view.ViewStrokeRenderer
 import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
+import androidx.ink.geometry.MutableVec
 import java.util.IdentityHashMap
 import kotlin.math.floor
 import kotlin.math.sqrt
@@ -494,6 +495,32 @@ class DryInkView(context: Context) : View(context) {
             strokes.forEach(scope::drawStroke)
             transformedCanvas.restore()
         }
+    }
+
+    /** PDF canvases receive the native stroke outlines, never a screenshot or GPU mesh draw. */
+    fun renderVectorInkForExport(canvas: Canvas, documentMatrix: Matrix) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val position = MutableVec()
+        canvas.save()
+        canvas.concat(documentMatrix)
+        strokes.forEach { stroke ->
+            val shape = stroke.shape
+            paint.color = ExportColorTransform.lightThemePixel(stroke.brush.colorIntArgb)
+            for (group in 0 until shape.getRenderGroupCount()) {
+                val path = Path().apply { fillType = Path.FillType.WINDING }
+                for (outline in 0 until shape.getOutlineCount(group)) {
+                    val count = shape.getOutlineVertexCount(group, outline)
+                    if (count == 0) continue
+                    for (vertex in 0 until count) {
+                        shape.populateOutlinePosition(group, outline, vertex, position)
+                        if (vertex == 0) path.moveTo(position.x, position.y) else path.lineTo(position.x, position.y)
+                    }
+                    path.close()
+                }
+                canvas.drawPath(path, paint)
+            }
+        }
+        canvas.restore()
     }
 
     override fun onDraw(canvas: Canvas) {
