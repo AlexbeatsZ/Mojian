@@ -9,6 +9,19 @@ import org.junit.Test
 
 class ShortcutModelsTest {
     @Test
+    fun copyFormatsAreConfigurableAndOnlyNativeCopyHasADefaultShortcut() {
+        val ids = ShortcutActionCatalog.actions(ToolShelf.defaults()).map { it.id }
+        val settings = KeyboardShortcutSettings()
+        assertTrue("home:copy-svg" in ids)
+        assertTrue("home:copy-png" in ids)
+        assertEquals("home:copy", settings.actionFor(ShortcutKeyChord(KeyEvent.KEYCODE_C, ctrl = true)))
+        assertNull(settings.bindings["home:copy-svg"])
+        assertNull(settings.bindings["home:copy-png"])
+        settings.assign("home:copy-svg", ShortcutKeyChord(KeyEvent.KEYCODE_C, ctrl = true, shift = true))
+        val restored = KeyboardShortcutSettings.fromJson(settings.toJson())
+        assertEquals("home:copy-svg", restored.actionFor(ShortcutKeyChord(KeyEvent.KEYCODE_C, ctrl = true, shift = true)))
+    }
+    @Test
     fun highZoomPresetsCanBeAssignedToKeyboardShortcuts() {
         val ids = ShortcutActionCatalog.actions(ToolShelf.defaults()).map { it.id }
         val settings = KeyboardShortcutSettings()

@@ -175,11 +175,6 @@ private data class SectionExportTarget(
     val sectionId: String,
 )
 
-private data class InsertObjectClipboard(
-    val source: PageSessionKey,
-    val json: JSONObject,
-)
-
 class MainActivity : Activity() {
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
     private val straighten = HoldToStraighten()
@@ -323,8 +318,8 @@ class MainActivity : Activity() {
     private var legacyBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
     private var zoomLocked = false
     private var lastPageTemplateSettings = PageViewSettings()
-    private var imageImportDisplayMode = ImageImportDisplayMode.ASK
-    private var pdfPrintoutDisplayMode = ImageImportDisplayMode.ASK
+    private var imageImportDisplayMode = ImageImportDisplayMode.INVERT
+    private var pdfPrintoutDisplayMode = ImageImportDisplayMode.INVERT
     private var pendingExport: PendingExport? = null
     private var pendingSectionExport: SectionExportTarget? = null
     private var pendingPdfPageTarget: PdfPageTarget? = null
@@ -332,7 +327,11 @@ class MainActivity : Activity() {
     private var splitFocusVisible = false
     private var navigationDropTarget: NavigationDropTarget? = null
     private var pageNavigationClipboard: PageNavigationClipboard? = null
-    private var insertObjectClipboard: InsertObjectClipboard? = null
+    private data class NativeSelection(
+        val token: String, val strokes: List<Stroke>, val tags: List<CanvasTagSnapshot>,
+        val text: List<CanvasTextSnapshot>, val objects: List<InsertObject>, val assets: Map<String, ByteArray>,
+    )
+    private var nativeSelection: NativeSelection? = null
     private var pendingImageSaveFile: File? = null
     private val toggledPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
     private val heldPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
@@ -1065,35 +1064,37 @@ class MainActivity : Activity() {
                     }
                     addView(settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
 
-                    val imageFilterValue = settingsValueButton(imageImportDisplayMode.label)
-                    imageFilterValue.setOnClickListener {
-                        imageImportDisplayMode = nextImportDisplayMode(imageImportDisplayMode)
-                        imageFilterValue.text = imageImportDisplayMode.label
-                        persistWorkspacePreferences()
-                    }
-                    addView(
-                        settingsRow(
-                            "图片导入显示",
-                            "只改变画布查看效果；原图与导出始终保持不变。",
-                            imageFilterValue,
-                        ),
-                        LinearLayout.LayoutParams(MATCH, dp(72)),
-                    )
+                    if (workspace.selectedPage()?.viewSettings?.darkBackground == true) {
+                        val imageFilterValue = settingsValueButton(imageImportDisplayMode.label)
+                        imageFilterValue.setOnClickListener {
+                            imageImportDisplayMode = nextImportDisplayMode(imageImportDisplayMode)
+                            imageFilterValue.text = imageImportDisplayMode.label
+                            persistWorkspacePreferences()
+                        }
+                        addView(
+                            settingsRow(
+                                "暗色模式图片导入",
+                                "默认自动反色，不询问；可改为询问或保持原图。",
+                                imageFilterValue,
+                            ),
+                            LinearLayout.LayoutParams(MATCH, dp(72)),
+                        )
 
-                    val pdfFilterValue = settingsValueButton(pdfPrintoutDisplayMode.label)
-                    pdfFilterValue.setOnClickListener {
-                        pdfPrintoutDisplayMode = nextImportDisplayMode(pdfPrintoutDisplayMode)
-                        pdfFilterValue.text = pdfPrintoutDisplayMode.label
-                        persistWorkspacePreferences()
+                        val pdfFilterValue = settingsValueButton(pdfPrintoutDisplayMode.label)
+                        pdfFilterValue.setOnClickListener {
+                            pdfPrintoutDisplayMode = nextImportDisplayMode(pdfPrintoutDisplayMode)
+                            pdfFilterValue.text = pdfPrintoutDisplayMode.label
+                            persistWorkspacePreferences()
+                        }
+                        addView(
+                            settingsRow(
+                                "暗色模式 PDF 插图",
+                                "逐页插入时的显示方式；保留原始 PDF 文件。",
+                                pdfFilterValue,
+                            ),
+                            LinearLayout.LayoutParams(MATCH, dp(72)),
+                        )
                     }
-                    addView(
-                        settingsRow(
-                            "PDF 打印样式显示",
-                            "逐页导入时使用查看滤镜；原 PDF 与导出页面不反色。",
-                            pdfFilterValue,
-                        ),
-                        LinearLayout.LayoutParams(MATCH, dp(72)),
-                    )
 
                     addView(optionsSectionTitle("整页视图"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
@@ -1241,10 +1242,14 @@ class MainActivity : Activity() {
         predictionEnabled = prefs.getBoolean(KEY_PREDICTION_ENABLED, true)
         imageImportDisplayMode =
             runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_IMAGE_IMPORT_DISPLAY_MODE, "") ?: "") }
-                .getOrDefault(ImageImportDisplayMode.ASK)
+                .getOrDefault(ImageImportDisplayMode.INVERT)
         pdfPrintoutDisplayMode =
             runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_PDF_PRINTOUT_DISPLAY_MODE, "") ?: "") }
-                .getOrDefault(ImageImportDisplayMode.ASK)
+                .getOrDefault(ImageImportDisplayMode.INVERT)
+        if (prefs.getInt(KEY_DARK_IMAGE_POLICY_VERSION, 0) < 1) {
+            if (imageImportDisplayMode == ImageImportDisplayMode.ASK) imageImportDisplayMode = ImageImportDisplayMode.INVERT
+            if (pdfPrintoutDisplayMode == ImageImportDisplayMode.ASK) pdfPrintoutDisplayMode = ImageImportDisplayMode.INVERT
+        }
         sectionPaneVisible = prefs.getBoolean(KEY_SECTION_PANE_VISIBLE, true)
         pagePaneVisible = prefs.getBoolean(KEY_PAGE_PANE_VISIBLE, true)
         panoramaSensitivity = prefs.getFloat(KEY_PANORAMA_SENSITIVITY, 1f).coerceIn(MINIMUM_PANORAMA_SENSITIVITY, MAXIMUM_PANORAMA_SENSITIVITY)
@@ -1658,6 +1663,7 @@ class MainActivity : Activity() {
             .putBoolean(KEY_PREDICTION_ENABLED, predictionEnabled)
             .putString(KEY_IMAGE_IMPORT_DISPLAY_MODE, imageImportDisplayMode.name)
             .putString(KEY_PDF_PRINTOUT_DISPLAY_MODE, pdfPrintoutDisplayMode.name)
+            .putInt(KEY_DARK_IMAGE_POLICY_VERSION, 1)
             .putBoolean(KEY_SECTION_PANE_VISIBLE, sectionPaneVisible)
             .putBoolean(KEY_PAGE_PANE_VISIBLE, pagePaneVisible)
             .putString(KEY_PAGE_PANE_MODE, workspace.pagePaneMode.name)
@@ -1933,6 +1939,15 @@ class MainActivity : Activity() {
                     addHomeCommand(HomeCommand.PASTE)
                     addHomeCommand(HomeCommand.CUT)
                     addHomeCommand(HomeCommand.COPY)
+                    addView(FrameLayout(this@MainActivity).apply {
+                        addView(ImageView(this@MainActivity).apply {
+                            setImageDrawable(fluentIcon("caret_down"))
+                            imageTintList = ColorStateList.valueOf(TEXT_PRIMARY)
+                        }, FrameLayout.LayoutParams(dp(9), dp(5), Gravity.CENTER))
+                        contentDescription = "复制选项"
+                        setDarkTooltip(this, "复制选项")
+                        setOnClickListener { showCopyOptions(this) }
+                    }, LinearLayout.LayoutParams(dp(18), dp(42)))
                     addHomeCommand(HomeCommand.FORMAT_PAINTER)
                     addView(verticalDivider())
 
@@ -2091,8 +2106,10 @@ class MainActivity : Activity() {
     private fun performHomeCommand(command: HomeCommand, anchor: View) {
         when (command) {
             HomeCommand.PASTE -> performPasteCommand()
-            HomeCommand.CUT -> runTextCommand("剪切") { textInputLayer.cut() }
-            HomeCommand.COPY -> runTextCommand("复制") { textInputLayer.copy() }
+            HomeCommand.CUT -> if (textInputLayer.isEditing()) runTextCommand("剪切") { textInputLayer.cut() } else copyNativeSelection(cut = true)
+            HomeCommand.COPY -> if (textInputLayer.isEditing()) runTextCommand("复制") { textInputLayer.copy() } else copyNativeSelection()
+            HomeCommand.COPY_SVG -> copySelectionImage(svg = true)
+            HomeCommand.COPY_PNG -> copySelectionImage(svg = false)
             HomeCommand.FORMAT_PAINTER ->
                 when (textInputLayer.formatPainter()) {
                     FormatPainterResult.CAPTURED -> Toast.makeText(this, "已复制格式；选择目标文字后再次点击格式刷", Toast.LENGTH_SHORT).show()
@@ -3458,7 +3475,6 @@ class MainActivity : Activity() {
                     insertContentLayer.bind(null)
                 }
                 if (pageNavigationClipboard?.notebookId == notebook.id) pageNavigationClipboard = null
-                if (insertObjectClipboard?.source?.notebookId == notebook.id) insertObjectClipboard = null
                 for (side in SplitPaneSide.entries) {
                     if (splitViewState.location(side)?.notebookId == notebook.id) clearPreview(hostFor(side))
                 }
@@ -5035,7 +5051,11 @@ class MainActivity : Activity() {
             location[0] + viewX.roundToInt(),
             location[1] + viewY.roundToInt(),
             listOf(
-                MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+                MojianCommandMenu.Item("剪切", "cut", action = { copyNativeSelection(true) }),
+                MojianCommandMenu.Item("复制", "copy", action = { copyNativeSelection() }),
+                MojianCommandMenu.Item("复制为 SVG", "copy", action = { copySelectionImage(true) }),
+                MojianCommandMenu.Item("复制为 PNG", "copy", action = { copySelectionImage(false) }),
+                MojianCommandMenu.Item("粘贴", "clipboard_paste", action = ::performPasteCommand),
                 MojianCommandMenu.Item("全选", "lasso", dividerBefore = true, action = ::selectAllContent),
                 MojianCommandMenu.Item("删除", "delete_dismiss", destructive = true, action = { deleteContentSelection() }),
             ),
@@ -5053,7 +5073,7 @@ class MainActivity : Activity() {
             location[0] + viewX.roundToInt(),
             location[1] + viewY.roundToInt(),
             listOf(
-                MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+                MojianCommandMenu.Item("粘贴", "clipboard_paste", action = ::performPasteCommand),
                 MojianCommandMenu.Item("全选", "lasso", action = ::selectAllContent),
             ),
             widthDp = 196,
@@ -5255,8 +5275,10 @@ class MainActivity : Activity() {
         val nextDark = settings.darkBackground
         darkCanvasActive = nextDark
         dryInkView.backgroundFormat = settings.backgroundFormat
+        dryInkView.configureOutputPage(settings, page?.title.orEmpty())
         dryInkView.setDarkBackground(nextDark)
         textInputLayer.setDarkBackground(nextDark)
+        insertContentLayer.setDarkBackground(nextDark)
         canvasBackgroundLayer.updatePage(settings)
         pageSurfaceBackground.updatePage(page?.title.orEmpty(), settings)
         pageSurfaceForeground.updatePage(page?.title.orEmpty(), settings)
@@ -5970,7 +5992,128 @@ class MainActivity : Activity() {
         launchDocumentPicker(requestCode, "image/*", allowMultiple = true)
     }
 
+    private fun showCopyOptions(anchor: View) {
+        MojianCommandMenu.show(this, anchor, listOf(
+            MojianCommandMenu.Item("复制（原格式）", "copy", action = { copyNativeSelection() }),
+            MojianCommandMenu.Item("复制为 SVG", "copy", action = { copySelectionImage(true) }),
+            MojianCommandMenu.Item("复制为 PNG", "copy", action = { copySelectionImage(false) }),
+        ))
+    }
+
+    private fun hasNativeSelectionClipboard(): Boolean {
+        val token = nativeSelection?.token ?: return false
+        val clip = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip ?: return false
+        return clip.description.hasMimeType(SelectionClipboard.NATIVE_MIME) && clip.itemCount > 0 &&
+            clip.getItemAt(0).intent?.getStringExtra("mojian-selection") == token
+    }
+
+    private fun copyNativeSelection(cut: Boolean = false) {
+        val document = insertContentLayer.currentDocument() ?: return
+        val strokes = dryInkView.snapshotSelectedStrokes()
+        val tags = tagLayer.snapshotSelectedTags()
+        val text = textInputLayer.snapshotEditors(selectedOnly = true)
+        val objects = insertContentLayer.snapshotSelectedObjects()
+        if (strokes.isEmpty() && tags.isEmpty() && text.isEmpty() && objects.isEmpty()) return
+        try {
+            val assets = objects.flatMap(SelectionClipboard::assetNames).distinct().associateWith { name ->
+                assetStore.assetFile(document.notebookId, document.pageId, name).readBytes()
+            }
+            val token = UUID.randomUUID().toString()
+            val selection = NativeSelection(token, strokes, tags, text, objects, assets)
+            val clip = ClipData("墨笺原格式", arrayOf(SelectionClipboard.NATIVE_MIME),
+                ClipData.Item(Intent().putExtra("mojian-selection", token)))
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+            nativeSelection = selection
+            if (cut) deleteContentSelection()
+            Toast.makeText(this, if (cut) "已剪切" else "已复制原格式", Toast.LENGTH_SHORT).show()
+        } catch (error: Exception) {
+            Toast.makeText(this, "复制失败：${error.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun pasteNativeSelection(): Boolean {
+        if (!hasNativeSelectionClipboard()) return false
+        val selection = nativeSelection ?: return false
+        val target = insertContentLayer.currentDocument() ?: return false
+        val offset = dp(18).toFloat()
+        try {
+            val directory = pageContentRepository.assetDirectory(target.notebookId, target.pageId)
+            val names = selection.assets.mapValues { (name, bytes) ->
+                val newName = "paste-${UUID.randomUUID()}-${PageContentRepository.safeId(name)}"
+                File(directory, newName).writeBytes(bytes)
+                newName
+            }
+            val strokes = selection.strokes.map { SelectionClipboard.translatedStroke(it, offset) }
+            val objects = selection.objects.map { SelectionClipboard.translatedObject(it, offset, names) }
+            textInputLayer.endEditing()
+            clearContentSelection()
+            dryInkView.appendSelectedStrokes(strokes)
+            dryInkView.setDarkBackground(darkCanvasActive)
+            tagLayer.appendSelectedTags(selection.tags.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offset) })
+            textInputLayer.appendEditors(selection.text.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offset) })
+            insertContentLayer.appendSelectedObjects(objects)
+            saveBoundPageSession()
+            expandPageIfNeeded()
+            updateSelectionInteraction()
+        } catch (error: Exception) {
+            Toast.makeText(this, "粘贴失败：${error.message}", Toast.LENGTH_SHORT).show()
+        }
+        return true
+    }
+
+    private fun copySelectionImage(svg: Boolean) {
+        val bounds = combinedSelectionBounds()?.let(::RectF) ?: return
+        val margin = maxOf(2f, dryInkView.snapshotSelectedStrokes().maxOfOrNull { it.brush.size } ?: 0f)
+        bounds.inset(-margin, -margin)
+        val scale = minOf(2f, 8192f / maxOf(1f, bounds.width(), bounds.height()),
+            kotlin.math.sqrt(16000000f / maxOf(1f, bounds.width() * bounds.height())))
+        val matrix = Matrix().apply { setTranslate(-bounds.left, -bounds.top); postScale(scale, scale) }
+        fun raster(inserts: Boolean, ink: Boolean, annotations: Boolean): Bitmap {
+            val bitmap = Bitmap.createBitmap(maxOf(1, kotlin.math.ceil(bounds.width() * scale).toInt()),
+                maxOf(1, kotlin.math.ceil(bounds.height() * scale).toInt()), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            if (inserts) insertContentLayer.renderForExport(canvas, matrix, selectedOnly = true)
+            if (ink) dryInkView.renderVectorInkForExport(canvas, matrix, selectedOnly = true)
+            if (annotations) {
+                tagLayer.renderForExport(canvas, matrix, selectedOnly = true)
+                textInputLayer.renderForExport(canvas, matrix, selectedOnly = true)
+            }
+            return bitmap
+        }
+        fun png(bitmap: Bitmap): ByteArray = java.io.ByteArrayOutputStream().use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            bitmap.recycle(); stream.toByteArray()
+        }
+        fun embeddedImage(bytes: ByteArray): String = "<image x=\"${SelectionSvg.number(bounds.left)}\" y=\"${SelectionSvg.number(bounds.top)}\" width=\"${SelectionSvg.number(bounds.width())}\" height=\"${SelectionSvg.number(bounds.height())}\" xlink:href=\"data:image/png;base64,${android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)}\"/>"
+        try {
+            val directory = File(cacheDir, "clipboard").apply { mkdirs() }
+            val file = File(directory, "selection-${UUID.randomUUID()}.${if (svg) "svg" else "png"}")
+            if (svg) {
+                val content = buildString {
+                    append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" version=\"1.1\" width=\"").append(SelectionSvg.number(bounds.width()))
+                        .append("\" height=\"").append(SelectionSvg.number(bounds.height())).append("\" viewBox=\"")
+                        .append(SelectionSvg.number(bounds.left)).append(' ').append(SelectionSvg.number(bounds.top)).append(' ')
+                        .append(SelectionSvg.number(bounds.width())).append(' ').append(SelectionSvg.number(bounds.height())).append("\">")
+                    if (insertContentLayer.selectedCount() > 0) append(embeddedImage(png(raster(true, false, false))))
+                    append(SelectionSvg.inkPaths(dryInkView.snapshotSelectedStrokes()))
+                    if (tagLayer.selectedCount() > 0 || textInputLayer.selectedCount() > 0) append(embeddedImage(png(raster(false, false, true))))
+                    append("</svg>")
+                }
+                file.writeText(content)
+            } else file.writeBytes(png(raster(true, true, true)))
+            val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+            val clip = ClipData(if (svg) "SVG" else "PNG", arrayOf(if (svg) "image/svg+xml" else "image/png"), ClipData.Item(uri))
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+            nativeSelection = null
+            directory.listFiles()?.filter { it != file }?.forEach { it.delete() }
+            Toast.makeText(this, if (svg) "已复制 SVG" else "已复制 PNG", Toast.LENGTH_SHORT).show()
+        } catch (error: Exception) {
+            Toast.makeText(this, "复制失败：${error.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun performPasteCommand() {
+        if (pasteNativeSelection()) return
         val imageUris = clipboardImageUris()
         if (imageUris.isNotEmpty()) {
             if (insertTarget() == null) {
@@ -5985,10 +6128,6 @@ class MainActivity : Activity() {
         }
         if (textInputLayer.paste()) {
             Toast.makeText(this, "已粘贴", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (insertObjectClipboard != null && insertContentLayer.currentDocument() != null) {
-            pasteInsertObject()
             return
         }
         Toast.makeText(this, "剪贴板中没有可粘贴的图片或页面内容", Toast.LENGTH_SHORT).show()
@@ -6025,6 +6164,10 @@ class MainActivity : Activity() {
         }
 
     private fun chooseDisplayFilter(mode: ImageImportDisplayMode, title: String, action: (Boolean) -> Unit) {
+        ImageImportPolicy.resolve(mode, workspace.selectedPage()?.viewSettings?.darkBackground == true)?.let {
+            action(it)
+            return
+        }
         when (mode) {
             ImageImportDisplayMode.INVERT -> action(true)
             ImageImportDisplayMode.ORIGINAL -> action(false)
@@ -6422,9 +6565,11 @@ class MainActivity : Activity() {
         val sectionId = workspace.selectedPageSectionId
         val selectedPageLink = page?.let { pageLink(workspace.id, sectionId, it.id) }
         return listOf(
-            MojianCommandMenu.Item("剪切", "cut", action = { copySelectedInsertObject(cut = true) }),
-            MojianCommandMenu.Item("复制", "copy", action = { copySelectedInsertObject(cut = false) }),
-            MojianCommandMenu.Item("粘贴", "clipboard_paste", enabled = insertObjectClipboard != null, action = ::pasteInsertObject),
+            MojianCommandMenu.Item("剪切", "cut", action = { copyNativeSelection(true) }),
+            MojianCommandMenu.Item("复制", "copy", action = { copyNativeSelection() }),
+            MojianCommandMenu.Item("复制为 SVG", "copy", action = { copySelectionImage(true) }),
+            MojianCommandMenu.Item("复制为 PNG", "copy", action = { copySelectionImage(false) }),
+            MojianCommandMenu.Item("粘贴", "clipboard_paste", action = ::performPasteCommand),
             MojianCommandMenu.Item("另存为…", "document_page", dividerBefore = true, action = { saveImageAs(image) }),
             MojianCommandMenu.Item("链接…", "link", enabled = false),
             MojianCommandMenu.Item(
@@ -6435,6 +6580,7 @@ class MainActivity : Activity() {
             ),
             MojianCommandMenu.Item("顺序", "navigation", dividerBefore = true, submenu = orderMenu),
             MojianCommandMenu.Item("旋转", "arrow_redo", submenu = rotateMenu),
+            MojianCommandMenu.Item("反色", "image", checked = image.viewInverted, action = { insertContentLayer.toggleImageInversion(image) }),
             MojianCommandMenu.Item("移动", "hand_left", enabled = false, dividerBefore = true),
             MojianCommandMenu.Item("裁剪", "crop", enabled = false),
             MojianCommandMenu.Item("还原为原始尺寸", "full_screen_maximize", dividerBefore = true, action = { insertContentLayer.restoreSelectedImageSize() }),
@@ -6445,7 +6591,11 @@ class MainActivity : Activity() {
     private fun objectContextMenuItems(item: InsertObject): List<MojianCommandMenu.Item> =
         listOf(
             MojianCommandMenu.Item(if (item is InsertObject.Table) "编辑" else "打开", "document_page", action = { activateInsertObject(item) }),
-            MojianCommandMenu.Item("复制", "copy", action = { insertContentLayer.duplicateSelection() }),
+            MojianCommandMenu.Item("剪切", "cut", action = { copyNativeSelection(true) }),
+            MojianCommandMenu.Item("复制", "copy", action = { copyNativeSelection() }),
+            MojianCommandMenu.Item("复制为 SVG", "copy", action = { copySelectionImage(true) }),
+            MojianCommandMenu.Item("复制为 PNG", "copy", action = { copySelectionImage(false) }),
+            MojianCommandMenu.Item("粘贴", "clipboard_paste", action = ::performPasteCommand),
             MojianCommandMenu.Item(
                 "顺序",
                 "navigation",
@@ -6460,37 +6610,6 @@ class MainActivity : Activity() {
             MojianCommandMenu.Item("删除", "delete_dismiss", dividerBefore = true, destructive = true, action = { insertContentLayer.deleteSelection() }),
         )
 
-    private fun copySelectedInsertObject(cut: Boolean) {
-        val document = insertContentLayer.currentDocument() ?: return
-        val selected = insertContentLayer.selectedImage() ?: return
-        insertObjectClipboard = InsertObjectClipboard(PageSessionKey(document.notebookId, document.pageId), JSONObject(selected.toJson().toString()))
-        if (cut) insertContentLayer.deleteSelection()
-        Toast.makeText(this, if (cut) "已剪切图片" else "已复制图片", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun pasteInsertObject() {
-        val clipboard = insertObjectClipboard ?: return
-        val target = insertContentLayer.currentDocument() ?: return
-        val json = JSONObject(clipboard.json.toString()).apply {
-            put("id", "paste-${UUID.randomUUID()}")
-            put("x", getDouble("x") + dp(18))
-            put("y", getDouble("y") + dp(18))
-            put("pageBackground", false)
-        }
-        val pasted = InsertObject.fromJson(json)
-        if (clipboard.source.notebookId != target.notebookId || clipboard.source.pageId != target.pageId) {
-            val sourceDirectory = pageContentRepository.assetDirectory(clipboard.source.notebookId, clipboard.source.pageId)
-            val targetDirectory = pageContentRepository.assetDirectory(target.notebookId, target.pageId)
-            val image = pasted as? InsertObject.Image
-            listOfNotNull(image?.assetName, image?.sourceAssetName).distinct().forEach { assetName ->
-                val source = File(sourceDirectory, PageContentRepository.safeId(assetName))
-                val destination = File(targetDirectory, PageContentRepository.safeId(assetName))
-                if (source.isFile && !destination.exists()) source.copyTo(destination)
-            }
-        }
-        insertContentLayer.addObjectAndSelect(pasted)
-        expandPageIfNeeded()
-    }
 
     private fun saveImageAs(image: InsertObject.Image) {
         val document = insertContentLayer.currentDocument() ?: return
@@ -6726,7 +6845,6 @@ class MainActivity : Activity() {
             tagLayer.renderForExport(canvas, documentMatrix)
             textInputLayer.renderForExport(canvas, documentMatrix)
         }
-        ExportColorTransform.applyTo(inkAndText)
         return ExportSnapshot(
             layers = linkedMapOf("页面背景" to background, "插入内容" to inserted, "墨迹与文字" to inkAndText),
             pageSize = pdfInfo?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) }
@@ -6915,6 +7033,7 @@ class MainActivity : Activity() {
         private const val KEY_ZOOM_LOCKED = "zoom-locked"
         private const val KEY_LAST_PAGE_TEMPLATE = "last-page-template"
         private const val KEY_IMAGE_IMPORT_DISPLAY_MODE = "image-import-display-mode"
+        private const val KEY_DARK_IMAGE_POLICY_VERSION = "dark-image-import-policy-version"
         private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"
         private const val KEY_NOTEBOOK_LIBRARY = "notebook-library"
         private const val KEY_KEYBOARD_SHORTCUTS = "keyboard-shortcuts"

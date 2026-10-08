@@ -6,6 +6,29 @@
 
 # Current State
 
+- On 2026-10-08 output colors were separated from page editing on both clients. Dark-page image
+  insertion defaults to inversion without a prompt; light-page insertion never asks/inverts and
+  hides its policy controls. Image menus toggle persisted inversion in either theme. Visual export
+  and selection SVG/PNG retain current appearance; only dark-page printing converts white/logical
+  white ink/text to black and neutral black paper to white. Print image IDs toggle displayed
+  inversion from original assets; optional `隐藏背景格式` removes patterns from print/preview
+  in either theme without mutating page settings. Root Windows 144/144 and Android 142/142 plus
+  APK/lint/test-APK builds pass (0 lint errors, 113 warnings); native Android output tests are compiled, not run on the live
+  tablet. Final output UI, integration and delivery are coordinated with the paginated-export
+  chat; do not publish or clean shared outputs concurrently. Read `docs/design/insert-and-export.md`.
+
+- On 2026-10-08 both clients gained native editable selection copy plus separate SVG and PNG copy
+  options in Home and content menus. Ctrl+C remains native copy; SVG/PNG are configurable shortcut
+  actions with no default binding. Private clipboard tokens prevent old system images or older
+  internal snapshots from winning paste. Native copies capture independent content and asset bytes;
+  Windows imported scene ordering and Android shape identities are retained safely. Initial Windows
+  141/141 and Android 139/139 tests, APK/integration-APK assembly and lint (0 errors, 112 warnings)
+  passed; actual WPF command/menu checks passed. Current-display output integration and final shared
+  build/commit/push/publication are coordinated with the concurrent color and paginated-export chats;
+  do not concurrently clear bin/obj/build or republish. Tablet ADB/mDNS had no endpoint. Read the
+  Selection clipboard section of `docs/design/insert-and-export.md` for clipboard lifetime, native
+  editability and SVG boundaries.
+
 - On 2026-10-08 both clients' selection handles gained an interior body-move region for tiny/narrow
   images, mouse/touch-specific target radii, aspect-preserving corner resize and single-axis edge
   resize. Resize derives from starting content geometry and pointer displacement, keeping the
@@ -122,8 +145,8 @@
 - Windows' Page/PDF creation dialog is an opaque, device-pixel-rounded ClearType window rather than a layered transparent window. Full-page pane header add controls opt into the native caption hit-test region, and empty/whitespace temporary text has no visible selection frame.
 - Windows right-button source classification tolerates Wacom drivers that mix raw barrel events with promoted mouse events. Mouse right-click still uses the system drag threshold, but the stylus side button must never use movement distance: release within the Windows `GetDoubleClickTime()` window is always a context click despite nib jitter. Nib contact shows the lasso preview immediately; an in-window release discards it without changing selection, while holding past the window makes the same path committable. In-air side-button clicks open the same context menu but cannot lasso without contact. Stylus menus wait for the promoted stream to drain; completed lassos never open a menu. A new barrel/right press while an app-owned menu is open closes it and rearms the timed gesture; middle down also closes the menu and resumes pan/Ctrl-zoom. Raw/mouse release, capture loss, focus/tool/document change share one cleanup path. Pen/highlighter contact inside an existing mixed-selection frame drags it; contact outside clears it and writes.
 - Windows drawing-tool flyouts preserve the state seen at pointer-down: an unselected tool click only selects, a second click opens its flyout, and clicking any tool while a flyout is open closes the old flyout; a different tool is selected without immediately opening its menu.
-- Image and PDF-printout imports have independent `询问 / 自动反色 / 保持原图` options. The view-only filter follows `invert(89.4118%) hue-rotate(180deg)` so white maps exactly to the `#1b1b1b` paper; export always uses original image pixels.
-- PDF export now writes native ink/shape/glyph geometry on both clients, using white paper and black logical ink/text while preserving intentional colors. Windows ordinary pages retain Optional Content Groups; source scenes preserve interleaving, and Android native PDF has no layer toggle. `.mjn` keeps editable page JSON, original assets, and intentional PNG layer previews. See `docs/design/insert-and-export.md`.
+- Image/PDF import policies apply only to dark pages and default to automatic inversion. The view filter follows `invert(89.4118%) hue-rotate(180deg)` calibrated to `#1b1b1b`; visual exports retain display state and source bytes remain unchanged.
+- PDF export writes native ink/shape/glyph geometry on both clients with the current page appearance. Printing owns the independent conversion/selection/pattern options. Windows ordinary pages retain Optional Content Groups; source scenes preserve interleaving, and Android native PDF has no layer toggle. `.mjn` keeps editable page JSON, original assets, and intentional PNG layer previews. See `docs/design/insert-and-export.md`.
 - Android canvas background patterns now render in a dedicated layer below inserted images/PDF printouts/stickers/tables/attachments, while dry and wet ink remain above inserted content. The fix passed unit tests, debug assembly, and lint; an installed tablet screenshot with two existing imported images verified that the grid remains visible around them without crossing their opaque pixels.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:

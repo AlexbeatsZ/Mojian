@@ -23,11 +23,12 @@ do not silently leave the other client behind.
 Parity means the same product outcome, not identical operating-system APIs. For example:
 
 - `开始 -> 粘贴` and its keyboard shortcut paste an image from the system clipboard as a normal
-  page-owned image object. Windows accepts a clipboard bitmap and copied image-file drop list;
+  page-owned image object after checking the current native selection clipboard token. Windows accepts a clipboard bitmap and copied image-file drop list;
   Android accepts foreground-readable `ClipData` image URIs. Each client immediately copies the
   image into the active page's private asset directory, preserves its aspect ratio, applies the
-  configured image display policy, and persists the object. Text editing and the product's internal
-  object clipboard remain available when the system clipboard does not contain an image.
+  configured image display policy, and persists the object. Native selection copy preserves editable
+  ink, tags, rich text and objects; SVG/PNG are separate external formats and unbound shortcut actions.
+  System text editing retains native character copy/paste. See `insert-and-export.md` for format boundaries.
 - A4 is a continuous Word-style stack on both clients. Existing content near the final sheet and a
   viewport browsing near the final sheet both append more paper before the user reaches the end.
   Sheets retain an explicit workspace-colored gap, the stored count never shrinks automatically,

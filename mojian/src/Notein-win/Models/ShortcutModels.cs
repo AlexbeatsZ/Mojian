@@ -83,6 +83,8 @@ public static class ShortcutActionCatalog
             new("home:paste", "粘贴", ShortcutCategory.Home),
             new("home:cut", "剪切", ShortcutCategory.Home),
             new("home:copy", "复制", ShortcutCategory.Home),
+            new("home:copy-svg", "复制为 SVG", ShortcutCategory.Home),
+            new("home:copy-png", "复制为 PNG", ShortcutCategory.Home),
             new("home:format-painter", "格式刷", ShortcutCategory.Home),
             new("home:bold", "加粗", ShortcutCategory.Home),
             new("home:italic", "倾斜", ShortcutCategory.Home),

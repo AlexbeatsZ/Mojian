@@ -15,7 +15,8 @@ object ImageViewFilter {
             0f, 0f, 0f, 1f, 0f,
         )
 
-    fun shouldApply(viewInverted: Boolean, forExport: Boolean): Boolean = viewInverted && !forExport
+    @Suppress("UNUSED_PARAMETER")
+    fun shouldApply(viewInverted: Boolean, forExport: Boolean): Boolean = viewInverted
 
     fun transform(red: Int, green: Int, blue: Int): IntArray =
         IntArray(3) { row ->

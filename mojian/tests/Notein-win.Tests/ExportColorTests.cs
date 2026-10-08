@@ -10,7 +10,7 @@ namespace Notein_win.Tests;
 public class ExportColorTests
 {
     [Fact]
-    public void DarkPageExportHasWhitePaperBlackLogicalInkAndOriginalColoredInk()
+    public void DarkPagePrintHasWhitePaperBlackInkAndOriginalColoredInk()
     {
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -37,16 +37,15 @@ public class ExportColorTests
                     Appearance = new PageAppearance { Theme = PageTheme.Dark, Background = CanvasBackgroundFormat.Blank, ShowTitle = false },
                 };
                 var bounds = InfinitePageLayout.ExportBounds(document);
-                var ink = canvas.RenderLayerBitmap(CanvasRenderLayer.InkAndText);
-                var paper = canvas.RenderLayerBitmap(CanvasRenderLayer.Background);
+                var ink = canvas.RenderLayerBitmap(CanvasRenderLayer.InkAndText, output: new OutputAppearance(true));
+                var paper = canvas.RenderLayerBitmap(CanvasRenderLayer.Background, output: new OutputAppearance(true));
                 Assert.Equal(Colors.White, Pixel(paper, 0, 0));
                 var y = (int)Math.Round(10 - bounds.Y);
                 var x0 = (int)Math.Round(10 - bounds.X);
                 Assert.Equal(Colors.Black, Pixel(ink, x0, y));
                 Assert.Equal(Color.FromRgb(70, 153, 255), Pixel(ink, x0 + 40, y));
                 Assert.Equal(Color.FromRgb(232, 49, 57), Pixel(ink, x0 + 80, y));
-                // Imported white can be cover ink; retain its source color.
-                Assert.Equal(Colors.White, Pixel(ink, x0 + 120, y));
+                Assert.Equal(Colors.Black, Pixel(ink, x0 + 120, y));
             }
             catch (Exception error) { failure = error; }
         });

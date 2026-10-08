@@ -32,6 +32,8 @@ object ShortcutActionCatalog {
             add(ShortcutCategory.HOME, "home:paste", "粘贴")
             add(ShortcutCategory.HOME, "home:cut", "剪切")
             add(ShortcutCategory.HOME, "home:copy", "复制")
+            add(ShortcutCategory.HOME, "home:copy-svg", "复制为 SVG")
+            add(ShortcutCategory.HOME, "home:copy-png", "复制为 PNG")
             add(ShortcutCategory.HOME, "home:bold", "加粗")
             add(ShortcutCategory.HOME, "home:italic", "倾斜")
             add(ShortcutCategory.HOME, "home:underline", "下划线")

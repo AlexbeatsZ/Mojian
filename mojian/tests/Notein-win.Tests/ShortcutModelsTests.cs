@@ -6,6 +6,16 @@ namespace Notein_win.Tests;
 public class ShortcutModelsTests
 {
     [Fact]
+    public void CopyFormatsAreConfigurableWithOnlyNativeCopyBoundByDefault()
+    {
+        var actions = ShortcutActionCatalog.Build(ToolShelf.Defaults());
+        var defaults = ShortcutActionCatalog.DefaultBindings();
+        Assert.Contains(actions, action => action.Id == "home:copy-svg");
+        Assert.Contains(actions, action => action.Id == "home:copy-png");
+        Assert.Equal(new ShortcutGesture(Key.C, ModifierKeys.Control).Serialize(), defaults["home:copy"]);
+        Assert.False(defaults.ContainsKey("home:copy-svg")); Assert.False(defaults.ContainsKey("home:copy-png"));
+    }
+    [Fact]
     public void GestureRoundTripsWithModifiers()
     {
         var source = new ShortcutGesture(Key.PageDown, ModifierKeys.Control | ModifierKeys.Shift);

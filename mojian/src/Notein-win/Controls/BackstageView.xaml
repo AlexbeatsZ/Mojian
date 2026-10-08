@@ -189,25 +189,25 @@
                     </Border>
 
                     <!-- Row 3: 图片导入显示 -->
-                    <Border MinHeight="56" Padding="0,8">
+                    <Border MinHeight="56" Padding="0,8" Visibility="{Binding IsDarkPageBackground, Converter={StaticResource BoolToVisibility}}">
                         <DockPanel LastChildFill="True">
                             <Button DockPanel.Dock="Right" Content="{Binding ImageDisplayModeButtonText}" Command="{Binding CycleImageDisplayModeCommand}"
                                     Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="图片导入显示" Foreground="{StaticResource TextPrimary}" FontSize="14" />
-                                <TextBlock Text="只改变画布查看效果；原图与导出始终保持不变。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="暗色模式图片导入" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="默认自动反色，不询问；可改为询问或保持原图。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </DockPanel>
                     </Border>
 
                     <!-- Row 4: PDF 打印样式显示 -->
-                    <Border MinHeight="56" Padding="0,8">
+                    <Border MinHeight="56" Padding="0,8" Visibility="{Binding IsDarkPageBackground, Converter={StaticResource BoolToVisibility}}">
                         <DockPanel LastChildFill="True">
                             <Button DockPanel.Dock="Right" Content="{Binding PdfDisplayModeButtonText}" Command="{Binding CyclePdfDisplayModeCommand}"
                                     Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="PDF 打印样式显示" Foreground="{StaticResource TextPrimary}" FontSize="14" />
-                                <TextBlock Text="逐页导入时使用查看滤镜；原 PDF 与导出页面不反色。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="暗色模式 PDF 插图" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="逐页插入时的显示方式；保留原始 PDF 文件。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </DockPanel>
                     </Border>

@@ -83,6 +83,17 @@ class InsertContentLayer(
 
     fun selectedCount(): Int = selectedItems().size
 
+    fun snapshotSelectedObjects(): List<InsertObject> = selectedItems().map { InsertObject.fromJson(it.toJson()) }
+
+    fun appendSelectedObjects(items: List<InsertObject>) {
+        val target = document ?: return
+        target.objects.addAll(items)
+        selectedObject = null
+        lassoSelectedObjects.clear()
+        lassoSelectedObjects.addAll(items)
+        changed(target)
+    }
+
     fun selectAll(): Int {
         selectedObject = null
         lassoSelectedObjects.clear()
@@ -226,6 +237,18 @@ class InsertContentLayer(
         return true
     }
 
+    fun toggleImageInversion(image: InsertObject.Image): Boolean {
+        val target = document ?: return false
+        if (image.pageBackground || image !in target.objects) return false
+        val index = target.objects.indexOf(image)
+        val replacement = image.copy(viewInverted = !image.viewInverted)
+        target.objects[index] = replacement
+        if (selectedObject === image) selectedObject = replacement
+        if (lassoSelectedObjects.remove(image)) lassoSelectedObjects.add(replacement)
+        changed(target)
+        return true
+    }
+
     fun flipSelectedImage(horizontal: Boolean): Boolean {
         val target = document ?: return false
         val image = selectedImage() ?: return false
@@ -330,8 +353,12 @@ class InsertContentLayer(
         if (changed) changed(target)
     }
 
-    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix = viewport.documentToViewMatrix()) {
-        drawObjects(canvas, forExport = true, documentMatrix = documentMatrix)
+    private var darkBackground = true
+
+    fun setDarkBackground(enabled: Boolean) { darkBackground = enabled }
+
+    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix = viewport.documentToViewMatrix(), selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
+        drawObjects(canvas, forExport = output.printsDark(darkBackground), documentMatrix = documentMatrix, selectedOnly = selectedOnly, output = output)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -339,15 +366,16 @@ class InsertContentLayer(
         drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
     }
 
-    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix) {
+    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
         val target = document ?: return
         canvas.save()
         canvas.concat(documentMatrix)
         target.objects.forEach { item ->
+            if (selectedOnly && item !in selectedItems()) return@forEach
             when (item) {
                 is InsertObject.Table -> drawTable(canvas, item, forExport)
                 is InsertObject.Attachment -> drawAttachment(canvas, item)
-                is InsertObject.Image -> drawImage(canvas, target, item, forExport)
+                is InsertObject.Image -> drawImage(canvas, target, item, output)
                 is InsertObject.Spreadsheet -> drawSpreadsheet(canvas, item, forExport)
                 is InsertObject.NoteLink -> drawLink(canvas, item)
             }
@@ -398,12 +426,12 @@ class InsertContentLayer(
         canvas.drawText(formatSize(attachment.sizeBytes), bounds.left + dp(67f), bounds.top + dp(48f), smallTextPaint)
     }
 
-    private fun drawImage(canvas: Canvas, document: PageInsertDocument, image: InsertObject.Image, forExport: Boolean) {
+    private fun drawImage(canvas: Canvas, document: PageInsertDocument, image: InsertObject.Image, output: OutputAppearance) {
         val file = FileFor(document, image.assetName)
         val bitmap = bitmap(file)
         val destination = bounds(image)
         if (bitmap != null) {
-            val paint = if (ImageViewFilter.shouldApply(image.viewInverted, forExport)) invertedImagePaint else bitmapPaint
+            val paint = if (output.imageInverted(image.id, image.viewInverted, darkBackground)) invertedImagePaint else bitmapPaint
             val quarterTurns = image.rotationQuarterTurns.mod(4)
             canvas.save()
             canvas.translate(destination.centerX(), destination.centerY())

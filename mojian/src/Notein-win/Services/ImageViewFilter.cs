@@ -7,7 +7,7 @@ public static class ImageViewFilter
     public const byte TargetBackgroundGray = 27; // 0x1B (#1B1B1B)
 
     public static bool ShouldApply(bool viewInverted, bool forExport) =>
-        viewInverted && !forExport;
+        viewInverted;
 
     public static Color InvertForDarkTheme(Color color)
     {
