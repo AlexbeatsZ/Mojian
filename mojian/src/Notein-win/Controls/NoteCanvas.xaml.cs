@@ -72,9 +72,24 @@ public partial class NoteCanvas : UserControl
     private readonly DispatcherTimer _rightLassoHoldTimer;
     private readonly DispatcherTimer _stylusContextMenuTimer;
     private static SelectionClipboardData? _selectionClipboard;
+    private const string NativeClipboardFormat = "Mojian.Selection.v1";
+    private static string? _selectionClipboardToken;
+
+    public static bool HasNativeClipboard
+    {
+        get
+        {
+            try { return _selectionClipboard != null && _selectionClipboardToken != null &&
+                Clipboard.GetData(NativeClipboardFormat) as string == _selectionClipboardToken; }
+            catch (System.Runtime.InteropServices.ExternalException) { return false; }
+        }
+    }
+
+    public event EventHandler? PasteRequested;
     private readonly Stopwatch _strokeClock = new();
     private readonly StrokeDrawingCache _strokeDrawings = new();
     private bool _drawingDryScene;
+    private OutputAppearance? _outputAppearance;
     internal int SceneRenderCount { get; private set; }
 
     private StrokeRecord? _activeStroke;
@@ -332,16 +347,22 @@ public partial class NoteCanvas : UserControl
     public bool CopySelection(bool cut = false)
     {
         if (Document == null || !HasContentSelection()) return false;
-        _selectionClipboard = new SelectionClipboardData(
+        var token = Guid.NewGuid().ToString();
+        var order = PageScene.OrderedContent(Document).Select((item, index) => (item, index)).ToDictionary(entry => entry.item, entry => entry.index);
+        var selection = new SelectionClipboardData(
             Document.NotebookId,
             Document.PageId,
-            _selectedStrokes.Select(item => CloneStroke(item)).ToList(),
+            _selectedStrokes.Select(item => { var copy = CloneStroke(item); copy.ZOrder = order[item]; return copy; }).ToList(),
             _selectedTags.Select(item => CloneTag(item)).ToList(),
-            _selectedTextItems.Select(item => CloneText(item)).ToList(),
+            _selectedTextItems.Select(item => { var copy = CloneText(item); copy.ZOrder = order[item]; return copy; }).ToList(),
             _selectedObjects.Select(item => new SelectionObjectClipboard(
-                item.CloneWithNewId(offset: 0),
-                string.IsNullOrWhiteSpace(item.AssetName) ? null : ResolveAssetPath?.Invoke(item.AssetName),
-                string.IsNullOrWhiteSpace(item.SourceAssetName) ? null : ResolveAssetPath?.Invoke(item.SourceAssetName))).ToList());
+                CopyObjectWithOrder(item, order[item]),
+                CaptureClipboardAsset(item.AssetName), CaptureClipboardAsset(item.SourceAssetName))).ToList());
+        var data = new DataObject(); data.SetData(NativeClipboardFormat, token, false);
+        try { Clipboard.SetDataObject(data, true); }
+        catch (System.Runtime.InteropServices.ExternalException) { return false; }
+        _selectionClipboardToken = token;
+        _selectionClipboard = selection;
         if (cut) DeleteSelection();
         return true;
     }
@@ -349,14 +370,29 @@ public partial class NoteCanvas : UserControl
     public bool PasteSelection()
     {
         var clipboard = _selectionClipboard;
-        if (Document == null || clipboard == null) return false;
+        if (Document == null || clipboard == null || !HasNativeClipboard) return false;
+        const float offset = 24;
+        var objects = clipboard.Objects.Select(source =>
+        {
+            var item = source.Item.CloneWithNewId(offset);
+            if (source.Asset is { } asset) item.AssetName = ImportClipboardAsset?.Invoke(asset.Name, asset.Bytes) ?? item.AssetName;
+            if (source.SourceAsset is { } sourceAsset) item.SourceAssetName = ImportClipboardAsset?.Invoke(sourceAsset.Name, sourceAsset.Bytes) ?? item.SourceAssetName;
+            return item;
+        }).ToList();
         PushUndo();
         ClearSelection();
-        const float offset = 24;
+        var layerId = string.Empty;
+        if (Document.Layers.Count > 0 || clipboard.Strokes.Any(item => item.LayerId.Length > 0) || clipboard.TextItems.Any(item => item.LayerId.Length > 0) || clipboard.Objects.Any(item => item.Item.LayerId.Length > 0))
+        {
+            layerId = IdFactory.New("paste-layer");
+            Document.Layers.Add(new PageLayer { Id = layerId, Name = "粘贴内容", Visible = true, Order = Document.Layers.Select(layer => layer.Order).DefaultIfEmpty(-1).Max() + 1 });
+        }
+        var orderOffset = layerId.Length == 0 ? Document.Strokes.Select(item => item.ZOrder).Concat(Document.TextItems.Select(item => item.ZOrder)).Concat(Document.Objects.Select(item => item.ZOrder)).DefaultIfEmpty(-1).Max() + 1 : 0;
 
         foreach (var source in clipboard.Strokes)
         {
             var item = CloneStroke(source, offset);
+            item.LayerId = layerId; item.ZOrder += orderOffset;
             Document.Strokes.Add(item);
             _selectedStrokes.Add(item);
         }
@@ -369,17 +405,13 @@ public partial class NoteCanvas : UserControl
         foreach (var source in clipboard.TextItems)
         {
             var item = CloneText(source, offset);
+            item.LayerId = layerId; item.ZOrder += orderOffset;
             Document.TextItems.Add(item);
             _selectedTextItems.Add(item);
         }
-        foreach (var source in clipboard.Objects)
+        foreach (var item in objects)
         {
-            var item = source.Item.CloneWithNewId(offset);
-            var samePage = clipboard.NotebookId == Document.NotebookId && clipboard.PageId == Document.PageId;
-            if (!samePage && !string.IsNullOrWhiteSpace(source.AssetPath) && File.Exists(source.AssetPath))
-                item.AssetName = ImportAssetPath?.Invoke(source.AssetPath) ?? item.AssetName;
-            if (!samePage && !string.IsNullOrWhiteSpace(source.SourceAssetPath) && File.Exists(source.SourceAssetPath))
-                item.SourceAssetName = ImportAssetPath?.Invoke(source.SourceAssetPath) ?? item.SourceAssetName;
+            item.LayerId = layerId; item.ZOrder += orderOffset;
             Document.Objects.Add(item);
             _selectedObjects.Add(item);
         }
@@ -600,6 +632,15 @@ public partial class NoteCanvas : UserControl
         return true;
     }
 
+    public bool ToggleImageInversion(PageObject item)
+    {
+        if (!CanMutateImage(item)) return false;
+        PushUndo();
+        item.ViewInverted = !item.ViewInverted;
+        FinishObjectMutation(item);
+        return true;
+    }
+
     public bool RestoreImageObjectSize(PageObject item)
     {
         if (!CanMutateImage(item)) return false;
@@ -703,7 +744,7 @@ public partial class NoteCanvas : UserControl
         ViewportMutated();
     }
 
-    public BitmapSource RenderLayerBitmap(CanvasRenderLayer layer, int maxPixelWidth = 1800)
+    public BitmapSource RenderLayerBitmap(CanvasRenderLayer layer, int maxPixelWidth = 1800, OutputAppearance? output = null)
     {
         if (Document == null) throw new InvalidOperationException("没有可导出的页面。");
         var extent = CalculateDocumentExtent();
@@ -715,9 +756,7 @@ public partial class NoteCanvas : UserControl
         {
             dc.PushTransform(new ScaleTransform(scale, scale));
             dc.PushTransform(new TranslateTransform(-extent.X, -extent.Y));
-            if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite)
-                dc.DrawRectangle(Brushes.White, null, extent);
-            DrawDocument(dc, layer, lightExport: true, extent);
+            dc.DrawDrawing(RenderLayerDrawing(layer, extent, output));
             dc.Pop();
             dc.Pop();
         }
@@ -727,19 +766,75 @@ public partial class NoteCanvas : UserControl
         return bitmap;
     }
 
-    public DrawingGroup RenderLayerDrawing(CanvasRenderLayer layer, Rect? documentExtent = null)
+    public DrawingGroup RenderLayerDrawing(CanvasRenderLayer layer, Rect? documentExtent = null, OutputAppearance? output = null)
     {
         if (Document == null) throw new InvalidOperationException("没有可导出的页面。");
         var extent = documentExtent ?? CalculateDocumentExtent();
         var drawing = new DrawingGroup();
-        using (var dc = drawing.Open())
+        var previous = _outputAppearance;
+        _outputAppearance = output ?? new OutputAppearance();
+        try
         {
+            using var dc = drawing.Open();
             if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite)
-                dc.DrawRectangle(Brushes.White, null, extent);
-            DrawDocument(dc, layer, lightExport: true, extent);
+                dc.DrawRectangle(OutputPaperBrush(), null, extent);
+            DrawDocument(dc, layer, _outputAppearance.PrintsDark(Appearance.Theme), extent);
         }
+        finally { _outputAppearance = previous; }
         drawing.Freeze();
         return drawing;
+    }
+
+    public (DrawingGroup Drawing, Rect Bounds)? RenderSelectionDrawing()
+    {
+        if (Document == null || !HasContentSelection()) return null;
+        var drawing = new DrawingGroup();
+        var previous = _outputAppearance;
+        _outputAppearance = new OutputAppearance();
+        try
+        {
+            using var dc = drawing.Open();
+            foreach (var content in PageScene.OrderedContent(Document))
+            {
+                switch (content)
+                {
+                    case PageObject item when _selectedObjects.Contains(item):
+                        DrawObjects(dc, false, new Rect(item.X, item.Y, item.Width, item.Height), [item]); break;
+                    case StrokeRecord stroke when _selectedStrokes.Contains(stroke): DrawStroke(dc, stroke, false); break;
+                    case TextItem text when _selectedTextItems.Contains(text): DrawTextItems(dc, false, [text]); break;
+                }
+            }
+            DrawTags(dc, false, _selectedTags);
+        }
+        finally { _outputAppearance = previous; }
+        var bounds = drawing.Bounds;
+        if (bounds.IsEmpty) return null;
+        bounds.Inflate(2, 2);
+        drawing.Freeze(); return (drawing, bounds);
+    }
+
+    public bool CopySelectionImage(bool svg)
+    {
+        var selection = RenderSelectionDrawing();
+        if (selection == null) return false;
+        var data = new DataObject();
+        if (svg)
+        {
+            var text = SelectionImageExport.SvgText(selection.Value.Drawing, selection.Value.Bounds);
+            data.SetData("image/svg+xml", new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text)), false);
+            data.SetData("image/svg+xml;charset=utf-8", text, false);
+            data.SetData(DataFormats.UnicodeText, text, false);
+        }
+        else
+        {
+            var bitmap = SelectionImageExport.PngBitmap(selection.Value.Drawing, selection.Value.Bounds);
+            data.SetData("PNG", new MemoryStream(SelectionImageExport.PngBytes(bitmap)), false);
+            data.SetImage(bitmap);
+        }
+        Clipboard.SetDataObject(data, true);
+        _selectionClipboard = null;
+        _selectionClipboardToken = null;
+        return true;
     }
 
     public Rect ExportDocumentExtent => CalculateDocumentExtent();
@@ -1480,8 +1575,8 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return false;
         var menu = CreateContextMenu(viewPoint);
-        var paste = new MenuItem { Header = "粘贴", IsEnabled = _selectionClipboard != null };
-        paste.Click += (_, _) => PasteSelection();
+        var paste = new MenuItem { Header = "粘贴" };
+        paste.Click += (_, _) => PasteRequested?.Invoke(this, EventArgs.Empty);
         menu.Items.Add(paste);
         var selectAll = new MenuItem
         {
@@ -1506,8 +1601,12 @@ public partial class NoteCanvas : UserControl
         var copy = new MenuItem { Header = "复制" };
         copy.Click += (_, _) => CopySelection();
         menu.Items.Add(copy);
-        var paste = new MenuItem { Header = "粘贴", IsEnabled = _selectionClipboard != null };
-        paste.Click += (_, _) => PasteSelection();
+        var svg = new MenuItem { Header = "复制为 SVG" };
+        svg.Click += (_, _) => CopySelectionImage(true); menu.Items.Add(svg);
+        var png = new MenuItem { Header = "复制为 PNG" };
+        png.Click += (_, _) => CopySelectionImage(false); menu.Items.Add(png);
+        var paste = new MenuItem { Header = "粘贴" };
+        paste.Click += (_, _) => PasteRequested?.Invoke(this, EventArgs.Empty);
         menu.Items.Add(paste);
         var duplicate = new MenuItem { Header = "副本" };
         duplicate.Click += (_, _) => DuplicateSelection();
@@ -2611,17 +2710,17 @@ public partial class NoteCanvas : UserControl
         {
             DrawStrokes(dc, lightExport, extent);
             DrawTags(dc, lightExport);
-            if (lightExport) DrawTextItems(dc, lightExport);
+            if (lightExport || _outputAppearance != null) DrawTextItems(dc, lightExport);
         }
     }
 
     private void DrawPaper(DrawingContext dc, bool lightExport, Rect extent)
     {
-        var paper = lightExport ? Brushes.White : ParseBrush(Appearance.PageColor, Appearance.Theme == PageTheme.Dark ? Color.FromRgb(27, 27, 27) : Color.FromRgb(250, 250, 250));
+        var paper = OutputPaperBrush();
         if (Appearance.PaperKind == PaperKind.Infinite)
         {
             var rect = new Rect(0, 0, Appearance.InfiniteWidth, Appearance.InfiniteHeight);
-            dc.DrawRectangle(paper, lightExport ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
+            dc.DrawRectangle(paper, _outputAppearance != null ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
             var visiblePaper = Rect.Intersect(rect, extent);
             if (!visiblePaper.IsEmpty) DrawPattern(dc, visiblePaper, lightExport);
         }
@@ -2635,7 +2734,7 @@ public partial class NoteCanvas : UserControl
             {
                 var rect = new Rect(0, i * (Appearance.Height + A4PageLayout.PageGap), Appearance.Width, Appearance.Height);
                 if (!rect.IntersectsWith(extent)) continue;
-                dc.DrawRectangle(paper, new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
+                dc.DrawRectangle(paper, _outputAppearance != null ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
                 DrawPattern(dc, rect, lightExport);
             }
         }
@@ -2647,6 +2746,7 @@ public partial class NoteCanvas : UserControl
 
     private void DrawPattern(DrawingContext dc, Rect bounds, bool lightExport)
     {
+        if (_outputAppearance is { Printing: true, HideBackgroundFormat: true }) return;
         if (Appearance.Background == CanvasBackgroundFormat.Blank) return;
         var spacing = Appearance.Background switch
         {
@@ -2654,8 +2754,8 @@ public partial class NoteCanvas : UserControl
             CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.GridWide or CanvasBackgroundFormat.DotsWide => 48d,
             _ => 32d,
         };
-        var color = lightExport ? Color.FromRgb(215, 224, 232) : Color.FromRgb(45, 50, 56);
-        var pen = new Pen(new SolidColorBrush(color), lightExport ? 0.7 : 0.8 / Math.Max(0.1, _viewport.Scale));
+        var color = Color.FromRgb(45, 50, 56);
+        var pen = new Pen(new SolidColorBrush(color), _outputAppearance != null ? 0.8 : 0.8 / Math.Max(0.1, _viewport.Scale));
         var isRuled = Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide;
         var isGrid = Appearance.Background is CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.GridStandard or CanvasBackgroundFormat.GridWide;
         var isDots = Appearance.Background is CanvasBackgroundFormat.DotsDense or CanvasBackgroundFormat.DotsStandard or CanvasBackgroundFormat.DotsWide;
@@ -2689,12 +2789,12 @@ public partial class NoteCanvas : UserControl
             {
                 case PageObjectKind.Image:
                 case PageObjectKind.Sticker:
-                    var bitmap = LoadBitmap(item.AssetName, item.ViewInverted && !lightExport);
+                    var bitmap = LoadBitmap(item.AssetName, OutputImageInverted(item));
                     if (bitmap != null) DrawTransformedImage(dc, bitmap, rect, item);
                     else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"图片不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
                     break;
                 case PageObjectKind.PdfPrintout:
-                    var pdfBitmap = LoadAdaptivePdfBitmap(item, item.ViewInverted && !lightExport, lightExport);
+                    var pdfBitmap = LoadAdaptivePdfBitmap(item, OutputImageInverted(item), _outputAppearance != null);
                     if (pdfBitmap != null) DrawTransformedImage(dc, pdfBitmap, rect, item);
                     else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"PDF 页面不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
                     break;
@@ -2790,7 +2890,7 @@ public partial class NoteCanvas : UserControl
                 // Only logical black adapts to dark paper. Whites and arbitrary
                 // source colors remain source colors, including white cover ink.
                 if (sourceColor.R != 0 || sourceColor.G != 0 || sourceColor.B != 0 || lightExport || Appearance.Theme != PageTheme.Dark)
-                    brush = new SolidColorBrush(Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B));
+                    brush = new SolidColorBrush(lightExport ? OutputAppearance.PrintInk(Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B)) : Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B));
             }
             if (stroke.VectorGeometry is { } vector)
             {
@@ -2833,11 +2933,11 @@ public partial class NoteCanvas : UserControl
         dc.DrawGeometry(null, pen, geometry);
     }
 
-    private void DrawTags(DrawingContext dc, bool lightExport)
+    private void DrawTags(DrawingContext dc, bool lightExport, IEnumerable<CanvasTag>? items = null)
     {
         if (Document == null) return;
         var brush = new SolidColorBrush(Color.FromRgb(229, 72, 77));
-        foreach (var tag in Document.Tags)
+        foreach (var tag in items ?? Document.Tags)
         {
             var center = new Point(tag.DocumentX, tag.DocumentY);
             if (tag.Kind == CanvasTagKind.Question) DrawText(dc, "?", new Point(center.X - 6, center.Y - 15), 22 * tag.Scale, brush, true);
@@ -2851,7 +2951,7 @@ public partial class NoteCanvas : UserControl
         foreach (var item in items ?? Document.TextItems)
         {
             if (!PageScene.IsVisible(Document, item.LayerId)) continue;
-            if (!lightExport && EditorLayer.Children.OfType<TextBox>().Any(editor => ReferenceEquals(editor.Tag, item) && editor.IsKeyboardFocusWithin)) continue;
+            if (!lightExport && _outputAppearance == null && EditorLayer.Children.OfType<TextBox>().Any(editor => ReferenceEquals(editor.Tag, item) && editor.IsKeyboardFocusWithin)) continue;
             var background = ParseBrush(item.BackgroundHex, Brushes.Transparent);
             if (background != Brushes.Transparent) dc.DrawRectangle(background, null, new Rect(item.X, item.Y, item.Width, item.Height));
             var formatted = new FormattedText(item.Text ?? string.Empty, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
@@ -3274,13 +3374,9 @@ public partial class NoteCanvas : UserControl
         VectorPath = source.VectorPath,
         VectorBounds = source.VectorBounds?.ToArray(),
         VectorTransform = source.VectorTransform.Select((value, index) => index >= 4 ? value + offset : value).ToArray(),
-        Points = source.Points.Select(point => new InkPoint(
-            point.X + offset,
-            point.Y + offset,
-            point.Pressure,
-            point.TiltX,
-            point.TiltY,
-            point.ElapsedMilliseconds)).ToList(),
+        Points = source.Points.Select(point => new InkPoint {
+            X = point.X + offset, Y = point.Y + offset, Pressure = point.Pressure,
+            TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList(),
     };
 
     private static CanvasTag CloneTag(CanvasTag source, float offset = 0) => new()
@@ -3326,7 +3422,19 @@ public partial class NoteCanvas : UserControl
         List<TextItem> TextItems,
         List<SelectionObjectClipboard> Objects);
 
-    private sealed record SelectionObjectClipboard(PageObject Item, string? AssetPath, string? SourceAssetPath);
+    public Func<string, byte[], string>? ImportClipboardAsset { get; set; }
+    private ClipboardAsset? CaptureClipboardAsset(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var path = ResolveAssetPath?.Invoke(name);
+        return string.IsNullOrWhiteSpace(path) ? null : new ClipboardAsset(name, File.ReadAllBytes(path));
+    }
+    private sealed record ClipboardAsset(string Name, byte[] Bytes);
+    private static PageObject CopyObjectWithOrder(PageObject source, int order)
+    {
+        var copy = source.CloneWithNewId(0); copy.ZOrder = order; return copy;
+    }
+    private sealed record SelectionObjectClipboard(PageObject Item, ClipboardAsset? Asset, ClipboardAsset? SourceAsset);
 
     private void SelectOnlyObject(PageObject item)
     {
@@ -3397,6 +3505,19 @@ public partial class NoteCanvas : UserControl
         catch { return new SolidColorBrush(fallback); }
     }
 
+    private Brush OutputPaperBrush() => ResolveOutputPaperBrush(_outputAppearance ?? new OutputAppearance());
+
+    public Brush ResolveOutputPaperBrush(OutputAppearance output)
+    {
+        var brush = (SolidColorBrush)ParseBrush(Appearance.PageColor,
+            Appearance.Theme == PageTheme.Dark ? Color.FromRgb(27, 27, 27) : Color.FromRgb(250, 250, 250));
+        return output.PrintsDark(Appearance.Theme)
+            ? new SolidColorBrush(OutputAppearance.PrintPaper(brush.Color)) : brush;
+    }
+
+    private bool OutputImageInverted(PageObject item) =>
+        _outputAppearance?.ImageInverted(item.Id, item.ViewInverted, Appearance.Theme) ?? item.ViewInverted;
+
     private static SolidColorBrush TextBrush(InkPalette palette, bool darkPage, bool lightExport)
     {
         var color = palette switch
@@ -3410,8 +3531,12 @@ public partial class NoteCanvas : UserControl
 
     private static Brush TextItemBrush(TextItem item, bool darkPage, bool lightExport)
     {
-        if (!string.IsNullOrWhiteSpace(item.ForegroundHex) && !(lightExport && item.ForegroundHex.Equals("#F4F4F4", StringComparison.OrdinalIgnoreCase)))
-            return ParseBrush(item.ForegroundHex, TextBrush(item.Color, darkPage, lightExport));
+        if (!string.IsNullOrWhiteSpace(item.ForegroundHex))
+        {
+            var brush = ParseBrush(item.ForegroundHex, TextBrush(item.Color, darkPage, lightExport));
+            return lightExport && brush is SolidColorBrush solid
+                ? new SolidColorBrush(OutputAppearance.PrintInk(solid.Color)) : brush;
+        }
         return TextBrush(item.Color, darkPage, lightExport);
     }
 

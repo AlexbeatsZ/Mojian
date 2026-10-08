@@ -37,8 +37,8 @@ public class VectorPdfExportTests
                 {
                     CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
                     VectorPdfExportService.Write(pdf, [new PdfVectorPage(bounds,
-                        [new PdfVectorLayer("页面背景", canvas.RenderLayerDrawing(CanvasRenderLayer.Background, bounds)),
-                         new PdfVectorLayer("墨迹与文字", canvas.RenderLayerDrawing(CanvasRenderLayer.InkAndText, bounds))])]);
+                        [new PdfVectorLayer("页面背景", canvas.RenderLayerDrawing(CanvasRenderLayer.Background, bounds, new OutputAppearance(true))),
+                         new PdfVectorLayer("墨迹与文字", canvas.RenderLayerDrawing(CanvasRenderLayer.InkAndText, bounds, new OutputAppearance(true)))])]);
                 }
                 finally { CultureInfo.CurrentCulture = previous; }
             });

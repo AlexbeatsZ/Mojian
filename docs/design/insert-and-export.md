@@ -11,6 +11,36 @@ The Insert ribbon implements tables, file attachments, PDF printouts, spreadshee
 multi-image insertion, stickers, and links to another note. `插入空间` remains owned by the Draw
 ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 
+## Selection clipboard
+
+- Both clients expose `复制（原格式）`, `复制为 SVG`, and `复制为 PNG` in the Home copy
+  dropdown and selection/object context menus. The ordinary copy button and `Ctrl+C` use native
+  editable content. Native text editing continues to copy the selected characters normally.
+- Native selection copy captures independent strokes, rich text, tags, inserted objects, and their
+  asset bytes. Paste creates new identities and page-owned assets, preserving point pressure, time,
+  tilt, brush parameters, vector contours, and relative placement. Windows source-scene selection
+  preserves interleaving in a new visible paste layer; Android generated shapes get new persisted IDs.
+- A private OS clipboard token identifies the current in-process native snapshot. It contains no
+  public text/image fallback and is intended only for the current Mojian client session. An external
+  clipboard change or SVG/PNG copy invalidates that snapshot for paste. Restart/cross-device clipboard
+  transfer is not a native interchange mechanism; `.mjn` remains the durable interchange format.
+- Paste checks that matching native token before system image/text content, through the same route
+  for `Ctrl+V`, Home, and context menus. It never falls back to an older native/image-object snapshot
+  after a new external clipboard value replaced it.
+- SVG/PNG contain only the chosen content on a transparent cropped surface, without paper patterns,
+  selection frames, hover marks, or a viewport screenshot. They preserve current displayed content
+  colors, image inversion and opacity; the independent print conversion is not applied. PNG renders
+  at up to 2x document resolution, bounded to 8192 pixels per
+  side and 16 million pixels. SVG ink/shape paths use actual native contours with no resolution cap.
+  Windows also writes glyph/vector geometry and embeds actual images. Android embeds the selected
+  inserted-content and tag/rich-text layers as PNGs around the native ink paths; it does not rasterize ink.
+- Windows writes `image/svg+xml` plus UTF-8 text for SVG, and standard PNG/bitmap clipboard formats
+  for PNG. Android shares MIME-typed read-only FileProvider URIs under `cache/clipboard/`, retaining
+  the active export until the next successful export. External SVG paste depends on the receiving
+  app accepting SVG; PNG is the ordinary image option.
+- `home:copy-svg` and `home:copy-png` are settings-owned shortcut actions, unbound by default.
+  Existing `home:copy` remains `Ctrl+C`. Both new actions are also available in quick-toolbar settings.
+
 ## Object and asset boundary
 
 - Every imported file is copied immediately into the application's private notebook asset store.
@@ -34,7 +64,7 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - Normal images support batch import. Stickers use the same image object and asset pipeline;
   built-in presets are rendered into page-owned PNG assets, while user presets are first copied to
   the sticker library and then copied into the target page.
-- `开始 -> 粘贴` and `Ctrl+V` reuse the same normal-image pipeline when the system clipboard contains
+- After checking the matching native selection token, `开始 -> 粘贴` and `Ctrl+V` reuse the same normal-image pipeline when the system clipboard contains
   an image. Windows accepts clipboard bitmaps and copied image-file drop lists; Android accepts
   foreground-readable `ClipData` image URIs. The pasted image is copied immediately into page-owned
   assets, keeps its source aspect ratio, uses the configured normal-image display policy, persists,
@@ -44,10 +74,14 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   percentage is recalculated for this application's `#1b1b1b` paper: `invert(89.4118%)` maps source
   white exactly to RGB `27,27,27`, while the hue rotation restores color identity as far as this
   CSS-style transform permits. Options provide separate policies for normal images and PDF
-  printouts; each offers `导入时询问`, `自动反色`, and `保持原图`. Ask mode applies one answer to a
-  selected image batch or the entire selected PDF. The unmodified source
-  bytes are always retained, package export always includes those bytes, and both PDF/private layer
-  rendering bypass the view filter.
+  printouts; each offers `导入时询问`, `自动反色`, and `保持原图`, defaults to automatic inversion,
+  and is visible only when the focused page has a dark background. Light-page insertion always
+  keeps original pixels and never asks, regardless of the saved dark-page policy. Ask mode applies
+  one answer to the selected image batch or entire PDF. The one-time policy upgrade changes old
+  `Ask` defaults to `Invert`, preserves `Original`, and then honors later explicit `Ask` choices.
+  The original source bytes are retained in workspace/package assets; visual exports and package
+  previews preserve the current image display flag. Image menus expose checked `反色` in either
+  page theme; toggling it persists the flag and never modifies the original asset.
 - Tables are page objects with an explicit row/column count and cell strings. The size picker adds
   a table and tapping that table opens its cell editor.
 - On Android and Windows, one ordinary finger/primary-mouse click selects any non-background
@@ -106,9 +140,30 @@ Boundless pages follow `docs/design/boundless-canvas.md`: export current mixed-c
 6 mm padding, independently of saved paper size and viewport. Content deletion may reduce the PDF
 crop without shrinking the canvas. Imported PDF MediaBox and A4 export behavior remain unchanged.
 
-PDF export writes the current document page in a light theme: paper becomes white, logical black
-ink/text becomes black, and blue/red/other intentional pen colors remain unchanged. View-only image
-inversion is bypassed. The 2026-10-08 user correction explicitly requires **vector output**.
+Visual export preserves the current page appearance: paper color, ink/text colors, patterns and
+image inversion. It never applies print-only appearance settings. The 2026-10-08 user correction
+explicitly requires **vector output**.
+
+Printing and print preview own `OutputAppearance`, separately from export. A dark page's white
+and logical near-white ink/text become black; intentional red/blue/other colors remain unchanged.
+Only exact white and the product's `#EFEFEF` / `#F4F4F4` logical whites are mapped, preserving
+other neutral gray shades and opacity. Neutral black paper (`0..32` RGB) becomes white; intentional
+colored paper retains its color. Light pages retain their colors and do not show dark-mode
+conversion/image-inversion controls. System printing includes Windows PDF printers and Android's
+native Save as PDF route.
+
+Each dark-page image has a print-only checkbox that toggles its displayed inversion. Already
+inverted images are checked by default, recovering the original pixels when printed; unchecking
+retains their current displayed filter. A previously original image can be checked to invert it.
+The renderer resolves this as `ViewInverted XOR chosenForPrint`, using retained source pixels,
+not applying the approximate color filter twice. Image IDs and owning page/theme are kept per page
+so a section/notebook output cannot apply the focused page's appearance to other pages.
+
+Printing also offers `隐藏背景格式`, default unchecked, in both page themes. It removes only
+rule lines, margin rules, grids and dots from that print/preview; page color, image/PDF backgrounds
+and notes remain. Export ignores this setting, and no output action mutates the source page's
+background format, image flag, ink color, live editor, or assets. Selection SVG/PNG copies likewise
+use the displayed appearance.
 
 Windows now records `DrawingGroup` export scenes and writes filled native ink contours, shape
 outlines, paper patterns, and glyph outlines as PDF path operators. Cubic/quadratic curves are
@@ -130,9 +185,9 @@ proof: inspect and render the actual final PDF with an independent interpreter.
 
 Android now uses native `PdfDocument` and draws AndroidX Ink 1.0.0 `PartitionedMesh` boundary
 outlines with `Canvas.drawPath`, rather than exporting GPU ink or a bitmap screenshot. Paper,
-tags, native text layouts and inserted-object geometry are recorded on the PDF canvas. Logical
-near-white text colors, including foreground spans, are adapted on a copied export layout, without
-mutating live editors. Bitmap assets remain native images. This native Android format has no
+tags, native text layouts and inserted-object geometry are recorded on the PDF canvas. Text colors,
+including foreground spans, are preserved for export and converted only for dark-page printing on
+a copied layout, without mutating live editors. Bitmap assets remain native images. This native Android format has no
 Optional Content Group toggle; preserving vector ink takes priority over the former raster-layer
 format. Native page dimensions are integer PDF points, so fractional source PDF dimensions are
 rounded to the nearest point on this client. Both clients keep document coordinates independent
@@ -165,8 +220,8 @@ portable editable/archive boundary that carries those original files.
 
 For a PDF-backed notebook page, export uses the imported page's original PDF point dimensions for
 the output MediaBox rather than the current screen or split-pane pixel size. The rendered source
-page remains in `插入内容`, while annotations remain in `墨迹与文字`; view-only inversion is still
-bypassed. This preserves writing-over-PDF behavior without flattening the source and annotations
+page remains in `插入内容`, while annotations remain in `墨迹与文字`; export retains its current
+image inversion. This preserves writing-over-PDF behavior without flattening the source and annotations
 into one inseparable raster layer.
 
 ## UI contract

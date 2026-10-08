@@ -12,8 +12,16 @@ public sealed class WorkspaceSettings
     public string PressureEraserToolId { get; set; } = "eraser-stroke";
     public double PanoramaSensitivity { get; set; } = 1d;
     public List<string> QuickToolbarIds { get; set; } = FullPageToolbarConfig.DefaultIds.ToList();
-    public ImageImportDisplayMode ImageDisplayMode { get; set; } = ImageImportDisplayMode.Ask;
-    public ImageImportDisplayMode PdfDisplayMode { get; set; } = ImageImportDisplayMode.Ask;
+    public ImageImportDisplayMode ImageDisplayMode { get; set; } = ImageImportDisplayMode.Invert;
+    public ImageImportDisplayMode PdfDisplayMode { get; set; } = ImageImportDisplayMode.Invert;
+    public int DarkImageImportPolicyVersion { get; set; }
+    public void UpgradeDarkImageImportPolicy()
+    {
+        if (DarkImageImportPolicyVersion >= 1) return;
+        if (ImageDisplayMode == ImageImportDisplayMode.Ask) ImageDisplayMode = ImageImportDisplayMode.Invert;
+        if (PdfDisplayMode == ImageImportDisplayMode.Ask) PdfDisplayMode = ImageImportDisplayMode.Invert;
+        DarkImageImportPolicyVersion = 1;
+    }
     public PageAppearance LastPageAppearance { get; set; } = new();
     public Dictionary<string, string> ShortcutBindings { get; set; } = ShortcutActionCatalog.DefaultBindings();
 }

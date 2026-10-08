@@ -59,8 +59,9 @@ public sealed class WorkspaceStore
     public WorkspaceSettings LoadSettings()
     {
         RestoreMissingCurrent(SettingsPath);
-        if (!File.Exists(SettingsPath)) return new WorkspaceSettings();
-        return ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions);
+        var settings = File.Exists(SettingsPath) ? ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions) : new WorkspaceSettings();
+        settings.UpgradeDarkImageImportPolicy();
+        return settings;
     }
 
     public void SaveSettings(WorkspaceSettings settings) => AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));

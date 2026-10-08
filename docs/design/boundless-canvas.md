@@ -41,7 +41,7 @@ Android `PageViewSettings.boundlessDocumentWidth/boundlessDocumentHeight` 与 PD
 宽内容按纸张可用宽度等比缩小，窄内容不放大，长内容向下切成独立物理页面。
 导出、打印、页数预览和输出页码共用 `docs/design/export-and-print.md` 的分页计划。
 
-保留原图、白纸、逻辑黑色笔迹及现有 PDF 图层语义；无限页自动页面标题不参与内容裁剪或导出，工具光标、选择框和编辑光标也不进入导出。
+导出保留当前纸色、笔迹、图片反色状态及 PDF 图层语义；打印单独执行暗色页白墨转黑、黑纸转白、图片反色选择，以及可选的隐藏底纹。参见 `insert-and-export.md`。无限页自动页面标题不参与内容裁剪或导出，工具光标、选择框和编辑光标也不进入导出。
 
 ## 验证
 

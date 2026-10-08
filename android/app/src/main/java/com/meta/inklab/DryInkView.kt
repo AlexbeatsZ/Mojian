@@ -56,6 +56,14 @@ class DryInkView(context: Context) : View(context) {
 
     private var renderBackgroundInInkLayer = true
     private var backgroundInvalidator: (() -> Unit)? = null
+    private var outputPageSettings = PageViewSettings()
+    private var outputPageTitle = ""
+
+    fun configureOutputPage(settings: PageViewSettings, title: String = "") {
+        outputPageSettings = settings.copy()
+        outputPageTitle = title
+        backgroundFormat = settings.backgroundFormat
+    }
 
     var shapePreview: Stroke? = null
         set(value) { field=value; invalidate() }
@@ -203,6 +211,13 @@ class DryInkView(context: Context) : View(context) {
 
     fun snapshotStrokes(): List<Stroke> = strokes.toList()
 
+    fun snapshotSelectedStrokes(): List<Stroke> = strokes.filter { it in selectedStrokes }
+
+    fun appendSelectedStrokes(items: List<Stroke>) {
+        addStrokes(items)
+        selectedStrokes.addAll(items)
+    }
+
     fun replaceStrokes(replacement: List<Stroke>) {
         strokes.clear()
         strokes.addAll(replacement)
@@ -232,6 +247,7 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun setDarkBackground(enabled: Boolean) {
+        outputPageSettings.darkBackground = enabled
         val replacements = LinkedHashMap<Stroke, Stroke>()
         for (stroke in strokes) {
             val color = stroke.brush.colorIntArgb
@@ -453,9 +469,45 @@ class DryInkView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun renderBackgroundForExport(canvas: Canvas, documentMatrix: Matrix = documentToView) {
-        canvas.drawColor(Color.WHITE)
-        renderBackground(canvas, documentMatrix, exportTheme = true)
+    fun renderBackgroundForExport(canvas: Canvas, documentMatrix: Matrix = documentToView, output: OutputAppearance = OutputAppearance()) {
+        val settings = outputPageSettings
+        val printingDark = output.printsDark(settings.darkBackground)
+        val displayedPaper = settings.pageColor.displayArgb(settings.darkBackground)
+        val paperColor = if (printingDark) OutputAppearance.printPaper(displayedPaper) else displayedPaper
+        canvas.drawColor(if (settings.paperSize == PaperSize.A4) {
+            if (printingDark) Color.WHITE else 0xFF0A0A0A.toInt()
+        } else paperColor)
+        val inverse = Matrix()
+        val visible = RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat())
+        if (documentMatrix.invert(inverse)) inverse.mapRect(visible)
+        val pageWidth = settings.documentWidth ?: A4PageLayout.pageWidth
+        val pageHeight = settings.documentHeight ?: A4PageLayout.pageHeight
+        val stride = pageHeight + A4PageLayout.pageGap
+        val first = if (settings.paperSize == PaperSize.A4) maxOf(0, floor(visible.top / stride).toInt()) else 0
+        val last = if (settings.paperSize == PaperSize.A4) minOf(settings.a4PageCount - 1, floor(visible.bottom / stride).toInt()) else 0
+        canvas.save()
+        canvas.concat(documentMatrix)
+        for (index in first..last) {
+            val top = if (settings.paperSize == PaperSize.A4) index * stride else 0f
+            val pageRect = RectF(0f, top, pageWidth, top + pageHeight)
+            val clip = RectF(pageRect)
+            if (!clip.intersect(visible)) continue
+            canvas.drawRect(pageRect, Paint().apply { color = paperColor })
+            canvas.save()
+            canvas.clipRect(pageRect)
+            if (!output.printing || !output.hideBackgroundFormat) drawGrid(canvas, exportTheme = false, visible = clip)
+            canvas.restore()
+        }
+        if (settings.pageTitleVisible && outputPageTitle.isNotBlank() && settings.paperSize != PaperSize.BOUNDLESS) {
+            val displayedTitle = if (settings.darkBackground) 0xFFEFEFEF.toInt() else 0xFF202020.toInt()
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = if (printingDark) OutputAppearance.printInk(displayedTitle) else displayedTitle
+                textSize = 5.2f * DOCUMENT_UNITS_PER_MM
+                typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+            }
+            canvas.drawText(outputPageTitle, 18f * DOCUMENT_UNITS_PER_MM, 22f * DOCUMENT_UNITS_PER_MM, titlePaint)
+        }
+        canvas.restore()
     }
 
     fun renderBackground(canvas: Canvas, documentMatrix: Matrix = documentToView) {
@@ -497,14 +549,15 @@ class DryInkView(context: Context) : View(context) {
     }
 
     /** PDF canvases receive the native stroke outlines, never a screenshot or GPU mesh draw. */
-    fun renderVectorInkForExport(canvas: Canvas, documentMatrix: Matrix) {
+    fun renderVectorInkForExport(canvas: Canvas, documentMatrix: Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         val position = MutableVec()
         canvas.save()
         canvas.concat(documentMatrix)
         strokes.forEach { stroke ->
+            if (selectedOnly && stroke !in selectedStrokes) return@forEach
             val shape = stroke.shape
-            paint.color = ExportColorTransform.lightThemePixel(stroke.brush.colorIntArgb)
+            paint.color = if (output.printsDark(outputPageSettings.darkBackground)) OutputAppearance.printInk(stroke.brush.colorIntArgb) else stroke.brush.colorIntArgb
             for (group in 0 until shape.getRenderGroupCount()) {
                 val path = Path().apply { fillType = Path.FillType.WINDING }
                 for (outline in 0 until shape.getOutlineCount(group)) {

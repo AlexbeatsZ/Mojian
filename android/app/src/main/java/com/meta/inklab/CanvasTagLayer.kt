@@ -69,6 +69,15 @@ class CanvasTagLayer(
     fun snapshotTags(): List<CanvasTagSnapshot> =
         tags.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY) }
 
+    fun snapshotSelectedTags(): List<CanvasTagSnapshot> =
+        tags.filter { it in selectedTags }.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY) }
+
+    fun appendSelectedTags(items: List<CanvasTagSnapshot>) {
+        selectedTags.clear()
+        items.map { CanvasTag(it.kind, it.documentX, it.documentY) }.forEach { tags += it; selectedTags += it }
+        invalidate()
+    }
+
     fun replaceTags(replacement: List<CanvasTagSnapshot>) {
         tags.clear()
         tags += replacement.map { CanvasTag(it.kind, it.documentX, it.documentY) }
@@ -281,14 +290,16 @@ class CanvasTagLayer(
         drawTags(canvas, viewport.documentToViewMatrix(), includeFocus = true)
     }
 
-    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix) {
-        drawTags(canvas, documentMatrix, includeFocus = false)
+    @Suppress("UNUSED_PARAMETER") // Tags are intentional red; printing preserves their color.
+    fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
+        drawTags(canvas, documentMatrix, includeFocus = false, selectedOnly = selectedOnly)
     }
 
-    private fun drawTags(canvas: Canvas, documentMatrix: android.graphics.Matrix, includeFocus: Boolean) {
+    private fun drawTags(canvas: Canvas, documentMatrix: android.graphics.Matrix, includeFocus: Boolean, selectedOnly: Boolean = false) {
         canvas.save()
         canvas.concat(documentMatrix)
         tags.forEachIndexed { index, tag ->
+            if (selectedOnly && tag !in selectedTags) return@forEachIndexed
             when (tag.kind) {
                 CanvasTagKind.IMPORTANT -> drawStar(canvas, tag.documentX, tag.documentY)
                 CanvasTagKind.QUESTION -> drawQuestion(canvas, tag.documentX, tag.documentY)

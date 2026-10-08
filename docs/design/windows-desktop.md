@@ -124,11 +124,13 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
 
 - Persist all completed ink in document coordinates with position, elapsed time, normalized pressure,
   tilt, tool type, logical color, width, opacity, and brush profile version.
-- `开始 -> 粘贴` and `Ctrl+V` first recognize a system clipboard bitmap or copied image-file list and
+- `开始 -> 粘贴` and `Ctrl+V` first recognize the current private native selection clipboard token,
+  preserving editable strokes, text, tags and asset-owned objects. Otherwise they recognize a system clipboard bitmap or copied image-file list and
   insert it through the normal page-owned image/asset pipeline. Pasted images keep their aspect ratio,
   follow the normal image display policy, and remain available after the clipboard changes. Plain text
-  continues to target an active text editor, while the product's internal mixed/object clipboard is the
-  fallback when the system clipboard does not contain an image or text.
+  continues to target an active text editor. An external clipboard change invalidates older native
+  snapshots. Ordinary Copy/Ctrl+C use native content; the copy dropdown and content menus additionally
+  expose SVG and PNG exports with unbound configurable shortcuts. See `insert-and-export.md`.
 - A4 pages are a continuous Word-style stack rather than one fixed rectangle. Completed content and the
   visible viewport both grow the persisted sheet count before reaching the final sheet bottom, so wheel,
   middle-drag, and touch navigation can continue downward. Page gaps remain workspace-colored and are
@@ -224,7 +226,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   baseline, and color without PDF imports overwriting that template. PDF page import uses the Windows
   PDF renderer, creates one immutable-background page per source page, retains the original PDF and
   rendered page asset, and preserves the source MediaBox dimensions in later layered export.
-- PDF export is a light-theme visual share. The private `.mjn` ZIP uses Android's existing manifest
+- PDF export preserves the current page appearance. Dark-page printing independently changes
+  white ink to black and black paper to white, offers per-image inversion selection, and can hide
+  paper patterns without changing saved page settings. Read `insert-and-export.md` for the shared
+  output appearance contract. The private `.mjn` ZIP uses Android's existing manifest
   identifiers (`mojian-notebook` / `mojian-section`, version 1) and carries editable JSON and original
   assets. Export never substitutes for autosave.
 - The PDF canvas keeps its PNG as an immediate placeholder only. When a PDF object retains its

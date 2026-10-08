@@ -17,9 +17,9 @@ class ImageViewFilterTest {
     }
 
     @Test
-    fun exportAlwaysBypassesTheViewFilter() {
+    fun displayedExportKeepsTheViewFilter() {
         assertEquals(true, ImageViewFilter.shouldApply(viewInverted = true, forExport = false))
-        assertEquals(false, ImageViewFilter.shouldApply(viewInverted = true, forExport = true))
+        assertEquals(true, ImageViewFilter.shouldApply(viewInverted = true, forExport = true))
         assertEquals(false, ImageViewFilter.shouldApply(viewInverted = false, forExport = false))
     }
 }

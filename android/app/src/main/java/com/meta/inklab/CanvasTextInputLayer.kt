@@ -265,9 +265,10 @@ class CanvasTextInputLayer(
             .maxOrNull()
             ?: 0f
 
-    fun snapshotEditors(): List<CanvasTextSnapshot> =
+    fun snapshotEditors(selectedOnly: Boolean = false): List<CanvasTextSnapshot> =
         buildList {
             forEachEditor { editor ->
+                if (selectedOnly && editor !in selectedEditors) return@forEachEditor
                 if (editor in temporaryEditors && editor.text.isBlank()) return@forEachEditor
                 val params = editor.layoutParams as LayoutParams
                 val state = state(editor)
@@ -293,15 +294,16 @@ class CanvasTextInputLayer(
             }
         }
 
-    fun renderForExport(canvas: android.graphics.Canvas, documentMatrix: android.graphics.Matrix) {
+    fun renderForExport(canvas: android.graphics.Canvas, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
         canvas.save()
         canvas.concat(documentMatrix)
         forEachEditor { editor ->
+            if (selectedOnly && editor !in selectedEditors) return@forEachEditor
             if (editor.text.isBlank()) return@forEachEditor
             val originalLayout = editor.layout ?: return@forEachEditor
             val exportText = SpannableString(editor.text)
             exportText.getSpans(0, exportText.length, ForegroundColorSpan::class.java).forEach { span ->
-                val color = ExportColorTransform.lightThemePixel(span.foregroundColor)
+                val color = if (output.printsDark(darkBackground)) OutputAppearance.printInk(span.foregroundColor) else span.foregroundColor
                 if (color != span.foregroundColor) {
                     val start = exportText.getSpanStart(span)
                     val end = exportText.getSpanEnd(span)
@@ -310,7 +312,7 @@ class CanvasTextInputLayer(
                     exportText.setSpan(ForegroundColorSpan(color), start, end, flags)
                 }
             }
-            val exportPaint = TextPaint(originalLayout.paint).apply { color = ExportColorTransform.lightThemePixel(color) }
+            val exportPaint = TextPaint(originalLayout.paint).apply { if (output.printsDark(darkBackground)) color = OutputAppearance.printInk(color) }
             val textLayout = StaticLayout.Builder.obtain(exportText, 0, exportText.length, exportPaint, originalLayout.width)
                 .setAlignment(originalLayout.alignment)
                 .setIncludePad(editor.includeFontPadding)
@@ -331,6 +333,11 @@ class CanvasTextInputLayer(
 
     fun replaceEditors(snapshots: List<CanvasTextSnapshot>) {
         clearAll()
+        appendEditors(snapshots, select = false)
+    }
+
+    fun appendEditors(snapshots: List<CanvasTextSnapshot>, select: Boolean = true) {
+        selectedEditors.clear()
         snapshots.forEach { snapshot ->
             val editor = createEditor().apply {
                 setText(snapshot.text)
@@ -341,6 +348,7 @@ class CanvasTextInputLayer(
                 editor,
                 LayoutParams(snapshot.width, snapshot.height),
             )
+            if (select) selectedEditors += editor
             editor.post { applyEditorTransform(editor) }
         }
     }

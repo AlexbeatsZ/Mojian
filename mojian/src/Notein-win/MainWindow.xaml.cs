@@ -21,9 +21,9 @@ public partial class MainWindow : Window
 {
     private bool _eventsWired;
     private TextBox? _lastTextBox;
+    private TextBox? _clipboardTextBox;
     private TextStyleSnapshot? _formatPainter;
     private PageNavigationClipboard? _pageNavigationClipboard;
-    private ObjectClipboard? _objectClipboard;
     private bool _toolFlyoutWasOpenAtPointerDown;
     private string? _toolFlyoutPointerToolId;
     private MainViewModel ViewModel => (MainViewModel)DataContext;
@@ -39,7 +39,8 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
         PreviewGotKeyboardFocus += (_, e) =>
         {
-            if (e.NewFocus is TextBox box && FindAncestor<NoteCanvas>(box) != null) _lastTextBox = box;
+            if (e.NewFocus is TextBox box && FindAncestor<NoteCanvas>(box) != null) { _lastTextBox = box; _clipboardTextBox = box; }
+            else if (e.NewFocus is NoteCanvas || e.NewFocus is DependencyObject focus && FindAncestor<NoteCanvas>(focus) != null) _clipboardTextBox = null;
         };
     }
 
@@ -85,6 +86,8 @@ public partial class MainWindow : Window
     {
         canvas.ResolveAssetPath = name => canvas.Document == null ? string.Empty : ViewModel.ResolveAsset(canvas.Document, name);
         canvas.ImportAssetPath = ViewModel.ImportAsset;
+        canvas.ImportClipboardAsset = (name, bytes) => ViewModel.WriteAsset(Path.GetExtension(name), bytes);
+        canvas.PasteRequested += (_, _) => PasteHomeContent();
         canvas.ResolvePressureEraserTool = () => ViewModel.PressureEraserTool;
         canvas.ResolveShapeSettings = () => ViewModel.ShapeSettings;
         canvas.BeginSpringLoadedTool = ViewModel.BeginSpringLoadedTool;
@@ -142,10 +145,11 @@ public partial class MainWindow : Window
         AddMenuItem(menu, item.Kind == PageObjectKind.Table ? "编辑" : "打开", () => OnObjectActivated(canvas, e));
         menu.Items.Add(new Separator());
 
-        AddMenuItem(menu, "剪切", () => CaptureObjectClipboard(canvas, item, cut: true));
-        AddMenuItem(menu, "复制", () => CaptureObjectClipboard(canvas, item, cut: false));
-        var paste = AddMenuItem(menu, "粘贴", PasteObject);
-        paste.IsEnabled = _objectClipboard != null;
+        AddMenuItem(menu, "剪切", () => canvas.CopySelection(cut: true));
+        AddMenuItem(menu, "复制", () => canvas.CopySelection());
+        AddMenuItem(menu, "复制为 SVG", () => canvas.CopySelectionImage(true));
+        AddMenuItem(menu, "复制为 PNG", () => canvas.CopySelectionImage(false));
+        AddMenuItem(menu, "粘贴", PasteHomeContent);
         menu.Items.Add(new Separator());
 
         var saveAs = AddMenuItem(menu, "另存为…", () => SaveEmbeddedObject(canvas, item));
@@ -161,6 +165,9 @@ public partial class MainWindow : Window
 
         if (item.IsImageLike)
         {
+            var invert = AddMenuItem(menu, "反色", () => canvas.ToggleImageInversion(item));
+            invert.IsCheckable = true;
+            invert.IsChecked = item.ViewInverted;
             var rotate = new MenuItem { Header = "旋转" };
             AddMenuItem(rotate, "顺时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: true));
             AddMenuItem(rotate, "逆时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: false));
@@ -184,27 +191,6 @@ public partial class MainWindow : Window
         OpenContextMenu(canvas, menu);
     }
 
-    private void CaptureObjectClipboard(NoteCanvas canvas, PageObject item, bool cut)
-    {
-        if (canvas.Document == null) return;
-        var assetPath = string.IsNullOrWhiteSpace(item.AssetName) ? null : ViewModel.ResolveAsset(canvas.Document, item.AssetName);
-        var sourceAssetPath = string.IsNullOrWhiteSpace(item.SourceAssetName) ? null : ViewModel.ResolveAsset(canvas.Document, item.SourceAssetName);
-        _objectClipboard = new ObjectClipboard(item.CloneWithNewId(offset: 0), assetPath, sourceAssetPath, cut);
-        if (cut) canvas.RemoveObject(item);
-    }
-
-    private void PasteObject()
-    {
-        var clipboard = _objectClipboard;
-        if (clipboard == null || FocusedCanvas.Document == null) return;
-        var item = clipboard.Item.CloneWithNewId();
-        if (!string.IsNullOrWhiteSpace(clipboard.AssetPath) && File.Exists(clipboard.AssetPath))
-            item.AssetName = ViewModel.ImportAsset(clipboard.AssetPath);
-        if (!string.IsNullOrWhiteSpace(clipboard.SourceAssetPath) && File.Exists(clipboard.SourceAssetPath))
-            item.SourceAssetName = ViewModel.ImportAsset(clipboard.SourceAssetPath);
-        FocusedCanvas.AddObject(item);
-        if (clipboard.IsCut) _objectClipboard = null;
-    }
 
     private void SaveEmbeddedObject(NoteCanvas canvas, PageObject item)
     {
@@ -843,16 +829,25 @@ public partial class MainWindow : Window
         return item.Height;
     }
 
+    private void OnCopyOptionsClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement anchor) return;
+        ShowChoiceMenu(anchor, new (string, Action)[] {
+            ("复制（原格式）", () => FocusedCanvas.CopySelection()),
+            ("复制为 SVG", () => FocusedCanvas.CopySelectionImage(true)),
+            ("复制为 PNG", () => FocusedCanvas.CopySelectionImage(false)),
+        });
+    }
+
     private void PasteHomeContent()
     {
+        if (FocusedCanvas.PasteSelection()) return;
         if (TryPasteSystemImages()) return;
-        if (FocusedTextBox() is { } textBox && SystemClipboardContainsText())
+        if (_clipboardTextBox is { IsLoaded: true } textBox && SystemClipboardContainsText())
         {
             textBox.Paste();
             return;
         }
-        if (FocusedCanvas.PasteSelection()) return;
-        if (_objectClipboard != null) PasteObject();
     }
 
     private bool TryPasteSystemImages()
@@ -918,9 +913,8 @@ public partial class MainWindow : Window
 
     private bool? ResolveInversion(ImageImportDisplayMode mode, string kind)
     {
-        if (mode == ImageImportDisplayMode.Invert) return true;
-        if (mode == ImageImportDisplayMode.Original) return false;
-        var result = MessageBox.Show(this, $"{kind}在深色页面中自动反色显示吗？\n\n导出仍使用原始像素。", "墨笺", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (ImageImportPolicy.Resolve(mode, ViewModel.IsDarkPageBackground) is { } resolved) return resolved;
+        var result = MessageBox.Show(this, $"{kind}在深色页面中反色显示吗？", "墨笺", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         return result == MessageBoxResult.Cancel ? null : result == MessageBoxResult.Yes;
     }
 
@@ -930,8 +924,10 @@ public partial class MainWindow : Window
         switch (command)
         {
             case HomeCommand.Paste: PasteHomeContent(); break;
-            case HomeCommand.Cut: FocusedTextBox()?.Cut(); break;
-            case HomeCommand.Copy: FocusedTextBox()?.Copy(); break;
+            case HomeCommand.Cut: if (_clipboardTextBox is { IsLoaded: true } cutBox) cutBox.Cut(); else FocusedCanvas.CopySelection(cut: true); break;
+            case HomeCommand.Copy: if (_clipboardTextBox is { IsLoaded: true } copyBox) copyBox.Copy(); else FocusedCanvas.CopySelection(); break;
+            case HomeCommand.CopySvg: FocusedCanvas.CopySelectionImage(true); break;
+            case HomeCommand.CopyPng: FocusedCanvas.CopySelectionImage(false); break;
             case HomeCommand.FormatPainter: ApplyFormatPainter(); break;
             case HomeCommand.FontFamily:
                 ShowChoiceMenu(button, new[]
@@ -1414,5 +1410,4 @@ public partial class MainWindow : Window
     }
 
     private sealed record PageNavigationClipboard(string NotebookId, string SectionId, string PageId, bool IsCut);
-    private sealed record ObjectClipboard(PageObject Item, string? AssetPath, string? SourceAssetPath, bool IsCut);
 }

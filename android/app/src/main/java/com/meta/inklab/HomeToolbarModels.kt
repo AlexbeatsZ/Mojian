@@ -8,6 +8,8 @@ enum class HomeCommand(
     PASTE("paste", "粘贴", "clipboard_paste"),
     CUT("cut", "剪切", "cut"),
     COPY("copy", "复制", "copy"),
+    COPY_SVG("copy-svg", "复制为 SVG", "copy"),
+    COPY_PNG("copy-png", "复制为 PNG", "copy"),
     FORMAT_PAINTER("format-painter", "格式刷", "paint_brush"),
     FONT_FAMILY("font-family", "字体", "text_font"),
     FONT_SIZE("font-size", "字号", "text_font_size"),
