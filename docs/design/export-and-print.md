@@ -40,8 +40,8 @@ the same planner used by export. Export preview shows export appearance; print p
 appearance. Printing never changes saved page appearance, image inversion, selected objects,
 viewport or session-only Android freehand.
 
-Ordinary export preserves the displayed page appearance. Dark-page printing makes the paper white
-and near-white/logical-white writing black, preserving intentional colors. The print panel lists
+Ordinary export preserves the displayed page appearance. Dark-page printing makes neutral black
+paper white and white/logical-white writing black, preserving intentional colors and colored paper. The print panel lists
 images from dark pages and lets the user toggle inversion relative to display; currently inverted
 images are checked by default. The color explanation and image controls are hidden when the scope
 contains only light pages. `隐藏背景格式` is a print-only option available in either theme; it omits
@@ -66,3 +66,9 @@ source-PDF MediaBoxes, landscape paper, validated ranges, PDF/print/image/XPS pa
 actual WPF Export/Print surfaces. Optional `MOJIAN_PAGINATION_PAGE_JSON` replays the user's unchanged
 two-sheet homework into scratch outputs. Build Android integration tests separately; never run a
 connected Gradle test against the only installed session-bound product.
+
+The final combined Windows suite passes 158/158, including actual Export/Print controls, image
+checkbox defaults/changes without page mutation, both theme visibility rules, and the unchanged
+homework's two native-vector pages. Android passes 147/147 unit tests plus APK, lint (0 errors,
+116 warnings) and separate native-test APK compilation. Both current artifacts were refreshed;
+Android device output interaction remains unverified while its live session is preserved.

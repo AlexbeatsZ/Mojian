@@ -49,6 +49,13 @@ public partial class NoteCanvas : UserControl
     [DllImport("user32.dll")]
     private static extern uint GetDoubleClickTime();
 
+    [DllImport("user32.dll")]
+    private static extern uint GetClipboardSequenceNumber();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsClipboardFormatAvailable(uint format);
+
     private readonly ViewportState _viewport = new();
     private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null)
     {
@@ -73,15 +80,17 @@ public partial class NoteCanvas : UserControl
     private readonly DispatcherTimer _stylusContextMenuTimer;
     private static SelectionClipboardData? _selectionClipboard;
     private const string NativeClipboardFormat = "Mojian.Selection.v1";
-    private static string? _selectionClipboardToken;
+    private static uint? _selectionClipboardSequence;
 
     public static bool HasNativeClipboard
     {
         get
         {
-            try { return _selectionClipboard != null && _selectionClipboardToken != null &&
-                Clipboard.GetData(NativeClipboardFormat) as string == _selectionClipboardToken; }
-            catch (System.Runtime.InteropServices.ExternalException) { return false; }
+            // OLE may expose custom formats as empty streams. The native generation identifies
+            // the exact successful write; any external copy or history restoration invalidates it.
+            return _selectionClipboard != null && _selectionClipboardSequence is { } sequence &&
+                GetClipboardSequenceNumber() == sequence &&
+                IsClipboardFormatAvailable((uint)DataFormats.GetDataFormat(NativeClipboardFormat).Id);
         }
     }
 
@@ -358,10 +367,10 @@ public partial class NoteCanvas : UserControl
             _selectedObjects.Select(item => new SelectionObjectClipboard(
                 CopyObjectWithOrder(item, order[item]),
                 CaptureClipboardAsset(item.AssetName), CaptureClipboardAsset(item.SourceAssetName))).ToList());
-        var data = new DataObject(); data.SetData(NativeClipboardFormat, token, false);
+        var data = new DataObject(); data.SetData(NativeClipboardFormat, new MemoryStream(System.Text.Encoding.UTF8.GetBytes(token)), false);
         try { Clipboard.SetDataObject(data, true); }
         catch (System.Runtime.InteropServices.ExternalException) { return false; }
-        _selectionClipboardToken = token;
+        _selectionClipboardSequence = GetClipboardSequenceNumber();
         _selectionClipboard = selection;
         if (cut) DeleteSelection();
         return true;
@@ -833,7 +842,7 @@ public partial class NoteCanvas : UserControl
         }
         Clipboard.SetDataObject(data, true);
         _selectionClipboard = null;
-        _selectionClipboardToken = null;
+        _selectionClipboardSequence = null;
         return true;
     }
 

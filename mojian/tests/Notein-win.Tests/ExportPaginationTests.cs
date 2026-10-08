@@ -143,7 +143,7 @@ public class ExportPaginationTests
             model.FocusedDocument!.Objects.AddRange([imageA, imageB]);
             var window = new MainWindow(model) { Width = 1280, Height = 1050 };
             window.Show();
-            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             try
             {
                 model.IsBackstageOpen = true;

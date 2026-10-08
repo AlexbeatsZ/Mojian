@@ -20,11 +20,16 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   asset bytes. Paste creates new identities and page-owned assets, preserving point pressure, time,
   tilt, brush parameters, vector contours, and relative placement. Windows source-scene selection
   preserves interleaving in a new visible paste layer; Android generated shapes get new persisted IDs.
-- A private OS clipboard token identifies the current in-process native snapshot. It contains no
+- A private OS clipboard marker identifies the current in-process native snapshot. It contains no
   public text/image fallback and is intended only for the current Mojian client session. An external
   clipboard change or SVG/PNG copy invalidates that snapshot for paste. Restart/cross-device clipboard
   transfer is not a native interchange mechanism; `.mjn` remains the durable interchange format.
-- Paste checks that matching native token before system image/text content, through the same route
+- Windows pairs the private marker with the Win32 clipboard sequence number from the successful
+  copy. Custom OLE payloads were observed returning empty streams instead of their original string
+  or byte data, so native ownership must not depend on managed deserialization. An external copy
+  or clipboard-history restoration changes the generation and cannot revive an old native snapshot.
+  Android continues to compare its private token.
+- Paste checks current native ownership before system image/text content, through the same route
   for `Ctrl+V`, Home, and context menus. It never falls back to an older native/image-object snapshot
   after a new external clipboard value replaced it.
 - SVG/PNG contain only the chosen content on a transparent cropped surface, without paper patterns,

@@ -6,6 +6,18 @@
 
 # Current State
 
+- On 2026-10-08 the shared Export/Print integration was delivered with page/section/notebook
+  scopes, physical pagination, paper/orientation/margins/ranges, native print dialogs and previews.
+  Export retains current appearance; dark-page print converts white writing and neutral black
+  paper, permits per-image inversion, and optionally hides every background pattern in either
+  theme. The unified build includes native/SVG/PNG copy and two-column backgrounds. Windows
+  158/158 tests (including the unchanged 1,110-stroke / 26,821-point homework as two vector pages)
+  and Android 147/147 tests, APK/lint/test-APK builds pass (0 lint errors, 116 warnings).
+  The sole Windows EXE (21:29 SGT) is reopened in the same five-notebook, 653-page workspace;
+  the current Android APK (21:13 SGT) is refreshed. The tablet is connected, but its installed
+  process retains session-only freehand: installation awaits the user's session-loss choice.
+  Native Android output tests are compiled, not run. Read `docs/design/export-and-print.md`.
+
 - On 2026-10-08 both clients gained `标准双栏横线`, `窄双栏横线`, and `宽双栏横线` in
   the background menus and new-page choosers. One vertical rule follows the actual paper center,
   stays independent of viewport/export crop, and clips to each A4 sheet. Boundless growth updates
@@ -16,8 +28,7 @@
   checks passed; Android native checks were compiled, not run. Tablet ADB has since returned;
   installation remains coordinated with delivery to preserve its running handwriting session.
   The unified current APK includes all three formats (147 merged Android unit tests pass).
-  Final unified Windows EXE delivery is still
-  owned by the paginated-export integration. Read `docs/design/workspace-ui.md`.
+  Final unified Windows EXE delivery includes all three formats. Read `docs/design/workspace-ui.md`.
 
 - On 2026-10-08 output colors were separated from page editing on both clients. Dark-page image
   insertion defaults to inversion without a prompt; light-page insertion never asks/inverts and
@@ -27,18 +38,19 @@
   inversion from original assets; optional `隐藏背景格式` removes patterns from print/preview
   in either theme without mutating page settings. Root Windows 144/144 and Android 142/142 plus
   APK/lint/test-APK builds pass (0 lint errors, 113 warnings); native Android output tests are compiled, not run on the live
-  tablet. Final output UI, integration and delivery are coordinated with the paginated-export
-  chat; do not publish or clean shared outputs concurrently. Read `docs/design/insert-and-export.md`.
+  tablet. Final output UI and delivery are included in the unified build above.
+  Read `docs/design/insert-and-export.md`.
 
 - On 2026-10-08 both clients gained native editable selection copy plus separate SVG and PNG copy
   options in Home and content menus. Ctrl+C remains native copy; SVG/PNG are configurable shortcut
-  actions with no default binding. Private clipboard tokens prevent old system images or older
+  actions with no default binding. Private clipboard ownership prevents old system images or older
   internal snapshots from winning paste. Native copies capture independent content and asset bytes;
   Windows imported scene ordering and Android shape identities are retained safely. Initial Windows
   141/141 and Android 139/139 tests, APK/integration-APK assembly and lint (0 errors, 112 warnings)
-  passed; actual WPF command/menu checks passed. Current-display output integration and final shared
-  build/commit/push/publication are coordinated with the concurrent color and paginated-export chats;
-  do not concurrently clear bin/obj/build or republish. Tablet ADB/mDNS had no endpoint. Read the
+  passed; actual WPF command/menu checks passed. Windows now pairs its private format marker with
+  the Win32 clipboard generation: custom OLE payloads were observed becoming empty streams.
+  External changes and history restoration cannot revive an older native snapshot. The final
+  shared delivery includes current-display output. Read the
   Selection clipboard section of `docs/design/insert-and-export.md` for clipboard lifetime, native
   editability and SVG boundaries.
 
@@ -173,10 +185,16 @@
   - `docs/design/input-gestures.md` (read before shortcut, gesture arbitration, viewport, or pressure-eraser work).
   - `docs/design/workspace-ui.md` (read before notebook/section/page navigation, tool configuration, or workspace styling).
   - `docs/design/insert-and-export.md` (read before insert objects/assets, image/PDF view filters, note links, or export formats).
+  - `docs/design/export-and-print.md` (read before output scopes, physical pagination, export/print surfaces, or native print adapters).
   - `docs/design/windows-desktop.md` (read before Notein-win storage, navigation, canvas, desktop UI, import/export, or release work).
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [x] Integrate displayed-color export, dark-page printing, individual image inversion and hidden
+  print backgrounds with the shared paginated-output UI; validate both clients and refresh the
+  sole EXE/current APK. Windows is reopened against its existing workspace. Tablet installation
+  remains pending the user's decision about its current session-only ink.
 
 - [x] Add shared standard/narrow/wide two-column ruled backgrounds in the ribbon menus and new-page
   chooser. Implementation and shared `.mjn` names are in the root checkout; isolated Windows
@@ -184,9 +202,8 @@
   saved/package round trips and actual menu/new-page chooser checks). Android 143/143
   tests, APK/lint/test-APK assembly passed in
   `C:\Users\Meta\AppData\Local\Temp\.agents\mojian-two-columns-20261008`.
-  Commits `57f7bbe` and `dff4c43` are pushed to `origin/master`. Final EXE/APK delivery must
-  include these changes together with the ongoing paginated-export
-  integration; no shared outputs have been overwritten by this task. See `docs/design/workspace-ui.md`.
+  Commits `57f7bbe` and `dff4c43` are pushed to `origin/master`. The final unified EXE/APK
+  includes these changes. See `docs/design/workspace-ui.md`.
 
 - [x] Verify and deliver the shared small-image move / aspect-preserving corner-resize repair
   from an isolated build checkout; Windows reopened, Android installation pending a current ADB
@@ -296,6 +313,7 @@
   - Run unit tests: `cd mojian; dotnet test`.
   - Migration regression tests: `uv run --project tools/data-migration python -m unittest discover -s tools/data-migration/tests`.
   - Optional actual-source acceptance: set `MOJIAN_VECTOR_PAGE_JSON` to a rebuilt imported page JSON before `dotnet test`; it renders 1x/8x and verifies vector edits without saving changes to that source file. UI screenshot tests use an isolated workspace/preferences file.
+  - Optional real pagination acceptance: set `MOJIAN_PAGINATION_PAGE_JSON` to a continuous A4 page JSON before `dotnet test`; the product planner generates independent vector sheets into temporary QA files without changing the source.
   - Launch desktop app: `cd mojian\src\Notein-win; dotnet run`.
   - Publish the delivered EXE: `dotnet publish mojian\src\Notein-win\Notein-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o mojian\artifacts\release`.
   - Release executable: `mojian\artifacts\release\Mojian.exe` (publish output is intentionally gitignored).

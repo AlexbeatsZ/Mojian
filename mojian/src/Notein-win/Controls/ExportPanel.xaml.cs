@@ -12,8 +12,9 @@ public partial class ExportPanel : UserControl
     private readonly Dictionary<string, bool> _imageSelection = [];
     private IReadOnlyList<ExportImageChoice> _images = [];
     private bool _refreshing;
-    public bool Printing { get; set; }
-    public ExportPanel() { InitializeComponent(); Loaded += (_, _) => { DecorateFormats(); Refresh(); }; IsVisibleChanged += (_, _) => { if (IsVisible) Refresh(); }; }
+    private bool _printing;
+    public bool Printing { get => _printing; set { _printing = value; Refresh(); } }
+    public ExportPanel() { InitializeComponent(); Refresh(); Loaded += (_, _) => { DecorateFormats(); Refresh(); }; IsVisibleChanged += (_, _) => { if (IsVisible) Refresh(); }; }
     private bool _decorated;
     private void DecorateFormats()
     {

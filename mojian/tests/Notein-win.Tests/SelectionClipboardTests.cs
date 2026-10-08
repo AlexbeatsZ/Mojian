@@ -27,6 +27,7 @@ public class SelectionClipboardTests
             foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" })
                 application.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
             window = new MainWindow(vm) { Width = 1000, Height = 700 }; window.Show();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var canvas = (NoteCanvas)window.FindName("LeftCanvas");
             canvas.Document!.Strokes.Add(new StrokeRecord { Points = [new InkPoint(20, 30), new InkPoint(120, 60)] });
             canvas.SelectAllContent(); canvas.Focus();
@@ -38,15 +39,19 @@ public class SelectionClipboardTests
             Assert.True((bool)execute.Invoke(window, ["home:copy"])!);
             Assert.True(NoteCanvas.HasNativeClipboard);
             Assert.True((bool)execute.Invoke(window, ["home:paste"])!); Assert.Equal(2, canvas.Document.Strokes.Count); Assert.Empty(canvas.Document.Objects);
-            Assert.True((bool)execute.Invoke(window, ["home:copy-svg"])!); Assert.True(Clipboard.ContainsData("image/svg+xml"));
-            Assert.True((bool)execute.Invoke(window, ["home:copy-png"])!); Assert.True(Clipboard.ContainsImage());
+            Assert.True((bool)execute.Invoke(window, ["home:copy-svg"])!);
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert.True(Clipboard.ContainsData("image/svg+xml"));
+            Assert.True((bool)execute.Invoke(window, ["home:copy-png"])!);
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert.True(Clipboard.ContainsImage());
             vm.ImageDisplayMode = ImageImportDisplayMode.Original;
             Assert.True((bool)execute.Invoke(window, ["home:paste"])!);
             Assert.Single(canvas.Document.Objects); Assert.Equal(2, canvas.Document.Strokes.Count);
             canvas.SelectAllContent();
             var menuMethod = typeof(NoteCanvas).GetMethod("OpenSelectionContextMenu", BindingFlags.Instance | BindingFlags.NonPublic)!;
             Assert.True((bool)menuMethod.Invoke(canvas, [new Point(100, 100)])!);
-            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             var menu = PresentationSource.CurrentSources.Cast<PresentationSource>().Where(source => source.Dispatcher.CheckAccess()).Select(source => FindMenu(source.RootVisual)).FirstOrDefault(value => value != null);
             Assert.NotNull(menu);
             var labels = menu.Items.OfType<System.Windows.Controls.MenuItem>().Select(item => item.Header?.ToString()).ToList();
@@ -81,6 +86,7 @@ public class SelectionClipboardTests
             Assert.True(source.CopySelection());
             Assert.True(NoteCanvas.HasNativeClipboard);
             Assert.False(Clipboard.ContainsImage()); Assert.False(Clipboard.ContainsText());
+            var nativeClipboard = SnapshotClipboard();
             stroke.Points[0] = new InkPoint(999, 999);
             var target = new NoteCanvas { Document = new PageDocument("target", "page2") };
             Assert.True(target.PasteSelection());
@@ -94,6 +100,8 @@ public class SelectionClipboardTests
             target.Undo(); Assert.Empty(target.Document.Strokes); Assert.Empty(target.Document.TextItems);
             target.Redo(); Assert.Single(target.Document.Strokes);
             Clipboard.SetText("new external content");
+            Assert.False(target.PasteSelection());
+            Clipboard.SetDataObject(nativeClipboard!, true);
             Assert.False(target.PasteSelection());
         }
         finally { if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); }
