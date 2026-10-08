@@ -8,11 +8,15 @@ import kotlin.math.roundToInt
 
 data class VectorPdfSource(val settings: PageViewSettings, val content: List<StrokeViewportBounds>, val originalSize: PdfOutputPageSize?,
     val render: (Canvas, Matrix, ExportOptions) -> Unit)
-data class VectorPdfPage(val sheet: ExportSheet, val render: (Canvas, Matrix) -> Unit)
+data class VectorPdfPage(val sheet: ExportSheet, val backgroundArgb: Int = android.graphics.Color.WHITE, val render: (Canvas, Matrix) -> Unit)
 
 object VectorPdfExporter {
     fun pages(sources: List<VectorPdfSource>, options: ExportOptions, outputSize: PdfOutputPageSize? = null): List<VectorPdfPage> {
-        val pages = sources.flatMap { source -> ExportLayout.plan(source.settings, source.content, options, source.originalSize, outputSize).map { sheet -> VectorPdfPage(sheet) { canvas,matrix -> source.render(canvas,matrix,options) } } }
+        val pages = sources.flatMap { source ->
+            val paper=source.settings.pageColor.displayArgb(source.settings.darkBackground)
+            val color=if(options.printing && source.settings.darkBackground) OutputAppearance.printPaper(paper) else paper
+            ExportLayout.plan(source.settings, source.content, options, source.originalSize, outputSize).map { sheet -> VectorPdfPage(sheet,color) { canvas,matrix -> source.render(canvas,matrix,options) } }
+        }
         return ExportLayout.selectPages(options.pageRange, pages.size).map(pages::get)
     }
 
@@ -41,7 +45,7 @@ object VectorPdfExporter {
 
     fun renderPage(canvas: Canvas, page: VectorPdfPage) {
         val sheet = page.sheet
-        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawColor(page.backgroundArgb)
         canvas.save()
         canvas.clipRect(sheet.marginPoints,sheet.marginPoints,sheet.widthPoints-sheet.marginPoints,sheet.heightPoints-sheet.marginPoints)
         val matrix = Matrix().apply { setValues(floatArrayOf(sheet.scale,0f,sheet.marginPoints-sheet.source.left*sheet.scale,
