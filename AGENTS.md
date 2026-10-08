@@ -1,5 +1,6 @@
 # Goal
 
+- Bring 墨笺 to native iOS/iPadOS with phone/tablet layouts, editable notes and configurable Apple Pencil side gestures.
 - Assess whether the Android Notein app on the user's tablet can be brought to Windows with PC-side writing and file-based synchronization through Syncthing instead of Notein cloud sync.
 - Prioritize a clean-room handwriting engine that reproduces Notein's pen character and low apparent latency, because both the compatibility route and an independent product need it.
 - Preserve the user's existing Notein data. Reverse engineering is for interoperability with the user's own notes; do not publish proprietary app code or keys.
@@ -17,6 +18,20 @@
   the current Android APK (21:13 SGT) is refreshed. The tablet is connected, but its installed
   process retains session-only freehand: installation awaits the user's session-loss choice.
   Native Android output tests are compiled, not run. Read `docs/design/export-and-print.md`.
+
+- Native Apple client 0.1.0 is in `ios/` (UIKit, iOS 17+, universal iPhone/iPad). It includes
+  editable pressure ink/shapes, direct touch selection, eight-handle resize, Undo/Redo, persistent
+  hierarchy/assets/text/tables, Files `.mjn` exchange, vector PDF/PNG output and native printing.
+  Phone/narrow iPad uses navigation sheets; wide iPad uses two panes. Pencil 2/Pro double-tap and
+  Pro squeeze have separate persisted actions; third-party pen input requires explicitly mapped
+  keyboard characters. Final Release simulator and unsigned arm64 device builds passed with
+  Xcode 27.0 / iOS 27.0; 19/19 portable tests pass. Actual simulator checks exercised iPhone
+  finger ink/Undo/Redo/page creation and iPad portrait/landscape/settings. Saved ink and Pencil
+  settings were inspected; Release restart retained both. Native PDF sharing and independent A4
+  vector/zero-image rendering checks passed, as did a configured keyboard event switching Eraser/Pen.
+  No physical iOS device/development Team is available, so no signed IPA
+  or physical Pencil acceptance is claimed. Complete parity gaps are listed in
+  `docs/design/ios-client.md`; Android/Windows outputs and live notes were not modified.
 
 - On 2026-10-08 both clients gained `标准双栏横线`, `窄双栏横线`, and `宽双栏横线` in
   the background menus and new-page choosers. One vertical rule follows the actual paper center,
@@ -175,6 +190,7 @@
 - Android canvas background patterns now render in a dedicated layer below inserted images/PDF printouts/stickers/tables/attachments, while dry and wet ink remain above inserted content. The fix passed unit tests, debug assembly, and lint; an installed tablet screenshot with two existing imported images verified that the grid remains visible around them without crossing their opaque pixels.
 - Static native inspection proves a Xiaomi-only prediction route in this Notein build: its JNI facade loads Xiaomi's `/system_ext/lib64/libtflite_interface_wrap.touch.so` and the bundled `assets/predict/estimate.hdb` model. An isolated probe succeeded after declaring that public native library: availability `true`, model init `0`, and one raw inference returned two floats. Xiaomi's official Pencil Engine SDK is the legitimate product integration route; do not ship Notein's model.
 - Design records:
+  - `docs/design/ios-client.md` (read before Apple UIKit layout/input, Pencil gestures, Apple storage/exchange or distribution).
   - `docs/design/writing-performance-and-durability.md` (read before Windows wet/dry rendering,
     pen feedback, Undo, autosave/recovery, or same-page split ownership).
   - `docs/design/shapes-and-straightening.md` (read before shape geometry, hold-to-straighten, shape settings, or generated-stroke persistence).
@@ -195,6 +211,9 @@
   print backgrounds with the shared paginated-output UI; validate both clients and refresh the
   sole EXE/current APK. Windows is reopened against its existing workspace. Tablet installation
   remains pending the user's decision about its current session-only ink.
+
+- [x] Implement/build the native iPhone/iPad client and independent Pencil gesture settings; verify core tests and initial native simulator interactions.
+- [ ] Collect actual iPad/Pencil acceptance and configure the user's Apple development Team for device installation; continue the parity work tracked in `docs/design/ios-client.md`.
 
 - [x] Add shared standard/narrow/wide two-column ruled backgrounds in the ribbon menus and new-page
   chooser. Implementation and shared `.mjn` names are in the root checkout; isolated Windows
@@ -308,6 +327,7 @@
 
 # Build / Run / Test
 
+- Apple client: `bash ios/tools/build.sh test|simulator|device`; see `ios/README.md`. Full Xcode is required; the Swift package alone is not the UIKit app. The current simulator app is `ios/artifacts/current/Mojian-simulator.app`. Signed archives require `MOJIAN_APPLE_TEAM`. Xcode 27 on this Mac provides Device Hub at `/Applications/Xcode.app/Contents/Applications/DeviceHub.app`; iOS runtimes are separate Components downloads.
 - Windows desktop client (`Notein-win`):
   - Build solution: `dotnet build mojian\Notein-win.slnx` or `cd mojian; dotnet build`.
   - Run unit tests: `cd mojian; dotnet test`.
