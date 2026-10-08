@@ -10,8 +10,11 @@
   images, mouse/touch-specific target radii, aspect-preserving corner resize and single-axis edge
   resize. Resize derives from starting content geometry and pointer displacement, keeping the
   opposite anchor fixed without off-center/padded-frame jumps. Android clamps at the shared frame
-  rather than individual image dimensions. Focused geometry and native canvas regression coverage
-  is added; final isolated builds/delivery are in progress. See `docs/design/input-gestures.md` and
+  rather than individual image dimensions. Isolated Windows 136/136 tests (including actual canvas
+  move/resize, Undo and save/reload) and Android 137/137 tests, debug/test-APK builds and lint
+  (0 errors, 110 warnings) passed. Both current deliverables are refreshed; the sole Windows EXE
+  reopened in the same five-notebook workspace. No tablet ADB/mDNS endpoint was available, so
+  Android native/physical interaction remains unverified. See `docs/design/input-gestures.md` and
   `docs/design/insert-and-export.md`.
 
 - On 2026-10-08 the user's `Chemistry / Chemical Kinetics / 作业 1` (edited 09:09 SGT)
@@ -139,8 +142,9 @@
 
 # Active Work
 
-- [ ] Verify and deliver the shared small-image move / aspect-preserving corner-resize repair;
-  use an isolated build checkout while the separate clipboard task edits this same workspace.
+- [x] Verify and deliver the shared small-image move / aspect-preserving corner-resize repair
+  from an isolated build checkout; Windows reopened, Android installation pending a current ADB
+  connection. The separate clipboard task's work remains in this checkout.
 
 - [x] Re-export the 2026-10-08 Chemical Kinetics homework as a true white-paper/black-ink vector PDF; replace both clients' raster PDF routes, validate native paths/opacity/color with independent PDF readers, and refresh both deliverables while preserving notes.
 
