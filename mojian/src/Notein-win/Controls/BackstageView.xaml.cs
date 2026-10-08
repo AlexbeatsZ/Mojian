@@ -14,7 +14,7 @@ public partial class BackstageView : UserControl
     public event Action<ShortcutActionDescriptor>? ConfigureShortcutRequested;
     public event Action<ShortcutActionDescriptor>? ClearShortcutRequested;
 
-    public BackstageView() => InitializeComponent();
+    public BackstageView() { InitializeComponent(); PrintSettings.Printing = true; }
 
     private void OnNewNotebookClick(object sender, RoutedEventArgs e) => NewNotebookRequested?.Invoke(this, EventArgs.Empty);
     private void OnOpenWorkspaceClick(object sender, RoutedEventArgs e) => OpenWorkspaceRequested?.Invoke(this, EventArgs.Empty);

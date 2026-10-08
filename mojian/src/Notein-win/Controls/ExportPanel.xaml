@@ -1,0 +1,58 @@
+<UserControl x:Class="Notein_win.Controls.ExportPanel" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources>
+  <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#F4F4F4" /></Style>
+  <Style TargetType="ListBox"><Setter Property="Background" Value="#262626" /><Setter Property="Foreground" Value="#F4F4F4" /><Setter Property="BorderBrush" Value="#626262" /><Setter Property="BorderThickness" Value="1" /></Style>
+  <Style TargetType="ListBoxItem"><Setter Property="Padding" Value="12,10" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Row" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#383838" /><Setter TargetName="Row" Property="BorderBrush" Value="#AFA1BC" /></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="#333333" /></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+  <Style TargetType="Button"><Setter Property="Background" Value="#292929" /><Setter Property="Foreground" Value="#F4F4F4" /><Setter Property="BorderBrush" Value="#777777" /><Setter Property="Padding" Value="16,10" /><Setter Property="Margin" Value="0,0,10,0" /></Style>
+  <Style TargetType="CheckBox"><Setter Property="Foreground" Value="#D4CEDA" /><Setter Property="Margin" Value="0,8,0,0" /></Style>
+ </UserControl.Resources>
+ <StackPanel MinWidth="620" MaxWidth="800">
+  <TextBlock x:Name="Heading" Text="导出" FontSize="26" FontWeight="SemiBold" Margin="0,0,0,24" />
+  <Grid>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+   <StackPanel>
+    <TextBlock Text="1. 选择范围" Foreground="#DCD0E8" FontSize="19" Margin="0,0,0,10" />
+    <ListBox x:Name="ScopeList" SelectedIndex="0" SelectionChanged="OnChanged" Background="Transparent" BorderThickness="0">
+     <ListBoxItem><StackPanel Orientation="Horizontal"><Path Data="{StaticResource Fluent_document_page}" Fill="#CBB7DF" Width="25" Height="25" Stretch="Uniform" Margin="0,0,14,0" /><TextBlock Text="页面" VerticalAlignment="Center" /></StackPanel></ListBoxItem>
+     <ListBoxItem><StackPanel Orientation="Horizontal"><Path Data="{StaticResource Fluent_document_page}" Fill="#CBB7DF" Width="25" Height="25" Stretch="Uniform" Margin="0,0,14,0" /><TextBlock Text="分区" VerticalAlignment="Center" /></StackPanel></ListBoxItem>
+     <ListBoxItem><StackPanel Orientation="Horizontal"><Path Data="{StaticResource Fluent_notebook}" Fill="#CBB7DF" Width="25" Height="25" Stretch="Uniform" Margin="0,0,14,0" /><TextBlock Text="笔记本" VerticalAlignment="Center" /></StackPanel></ListBoxItem>
+    </ListBox>
+    <TextBlock x:Name="TargetText" Foreground="#AAA5AF" TextWrapping="Wrap" Margin="12,18,0,0" />
+   </StackPanel>
+   <Border Grid.Column="1" BorderBrush="#555555" BorderThickness="1,0,0,0" Margin="15,40,15,0" />
+   <StackPanel Grid.Column="2">
+    <StackPanel x:Name="FormatPanel">
+     <TextBlock Text="2. 选择格式" Foreground="#DCD0E8" FontSize="19" Margin="0,0,0,10" />
+     <ListBox x:Name="FormatList" SelectedIndex="0" SelectionChanged="OnChanged">
+      <ListBoxItem><StackPanel><TextBlock Text="PDF (*.pdf)" FontWeight="SemiBold" /><TextBlock Text="分页分享，保留矢量笔迹" FontSize="12" Foreground="#AAA5AF" Margin="0,4,0,0" /></StackPanel></ListBoxItem>
+      <ListBoxItem><StackPanel><TextBlock Text="墨笺可编辑包 (*.mjn)" FontWeight="SemiBold" /><TextBlock Text="包含页面与原始附件，可继续编辑" FontSize="12" Foreground="#AAA5AF" Margin="0,4,0,0" /></StackPanel></ListBoxItem>
+      <ListBoxItem><StackPanel><TextBlock Text="分页图片 (*.zip)" FontWeight="SemiBold" /><TextBlock Text="每页一张 PNG，200 DPI，按页码排列" FontSize="12" Foreground="#AAA5AF" Margin="0,4,0,0" /></StackPanel></ListBoxItem>
+      <ListBoxItem><StackPanel><TextBlock Text="XPS (*.xps)" FontWeight="SemiBold" /><TextBlock Text="Windows 固定版式文档" FontSize="12" Foreground="#AAA5AF" Margin="0,4,0,0" /></StackPanel></ListBoxItem>
+     </ListBox>
+    </StackPanel>
+    <StackPanel x:Name="LayoutPanel" Margin="0,20,0,0">
+     <TextBlock x:Name="LayoutHeading" Text="3. 分页设置" Foreground="#DCD0E8" FontSize="19" Margin="0,0,0,10" />
+     <TextBlock Text="纸张" Foreground="#AAA5AF" FontSize="12" Margin="0,0,0,5" />
+     <ListBox x:Name="PaperList" SelectedIndex="0" SelectionChanged="OnChanged"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel><ListBoxItem Content="自动" /><ListBoxItem Content="A4" /><ListBoxItem Content="A3" /><ListBoxItem Content="Letter" /></ListBox>
+     <TextBlock Text="自动：普通页面按 A4 分页；PDF 页面保留原尺寸" Foreground="#AAA5AF" FontSize="12" TextWrapping="Wrap" Margin="0,5,0,10" />
+     <TextBlock Text="方向" Foreground="#AAA5AF" FontSize="12" Margin="0,0,0,5" />
+     <ListBox x:Name="OrientationList" SelectedIndex="0" SelectionChanged="OnChanged"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel><ListBoxItem Content="纵向" /><ListBoxItem Content="横向" /></ListBox>
+     <TextBlock Text="边距" Foreground="#AAA5AF" FontSize="12" Margin="0,10,0,5" />
+     <ListBox x:Name="MarginList" SelectedIndex="1" SelectionChanged="OnChanged"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel><ListBoxItem Content="0 mm" /><ListBoxItem Content="6 mm" /><ListBoxItem Content="12 mm" /><ListBoxItem Content="20 mm" /></ListBox>
+     <CheckBox x:Name="TrimCheck" IsChecked="True" Content="省略 A4 末尾空白页" Checked="OnChanged" Unchecked="OnChanged" />
+     <CheckBox x:Name="HideFormatCheck" Content="隐藏背景格式（横线、网格、点阵）" Checked="OnChanged" Unchecked="OnChanged" />
+     <TextBlock Text="输出页码（留空为全部，例如 1-3,5）" Foreground="#AAA5AF" FontSize="12" Margin="0,12,0,5" />
+     <TextBox x:Name="RangeText" Background="#232323" Foreground="#F4F4F4" BorderBrush="#626262" Padding="10,7" TextChanged="OnChanged" />
+    </StackPanel>
+    <StackPanel x:Name="PrintColorPanel" Margin="0,16,0,0" Visibility="Collapsed">
+     <TextBlock Text="深色页面打印" Foreground="#DCD0E8" FontSize="16" />
+     <TextBlock Text="白色笔迹转黑、背景转白，其他颜色保持不变" Foreground="#AAA5AF" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,10" />
+     <TextBlock Text="选择要反色的图片（相对当前显示效果）" Foreground="#AAA5AF" FontSize="12" Margin="0,0,0,5" />
+     <StackPanel x:Name="PrintImageList" />
+    </StackPanel>
+    <TextBlock x:Name="Summary" TextWrapping="Wrap" Foreground="#CDBDDD" Margin="0,18,0,12" />
+    <StackPanel Orientation="Horizontal"><Button x:Name="ActionButton" Content="导出…" Click="OnAction" /><Button x:Name="PreviewButton" Content="分页预览" Click="OnPreview" /></StackPanel>
+   </StackPanel>
+  </Grid>
+ </StackPanel>
+</UserControl>

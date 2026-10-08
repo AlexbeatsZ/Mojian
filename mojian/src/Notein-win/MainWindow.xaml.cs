@@ -75,6 +75,7 @@ public partial class MainWindow : Window
         Backstage.SwitchWorkspaceRequested += (_, _) => SwitchWorkspace();
         Backstage.ExportPdfRequested += (_, _) => ExportCurrentPagePdf();
         Backstage.ExportPackageRequested += (_, _) => ExportNotebookPackage();
+        ConfigureExportPanels();
         Backstage.ConfigureShortcutRequested += ConfigureShortcut;
         Backstage.ClearShortcutRequested += action => ViewModel.ClearShortcut(action.Id);
         UpdateZoomStatus();
@@ -1240,30 +1241,7 @@ public partial class MainWindow : Window
 
     private void ExportCurrentPagePdf()
     {
-        if (ViewModel.FocusedDocument == null) return;
-        var dialog = new SaveFileDialog { Title = "导出当前页面", Filter = "PDF 文件 (*.pdf)|*.pdf", FileName = $"{ViewModel.ActivePageTitle}.pdf", AddExtension = true, DefaultExt = ".pdf" };
-        if (dialog.ShowDialog(this) != true) return;
-        try
-        {
-            var page = ViewModel.FocusedDocument == null ? null : ViewModel.ActiveWorkspace.FindPage(ViewModel.FocusedDocument.PageId, out _);
-            var extent = FocusedCanvas.ExportDocumentExtent;
-            if (page?.Appearance.PaperKind == PaperKind.Pdf)
-                extent = new Rect(0, 0, page.Appearance.Width, page.Appearance.Height);
-            var layers = ViewModel.FocusedDocument?.Layers.Count > 0
-                ? new[] { new PdfVectorLayer("页面与内容（原始图层顺序）", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Composite, extent)) }
-                : new[]
-                {
-                    new PdfVectorLayer("页面背景", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Background, extent)),
-                    new PdfVectorLayer("插入内容", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.Inserts, extent)),
-                    new PdfVectorLayer("墨迹与文字", FocusedCanvas.RenderLayerDrawing(CanvasRenderLayer.InkAndText, extent)),
-                };
-            VectorPdfExportService.Write(dialog.FileName, new[]
-            {
-                new PdfVectorPage(extent, layers, page?.PdfWidthPoints, page?.PdfHeightPoints),
-            });
-            MessageBox.Show(this, "PDF 已导出。", "墨笺", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex) { MessageBox.Show(this, $"PDF 导出失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error); }
+        RunExport(new ExportOptions(), false, false);
     }
 
     private void ExportNotebookPackage()

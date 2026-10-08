@@ -8,6 +8,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class NotebookPackageExporter(private val repository: PageContentRepository) {
+    fun writePage(output: OutputStream, notebook: NotebookWorkspace, page: NotePage) {
+        writeRoots(output, notebook, listOf(SectionNode(id="export-page", title=page.title, pages=mutableListOf(page))), "mojian-section", page.id, emptyMap())
+    }
     fun write(
         output: OutputStream,
         notebook: NotebookWorkspace,

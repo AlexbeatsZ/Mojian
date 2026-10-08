@@ -136,7 +136,8 @@ mutating live editors. Bitmap assets remain native images. This native Android f
 Optional Content Group toggle; preserving vector ink takes priority over the former raster-layer
 format. Native page dimensions are integer PDF points, so fractional source PDF dimensions are
 rounded to the nearest point on this client. Both clients keep document coordinates independent
-of viewport position and scale. A4 remains a continuous document export in the product.
+of viewport position and scale. Physical export and printing now follow `export-and-print.md`:
+A4 sheets and boundless content are paginated into real output pages through the product entry points.
 
 PDF printout backgrounds are still drawn from the existing original-source raster renderer; the
 new guarantee covers authored/imported ink paths, text/glyphs and native geometry, not a claim that

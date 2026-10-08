@@ -326,6 +326,7 @@ class MainActivity : Activity() {
     private var imageImportDisplayMode = ImageImportDisplayMode.ASK
     private var pdfPrintoutDisplayMode = ImageImportDisplayMode.ASK
     private var pendingExport: PendingExport? = null
+    private var pendingRichExport: ((Uri) -> Unit)? = null
     private var pendingSectionExport: SectionExportTarget? = null
     private var pendingPdfPageTarget: PdfPageTarget? = null
     private var boundPageKey: PageSessionKey? = null
@@ -883,7 +884,7 @@ class MainActivity : Activity() {
                     addView(backstageNavItem("打开", false) { showShell("打开笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(8), dp(4), dp(8)) })
                     addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("打印", false) { showShell("打印") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("打印", false) { dialog.dismiss(); showExportDialog(printing = true) }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("共享", false) { showShell("共享") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("导出", false) { dialog.dismiss(); showExportDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
@@ -6557,21 +6558,134 @@ class MainActivity : Activity() {
         return InsertTarget(workspace.id, pageId, point.x, point.y)
     }
 
-    private fun showExportDialog() {
-        if (workspace.selectedPageId.isEmpty()) {
-            Toast.makeText(this, "请先选择要导出的页面", Toast.LENGTH_SHORT).show()
+    private fun exportPages(scope: ExportScope): List<NotePage> = when(scope) {
+        ExportScope.PAGE -> listOfNotNull(workspace.selectedPage())
+        ExportScope.SECTION -> workspace.selectedSection()?.let { workspace.pagesInSectionTree(it.id) }.orEmpty()
+        ExportScope.NOTEBOOK -> workspace.allSections().flatMap { it.pages }
+    }
+
+    private fun exportTitle(scope: ExportScope): String = when(scope) {
+        ExportScope.PAGE -> workspace.selectedPage()?.title ?: "页面"
+        ExportScope.SECTION -> workspace.selectedSection()?.title ?: "分区"
+        ExportScope.NOTEBOOK -> workspace.title
+    }
+
+    /** Independent layers preserve the active page, selection, viewport, and session-only freehand. */
+    private fun exportSource(page: NotePage): VectorPdfSource {
+        val key=PageSessionKey(workspace.id,page.id)
+        val session=pageSessions[key]
+        val stored=pageContentRepository.load(workspace.id,page.id)
+        val strokes=session?.strokes ?: (0 until stored.strokes.length()).mapNotNull { ShapeStrokeCodec.decode(stored.strokes.getJSONObject(it),::displayColor) }
+        val settings=page.viewSettings.copy()
+        val exportViewport=ViewportState()
+        val ink=DryInkView(this).apply { backgroundFormat=settings.backgroundFormat; replaceStrokes(strokes) }
+        val inserts=InsertContentLayer(this,exportViewport,pageContentRepository).apply { bind(stored) }
+        val tags=CanvasTagLayer(this,exportViewport).apply { replaceTags(session?.tags.orEmpty()) }
+        val text=CanvasTextInputLayer(this,exportViewport).apply {
+            replaceEditors(session?.textBoxes.orEmpty())
+            measure(View.MeasureSpec.makeMeasureSpec(dp(900),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(dp(1200),View.MeasureSpec.EXACTLY))
+            layout(0,0,measuredWidth,measuredHeight)
+        }
+        val bounds=(ink.contentBounds()+inserts.contentBounds()+tags.contentBounds()+text.contentBounds()).toList()
+        return VectorPdfSource(settings,bounds,page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) { canvas,matrix,_ ->
+            ink.renderBackgroundForExport(canvas,matrix)
+            inserts.renderForExport(canvas,matrix)
+            ink.renderVectorInkForExport(canvas,matrix)
+            tags.renderForExport(canvas,matrix)
+            text.renderForExport(canvas,matrix)
+        }
+    }
+
+    private fun startRichExport(options: ExportOptions, printing: Boolean, sources: List<VectorPdfSource>) {
+        val notebook=workspace
+        val pages=exportPages(options.scope)
+        require(pages.isNotEmpty()) { "当前范围没有页面" }
+        val title=exportTitle(options.scope)
+        if(printing) {
+            val sheets=VectorPdfExporter.pages(sources,options)
+            val first=sheets.first().sheet
+            val media=android.print.PrintAttributes.MediaSize("MOJIAN","墨笺页面",(first.widthPoints/72*1000).toInt(),(first.heightPoints/72*1000).toInt())
+            val margin=(options.marginMm/25.4f*1000).toInt()
+            val attributes=android.print.PrintAttributes.Builder().setMediaSize(media).setMinMargins(android.print.PrintAttributes.Margins(margin,margin,margin,margin))
+                .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR).build()
+            (getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager).print(title,PaginatedPrintAdapter(title,sources,options,ioExecutor),attributes)
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle("导出")
-            .setItems(arrayOf("分层 PDF（当前页面）", "墨笺私有格式 .mjn（当前笔记本）")) { _, which ->
-                startExport(if (which == 0) PendingExport.PDF else PendingExport.PRIVATE_PACKAGE)
+        val section=notebook.selectedSection()
+        val pdfPages=if(options.format==ExportFormat.PACKAGE) emptyList() else VectorPdfExporter.pages(sources,options)
+        pendingRichExport={ uri ->
+            val pdf=if(options.format==ExportFormat.PDF) VectorPdfExporter.capturePages(pdfPages) else null
+            Toast.makeText(this,"正在导出…",Toast.LENGTH_SHORT).show()
+            ioExecutor.execute {
+                try {
+                    contentResolver.openOutputStream(uri,"w").use { output ->
+                        requireNotNull(output) { "无法写入目标文件" }
+                        when(options.format) {
+                            ExportFormat.PDF -> requireNotNull(pdf).writeTo(output)
+                            ExportFormat.PACKAGE -> {
+                                val exporter=NotebookPackageExporter(pageContentRepository)
+                                when(options.scope) {
+                                    ExportScope.PAGE -> exporter.writePage(output,notebook,pages.first())
+                                    ExportScope.SECTION -> exporter.writeSection(output,notebook,requireNotNull(section),null,emptyMap())
+                                    ExportScope.NOTEBOOK -> exporter.write(output,notebook,null,emptyMap())
+                                }
+                            }
+                            ExportFormat.PNG_ZIP -> java.util.zip.ZipOutputStream(output).use { zip ->
+                                pdfPages.forEachIndexed { index,page ->
+                                    val task=java.util.concurrent.FutureTask {
+                                        val scale=200f/72
+                                        Bitmap.createBitmap(kotlin.math.ceil(page.sheet.widthPoints*scale).toInt(),kotlin.math.ceil(page.sheet.heightPoints*scale).toInt(),Bitmap.Config.ARGB_8888).also { bitmap ->
+                                            val canvas=Canvas(bitmap); canvas.scale(scale,scale); VectorPdfExporter.renderPage(canvas,page)
+                                        }
+                                    }
+                                    runOnUiThread(task)
+                                    val bitmap=task.get()
+                                    try { zip.putNextEntry(java.util.zip.ZipEntry("page-%04d.png".format(java.util.Locale.ROOT,index+1))); bitmap.compress(Bitmap.CompressFormat.PNG,100,zip); zip.closeEntry() }
+                                    finally { bitmap.recycle() }
+                                }
+                            }
+                        }
+                    }
+                    runOnUiThread { Toast.makeText(this,"导出完成${if(pdfPages.isNotEmpty()) " · ${pdfPages.size} 页" else ""}",Toast.LENGTH_LONG).show() }
+                } catch(error: Exception) { reportBackgroundFailure("导出失败",error) }
+                finally { pdf?.close() }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
+        pendingExport=PendingExport.PDF // The picker callback dispatches the captured scoped request above.
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type=options.format.mime; putExtra(Intent.EXTRA_TITLE,"${safeFileName(title)}.${options.format.extension}")
+        },REQUEST_EXPORT)
+    }
+
+    private fun showExportDialog(printing: Boolean = false) {
+        saveBoundPageSession()
+        val sources = mutableMapOf<String, VectorPdfSource>()
+        fun selectedSources(options: ExportOptions) = exportPages(options.scope).map { page -> sources.getOrPut(page.id) { exportSource(page) } }
+        ExportOptionsDialog(this,printing,images = { options ->
+            val darkPages=exportPages(options.scope).filter { it.viewSettings.darkBackground }
+            darkPages.isNotEmpty() to darkPages.flatMap { page -> pageContentRepository.load(workspace.id,page.id).objects.filterIsInstance<InsertObject.Image>()
+                .map { ExportImageChoice(it.id,"${page.title} · ${it.displayName}",it.viewInverted) } }
+        },describe = { options ->
+            val pages=exportPages(options.scope)
+            require(pages.isNotEmpty()) { "请先选择要导出的${options.scope.label}" }
+            if(!printing && options.format==ExportFormat.PACKAGE) "${exportTitle(options.scope)}\n${pages.size} 个笔记页面，包含可编辑内容和原始附件"
+            else {
+                val sheets=VectorPdfExporter.pages(selectedSources(options),options)
+                "${exportTitle(options.scope)}\n${pages.size} 个笔记页面 → 本次输出 ${sheets.size} 页"
+            }
+        },action = { options,preview ->
+            runCatching { startRichExport(options,printing || preview,if(options.format==ExportFormat.PACKAGE && !printing && !preview) emptyList() else selectedSources(options)) }
+                .onFailure { reportBackgroundFailure("导出失败",it) }
+        }).show()
     }
 
     private fun startExport(type: PendingExport) {
+        if(type==PendingExport.PDF) {
+            runCatching { saveBoundPageSession(); startRichExport(ExportOptions(),false,exportPages(ExportScope.PAGE).map(::exportSource)) }
+                .onFailure { reportBackgroundFailure("导出失败",it) }
+            return
+        }
+        pendingRichExport = null
         if (type != PendingExport.SECTION_PACKAGE && workspace.selectedPageId.isEmpty()) {
             Toast.makeText(this, "请先选择要导出的页面", Toast.LENGTH_SHORT).show()
             return
@@ -6605,6 +6719,7 @@ class MainActivity : Activity() {
     }
 
     private fun exportToUri(uri: Uri, type: PendingExport) {
+        pendingRichExport?.let { action -> pendingRichExport=null; action(uri); return }
         if (type == PendingExport.PDF) {
             val pdf = runCatching { captureVectorPdf() }.getOrElse {
                 reportBackgroundFailure("导出失败", it)

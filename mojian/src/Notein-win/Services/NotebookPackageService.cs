@@ -16,6 +16,9 @@ public static class NotebookPackageService
     public static void ExportSection(string path, NotebookWorkspace notebook, SectionNode section, WorkspaceStore store, string? currentPageId = null, IReadOnlyDictionary<string, byte[]>? layers = null)
         => ExportRoots(path, notebook, new[] { section }, "mojian-section", store, currentPageId, layers);
 
+    public static void ExportPage(string path, NotebookWorkspace notebook, NotePage page, WorkspaceStore store)
+        => ExportRoots(path, notebook, [new SectionNode { Title = page.Title, Pages = [page] }], "mojian-section", store, page.Id, null);
+
     private static void ExportRoots(string path, NotebookWorkspace notebook, IReadOnlyCollection<SectionNode> roots, string format, WorkspaceStore store, string? currentPageId, IReadOnlyDictionary<string, byte[]>? layers)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
