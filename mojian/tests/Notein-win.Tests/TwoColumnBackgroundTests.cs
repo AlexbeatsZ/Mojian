@@ -35,6 +35,7 @@ public class TwoColumnBackgroundTests
                 anchor.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, anchor));
                 Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Background);
                 var menu = PresentationSource.CurrentSources.Cast<PresentationSource>()
+                    .Where(source => source.Dispatcher.CheckAccess())
                     .SelectMany(source => source.RootVisual == null ? [] : Descendants(source.RootVisual))
                     .OfType<ContextMenu>().Single();
                 var items = menu.Items.OfType<MenuItem>().Where(item => item.Header.ToString()!.Contains("双栏")).ToList();
