@@ -3505,11 +3505,13 @@ public partial class NoteCanvas : UserControl
         catch { return new SolidColorBrush(fallback); }
     }
 
-    private Brush OutputPaperBrush()
+    private Brush OutputPaperBrush() => ResolveOutputPaperBrush(_outputAppearance ?? new OutputAppearance());
+
+    public Brush ResolveOutputPaperBrush(OutputAppearance output)
     {
         var brush = (SolidColorBrush)ParseBrush(Appearance.PageColor,
             Appearance.Theme == PageTheme.Dark ? Color.FromRgb(27, 27, 27) : Color.FromRgb(250, 250, 250));
-        return _outputAppearance?.PrintsDark(Appearance.Theme) == true
+        return output.PrintsDark(Appearance.Theme)
             ? new SolidColorBrush(OutputAppearance.PrintPaper(brush.Color)) : brush;
     }
 
