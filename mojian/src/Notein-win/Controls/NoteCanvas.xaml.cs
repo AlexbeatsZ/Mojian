@@ -2766,7 +2766,7 @@ public partial class NoteCanvas : UserControl
         var color = Color.FromRgb(45, 50, 56);
         var pen = new Pen(new SolidColorBrush(color), _outputAppearance != null ? 0.8 : 0.8 / Math.Max(0.1, _viewport.Scale));
         var isTwoColumn = Appearance.Background is CanvasBackgroundFormat.RuledTwoColumnStandard or CanvasBackgroundFormat.RuledTwoColumnNarrow or CanvasBackgroundFormat.RuledTwoColumnWide;
-        var isRuled = isTwoColumn || Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide;
+        var isRuled = isTwoColumn || Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.RuledClean;
         var isGrid = Appearance.Background is CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.GridStandard or CanvasBackgroundFormat.GridWide;
         var isDots = Appearance.Background is CanvasBackgroundFormat.DotsDense or CanvasBackgroundFormat.DotsStandard or CanvasBackgroundFormat.DotsWide;
         if (isRuled || isGrid)

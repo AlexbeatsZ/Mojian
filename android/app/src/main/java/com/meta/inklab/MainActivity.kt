@@ -112,9 +112,9 @@ private data class PageSessionKey(
 )
 
 private data class PageSessionState(
-    val strokes: List<Stroke>,
-    val tags: List<CanvasTagSnapshot>,
-    val textBoxes: List<CanvasTextSnapshot>,
+    val strokes: List<Stroke>?,
+    val tags: List<CanvasTagSnapshot>?,
+    val textBoxes: List<CanvasTextSnapshot>?,
     val viewport: ViewportSnapshot,
 )
 
@@ -392,7 +392,8 @@ class MainActivity : Activity() {
         window.navigationBarColor = NAV_BACKGROUND
         loadPreferences()
         shortcutDispatcher.handler = StylusShortcutHandler(::handleXiaomiStylusSignal)
-        pageContentRepository = PageContentRepository(filesDir)
+        try { initializeWorkspaceRepository() } catch (error: Exception) { showWorkspaceLoadFailure(error); return }
+        selectIncomingNote(intent.data)
         assetStore = AssetStore(this, pageContentRepository)
         pdfPageImporter = PdfPageImporter(pageContentRepository, assetStore)
         currentBrush = brushFor(toolShelf.selected)
@@ -408,8 +409,127 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         dismissDarkTooltip()
-        ioExecutor.shutdownNow()
+        mainHandler.removeCallbacks(syncRefresh)
+        mainHandler.removeCallbacks(saveSharedContent)
+        ioExecutor.shutdown()
+        pageWrites.close()
         super.onDestroy()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if(!workspaceLoaded) return
+        saveBoundPageSession()
+        if(contentDirty) return
+        if(selectIncomingNote(intent.data)) { persistWorkspacePreferences();renderWorkspace() }
+    }
+
+    private fun selectIncomingNote(uri: Uri?): Boolean {
+        if(uri?.scheme!="mojian" || uri.host!="open") return false
+        val parts=uri.pathSegments
+        if(parts.size!=6 || parts[0]!="notebook" || parts[2]!="section" || parts[4]!="page") return false
+        val notebook=notebookLibrary.notebooks.firstOrNull { it.id==parts[1] } ?: return false
+        val section=notebook.section(parts[3]) ?: return false
+        if(section.pages.none { it.id==parts[5] }) return false
+        notebookLibrary.selectNotebook(notebook.id)
+        notebook.selectSection(section.id)
+        return notebook.selectPage(section.id,parts[5])
+    }
+
+    private var contentDirty = false
+    private var workspaceLoaded = false
+    private val pageWrites = PageWriteQueue()
+    private val saveSharedContent = Runnable { persistGeneratedShapes(flush=false) }
+    private val syncRefresh = object : Runnable {
+        override fun run() {
+            if (workspaceLoaded && !contentDirty && currentFocus !is EditText) refreshSharedWorkspace()
+            mainHandler.postDelayed(this,3000)
+        }
+    }
+
+    private fun hasSharedStorageAccess() = android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()
+
+    private fun openSharedStoragePermission() {
+        val action = if (android.os.Build.VERSION.SDK_INT >= 30) android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+            else android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+        startActivity(Intent(action,Uri.parse("package:$packageName")))
+    }
+
+    private fun initializeWorkspaceRepository() {
+        val prefs = getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE)
+        val configured = prefs.getString("sharedWorkspaceRoot",null)
+        val defaultRoot = java.io.File(android.os.Environment.getExternalStorageDirectory(),"Documents/Mojian")
+        val root = if(configured != null) java.io.File(configured) else if(hasSharedStorageAccess() && java.io.File(defaultRoot,"library.json").isFile) defaultRoot else filesDir
+        pageContentRepository = PageContentRepository(root)
+        if(root != filesDir) {
+            check(hasSharedStorageAccess()) { "共享文件夹需要 Android 11 或更高版本，并允许墨笺访问共享笔记文件夹" }
+            notebookLibrary = pageContentRepository.loadLibrary()
+            prefs.edit().putString("sharedWorkspaceRoot",root.absolutePath).apply()
+            prefs.getString(KEY_ACTIVE_NOTEBOOK_ID,null)?.let { id -> if(notebookLibrary.notebooks.any { it.id==id }) notebookLibrary.selectNotebook(id) }
+            val section = prefs.getString(KEY_FOCUSED_SECTION_ID,null)
+            val page = prefs.getString(KEY_SELECTED_PAGE_ID,null)
+            if(section != null && workspace.section(section)!=null) workspace.selectSection(section)
+            if(page != null) workspace.allSections().firstOrNull { sectionNode -> sectionNode.pages.any { it.id==page } }?.let { workspace.selectPage(it.id,page) }
+        }
+        workspaceLoaded = true
+    }
+
+    private fun showWorkspaceLoadFailure(error: Exception) {
+        setContentView(LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL;setPadding(dp(24),dp(30),dp(24),dp(24));setBackgroundColor(NAV_BACKGROUND)
+            addView(TextView(this@MainActivity).apply { text="笔记库暂时无法读取\n${error.message}\n请确认 Syncthing 已完成传输。";setTextColor(TEXT_PRIMARY) })
+            addView(android.widget.Button(this@MainActivity).apply { text="重新加载";setOnClickListener { recreate() } })
+            addView(android.widget.Button(this@MainActivity).apply { text="共享文件夹权限";setOnClickListener { openSharedStoragePermission() } })
+        })
+    }
+
+    private fun refreshSharedWorkspace(force: Boolean = false) {
+        if(!workspaceLoaded || !pageContentRepository.isShared || !pageWrites.isIdle || pageWrites.hasFailures) return
+        try {
+            val key=boundPageKey
+            val changed=force || pageContentRepository.libraryChanged() || (key!=null && pageContentRepository.pageChanged(key.notebookId,key.pageId))
+            if(!changed) return
+            if(contentDirty) { persistGeneratedShapes(); if(contentDirty) return }
+            val location=notebookLibrary.captureLocation()
+            notebookLibrary=pageContentRepository.loadLibrary()
+            notebookLibrary.restoreLocation(location)
+            boundPageKey=null;pageSessions.clear()
+            insertContentLayer.bind(null)
+            renderWorkspace()
+        } catch(error: Exception) {
+            android.util.Log.e("MojianSync","Unable to reload shared notes",error)
+            if(force) Toast.makeText(this,error.message,Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if(workspaceLoaded) { refreshSharedWorkspace();mainHandler.removeCallbacks(syncRefresh);mainHandler.postDelayed(syncRefresh,3000) }
+    }
+
+    private fun markPageContentChanged() {
+        if(restoringPageInk || boundPageKey==null) return
+        contentDirty=true
+        dryInkView.invalidate()
+        mainHandler.removeCallbacks(saveSharedContent);mainHandler.postDelayed(saveSharedContent,300)
+    }
+
+    private fun showSyncOptions() {
+        val input=EditText(this).apply { setText(if(::pageContentRepository.isInitialized && pageContentRepository.root!=filesDir) pageContentRepository.root.absolutePath else "/storage/emulated/0/Documents/Mojian");setSingleLine(true) }
+        AlertDialog.Builder(this).setTitle("Syncthing 共享笔记库")
+            .setMessage("选择 Syncthing 同步的笔记文件夹。首次请先完成 OMEN 笔记传输。同一本笔记请轮流编辑，切换设备前等待同步完成。")
+            .setView(input).setNeutralButton("文件夹权限") { _,_->openSharedStoragePermission() }
+            .setNegativeButton("重新加载") { _,_->refreshSharedWorkspace(true) }
+            .setPositiveButton("打开") { _,_->
+                try {
+                    check(hasSharedStorageAccess()) { "请先开启共享文件夹权限（需要 Android 11 或更高版本）" }
+                    val target=java.io.File(input.text.toString()).canonicalFile
+                    PageContentRepository(target).loadLibrary()
+                    saveBoundPageSession()
+                    getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE).edit().putString("sharedWorkspaceRoot",target.path).apply()
+                    recreate()
+                } catch(error: Exception) { Toast.makeText(this,error.message,Toast.LENGTH_LONG).show() }
+            }.show()
     }
 
     @Suppress("DEPRECATION")
@@ -501,6 +621,10 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        if(!::dryInkView.isInitialized) { super.onPause();return }
+        mainHandler.removeCallbacks(syncRefresh)
+        mainHandler.removeCallbacks(saveSharedContent)
+        if(workspaceLoaded && ::dryInkView.isInitialized) saveBoundPageSession()
         cancelShapeGesture()
         dismissDarkTooltip()
         toolDetailPopup?.dismiss()
@@ -912,7 +1036,7 @@ class MainActivity : Activity() {
                     )
                     addView(
                         TextView(this@MainActivity).apply {
-                            text = "选择要在工作区中打开的笔记本。备份、同步和共享将在后续版本接入。"
+                            text = "笔记文件夹：${pageContentRepository.root.absolutePath}"
                             setTextColor(TEXT_SECONDARY)
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
                         },
@@ -1029,7 +1153,8 @@ class MainActivity : Activity() {
                         backstageNavItem("快捷键", false) { dialog.setContentView(buildShortcutOptionsPage(dialog)) },
                         LinearLayout.LayoutParams(MATCH, dp(40)),
                     )
-                    for (label in listOf("显示", "同步", "保存和备份", "语言", "高级")) {
+                    addView(backstageNavItem("同步", false) { showSyncOptions() },LinearLayout.LayoutParams(MATCH,dp(40)))
+                    for (label in listOf("显示", "保存和备份", "语言", "高级")) {
                         addView(backstageNavItem(label, false) { showShell("$label 选项") }, LinearLayout.LayoutParams(MATCH, dp(40)))
                     }
                 },
@@ -1664,6 +1789,9 @@ class MainActivity : Activity() {
     }
 
     private fun persistWorkspacePreferences() {
+        if(::pageContentRepository.isInitialized && pageContentRepository.isShared) {
+            runCatching { pageContentRepository.saveLibrary(notebookLibrary) }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
+        }
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PREDICTION_ENABLED, predictionEnabled)
@@ -1710,6 +1838,9 @@ class MainActivity : Activity() {
     }
 
     private fun persistPageViewSettings() {
+        if(::pageContentRepository.isInitialized && pageContentRepository.isShared) {
+            runCatching { pageContentRepository.saveLibrary(notebookLibrary) }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
+        }
         val root = JSONObject()
         for (notebook in notebookLibrary.notebooks) {
             for (section in notebook.allSections()) {
@@ -2779,6 +2910,7 @@ class MainActivity : Activity() {
                 onCancelMarquee = ::cancelDirectMarquee
             }
         tagLayer.onPlacementFinished = { tag ->
+            markPageContentChanged()
             updateSelectionInteraction()
             expandPageIfNeeded()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
@@ -2792,7 +2924,7 @@ class MainActivity : Activity() {
             renderToolDetails()
         }
         insertContentLayer.onDocumentChanged = { document ->
-            pageContentRepository.save(document)
+            markPageContentChanged()
             expandPageIfNeeded()
         }
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
@@ -2815,8 +2947,9 @@ class MainActivity : Activity() {
             renderToolDetails()
         }
         textInputLayer.onEditingChanged = { updateSelectionInteraction() }
-        textInputLayer.onContentChanged = ::expandPageIfNeeded
-        dryInkView.onContentChanged = { expandPageIfNeeded(); persistGeneratedShapes() }
+        textInputLayer.onContentChanged = { expandPageIfNeeded();markPageContentChanged() }
+        tagLayer.onContentChanged = ::markPageContentChanged
+        dryInkView.onContentChanged = { expandPageIfNeeded();markPageContentChanged() }
         textInputLayer.onPageGesture = ::handleFingerGesture
         paperContainer.onPointerEventObserved = ::observeCanvasPointerEvent
         dryInkView.setViewport(viewport.documentToViewMatrix())
@@ -3732,9 +3865,9 @@ class MainActivity : Activity() {
         pageSessions[PageSessionKey(sourceNotebookId, sourcePage.id)]?.let { session ->
             pageSessions[PageSessionKey(targetNotebookId, targetPage.id)] =
                 session.copy(
-                    strokes = session.strokes.toList(),
-                    tags = session.tags.toList(),
-                    textBoxes = session.textBoxes.toList(),
+                    strokes = session.strokes?.toList(),
+                    tags = session.tags?.toList(),
+                    textBoxes = session.textBoxes?.toList(),
                 )
         }
     }
@@ -3800,21 +3933,65 @@ class MainActivity : Activity() {
         if (nextKey != boundPageKey) {
             cancelStylusAction()
             saveBoundPageSession()
+            if(contentDirty) return
             boundPageKey = nextKey
             val session = nextKey?.let(pageSessions::get)
-            val stored = nextKey?.let { pageContentRepository.load(it.notebookId,it.pageId).strokes }
-            val restoredShapes = stored?.let { array -> (0 until array.length()).mapNotNull { ShapeStrokeCodec.decode(array.getJSONObject(it),::displayColor) } }.orEmpty()
+            val document = try { nextKey?.let { pageContentRepository.load(it.notebookId,it.pageId) } } catch(error: Exception) {
+                boundPageKey=null;Toast.makeText(this,error.message,Toast.LENGTH_LONG).show();null
+            }
+            val restoredShapes = document?.strokes?.let { array -> (0 until array.length()).map { SharedStrokeCodec.decode(array.getJSONObject(it),::displayColor,SharedSceneOrder.visible(document.sharedSource,array.getJSONObject(it))) } }.orEmpty()
             restoringPageInk = true
-            try { dryInkView.replaceStrokes(session?.strokes ?: restoredShapes) } finally { restoringPageInk = false }
-            tagLayer.replaceTags(session?.tags.orEmpty())
-            textInputLayer.replaceEditors(session?.textBoxes.orEmpty())
+            try {
+                dryInkView.replaceStrokes(session?.strokes ?: restoredShapes)
+                tagLayer.replaceTags(session?.tags ?: document?.let(SharedContentCodec::tags).orEmpty())
+                textInputLayer.replaceEditors(session?.textBoxes ?: document?.let(SharedContentCodec::text).orEmpty())
+                insertContentLayer.bind(null);insertContentLayer.bind(document)
+                configureSharedScene(document)
+            } finally { restoringPageInk = false;contentDirty=false }
             if (session == null) viewport.reset() else viewport.restore(session.viewport)
             applyViewportToLayers()
         }
-        val document = pageId?.let { pageContentRepository.load(workspace.id, it) }
-        insertContentLayer.bind(document)
         expandPageIfNeeded()
         if (splitViewState.enabled) splitViewState.updateFocused(notebookLibrary.captureLocation())
+        if(!contentDirty && !pageWrites.hasFailures) {
+            val retained=mutableSetOf<PageSessionKey>()
+            boundPageKey?.let(retained::add)
+            if(splitViewState.enabled) SplitPaneSide.entries.forEach { side ->
+                splitViewState.location(side)?.let { retained+=PageSessionKey(it.notebookId,it.pageId) }
+            }
+            // Completed content is durable. Keep viewports, but release inactive imported-page
+            // JSON/path/native stroke graphs rather than accumulating the entire library in RAM.
+            pageSessions.replaceAll { key,session -> if(key in retained) session else
+                session.copy(strokes=null,tags=null,textBoxes=null) }
+        }
+    }
+
+    private fun configureSharedScene(document: PageInsertDocument?) {
+        insertContentLayer.sceneComposed=document!=null
+        textInputLayer.sceneComposed=document!=null
+        textInputLayer.contentVisible={ id -> document?.let { doc ->
+            SharedWorkspaceCodec.items(doc.sharedSource.optJSONArray("textItems")).firstOrNull { it.optString("id")==id }
+                ?.let { SharedSceneOrder.visible(doc.sharedSource,it) } ?: true
+        } ?: true }
+        dryInkView.sceneRenderer=if(document==null) null else { canvas,strokes,draw ->
+            data class Entry(val metadata: JSONObject,val index: Int,val action: ()->Unit)
+            val source=document.sharedSource
+            val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
+            val entries=mutableListOf<Entry>()
+            document.objects.forEachIndexed { index,item ->
+                val metadata=objects[item.id] ?: JSONObject().put("isPageBackground",item is InsertObject.Image && item.pageBackground)
+                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,index) { insertContentLayer.renderSceneObject(canvas,item.id) }
+            }
+            strokes.forEachIndexed { index,stroke ->
+                val metadata=SharedStrokeCodec.metadata(stroke) ?: JSONObject()
+                if(SharedStrokeCodec.visible(stroke)) entries+=Entry(metadata,document.objects.size+index) { draw(stroke) }
+            }
+            textInputLayer.snapshotEditors().forEachIndexed { index,item ->
+                val metadata=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).firstOrNull { it.optString("id")==item.id } ?: JSONObject()
+                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,document.objects.size+strokes.size+index) { textInputLayer.renderForExport(canvas,android.graphics.Matrix(),onlyId=item.id) }
+            }
+            entries.sortedWith(compareBy<Entry> { SharedSceneOrder.layer(source,it.metadata) }.thenBy { it.metadata.optLong("zOrder") }.thenBy { it.index }).forEach { it.action() }
+        }
     }
 
     private fun renderToolShelf() {
@@ -4524,20 +4701,32 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun persistGeneratedShapes() {
+    private fun persistGeneratedShapes(flush: Boolean = true) {
         val key=boundPageKey ?: return
         if (restoringPageInk) return
+        if (!contentDirty) {
+            if(flush) try { pageWrites.flush() } catch(error: Exception) { contentDirty=true;Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show() }
+            return
+        }
         val document=insertContentLayer.currentDocument() ?: return
         if (document.notebookId!=key.notebookId || document.pageId!=key.pageId) return
-        val retained=org.json.JSONArray()
-        for (i in 0 until document.strokes.length()) {
-            val stroke=document.strokes.getJSONObject(i)
-            if (stroke.optString("brushProfile")!="shape-v1") retained.put(stroke)
-        }
-        dryInkView.snapshotStrokes().forEach { stroke -> ShapeStrokeCodec.encode(stroke)?.let(retained::put) }
-        if (document.strokes.toString() == retained.toString()) return
-        document.strokes=retained
-        pageContentRepository.save(document)
+        try {
+            val snapshot = synchronized(document) {
+                document.strokes=org.json.JSONArray().apply { dryInkView.snapshotStrokes().forEach { put(SharedStrokeCodec.encode(it)) } }
+                val source=JSONObject().apply { document.sharedSource.keys().forEach { key->put(key,document.sharedSource.get(key)) } }
+                document.sharedSource=source
+                SharedContentCodec.save(document,tagLayer.snapshotTags(),textInputLayer.snapshotEditors(),resources.displayMetrics.density)
+                PageInsertDocument(document.notebookId,document.pageId,document.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
+                    document.strokes,source,document.diskStamp)
+            }
+            pageWrites.submit(pageContentRepository,document,snapshot) { error -> runOnUiThread {
+                if(boundPageKey==key) contentDirty=true
+                Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show()
+                android.util.Log.e("MojianSync","Save refused",error)
+            } }
+            contentDirty=false
+            if(flush) pageWrites.flush()
+        } catch(error: Exception) { contentDirty=true;Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show();android.util.Log.e("MojianSync","Save refused",error) }
     }
 
     private fun selectTool(id: String) {
@@ -6717,18 +6906,18 @@ class MainActivity : Activity() {
         val session=pageSessions[key]
         val stored=pageContentRepository.load(workspace.id,page.id)
         val settings=page.viewSettings.copy()
-        val strokes=session?.strokes ?: (0 until stored.strokes.length()).mapNotNull { index ->
-            ShapeStrokeCodec.decode(stored.strokes.getJSONObject(index)) { color ->
+        val strokes=session?.strokes ?: (0 until stored.strokes.length()).map { index ->
+            SharedStrokeCodec.decode(stored.strokes.getJSONObject(index),{ color ->
                 if(color==InkPalette.BLACK && settings.darkBackground) Color.rgb(239,239,239) else color.argb
-            }
+            },SharedSceneOrder.visible(stored.sharedSource,stored.strokes.getJSONObject(index)))
         }
         val exportViewport=ViewportState()
         val ink=DryInkView(this).apply { configureOutputPage(settings,page.title); setDarkBackground(settings.darkBackground); replaceStrokes(strokes) }
         val inserts=InsertContentLayer(this,exportViewport,pageContentRepository).apply { setDarkBackground(settings.darkBackground); bind(stored) }
-        val tags=CanvasTagLayer(this,exportViewport).apply { replaceTags(session?.tags.orEmpty()) }
+        val tags=CanvasTagLayer(this,exportViewport).apply { replaceTags(session?.tags ?: SharedContentCodec.tags(stored)) }
         val text=CanvasTextInputLayer(this,exportViewport).apply {
             setDarkBackground(settings.darkBackground)
-            replaceEditors(session?.textBoxes.orEmpty())
+            replaceEditors(session?.textBoxes ?: SharedContentCodec.text(stored))
             measure(View.MeasureSpec.makeMeasureSpec(dp(900),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(dp(1200),View.MeasureSpec.EXACTLY))
             layout(0,0,measuredWidth,measuredHeight)
         }
@@ -6736,10 +6925,23 @@ class MainActivity : Activity() {
         return VectorPdfSource(settings,bounds,page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) { canvas,matrix,options ->
             val output=OutputAppearance(options.printing,options.invertedImageIds,options.hideBackgroundFormat)
             ink.renderBackgroundForExport(canvas,matrix,output)
-            inserts.renderForExport(canvas,matrix,output=output)
-            ink.renderVectorInkForExport(canvas,matrix,output=output)
+            data class Entry(val metadata: JSONObject,val index: Int,val action: ()->Unit)
+            val source=stored.sharedSource
+            val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
+            val entries=mutableListOf<Entry>()
+            stored.objects.forEachIndexed { index,item ->
+                val metadata=objects[item.id] ?: JSONObject().put("isPageBackground",item is InsertObject.Image && item.pageBackground)
+                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,index) { inserts.renderSceneObject(canvas,item.id,matrix,output) }
+            }
+            strokes.forEachIndexed { index,stroke -> entries+=Entry(SharedStrokeCodec.metadata(stroke) ?: JSONObject(),stored.objects.size+index) {
+                ink.renderVectorInkForExport(canvas,matrix,output=output,onlyStroke=stroke)
+            } }
+            text.snapshotEditors().forEachIndexed { index,item ->
+                val metadata=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).firstOrNull { it.optString("id")==item.id } ?: JSONObject()
+                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,stored.objects.size+strokes.size+index) { text.renderForExport(canvas,matrix,output=output,onlyId=item.id) }
+            }
+            entries.sortedWith(compareBy<Entry> { SharedSceneOrder.layer(source,it.metadata) }.thenBy { it.metadata.optLong("zOrder") }.thenBy { it.index }).forEach { it.action() }
             tags.renderForExport(canvas,matrix,output=output)
-            text.renderForExport(canvas,matrix,output=output)
         }
     }
 

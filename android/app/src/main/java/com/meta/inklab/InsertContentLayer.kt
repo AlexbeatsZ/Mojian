@@ -74,6 +74,12 @@ class InsertContentLayer(
     }
 
     fun currentDocument(): PageInsertDocument? = document
+    var sceneComposed = false
+    private var sceneObjectId: String? = null
+    fun renderSceneObject(canvas: Canvas,id: String,matrix: android.graphics.Matrix = android.graphics.Matrix(),output: OutputAppearance = OutputAppearance()) {
+        sceneObjectId=id
+        try { drawObjects(canvas,output.printsDark(darkBackground),matrix,output=output) } finally { sceneObjectId=null }
+    }
 
     fun contentBottom(): Float = document?.objects?.maxOfOrNull { it.documentY + it.height } ?: 0f
 
@@ -363,7 +369,7 @@ class InsertContentLayer(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
+        if(!sceneComposed) drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
     }
 
     private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
@@ -371,6 +377,9 @@ class InsertContentLayer(
         canvas.save()
         canvas.concat(documentMatrix)
         target.objects.forEach { item ->
+            if(sceneObjectId!=null && sceneObjectId!=item.id) return@forEach
+            val metadata=SharedWorkspaceCodec.items(target.sharedSource.optJSONArray("objects")).firstOrNull { it.optString("id")==item.id }
+            if(metadata!=null && !SharedSceneOrder.visible(target.sharedSource,metadata)) return@forEach
             if (selectedOnly && item !in selectedItems()) return@forEach
             when (item) {
                 is InsertObject.Table -> drawTable(canvas, item, forExport)
@@ -521,9 +530,14 @@ class InsertContentLayer(
     private fun hitSelectable(viewX: Float, viewY: Float): InsertObject? {
         val point = viewport.viewToDocument(viewX, viewY)
         return document?.objects?.asReversed()?.firstOrNull {
-            !(it is InsertObject.Image && it.pageBackground) && bounds(it).contains(point.x, point.y)
+            isVisible(it) && !(it is InsertObject.Image && it.pageBackground) && bounds(it).contains(point.x, point.y)
         }
     }
+
+    private fun isVisible(item: InsertObject): Boolean = document?.let { doc ->
+        SharedWorkspaceCodec.items(doc.sharedSource.optJSONArray("objects")).firstOrNull { it.optString("id")==item.id }
+            ?.let { SharedSceneOrder.visible(doc.sharedSource,it) } ?: true
+    } ?: false
 
     private fun reorderSelection(toFront: Boolean): Boolean {
         val target = document ?: return false

@@ -220,6 +220,7 @@ public static class NotebookPackageService
         CanvasBackgroundFormat.RuledNarrow => "RULED_NARROW",
         CanvasBackgroundFormat.RuledStandard => "RULED_STANDARD",
         CanvasBackgroundFormat.RuledWide => "RULED_WIDE",
+        CanvasBackgroundFormat.RuledClean => "RULE_CLEAN",
         CanvasBackgroundFormat.RuledTwoColumnStandard => "RULE_TWO_COLUMN_STANDARD",
         CanvasBackgroundFormat.RuledTwoColumnNarrow => "RULE_TWO_COLUMN_NARROW",
         CanvasBackgroundFormat.RuledTwoColumnWide => "RULE_TWO_COLUMN_WIDE",

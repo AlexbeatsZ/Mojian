@@ -63,6 +63,17 @@ public partial class MainWindow : Window
         if (_eventsWired) return;
         _eventsWired = true;
         ViewModel.ObserveSaveCompletion(Dispatcher);
+        var syncTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        syncTimer.Tick += (_, _) =>
+        {
+            if (System.Windows.Input.Mouse.LeftButton == System.Windows.Input.MouseButtonState.Pressed ||
+                System.Windows.Input.Stylus.CurrentStylusDevice?.InAir == false ||
+                Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
+            try { ViewModel.RefreshSharedWorkspace(); }
+            catch (Exception) { /* A partial incoming file is retried after the next sync interval. */ }
+        };
+        syncTimer.Start();
+        Closed += (_, _) => syncTimer.Stop();
         ConfigureCanvas(LeftCanvas);
         ConfigureCanvas(RightCanvas);
         ViewModel.RequestUndo += () => FocusedCanvas.Undo();

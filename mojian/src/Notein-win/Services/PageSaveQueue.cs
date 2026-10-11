@@ -15,6 +15,7 @@ public sealed class PageSaveQueue
     private long _sequence;
     public event Action<Exception?>? Completed;
     public bool IsIdle { get { lock (_gate) return !_running && _pending.Count == 0; } }
+    public bool HasFailures { get { lock (_gate) return _failed.Count != 0; } }
 
     public void Enqueue(WorkspaceStore store, PageDocument snapshot, NotebookLibrary? library = null)
     {

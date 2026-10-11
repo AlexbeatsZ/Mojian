@@ -21,7 +21,7 @@ object SelectionClipboard {
         val brush = if (shape == null) stroke.brush else ShapeStrokeCodec.brush(
             InkPalette.entries[shape.getInt("color")], stroke.brush.size / ShapeStrokeCodec.UNITS_PER_MM,
             shape.getInt("opacityPercent"), stroke.brush.colorIntArgb)
-        return Stroke(brush, inputs)
+        return Stroke(brush, inputs).also { SharedStrokeCodec.transformed(stroke,it,{x,y->DocumentPoint(x+offset,y+offset)},copy=true) }
     }
 
     fun translatedObject(item: InsertObject, offset: Float, assets: Map<String, String>): InsertObject {
@@ -50,7 +50,22 @@ object SelectionSvg {
     fun inkPaths(strokes: List<Stroke>): String = buildString {
         val position = MutableVec()
         strokes.forEach { stroke ->
+            if(!SharedStrokeCodec.visible(stroke)) return@forEach
             val color = stroke.brush.colorIntArgb
+            val source = SharedStrokeCodec.metadata(stroke)
+            if(source?.optString("vectorPath")?.isNotBlank() == true) {
+                val path=source.getString("vectorPath")
+                val transform=source.optJSONArray("vectorTransform") ?: org.json.JSONArray(listOf(1,0,0,1,0,0))
+                val unit=SharedWorkspaceCodec.TO_SHARED.toFloat()
+                append("<path fill=\"").append(String.format(Locale.ROOT,"#%06X",color and 0xffffff))
+                    .append("\" fill-opacity=\"").append(number(Color.alpha(color)/255f))
+                    .append("\" fill-rule=\"").append(if(path.startsWith("F0")) "evenodd" else "nonzero")
+                    .append("\" transform=\"matrix(")
+                (0..5).forEach { index->if(index>0) append(' ');append(number(transform.getDouble(index).toFloat()/unit)) }
+                append(")\" d=\"").append(path.removePrefix("F0").removePrefix("F1").trim().replace("&","&amp;").replace("\"","&quot;"))
+                    .append("\"/>")
+                return@forEach
+            }
             val shape = stroke.shape
             for (group in 0 until shape.getRenderGroupCount()) {
                 append("<path fill=\"").append(String.format(Locale.ROOT, "#%06X", color and 0xffffff))

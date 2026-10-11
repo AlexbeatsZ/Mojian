@@ -6,6 +6,27 @@ namespace Notein_win.Services;
 
 public sealed class WorkspaceStore
 {
+    private readonly Dictionary<string, (long Length, long Modified)?> _observedFiles = new();
+    private readonly object _sync = new();
+    private readonly Dictionary<string, HashSet<string?>> _localVersions = new();
+    private static string? PageStamp(string path) => Stamp(path) is { } stamp ? $"{stamp.Length}:{stamp.Modified}" : null;
+    private static (long Length, long Modified)? Stamp(string path) => File.Exists(path)
+        ? (new FileInfo(path).Length, File.GetLastWriteTimeUtc(path).Ticks) : null;
+    private void Observe(string path) { lock (_sync) _observedFiles[path] = Stamp(path); }
+    private void GuardExternalWrite(string path)
+    {
+        if (_observedFiles.TryGetValue(path, out var seen) && seen != Stamp(path))
+            throw new IOException("笔记已在另一台设备更新，已阻止覆盖。请等待同步完成并重新加载笔记库。");
+    }
+    public bool HasExternalChanges
+    {
+        get { lock (_sync) return _observedFiles.Any(pair => pair.Value != Stamp(pair.Key)); }
+    }
+    public void ForgetInactivePages(params PageDocument?[] documents)
+    {
+        var keep = documents.Where(doc => doc != null).Select(doc => GetPageDocumentPath(doc!.NotebookId, doc.PageId)).Append(LibraryPath).ToHashSet();
+        lock (_sync) foreach (var path in _observedFiles.Keys.Where(path => !keep.Contains(path)).ToArray()) _observedFiles.Remove(path);
+    }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -51,10 +72,14 @@ public sealed class WorkspaceStore
             library.ActiveNotebookId = library.Notebooks[0].Id;
         }
         NormalizeSelections(library);
+        Observe(LibraryPath);
         return library;
     }
 
-    public void SaveLibrary(NotebookLibrary library) => AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, JsonOptions));
+    public void SaveLibrary(NotebookLibrary library)
+    {
+        lock (_sync) { GuardExternalWrite(LibraryPath); AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, JsonOptions)); Observe(LibraryPath); }
+    }
 
     public WorkspaceSettings LoadSettings()
     {
@@ -70,10 +95,16 @@ public sealed class WorkspaceStore
     {
         var path = GetPageDocumentPath(notebookId, pageId);
         RestoreMissingCurrent(path);
-        if (!File.Exists(path)) return new PageDocument(notebookId, pageId);
+        if (!File.Exists(path)) { Observe(path); return new PageDocument(notebookId, pageId); }
         var document = ReadRecoverable<PageDocument>(path, PageJsonOptions);
         document.NotebookId = notebookId;
         document.PageId = pageId;
+        lock (_sync)
+        {
+            if (_observedFiles.TryGetValue(path, out var previous) && previous != Stamp(path)) _localVersions.Remove(path);
+            Observe(path);
+            document.DiskStamp = PageStamp(path);
+        }
         return document;
     }
 
@@ -84,8 +115,23 @@ public sealed class WorkspaceStore
         WritePageSnapshot(document);
     }
 
-    public void WritePageSnapshot(PageDocument snapshot) =>
-        AtomicWrite(GetPageDocumentPath(snapshot.NotebookId, snapshot.PageId), JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions));
+    public void WritePageSnapshot(PageDocument snapshot)
+    {
+        var path = GetPageDocumentPath(snapshot.NotebookId, snapshot.PageId);
+        lock (_sync)
+        {
+            GuardExternalWrite(path);
+            var current = PageStamp(path);
+            if (current != null && snapshot.DiskStamp != current && !(_localVersions.TryGetValue(path, out var local) && local.Contains(snapshot.DiskStamp)))
+                throw new IOException("页面已更新，已阻止旧页面覆盖。请重新加载。");
+            AtomicWrite(path, JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions));
+            if (!_localVersions.TryGetValue(path, out var versions)) _localVersions[path] = versions = new HashSet<string?>();
+            versions.Add(snapshot.DiskStamp);
+            snapshot.DiskStamp = PageStamp(path);
+            versions.Add(snapshot.DiskStamp);
+            Observe(path);
+        }
+    }
 
     public string GetNotebookDirectory(string notebookId)
     {

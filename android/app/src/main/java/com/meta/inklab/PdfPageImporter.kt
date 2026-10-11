@@ -43,11 +43,13 @@ class PdfPageImporter(
                             val documentWidth = widthPoints * DOCUMENT_UNITS_PER_PDF_POINT
                             val documentHeight = heightPoints * DOCUMENT_UNITS_PER_PDF_POINT
                             val renderedAssetName = "${UUID.randomUUID()}-pdf-page-$pageNumber.png"
+                            // The canonical workspace resolves assets in each page's own directory.
+                            if(pageId!=sourceOwnerPageId) source.file.copyTo(File(repository.assetDirectory(notebookId,pageId),source.storedName),overwrite=true)
                             renderPage(page, File(repository.assetDirectory(notebookId, pageId), renderedAssetName))
 
                             val pdfInfo =
                                 PdfPageInfo(
-                                    sourceOwnerPageId = sourceOwnerPageId,
+                                    sourceOwnerPageId = pageId,
                                     sourceAssetName = source.storedName,
                                     renderedAssetName = renderedAssetName,
                                     sourceDocumentName = source.displayName,

@@ -18,12 +18,14 @@ class CanvasTag(
     val kind: CanvasTagKind,
     var documentX: Float,
     var documentY: Float,
+    val id: String = "tag-${java.util.UUID.randomUUID()}",
 )
 
 data class CanvasTagSnapshot(
     val kind: CanvasTagKind,
     val documentX: Float,
     val documentY: Float,
+    val id: String = "tag-${java.util.UUID.randomUUID()}",
 )
 
 /** Session-only page tags placed in document coordinates. */
@@ -50,6 +52,7 @@ class CanvasTagLayer(
 
     var onPlacementFinished: ((CanvasTag) -> Unit)? = null
     var onTagClicked: ((CanvasTag) -> Unit)? = null
+    var onContentChanged: (() -> Unit)? = null
 
     fun beginPlacement(kind: CanvasTagKind) {
         pendingKind = kind
@@ -67,20 +70,21 @@ class CanvasTagLayer(
     fun allTags(): List<CanvasTag> = tags.toList()
 
     fun snapshotTags(): List<CanvasTagSnapshot> =
-        tags.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY) }
+        tags.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY,it.id) }
 
     fun snapshotSelectedTags(): List<CanvasTagSnapshot> =
-        tags.filter { it in selectedTags }.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY) }
+        tags.filter { it in selectedTags }.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY,it.id) }
 
     fun appendSelectedTags(items: List<CanvasTagSnapshot>) {
         selectedTags.clear()
         items.map { CanvasTag(it.kind, it.documentX, it.documentY) }.forEach { tags += it; selectedTags += it }
         invalidate()
+        onContentChanged?.invoke()
     }
 
     fun replaceTags(replacement: List<CanvasTagSnapshot>) {
         tags.clear()
-        tags += replacement.map { CanvasTag(it.kind, it.documentX, it.documentY) }
+        tags += replacement.map { CanvasTag(it.kind, it.documentX, it.documentY,it.id) }
         selectedTags.clear()
         pendingKind = null
         focusedIndex = null
@@ -99,6 +103,7 @@ class CanvasTagLayer(
         tags.clear()
         selectedTags.clear()
         cancelPlacement()
+        onContentChanged?.invoke()
     }
 
     fun selectedCount(): Int = selectedTags.size
@@ -175,6 +180,7 @@ class CanvasTagLayer(
         selectedTags.clear()
         focusedIndex = null
         invalidate()
+        onContentChanged?.invoke()
         return count
     }
 
@@ -205,7 +211,7 @@ class CanvasTagLayer(
             tag.documentX = point.x
             tag.documentY = point.y
         }
-        if (selectedTags.isNotEmpty()) invalidate()
+        if (selectedTags.isNotEmpty()) { invalidate();onContentChanged?.invoke() }
     }
 
     fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
@@ -214,7 +220,7 @@ class CanvasTagLayer(
             tag.documentX = point.x
             tag.documentY = point.y
         }
-        if (selectedTags.isNotEmpty()) invalidate()
+        if (selectedTags.isNotEmpty()) { invalidate();onContentChanged?.invoke() }
     }
 
     fun insertVerticalSpace(startY: Float, deltaY: Float) {
@@ -226,7 +232,7 @@ class CanvasTagLayer(
                 changed = true
             }
         }
-        if (changed) invalidate()
+        if (changed) { invalidate();onContentChanged?.invoke() }
     }
 
     fun eraseAtDocument(x: Float, y: Float, radius: Float): Int {
@@ -240,6 +246,7 @@ class CanvasTagLayer(
         selectedTags.removeAll(removed.toSet())
         focusedIndex = null
         invalidate()
+        onContentChanged?.invoke()
         return removed.size
     }
 
@@ -273,6 +280,7 @@ class CanvasTagLayer(
                 isClickable = false
                 invalidate()
                 onPlacementFinished?.invoke(tag)
+                onContentChanged?.invoke()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> return true

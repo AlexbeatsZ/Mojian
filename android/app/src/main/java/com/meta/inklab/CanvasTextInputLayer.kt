@@ -51,12 +51,14 @@ data class CanvasTextSnapshot(
     val contentScale: Float,
     val lineSpacingExtra: Float,
     val lineSpacingMultiplier: Float,
+    val id: String = "text-${java.util.UUID.randomUUID()}",
 )
 
 private data class TextBoxState(
     var documentX: Float,
     var documentY: Float,
     var contentScale: Float = 1f,
+    val id: String = "text-${java.util.UUID.randomUUID()}",
 )
 
 private data class CapturedTextFormat(
@@ -79,6 +81,7 @@ class CanvasTextInputLayer(
     private var pageGestureActive = false
     private var capturedFormat: CapturedTextFormat? = null
     private var darkBackground = true
+    private var restoringEditors = false
     private val selectedEditors = linkedSetOf<EditText>()
     private val temporaryEditors = linkedSetOf<EditText>()
     private val formalEditingEditors = linkedSetOf<EditText>()
@@ -87,6 +90,12 @@ class CanvasTextInputLayer(
     var onEditingChanged: ((Boolean) -> Unit)? = null
     var onContentChanged: (() -> Unit)? = null
     var onPageGesture: ((MotionEvent) -> Unit)? = null
+    var sceneComposed = false
+    var contentVisible: (String)->Boolean = { true }
+    override fun dispatchDraw(canvas: android.graphics.Canvas) {
+        if(!sceneComposed) { super.dispatchDraw(canvas);return }
+        forEachEditor { editor -> if(editor==activeEditor) drawChild(canvas,editor,drawingTime) }
+    }
 
     init {
         setBackgroundColor(Color.TRANSPARENT)
@@ -222,6 +231,7 @@ class CanvasTextInputLayer(
             }
             applyEditorTransform(editor)
         }
+        if(selectedEditors.isNotEmpty()) onContentChanged?.invoke()
     }
 
     fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
@@ -242,6 +252,7 @@ class CanvasTextInputLayer(
             }
             applyEditorTransform(editor)
         }
+        if(selectedEditors.isNotEmpty()) onContentChanged?.invoke()
     }
 
     fun deleteSelection(): Int {
@@ -251,6 +262,7 @@ class CanvasTextInputLayer(
         if (activeEditor in selectedEditors) activeEditor = null
         selectedEditors.clear()
         onSelectionChanged?.invoke(0)
+        onContentChanged?.invoke()
         return count
     }
 
@@ -280,6 +292,7 @@ class CanvasTextInputLayer(
                         width = editor.width.takeIf { it > 0 } ?: params.width.takeIf { it > 0 } ?: dp(300),
                         height = editor.height.takeIf { it > 0 } ?: params.height.takeIf { it > 0 } ?: dp(32),
                         contentScale = state.contentScale,
+                        id = state.id,
                         lineSpacingExtra = editor.lineSpacingExtra,
                         lineSpacingMultiplier = editor.lineSpacingMultiplier,
                     ),
@@ -294,10 +307,12 @@ class CanvasTextInputLayer(
             }
         }
 
-    fun renderForExport(canvas: android.graphics.Canvas, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
+    fun renderForExport(canvas: android.graphics.Canvas, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance(), onlyId: String? = null) {
         canvas.save()
         canvas.concat(documentMatrix)
         forEachEditor { editor ->
+            if(onlyId!=null && state(editor).id!=onlyId) return@forEachEditor
+            if(!contentVisible(state(editor).id)) return@forEachEditor
             if (selectedOnly && editor !in selectedEditors) return@forEachEditor
             if (editor.text.isBlank()) return@forEachEditor
             val originalLayout = editor.layout ?: return@forEachEditor
@@ -312,7 +327,9 @@ class CanvasTextInputLayer(
                     exportText.setSpan(ForegroundColorSpan(color), start, end, flags)
                 }
             }
-            val exportPaint = TextPaint(originalLayout.paint).apply { if (output.printsDark(darkBackground)) color = OutputAppearance.printInk(color) }
+            val exportPaint = TextPaint(originalLayout.paint).apply {
+                color=if(output.printsDark(darkBackground)) OutputAppearance.printInk(editor.currentTextColor) else editor.currentTextColor
+            }
             val textLayout = StaticLayout.Builder.obtain(exportText, 0, exportText.length, exportPaint, originalLayout.width)
                 .setAlignment(originalLayout.alignment)
                 .setIncludePad(editor.includeFontPadding)
@@ -338,11 +355,13 @@ class CanvasTextInputLayer(
 
     fun appendEditors(snapshots: List<CanvasTextSnapshot>, select: Boolean = true) {
         selectedEditors.clear()
+        restoringEditors=true
+        try {
         snapshots.forEach { snapshot ->
             val editor = createEditor().apply {
                 setText(snapshot.text)
                 setLineSpacing(snapshot.lineSpacingExtra, snapshot.lineSpacingMultiplier)
-                tag = TextBoxState(snapshot.documentX, snapshot.documentY, snapshot.contentScale)
+                tag = TextBoxState(snapshot.documentX, snapshot.documentY, snapshot.contentScale,if(select) "text-${java.util.UUID.randomUUID()}" else snapshot.id)
             }
             addView(
                 editor,
@@ -351,6 +370,8 @@ class CanvasTextInputLayer(
             if (select) selectedEditors += editor
             editor.post { applyEditorTransform(editor) }
         }
+        } finally { restoringEditors=false }
+        if(select && snapshots.isNotEmpty()) onContentChanged?.invoke()
     }
 
     fun paste(): Boolean = contextAction(android.R.id.paste)
@@ -424,6 +445,7 @@ class CanvasTextInputLayer(
     fun setLineSpacing(multiplier: Float): Boolean {
         val editor = currentEditor() ?: return false
         editor.setLineSpacing(0f, multiplier)
+        onContentChanged?.invoke()
         return true
     }
 
@@ -516,12 +538,12 @@ class CanvasTextInputLayer(
                             temporaryEditors.remove(this@apply)
                             formalEditingEditors += this@apply
                         }
-                        post { onContentChanged?.invoke() }
+                        if(!restoringEditors) onContentChanged?.invoke()
                     }
                 },
             )
             addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) onContentChanged?.invoke()
+                if (!restoringEditors && this@apply === activeEditor && (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop)) onContentChanged?.invoke()
             }
             setOnFocusChangeListener { view, focused ->
                 if (focused) {
@@ -566,6 +588,7 @@ class CanvasTextInputLayer(
         if (range == null) return false
         action(editor, range.first, range.last + 1)
         editor.requestFocus()
+        onContentChanged?.invoke()
         return true
     }
 
@@ -728,6 +751,7 @@ class CanvasTextInputLayer(
         val point = viewport.viewToDocument(x, y)
         for (index in childCount - 1 downTo 0) {
             val child = getChildAt(index) as? EditText ?: continue
+            if(!contentVisible(state(child).id)) continue
             if (documentBounds(child).contains(point.x, point.y)) return child
         }
         return null

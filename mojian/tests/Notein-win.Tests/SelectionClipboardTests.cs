@@ -65,7 +65,7 @@ public class SelectionClipboardTests
             }
             menu.IsOpen = false;
         }
-        finally { window?.Close(); if (Directory.Exists(root)) Directory.Delete(root, true); if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); }
+        finally { window?.Close(); if (Directory.Exists(root)) Directory.Delete(root, true); RestoreClipboard(previous); }
     });
 
     [Fact]
@@ -104,7 +104,7 @@ public class SelectionClipboardTests
             Clipboard.SetDataObject(nativeClipboard!, true);
             Assert.False(target.PasteSelection());
         }
-        finally { if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); }
+        finally { RestoreClipboard(previous); }
     });
 
     [Fact]
@@ -137,7 +137,7 @@ public class SelectionClipboardTests
             Assert.False(NoteCanvas.HasNativeClipboard); Assert.True(Clipboard.ContainsData("image/svg+xml"));
             Assert.True(canvas.CopySelectionImage(false)); Assert.True(Clipboard.ContainsImage()); Assert.True(Clipboard.ContainsData("PNG"));
         }
-        finally { if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); }
+        finally { RestoreClipboard(previous); }
     });
 
     [Fact]
@@ -157,7 +157,7 @@ public class SelectionClipboardTests
             Assert.True(target.PasteSelection()); Assert.Equal("target.txt", Assert.Single(target.Document.Objects).AssetName);
             Assert.Equal("owned attachment", File.ReadAllText(Path.Combine(root, "target.txt")));
         }
-        finally { Directory.Delete(root, true); if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); }
+        finally { Directory.Delete(root, true); RestoreClipboard(previous); }
     });
 
     private static void Sta(Action action)
@@ -166,6 +166,16 @@ public class SelectionClipboardTests
         var thread = new Thread(() => { try { _ = Application.Current ?? new Application(); action(); } catch (Exception e) { failure = e; } });
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    private static void RestoreClipboard(DataObject? previous)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); return; }
+            catch (System.Runtime.InteropServices.COMException error) when (error.HResult == unchecked((int)0x800401D0) && attempt < 20)
+            { Thread.Sleep(50); }
+        }
     }
 
     private static DataObject? SnapshotClipboard()

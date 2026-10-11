@@ -27,6 +27,7 @@ public enum CanvasBackgroundFormat
     RuledTwoColumnStandard,
     RuledTwoColumnNarrow,
     RuledTwoColumnWide,
+    RuledClean,
 }
 
 public static class CanvasBackgroundFormatExtensions
@@ -37,6 +38,7 @@ public static class CanvasBackgroundFormatExtensions
         CanvasBackgroundFormat.RuledNarrow => "窄横线",
         CanvasBackgroundFormat.RuledStandard => "标准横线",
         CanvasBackgroundFormat.RuledWide => "宽横线",
+        CanvasBackgroundFormat.RuledClean => "纯横线",
         CanvasBackgroundFormat.RuledTwoColumnStandard => "标准双栏横线",
         CanvasBackgroundFormat.RuledTwoColumnNarrow => "窄双栏横线",
         CanvasBackgroundFormat.RuledTwoColumnWide => "宽双栏横线",
@@ -52,6 +54,8 @@ public static class CanvasBackgroundFormatExtensions
 
 public sealed class PageAppearance
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public PaperKind PaperKind { get; set; } = PaperKind.Infinite;
     public PageTheme Theme { get; set; } = PageTheme.Dark;
     public CanvasBackgroundFormat Background { get; set; } = CanvasBackgroundFormat.GridStandard;
@@ -65,6 +69,7 @@ public sealed class PageAppearance
 
     public PageAppearance Clone() => new()
     {
+        AdditionalData = AdditionalData,
         PaperKind = PaperKind,
         Theme = Theme,
         Background = Background,
@@ -80,6 +85,8 @@ public sealed class PageAppearance
 
 public sealed class NotePage
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public NotePage CopyForSave()
     {
         var copy = (NotePage)MemberwiseClone();
@@ -115,6 +122,8 @@ public sealed class NotePage
 
 public sealed class SectionNode
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public SectionNode CopyForSave()
     {
         var copy = (SectionNode)MemberwiseClone();
@@ -210,6 +219,8 @@ public sealed class PagePaneRow
 
 public sealed class NotebookWorkspace
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public NotebookWorkspace CopyForSave()
     {
         var copy = (NotebookWorkspace)MemberwiseClone();
@@ -647,9 +658,11 @@ public sealed class NotebookWorkspace
 
 public sealed class NotebookLibrary
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public NotebookLibrary CopyForSave() => new()
     {
-        Version = Version, ActiveNotebookId = ActiveNotebookId,
+        Version = Version, ActiveNotebookId = ActiveNotebookId, AdditionalData = AdditionalData,
         Notebooks = Notebooks.Select(notebook => notebook.CopyForSave()).ToList(),
     };
     public int Version { get; set; } = 2;

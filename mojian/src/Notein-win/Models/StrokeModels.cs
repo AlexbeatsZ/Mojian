@@ -30,6 +30,8 @@ public sealed class InkPoint
 
 public sealed class StrokeRecord
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     private float _widthMm = 0.4f;
     private List<InkPoint> _points = new();
     private Rect? _cachedBounds;
@@ -178,6 +180,8 @@ public static class CanvasTagKindExtensions
 
 public sealed class CanvasTag
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public string Id { get; set; } = IdFactory.New("tag");
     public CanvasTagKind Kind { get; set; }
     public float DocumentX { get; set; }
@@ -191,6 +195,8 @@ public sealed class CanvasTag
 
 public sealed class TextItem
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public TextItem CopyForSave() => (TextItem)MemberwiseClone();
     public string LayerId { get; set; } = string.Empty;
     public long ZOrder { get; set; }
@@ -225,6 +231,10 @@ public sealed class PageViewport
 
 public sealed class PageDocument
 {
+    [JsonIgnore]
+    public string? DiskStamp { get; set; }
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public int Version { get; set; } = 2;
     public string NotebookId { get; set; } = string.Empty;
     public string PageId { get; set; } = string.Empty;
@@ -242,18 +252,20 @@ public sealed class PageDocument
 
     public PageDocument CopyForSave() => new(NotebookId, PageId)
     {
-        Version = Version, Revision = Revision, UpdatedAt = UpdatedAt,
+        Version = Version, Revision = Revision, UpdatedAt = UpdatedAt, AdditionalData = AdditionalData, DiskStamp = DiskStamp,
         Viewport = new PageViewport { Scale = Viewport.Scale, TranslationX = Viewport.TranslationX, TranslationY = Viewport.TranslationY },
         Strokes = Strokes.Select(stroke => stroke.CopyForSave()).ToList(),
         Tags = Tags.Select(tag => tag.CopyForSave()).ToList(),
         TextItems = TextItems.Select(text => text.CopyForSave()).ToList(),
         Objects = Objects.Select(item => item.CopyForSave()).ToList(),
-        Layers = Layers.Select(layer => new PageLayer { Id = layer.Id, Name = layer.Name, Visible = layer.Visible, Order = layer.Order }).ToList(),
+        Layers = Layers.Select(layer => new PageLayer { Id = layer.Id, Name = layer.Name, Visible = layer.Visible, Order = layer.Order, AdditionalData = layer.AdditionalData }).ToList(),
     };
 }
 
 public sealed class PageLayer
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public bool Visible { get; set; } = true;

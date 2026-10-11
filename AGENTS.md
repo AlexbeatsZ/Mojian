@@ -1,11 +1,28 @@
 # Goal
 
 - Bring 墨笺 to native iOS/iPadOS with phone/tablet layouts, editable notes and configurable Apple Pencil side gestures.
-- Assess whether the Android Notein app on the user's tablet can be brought to Windows with PC-side writing and file-based synchronization through Syncthing instead of Notein cloud sync.
+- Build Mojian as a persistent Windows/Android note application with one shared folder format,
+  editable handwriting and Syncthing synchronization. Existing Notein/OneNote notes are imported
+  into this format; the initial three-device library is authoritative on OMEN.
 - Prioritize a clean-room handwriting engine that reproduces Notein's pen character and low apparent latency, because both the compatibility route and an independent product need it.
 - Preserve the user's existing Notein data. Reverse engineering is for interoperability with the user's own notes; do not publish proprietary app code or keys.
 
 # Current State
+
+- On 2026-10-12 OMEN's complete five-notebook / 652-page workspace seeded Syncthing `Mojian`
+  (1,793 files / 5,285,164,934 bytes). OMEN, Redmi K70 and Xiaomi Pad 6 Pro now use send/receive;
+  Android's folder is `/storage/emulated/0/Documents/Mojian`. Both applications are version
+  0.6.0; Android remains `com.meta.inklab.debug` / 7 and was updated in place with user approval.
+  Android now reads/writes the desktop v2 canonical store in 96-DPI units, preserves imported
+  paths/layers/unknown metadata, and durably saves ordinary handwriting, tags and text on a
+  serial worker. Both clients refresh incoming changes while idle and reject stale saves.
+  Actual phone -> tablet -> OMEN -> phone/tablet edits and cold reopen passed on a disposable
+  page. The original homework retains 1,110 strokes / 26,821 points. Large imported-page native
+  acceptance is being completed after fixing nullable PDF metadata and duplicate JSON parsing.
+  Windows 161 tests pass; latest Android 161 tests pass, with final lint/package checks pending
+  the large-page fix. Existing Syncthing identities and other folders remain. The database
+  minimum was changed from 1% to 1 GB when C: had 2.1 GiB free; a separate task freed space.
+  See `docs/design/live-note-sync.md` for format, permission, concurrency and runtime evidence.
 
 - On 2026-10-08 the shared Export/Print integration was delivered with page/section/notebook
   scopes, physical pagination, paper/orientation/margins/ranges, native print dialogs and previews.
@@ -197,6 +214,8 @@
   - `docs/design/boundless-canvas.md` (read before boundless page growth, paper extents, or smart-cropped PDF export).
   - `docs/design/cross-platform-parity.md` (read before any shared Windows/Android product feature or defect; shared behavior is updated, tested, and delivered on both clients by default).
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
+  - `docs/design/live-note-sync.md` (read before canonical shared-store, autosave, incoming
+    refresh, Syncthing deployment or source-preserving round-trip work).
   - `docs/design/handwriting-engine.md` (read before ink-input, brush, rendering, or tablet-lab work).
   - `docs/design/stored-ink-appearance.md` (read before Android shared-stroke opacity/color or legacy pen loading).
   - `docs/design/input-gestures.md` (read before shortcut, gesture arbitration, viewport, or pressure-eraser work).
@@ -207,6 +226,12 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [ ] Shared synchronization integration owner: the deployment chat is completing native
+  acceptance of the large imported page after single-parse, weak document reuse, streaming JSON
+  writes/fingerprints and inactive-session release. Preserve the other chat's stored-color and
+  two-finger navigation policy in the final build. Do not clean shared Android outputs while
+  either integration build is running; final APK delivery follows both chats' completed changes.
 
 - [x] Android old synced pen/color and two-finger/right-button repairs: legacy ordinary fountain
   pens display opaque without rewriting JSON; source outlines/shapes retain alpha. Two fingers

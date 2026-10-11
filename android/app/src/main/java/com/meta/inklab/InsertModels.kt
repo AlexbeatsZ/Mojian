@@ -188,8 +188,8 @@ sealed class InsertObject(
                         json.optString("mimeType", "image/png"),
                         ImageSourceKind.valueOf(json.optString("sourceKind", ImageSourceKind.IMAGE.name)),
                         json.optBoolean("viewInverted", false),
-                        json.optString("sourceAssetName").takeIf { it.isNotEmpty() },
-                        if (json.has("sourcePageNumber")) json.getInt("sourcePageNumber") else null,
+                        if (json.isNull("sourceAssetName")) null else json.optString("sourceAssetName").takeIf { it.isNotEmpty() },
+                        if (json.isNull("sourcePageNumber")) null else json.getInt("sourcePageNumber"),
                         json.optBoolean("pageBackground", false),
                         json.optInt("rotationQuarterTurns", 0).mod(4),
                         json.optBoolean("flipHorizontal", false),
@@ -224,6 +224,9 @@ data class PageInsertDocument(
     val pageId: String,
     val objects: MutableList<InsertObject> = mutableListOf(),
     var strokes: JSONArray = JSONArray(),
+    var sharedSource: JSONObject = JSONObject(),
+    var diskStamp: String? = null,
+    var diskFingerprint: String? = null,
 ) {
     fun toJson(): JSONObject =
         JSONObject().apply {

@@ -51,6 +51,7 @@ enum class CanvasBackgroundFormat(
 }
 
 class DryInkView(context: Context) : View(context) {
+    var sceneRenderer: ((Canvas,List<Stroke>,(Stroke)->Unit)->Unit)? = null
     var onContentChanged: (() -> Unit)? = null
     var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
         set(value) {
@@ -265,14 +266,14 @@ class DryInkView(context: Context) : View(context) {
             val mappedRgb = if (enabled) 0xFFEFEFEF.toInt() else InkPalette.BLACK.argb
             val mapped = Color.argb(Color.alpha(color), Color.red(mappedRgb), Color.green(mappedRgb), Color.blue(mappedRgb))
             if (mapped == color) continue
-            replacements[stroke] = Stroke(stroke.brush.copyWithColorIntArgb(mapped), stroke.inputs)
+            replacements[stroke] = Stroke(stroke.brush.copyWithColorIntArgb(mapped), stroke.inputs).also { SharedStrokeCodec.recolored(stroke,it) }
         }
         if (replacements.isEmpty()) return
         for (index in strokes.indices) replacements[strokes[index]]?.let { strokes[index] = it }
         val selectedReplacements = selectedStrokes.mapNotNull(replacements::get)
         selectedStrokes.removeAll(replacements.keys)
         selectedStrokes.addAll(selectedReplacements)
-        rebuildStrokeMetrics()
+        rebuildStrokeMetrics(notify=false)
         invalidate()
     }
 
@@ -315,6 +316,15 @@ class DryInkView(context: Context) : View(context) {
         selectedStrokes.clear()
         if (polygon.size >= 3) {
             for (stroke in strokes) {
+                if(!SharedStrokeCodec.visible(stroke)) continue
+                val outline = SharedStrokeCodec.bounds(stroke)
+                if(outline != null) {
+                    if(listOf(DocumentPoint(outline.left,outline.top),DocumentPoint(outline.right,outline.top),
+                        DocumentPoint(outline.right,outline.bottom),DocumentPoint(outline.left,outline.bottom)).all {
+                            SelectionGeometry.pointInPolygonOrBoundary(it.x,it.y,polygon)
+                        }) selectedStrokes += stroke
+                    continue
+                }
                 val inputs = stroke.inputs
                 if (inputs.size > 0 && (0 until inputs.size).all { index ->
                         val input = inputs.get(index)
@@ -341,7 +351,7 @@ class DryInkView(context: Context) : View(context) {
 
     fun selectAll(): Int {
         selectedStrokes.clear()
-        selectedStrokes.addAll(strokes)
+        selectedStrokes.addAll(strokes.filter(SharedStrokeCodec::visible))
         invalidate()
         return selectedStrokes.size
     }
@@ -463,7 +473,7 @@ class DryInkView(context: Context) : View(context) {
                         input.orientationRadians,
                     )
                 }
-                replacements[stroke] = Stroke(stroke.brush, transformedInputs)
+                replacements[stroke] = Stroke(stroke.brush, transformedInputs).also { SharedStrokeCodec.transformed(stroke,it,{ x,y -> DocumentPoint(x,y+deltaY) }) }
             }
         }
         for (index in strokes.indices) {
@@ -547,19 +557,20 @@ class DryInkView(context: Context) : View(context) {
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
             transformedCanvas.concat(documentMatrix)
-            strokes.forEach(scope::drawStroke)
+            strokes.forEach { if (!SharedStrokeCodec.draw(transformedCanvas,it)) scope.drawStroke(it) }
             transformedCanvas.restore()
         }
     }
 
     /** PDF canvases receive the native stroke outlines, never a screenshot or GPU mesh draw. */
-    fun renderVectorInkForExport(canvas: Canvas, documentMatrix: Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
+    fun renderVectorInkForExport(canvas: Canvas, documentMatrix: Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance(), onlyStroke: Stroke? = null) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         val position = MutableVec()
         canvas.save()
         canvas.concat(documentMatrix)
-        strokes.forEach { stroke ->
+        (onlyStroke?.let(::listOf) ?: strokes).forEach { stroke ->
             if (selectedOnly && stroke !in selectedStrokes) return@forEach
+            if (SharedStrokeCodec.draw(canvas,stroke,output.printsDark(outputPageSettings.darkBackground))) return@forEach
             val shape = stroke.shape
             paint.color = if (output.printsDark(outputPageSettings.darkBackground)) OutputAppearance.printInk(stroke.brush.colorIntArgb) else stroke.brush.colorIntArgb
             for (group in 0 until shape.getRenderGroupCount()) {
@@ -588,7 +599,10 @@ class DryInkView(context: Context) : View(context) {
             if (renderBackgroundInInkLayer) drawGrid(transformedCanvas)
             val startY = insertSpaceStartY
             val currentY = insertSpaceCurrentY
-            for (stroke in strokes) {
+            val renderScene=sceneRenderer
+            if(renderScene != null && startY == null && currentY == null) {
+                renderScene(transformedCanvas,strokes.filter { boundsFor(it).intersects(visible) }) { stroke -> if(!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke) }
+            } else for (stroke in strokes) {
                 val bounds = boundsFor(stroke)
                 if (startY != null && currentY != null) {
                     val deltaY = currentY - startY
@@ -598,13 +612,13 @@ class DryInkView(context: Context) : View(context) {
                         if (!bounds.translated(deltaY).intersects(visible)) continue
                         transformedCanvas.save()
                         transformedCanvas.translate(0f, deltaY)
-                        scope.drawStroke(stroke)
+                        if (!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke)
                         transformedCanvas.restore()
                         continue
                     }
                 }
                 if (!bounds.intersects(visible)) continue
-                scope.drawStroke(stroke)
+                if (!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke)
             }
             shapePreview?.let { scope.drawStroke(it) }
             drawLasso(transformedCanvas)
@@ -769,11 +783,11 @@ class DryInkView(context: Context) : View(context) {
         cachedContentBottom = maxOf(cachedContentBottom, bounds.bottom)
     }
 
-    private fun rebuildStrokeMetrics() {
+    private fun rebuildStrokeMetrics(notify: Boolean = true) {
         strokeBounds.clear()
         cachedContentBottom = 0f
         strokes.forEach(::registerStroke)
-        onContentChanged?.invoke()
+        if(notify) onContentChanged?.invoke()
     }
 
     private fun boundsFor(stroke: Stroke): StrokeViewportBounds =
@@ -783,6 +797,7 @@ class DryInkView(context: Context) : View(context) {
         }
 
     private fun computeStrokeBounds(stroke: Stroke): StrokeViewportBounds {
+        SharedStrokeCodec.bounds(stroke)?.let { return it }
         val inputs = stroke.inputs
         if (inputs.isEmpty()) return StrokeViewportBounds(0f, 0f, 0f, 0f)
         val first = inputs.get(0)
@@ -811,6 +826,7 @@ class DryInkView(context: Context) : View(context) {
     }
 
     private fun strokeTouchesCircle(stroke: Stroke, x: Float, y: Float, radius: Float): Boolean {
+        SharedStrokeCodec.hits(stroke,x,y,radius)?.let { return it }
         val inputs = stroke.inputs
         if (inputs.isEmpty()) return false
         val first = inputs.get(0)
@@ -872,7 +888,7 @@ class DryInkView(context: Context) : View(context) {
             val brush =
                 if (brushScale == 1f) stroke.brush
                 else stroke.brush.copy(size = (stroke.brush.size * brushScale).coerceAtLeast(0.01f))
-            replacements[stroke] = Stroke(brush, transformedInputs)
+            replacements[stroke] = Stroke(brush, transformedInputs).also { SharedStrokeCodec.transformed(stroke,it,pointTransform) }
         }
         for (index in strokes.indices) {
             replacements[strokes[index]]?.let { strokes[index] = it }

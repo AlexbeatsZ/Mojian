@@ -878,6 +878,34 @@ public sealed class MainViewModel : ObservableObject
         NotifyAllWorkspaceProperties();
     }
 
+    public bool RefreshSharedWorkspace()
+    {
+        if (!_store.HasExternalChanges || !_pageSaves.IsIdle || _pageSaves.HasFailures) return false;
+        var notebookId = ActiveWorkspace.Id;
+        var primaryId = PrimaryDocument?.PageId;
+        var secondaryId = SecondaryDocument?.PageId;
+        var primaryNotebookId = PrimaryDocument?.NotebookId;
+        var secondaryNotebookId = SecondaryDocument?.NotebookId;
+        var fresh = _store.LoadLibrary();
+        _library = fresh;
+        if (fresh.Notebooks.Any(item => item.Id == notebookId)) fresh.ActiveNotebookId = notebookId;
+        if (primaryId != null && fresh.Notebooks.FirstOrDefault(item => item.Id == primaryNotebookId)?.FindPage(primaryId, out _) != null)
+        {
+            PrimaryDocument = _store.LoadPage(primaryNotebookId!, primaryId);
+        }
+        else PrimaryDocument = null;
+        SecondaryDocument = secondaryId != null && fresh.Notebooks.FirstOrDefault(item => item.Id == secondaryNotebookId)?.FindPage(secondaryId, out _) != null
+            ? secondaryId == primaryId && secondaryNotebookId == primaryNotebookId ? PrimaryDocument : _store.LoadPage(secondaryNotebookId!, secondaryId) : null;
+        if (FocusedDocument is { } focused) SelectLibraryLocation(focused.NotebookId, focused.PageId);
+        _store.ForgetInactivePages(PrimaryDocument, SecondaryDocument);
+        RefreshNavigation();
+        RefreshPageAppearance();
+        NotifyAllWorkspaceProperties();
+        OnPropertyChanged(nameof(FocusedDocument));
+        SaveStateText = "已同步";
+        return true;
+    }
+
     public string ImportAsset(string sourcePath)
     {
         var document = FocusedDocument ?? throw new InvalidOperationException("请先打开一个页面。");

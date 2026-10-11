@@ -33,6 +33,8 @@ public static class ImageImportDisplayModeExtensions
 
 public sealed class PageObject
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public PageObject CopyForSave()
     {
         var copy = (PageObject)MemberwiseClone();
