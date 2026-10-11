@@ -39,7 +39,10 @@ class CanvasNavigationIntegrationTest {
                 val props=types.mapIndexed { index,type -> MotionEvent.PointerProperties().apply { id=index;toolType=type } }.toTypedArray()
                 val coords=types.mapIndexed { index,_ -> MotionEvent.PointerCoords().apply { x=100f+index*80;y=100f;pressure=1f;size=1f } }.toTypedArray()
                 val event=MotionEvent.obtain(SystemClock.uptimeMillis(),SystemClock.uptimeMillis(),action,types.size,props,coords,0,0,1f,1f,0,0,source,0)
-                if(action==MotionEvent.ACTION_HOVER_MOVE) host.dispatchHoverEvent(event)
+                if(action==MotionEvent.ACTION_HOVER_MOVE) {
+                    CanvasInputHost::class.java.getDeclaredMethod("dispatchHoverEvent",MotionEvent::class.java)
+                        .apply { isAccessible=true }.invoke(host,event)
+                }
                 else if(action==MotionEvent.ACTION_BUTTON_RELEASE) host.dispatchGenericMotionEvent(event)
                 else host.dispatchTouchEvent(event)
                 event.recycle()
