@@ -15,7 +15,7 @@
   both devices) still fired after navigation ended. The host now sends `ACTION_CANCEL` on any
   mid-sequence takeover (`ChildStreamHandoff`), the overlay stops the timer on every cancel, and a
   one-finger move interrupted by a second finger is finished/saved. Android 165 tests, APK and lint
-  (0 errors, 130 warnings) pass; device installation awaits the user. No Mojian Android crash was
+  (0 errors, 130 warnings) pass; installed in place on tablet and K70 and both launched. Physical two-finger acceptance is pending; the user chose to keep the system long-press timeout. No Mojian Android crash was
   in either device's logcat; Android saves use POSIX rename and catch refused writes with a toast.
 
 - On 2026-10-12 the Windows EXE crashed repeatedly after Syncthing deployment: `File.Replace` of
