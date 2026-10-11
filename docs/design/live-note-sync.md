@@ -88,6 +88,8 @@ OMEN addition. An additional phone text edit reached OMEN after committing the c
 method's composition. The disposable notebook and its test conflict copy were removed after
 acceptance. The current five-book / 653-page library includes a real OMEN page added during
 deployment; cleanup removed only the test notebook and did not restore an older whole library.
+Final readback: OMEN, phone and tablet each report 1,794 local/global files, idle state,
+zero needed files/bytes and zero folder errors. Both Android test directories are absent.
 
 Windows 161 tests pass, including real-window/clipboard checks and incoming-file/stale-writer
 regressions. Android 162 unit tests pass; debug APK, separate test APK and lint build successfully
