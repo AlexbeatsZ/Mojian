@@ -974,7 +974,8 @@ public partial class NoteCanvas : UserControl
             else ContinuePointer(_hoverViewPoint.Value, 0.65f, 0, 0, isStylus: false);
             e.Handled = true;
         }
-        if (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured)
+        // A cached pan already moved the scene; a full invalidation would re-rasterize it.
+        if (!_panCacheActive && (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured))
             InvalidateVisual();
         else PointerOverlay.InvalidateVisual();
     }
@@ -1844,6 +1845,7 @@ public partial class NoteCanvas : UserControl
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         if (_isDragZooming)
         {
+            EndPanCache();
             var factor = ViewportState.DiagonalDragZoomFactor(_lastPointer, viewPoint);
             _viewport.ZoomAt((float)_dragZoomAnchor.X, (float)_dragZoomAnchor.Y, factor);
             _lastPointer = viewPoint;
@@ -1854,12 +1856,8 @@ public partial class NoteCanvas : UserControl
         if (_isPanning)
         {
             var sensitivity = Math.Clamp(PanoramaSensitivity, 0.25d, 3d);
-            _viewport.Pan(
-                (float)((viewPoint.X - _lastPointer.X) * sensitivity),
-                (float)((viewPoint.Y - _lastPointer.Y) * sensitivity));
+            PanScene((viewPoint.X - _lastPointer.X) * sensitivity, (viewPoint.Y - _lastPointer.Y) * sensitivity);
             _lastPointer = viewPoint;
-            UpdateTextEditorPositions();
-            InvalidateVisual();
             return;
         }
         if (_isInsertingSpace)
@@ -1940,6 +1938,7 @@ public partial class NoteCanvas : UserControl
         _finishingPointer = true;
         ReleaseInput(isStylus);
         _finishingPointer = false;
+        EndPanCache();
         var changed = false;
         if (_isPanning)
         {
@@ -2689,11 +2688,74 @@ public partial class NoteCanvas : UserControl
         _drawingDryScene = SeparateWetInk;
         try
         {
-            dc.PushTransform(new MatrixTransform(_viewport.DocumentToViewMatrix()));
-            DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, VisibleDocumentBounds());
+            var matrix = _viewport.DocumentToViewMatrix();
+            var extent = VisibleDocumentBounds();
+            if (_panCacheActive)
+            {
+                // Render at the cached base position (the layer transform adds _panOffset)
+                // and include half a view of margin so moving the bitmap reveals content.
+                matrix.Translate(-_panOffset.X, -_panOffset.Y);
+                var overscan = PanOverscanViewRect();
+                var inverse = matrix; inverse.Invert();
+                extent = Rect.Transform(overscan, inverse);
+                dc.PushClip(new RectangleGeometry(overscan));
+            }
+            dc.PushTransform(new MatrixTransform(matrix));
+            DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, extent);
             dc.Pop();
+            if (_panCacheActive) dc.Pop();
         }
         finally { _drawingDryScene = false; }
+    }
+
+    // Panning used to re-rasterize every visible stroke for each pointer sample (about
+    // 25-45 ms per frame on ordinary 1-3k stroke pages), which made Hand/middle drag feel
+    // sluggish. During a pan the scene is cached as a bitmap with overscan and only its
+    // transform moves; it re-renders when the margin is used up and returns to the vector
+    // scene when the gesture ends. Zoom gestures never use this cache.
+    private readonly TranslateTransform _panTranslate = new();
+    private Vector _panOffset;
+    private bool _panCacheActive;
+
+    private Rect PanOverscanViewRect() => new(-ActualWidth / 2, -ActualHeight / 2, ActualWidth * 2, ActualHeight * 2);
+
+    private void PanScene(double deltaX, double deltaY)
+    {
+        _viewport.Pan((float)deltaX, (float)deltaY);
+        if (!_panCacheActive) BeginPanCache();
+        _panOffset += new Vector(deltaX, deltaY);
+        if (Math.Abs(_panOffset.X) > ActualWidth / 2 || Math.Abs(_panOffset.Y) > ActualHeight / 2)
+        {
+            _panOffset = default;
+            SceneLayer.InvalidateVisual();
+        }
+        _panTranslate.X = _panOffset.X;
+        _panTranslate.Y = _panOffset.Y;
+        UpdateTextEditorPositions();
+        PointerOverlay.InvalidateVisual();
+    }
+
+    private void BeginPanCache()
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        _panCacheActive = true;
+        _panOffset = default;
+        _panTranslate.X = _panTranslate.Y = 0;
+        SceneLayer.ClipToBounds = false;
+        SceneLayer.RenderTransform = _panTranslate;
+        SceneLayer.CacheMode = new BitmapCache { EnableClearType = false, SnapsToDevicePixels = false, RenderAtScale = 1 };
+        SceneLayer.InvalidateVisual();
+    }
+
+    private void EndPanCache()
+    {
+        if (!_panCacheActive) return;
+        _panCacheActive = false;
+        _panOffset = default;
+        SceneLayer.CacheMode = null;
+        SceneLayer.RenderTransform = Transform.Identity;
+        SceneLayer.ClipToBounds = true;
+        SceneLayer.InvalidateVisual();
     }
 
     private void DrawDocument(DrawingContext dc, CanvasRenderLayer layer, bool lightExport, Rect extent)
@@ -3353,6 +3415,7 @@ public partial class NoteCanvas : UserControl
         _insertSpaceUndoPushed = false;
         _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;
+        EndPanCache();
         _stylusSelectionTransformActive = false; _stylusSelectionTransformMoved = false;
         _middleNavigationActive = false; _middleNavigationUsesStylus = false;
         EndPanoramaSpringLoadedTool();

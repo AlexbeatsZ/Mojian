@@ -68,6 +68,40 @@ explicit screen bitmap were evaluated but rejected because they changed edge
 pixels at handoff. The delivered scene remains vector-backed, with no scaled-up
 page bitmap or additional synchronous raster task on the input dispatcher.
 
+### Follow-up: sluggish panorama Hand / middle-drag pan (2026-10-12)
+
+The user reported that the Windows Hand felt laggy. Every pan sample called
+`InvalidateVisual()`, so WPF re-recorded and re-rasterized the whole visible
+scene per sample; WPF has no automatic layer cache, so translating the vector
+scene still re-rasterizes it. Real-window GPU measurements on the live workspace
+(1400×1000, 240 Hz panel, one pan step per `CompositionTarget.Rendering`):
+
+| Page | Zoom | Per-sample redraw | Cached pan |
+|---|---|---|---|
+| 1,105 strokes | 50% | 22 ms median (≈44 fps) | 4.1 ms |
+| 3,096 strokes | 50% | 31 ms median (≈30 fps) | 4.1 ms |
+| 3,096 strokes | 100% | 8–10 ms | 4.2 ms |
+| 10,613 strokes | 50% | 13 ms | 1.5–4.5 ms |
+
+Contract: while `_isPanning` (pen Hand, mouse or stylus middle navigation),
+`SceneLayer` temporarily gets a `BitmapCache`, `ClipToBounds=false` and a
+`TranslateTransform`. The scene renders half a view of overscan on every side,
+clipped to that rectangle so the cache stays bounded, at the base position
+(`DrawScreenScene` subtracts the accumulated offset, so any re-render during the
+gesture stays aligned). Samples only move the transform; when the offset exceeds
+half the view the scene re-renders once around the current viewport. Zoom
+gestures end the cache first; release, cancel and transient-state clearing
+restore the vector scene. The mouse-move path must not invalidate the whole
+canvas while the cache is active, or it rasterizes the cache again per sample.
+
+The moving bitmap differs from the vector scene only in edge anti-aliasing
+(mean ≈1 per channel in the regression; a one-pixel misplacement measures
+several times higher). Release returns to the exact vector pixels. This differs
+from the rejected wet/dry `BitmapCache`: nothing is cached across a static handoff.
+`HandPanMovesCachedSceneWithoutPerSampleRedrawAndMatchesVectorPixels` covers no
+per-sample scene builds, one overscan re-render, alignment and release pixels.
+Two-finger touch manipulation still redraws per delta because it also scales.
+
 ## Reference investigation
 
 Notein's earlier verified 2.0.10.0 native Ink library exactly matched AndroidX Ink

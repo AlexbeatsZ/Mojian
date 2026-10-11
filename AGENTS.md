@@ -9,6 +9,13 @@
 
 # Current State
 
+- On 2026-10-12 the Windows panorama Hand / middle-drag pan lag was traced to a full scene
+  re-rasterization per pan sample (real-window GPU: 22-31 ms/frame at 50% on 1-3k stroke pages).
+  Pans now move a temporary overscanned `BitmapCache` of `SceneLayer` (about 4 ms/frame), re-render
+  once per half view of travel and restore vector rendering on release. Windows 163 tests pass;
+  the sole Release EXE was republished and reopened. This WPF-specific fix does not change Android.
+  See `docs/design/writing-performance-and-durability.md`.
+
 - On 2026-10-12 Android two-finger tap/short page drag was found to pop the canvas context menu
   afterwards: `CanvasInputHost` swallowed the rest of the sequence without cancelling the child
   that received the first finger, so `SelectionOverlayView`'s long-press timer (system 300 ms on

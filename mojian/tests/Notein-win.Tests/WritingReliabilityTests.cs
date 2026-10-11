@@ -217,6 +217,67 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
     });
 
     [Fact]
+    public void HandPanMovesCachedSceneWithoutPerSampleRedrawAndMatchesVectorPixels() => Sta(() =>
+    {
+        _ = Application.Current ?? new Application();
+        NoteCanvas Create()
+        {
+            var created = new NoteCanvas { Width = 400, Height = 300, Document = new PageDocument("n", "p"), SingleFingerPanEnabled = true,
+                Appearance = new PageAppearance { ShowTitle = false, Background = CanvasBackgroundFormat.GridStandard } };
+            for (var row = 0; row < 12; row++)
+                created.Document.Strokes.Add(new StrokeRecord { Points = [new InkPoint(10, 20 + row * 40), new InkPoint(700, 40 + row * 40)] });
+            created.Measure(new Size(400, 300)); created.Arrange(new Rect(0, 0, 400, 300)); created.UpdateLayout();
+            return created;
+        }
+        byte[] Render(NoteCanvas target)
+        {
+            target.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(400, 300, 96, 96, PixelFormats.Pbgra32); bitmap.Render(target);
+            var pixels = new byte[400 * 300 * 4]; bitmap.CopyPixels(pixels, 1600, 0); return pixels;
+        }
+        void AssertSameAsDirect(NoteCanvas panned, string stage, bool cached = false)
+        {
+            var reference = Create();
+            reference.Viewport.Restore(new PageViewport { Scale = panned.Viewport.Scale, TranslationX = panned.Viewport.TranslationX, TranslationY = panned.Viewport.TranslationY });
+            reference.InvalidateVisual();
+            var a1 = Render(panned); var b1 = Render(reference);
+            var diffs = a1.Zip(b1, (a, b) => Math.Abs(a - b)).ToArray();
+            var max = diffs.Max();
+            var mean = diffs.Average();
+            // The moving bitmap differs only in edge anti-aliasing (mean ~1 per channel); a
+            // misplaced scene shifted by one or two pixels measures several times higher.
+            var shifted = a1.Skip(1600).Zip(b1, (a, b) => Math.Abs(a - b)).Average();
+            output.WriteLine($"{stage}: max={max} mean={mean:F3} one_row_shift_mean={shifted:F3}");
+            if (cached) Assert.True(mean < 1.5 && shifted > 3 * mean, $"{stage}: mean={mean:F3} one_row_shift_mean={shifted:F3}");
+            else Assert.True(max <= 2, $"{stage}: max_pixel_diff={max}");
+        }
+        var canvas = Create();
+        void Call(string method, params object[] args) => typeof(NoteCanvas).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, args);
+        int Builds() => (int)typeof(NoteCanvas).GetProperty("SceneRenderCount", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(canvas)!;
+        bool Cached() => (bool)typeof(NoteCanvas).GetField("_panCacheActive", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(canvas)!;
+        Render(canvas);
+        Call("BeginPointer", new Point(300, 200), .5f, 0f, 0f, true, false, false);
+        Call("ContinuePointer", new Point(299, 199), .5f, 0f, 0f, true);
+        Render(canvas);
+        Assert.True(Cached());
+        var builds = Builds();
+        for (var i = 1; i <= 40; i++)
+        {
+            // 3 px per sample: 120 px travel stays within the 200 px horizontal overscan.
+            Call("ContinuePointer", new Point(299 - i * 3, 199 - i), .5f, 0f, 0f, true);
+            Render(canvas);
+        }
+        Assert.Equal(builds, Builds());
+        AssertSameAsDirect(canvas, "mid-pan", cached: true);
+        for (var i = 1; i <= 40; i++) { Call("ContinuePointer", new Point(179 - i * 3, 159), .5f, 0f, 0f, true); Render(canvas); }
+        Assert.Equal(builds + 1, Builds());
+        AssertSameAsDirect(canvas, "after-recenter", cached: true);
+        Call("EndPointer", true);
+        Assert.False(Cached());
+        AssertSameAsDirect(canvas, "after-release");
+    });
+
+    [Fact]
     public void ZoomedOutWetInkReusesCompletedSceneAndPreservesHandoffPixels() => Sta(() =>
     {
         _ = Application.Current ?? new Application();
