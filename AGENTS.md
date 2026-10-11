@@ -208,12 +208,15 @@
 
 # Active Work
 
-- [ ] Concurrent Android color/input repair: this chat owns `CanvasNavigationGuard`,
-  `StoredInkAppearance`, `InkColorProbeActivity`, their tests and navigation-only MainActivity
-  hunks. Old desktop ordinary `fountain-v1` pens without outlines can have `opacityPercent=32`
-  but are displayed opaque by Windows; Android must use opaque display while preserving JSON.
-  `SharedStrokeCodec` now calls the appearance policy and preserves full outline alpha.
-  Keep this repair in the final shared APK; do not overwrite it during sync delivery.
+- [x] Android old synced pen/color and two-finger/right-button repairs: legacy ordinary fountain
+  pens display opaque without rewriting JSON; source outlines/shapes retain alpha. Two fingers
+  preempt/cancel mouse and Xiaomi-key secondary gestures through last-finger lift, and independent
+  button/hover streams cannot end navigation. The tablet native color probe passed all twelve RGB
+  samples and ten outline-alpha cases; Android 161/161 tests, APK/test-APK and lint pass (0 errors,
+  130 warnings). Native gesture test APK installation was rejected by HyperOS; physical gesture
+  acceptance remains pending. On 2026-10-12 the user authorized coordination with the active sync
+  chat, which owns final integrated commit/deployment to tablet and Redmi K70, including the
+  SharedStrokeCodec opacity hook and InkColorProbeActivity. Read `docs/design/stored-ink-appearance.md`.
 
 - [x] Integrate displayed-color export, dark-page printing, individual image inversion and hidden
   print backgrounds with the shared paginated-output UI; validate both clients and refresh the

@@ -23,3 +23,9 @@ Unit regressions cover legacy/missing-profile pens, unchanged JSON, highlighter/
 the outline alpha range. Debug-only `InkColorProbeActivity` uses isolated native views and synthetic
 strokes, never preferences or user pages. It checks legacy pen RGB pixels, source JSON round trip
 and ten outline opacity/type combinations. Physical touch/pen appearance remains user acceptance.
+
+The 2026-10-12 Xiaomi Pad 6 Pro probe passed: black/blue/red/dark-page white at 50%, 100% and
+320% produced twelve exact RGB matches (zero error). The legacy red pen pixel was `#FFC42B1C`,
+source JSON remained unchanged, and ten outline opacity/type cases passed. Android 161/161 unit
+tests, APK/test-APK assembly and lint passed (zero errors, 130 warnings). This is native isolated
+pixel evidence; it does not measure stylus latency or replace physical gesture acceptance.
