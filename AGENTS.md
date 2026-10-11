@@ -182,6 +182,7 @@
   - `docs/design/cross-platform-parity.md` (read before any shared Windows/Android product feature or defect; shared behavior is updated, tested, and delivered on both clients by default).
   - `docs/design/sync-architecture.md` (read before synchronization or note-format work).
   - `docs/design/handwriting-engine.md` (read before ink-input, brush, rendering, or tablet-lab work).
+  - `docs/design/stored-ink-appearance.md` (read before Android shared-stroke opacity/color or legacy pen loading).
   - `docs/design/input-gestures.md` (read before shortcut, gesture arbitration, viewport, or pressure-eraser work).
   - `docs/design/workspace-ui.md` (read before notebook/section/page navigation, tool configuration, or workspace styling).
   - `docs/design/insert-and-export.md` (read before insert objects/assets, image/PDF view filters, note links, or export formats).
@@ -190,6 +191,13 @@
   - `docs/design/data-migration.md` (read before Notein/OneNote export, backup parsing, imported hierarchy, fallback, or migrated-PDF work).
 
 # Active Work
+
+- [ ] Concurrent Android color/input repair: this chat owns `CanvasNavigationGuard`,
+  `StoredInkAppearance`, `InkColorProbeActivity`, their tests and navigation-only MainActivity
+  hunks. Old desktop ordinary `fountain-v1` pens without outlines can have `opacityPercent=32`
+  but are displayed opaque by Windows; Android must use opaque display while preserving JSON.
+  `SharedStrokeCodec` now calls the appearance policy and preserves full outline alpha.
+  Keep this repair in the final shared APK; do not overwrite it during sync delivery.
 
 - [x] Integrate displayed-color export, dark-page printing, individual image inversion and hidden
   print backgrounds with the shared paginated-output UI; validate both clients and refresh the

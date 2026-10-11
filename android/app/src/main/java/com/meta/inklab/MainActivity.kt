@@ -295,7 +295,7 @@ class MainActivity : Activity() {
     private var insertSpacePointerId: Int? = null
     private var insertSpaceStartDocY = 0f
     private var insertSpaceCurrentDocY = 0f
-    private var directPageGestureCaptured = false
+    private val twoFingerNavigation = CanvasNavigationGuard()
     private var mouseCanvasGesture = CanvasDragIntent.NONE
     private var lastMouseGestureY = 0f
     private var mouseSecondaryGesture = MouseSecondaryGesture.NONE
@@ -514,7 +514,7 @@ class MainActivity : Activity() {
         pressurePointerId = null
         activeDirectTool = null
         panoramaPointerId = null
-        directPageGestureCaptured = false
+        twoFingerNavigation.cancel()
         mouseCanvasGesture = CanvasDragIntent.NONE
         resetMouseSecondaryGesture(cancelPreview = true)
         resetXiaomiSecondaryGesture(cancelPreview = true)
@@ -549,6 +549,10 @@ class MainActivity : Activity() {
     }
 
     private fun handleXiaomiSecondarySignal(signal: StylusShortcutSignal): Boolean {
+        if (pageNavigationBlocksSecondary()) {
+            resetXiaomiSecondaryGesture(cancelPreview = true)
+            return true
+        }
         when (signal.phase) {
             StylusKeyPhase.DOWN -> {
                 if (signal.repeatCount > 0) return true
@@ -4795,6 +4799,12 @@ class MainActivity : Activity() {
             }
         val releasedButton = if (action == MotionEvent.ACTION_BUTTON_RELEASE) event.actionButton else 0
 
+        if (pageNavigationBlocksSecondary() &&
+            (pressedButton and MotionEvent.BUTTON_SECONDARY != 0 || releasedButton and MotionEvent.BUTTON_SECONDARY != 0)) {
+            resetMouseSecondaryGesture(cancelPreview = true)
+            return true
+        }
+
         if (pressedButton and MotionEvent.BUTTON_TERTIARY != 0) {
             MojianCommandMenu.dismissActive()
             resetMouseSecondaryGesture(cancelPreview = true)
@@ -4900,25 +4910,30 @@ class MainActivity : Activity() {
 
     private fun observeCanvasPointerEvent(event: MotionEvent): Boolean {
         rememberStylusCanvasPoint(event)
-        if (handleXiaomiSecondaryStylusEvent(event)) return true
-        val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
-        if (mouseIndex != null && handleCanvasMousePointerEvent(event, event.getX(mouseIndex), event.getY(mouseIndex))) return true
         val fingerCount = (0 until event.pointerCount).count { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
-        if (fingerCount >= 2 || directPageGestureCaptured) {
-            if (!directPageGestureCaptured) {
+        val endsTouchSequence =
+            (fingerCount > 0 && event.actionMasked == MotionEvent.ACTION_UP) ||
+                (event.actionMasked == MotionEvent.ACTION_CANCEL && !event.isFromSource(InputDevice.SOURCE_MOUSE))
+        val capture = twoFingerNavigation.observe(fingerCount, endsTouchSequence)
+        if (capture != NavigationCapture.NONE) {
+            if (capture == NavigationCapture.STARTED) {
+                MojianCommandMenu.dismissActive()
+                resetMouseSecondaryGesture(cancelPreview = true)
+                resetXiaomiSecondaryGesture(cancelPreview = true)
+                if (mouseCanvasGesture != CanvasDragIntent.NONE) endMouseCanvasGesture()
                 cancelShapeGesture()
-                directPageGestureCaptured = true
                 selectionOverlay.cancelDirectGesture()
                 cancelInsertSpaceGesture()
                 textInputLayer.abandonTemporaryEditors()
                 textInputLayer.endEditing()
             }
-            handleFingerGesture(event)
-            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                directPageGestureCaptured = false
-            }
+            // A mouse release/pen hover is a separate stream; it must not end or move touch navigation.
+            if (fingerCount > 0 || endsTouchSequence) handleFingerGesture(event)
             return true
         }
+        if (handleXiaomiSecondaryStylusEvent(event)) return true
+        val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
+        if (mouseIndex != null && handleCanvasMousePointerEvent(event, event.getX(mouseIndex), event.getY(mouseIndex))) return true
         if (toolShelf.selected.kind == DrawingToolKind.SHAPE && !singleFingerPanEnabled && !insertSpaceModeEnabled) {
             val overChrome = event.actionMasked == MotionEvent.ACTION_DOWN && listOf(floatingToolbox, fullPagePaneButtons, fullPageToggle.parent as View).any { control ->
                 if (!control.isShown) false else {
@@ -4987,6 +5002,7 @@ class MainActivity : Activity() {
         showCanvasContextMenuAt(viewX, viewY, performHaptic = true)
 
     private fun showCanvasContextMenuAt(viewX: Float, viewY: Float, performHaptic: Boolean = false): Boolean {
+        if (pageNavigationBlocksSecondary()) return true
         val documentPoint = viewport.viewToDocument(viewX, viewY)
         val selectionBounds = combinedSelectionBounds()
         if (selectionBounds?.contains(documentPoint.x, documentPoint.y) == true) {
@@ -5095,6 +5111,8 @@ class MainActivity : Activity() {
     }
 
     private fun beginSingleFingerPan(event: MotionEvent, fingerIndex: Int) {
+        resetMouseSecondaryGesture(cancelPreview = true)
+        resetXiaomiSecondaryGesture(cancelPreview = true)
         transformGestureActive = true
         transformGestureArbiter.cancel()
         lastGestureFocusX = event.getX(fingerIndex)
@@ -5139,6 +5157,9 @@ class MainActivity : Activity() {
         transformGestureActive = false
         transformGestureArbiter.cancel()
     }
+
+    private fun pageNavigationBlocksSecondary(): Boolean =
+        twoFingerNavigation.active || transformGestureActive || mouseCanvasGesture != CanvasDragIntent.NONE
 
     private fun gestureGeometry(event: MotionEvent, fingerIndices: List<Int>): Triple<Float, Float, Float> {
         val first = fingerIndices[0]
