@@ -1,8 +1,10 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
@@ -84,6 +86,7 @@ public class UiRenderTests
                 // 4. View tab
                 vm.ActiveRibbonTab = RibbonTab.View;
                 CaptureVisual(window, 1440, 900, "win_4_view.png");
+                AssertCaptionButtons(window);
                 var normalFullPageButton = Assert.IsType<Button>(window.FindName("EnterFullPageButton"));
                 AssertRenderedIconIsCentered(normalFullPageButton);
                 var leftCanvas = Assert.IsType<NoteCanvas>(window.FindName("LeftCanvas"));
@@ -122,6 +125,7 @@ public class UiRenderTests
                 vm.IsBackstageOpen = true;
                 vm.SelectBackstageTabCommand.Execute("Info");
                 CaptureVisual(window, 1440, 900, "win_6_backstage_info.png");
+                AssertCaptionButtons(window);
 
                 // 7. Backstage Options
                 vm.SelectBackstageTabCommand.Execute("Options");
@@ -157,6 +161,10 @@ public class UiRenderTests
                 Assert.Equal(new Thickness(6), exitFullPage.Padding);
                 Assert.Equal(34, exitFullPage.ActualWidth);
                 AssertRenderedIconIsCentered(exitFullPage);
+                AssertCaptionButtons(window);
+                var minimizeCaption = Assert.IsType<Button>(window.FindName("MinimizeCaptionButton"));
+                var root = (FrameworkElement)window.Content;
+                Assert.True(canvasActions.TranslatePoint(new Point(canvasActions.ActualWidth, 0), root).X <= minimizeCaption.TranslatePoint(new Point(0, 0), root).X);
 
                 vm.ToggleSectionPaneCommand.Execute(null);
                 vm.TogglePagePaneCommand.Execute(null);
@@ -261,6 +269,60 @@ public class UiRenderTests
             yield return child;
             foreach (var descendant in VisualDescendants(child)) yield return descendant;
         }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    // App-drawn caption buttons: visible in the top-right 34 px row in every mode, glyphs actually
+    // rasterize, and the maximize button reports HTMAXBUTTON so Windows 11 Snap Layouts appear.
+    private static void AssertCaptionButtons(Window window)
+    {
+        window.UpdateLayout();
+        var root = (FrameworkElement)window.Content;
+        var buttons = new[] { "MinimizeCaptionButton", "MaximizeCaptionButton", "CloseCaptionButton" }
+            .Select(name => Assert.IsType<Button>(window.FindName(name))).ToArray();
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            var button = buttons[i];
+            Assert.True(button.IsVisible);
+            Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(button));
+            Assert.Equal(46, button.ActualWidth);
+            Assert.Equal(34, button.ActualHeight);
+            var origin = button.TranslatePoint(new Point(0, 0), root);
+            Assert.Equal(root.ActualWidth - 46 * (buttons.Length - i), origin.X, 1);
+            Assert.Equal(0, origin.Y, 1);
+            Assert.True(CountLightPixels(button) > 4, $"{button.Name} glyph did not rasterize");
+        }
+
+        var handle = new WindowInteropHelper(window).Handle;
+        Assert.Equal(1, NonClientHitTest(handle, buttons[0]));
+        Assert.Equal(9, NonClientHitTest(handle, buttons[1]));
+        Assert.Equal(1, NonClientHitTest(handle, buttons[2]));
+    }
+
+    private static int NonClientHitTest(IntPtr handle, FrameworkElement element)
+    {
+        var point = element.PointToScreen(new Point(element.ActualWidth / 2, element.ActualHeight / 2));
+        var lParam = ((int)Math.Round(point.Y) << 16) | ((int)Math.Round(point.X) & 0xFFFF);
+        return SendMessage(handle, 0x0084, IntPtr.Zero, new IntPtr(lParam)).ToInt32();
+    }
+
+    private static int CountLightPixels(FrameworkElement element)
+    {
+        var width = (int)Math.Round(element.ActualWidth);
+        var height = (int)Math.Round(element.ActualHeight);
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+            drawing.DrawRectangle(new VisualBrush(element), null, new Rect(0, 0, width, height));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        var pixels = new byte[width * height * 4];
+        bitmap.CopyPixels(pixels, width * 4, 0);
+        var count = 0;
+        for (var i = 0; i < pixels.Length; i += 4)
+            if (pixels[i + 3] > 128 && pixels[i] > 160 && pixels[i + 1] > 160 && pixels[i + 2] > 160) count++;
+        return count;
     }
 
     private static void AssertRenderedIconIsCentered(Button button)

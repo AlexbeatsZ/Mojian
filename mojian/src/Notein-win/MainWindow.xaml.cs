@@ -53,10 +53,107 @@ public partial class MainWindow : Window
         _ = DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
         _ = DwmSetWindowAttribute(handle, 35, ref caption, sizeof(int));
         _ = DwmSetWindowAttribute(handle, 36, ref textColor, sizeof(int));
+        HwndSource.FromHwnd(handle)?.AddHook(CaptionWndProc);
+        StateChanged += (_, _) => ApplyWindowStateChrome();
+        DpiChanged += (_, _) => ApplyWindowStateChrome();
+        ApplyWindowStateChrome();
     }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    private const int WmNcHitTest = 0x0084;
+    private const int WmNcLButtonDown = 0x00A1;
+    private const int WmNcLButtonUp = 0x00A2;
+    private const int WmNcMouseLeave = 0x02A2;
+    private const int HtMaxButton = 9;
+    private bool _maximizeCaptionHot;
+    private bool _maximizeCaptionPressed;
+
+    private void OnMinimizeCaptionClick(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+    private void OnMaximizeCaptionClick(object sender, RoutedEventArgs e) => ToggleMaximized();
+    private void OnCloseCaptionClick(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+
+    private void ToggleMaximized()
+    {
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
+    }
+
+    // WindowChrome lets a maximized client area overhang the monitor by the sizing frame; inset the
+    // layout so the top row and caption buttons stay on screen.
+    private void ApplyWindowStateChrome()
+    {
+        var maximized = WindowState == WindowState.Maximized;
+        MaximizeCaptionButton.Content = maximized ? "" : "";
+        MaximizeCaptionButton.ToolTip = maximized ? "向下还原" : "最大化";
+        if (!maximized) { RootLayout.Margin = new Thickness(0); return; }
+        var handle = new WindowInteropHelper(this).Handle;
+        var dpi = handle == IntPtr.Zero ? 96u : GetDpiForWindow(handle);
+        if (dpi == 0) dpi = 96;
+        const int smCxSizeFrame = 32, smCySizeFrame = 33, smCxPaddedBorder = 92;
+        var padded = GetSystemMetricsForDpi(smCxPaddedBorder, dpi);
+        var scale = dpi / 96.0;
+        var x = (GetSystemMetricsForDpi(smCxSizeFrame, dpi) + padded) / scale;
+        var y = (GetSystemMetricsForDpi(smCySizeFrame, dpi) + padded) / scale;
+        RootLayout.Margin = new Thickness(x, y, x, y);
+    }
+
+    // Reports the maximize button as HTMAXBUTTON so Windows 11 shows Snap Layouts on hover; the
+    // non-client press/release is then handled here instead of by the WPF button.
+    private IntPtr CaptionWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        switch (msg)
+        {
+            case WmNcHitTest:
+                if (IsOverMaximizeCaption(lParam))
+                {
+                    SetMaximizeCaptionState(true, _maximizeCaptionPressed);
+                    handled = true;
+                    return new IntPtr(HtMaxButton);
+                }
+                SetMaximizeCaptionState(false, false);
+                break;
+            case WmNcMouseLeave:
+                SetMaximizeCaptionState(false, false);
+                break;
+            case WmNcLButtonDown when wParam.ToInt64() == HtMaxButton:
+                SetMaximizeCaptionState(true, true);
+                handled = true;
+                break;
+            case WmNcLButtonUp when wParam.ToInt64() == HtMaxButton:
+                var activate = _maximizeCaptionPressed;
+                SetMaximizeCaptionState(true, false);
+                handled = true;
+                if (activate) Dispatcher.InvokeAsync(ToggleMaximized);
+                break;
+        }
+        return IntPtr.Zero;
+    }
+
+    private bool IsOverMaximizeCaption(IntPtr lParam)
+    {
+        if (!MaximizeCaptionButton.IsVisible) return false;
+        var raw = lParam.ToInt64();
+        var screen = new Point((short)(raw & 0xFFFF), (short)((raw >> 16) & 0xFFFF));
+        var local = MaximizeCaptionButton.PointFromScreen(screen);
+        return local.X >= 0 && local.Y >= 0 && local.X < MaximizeCaptionButton.ActualWidth && local.Y < MaximizeCaptionButton.ActualHeight;
+    }
+
+    private void SetMaximizeCaptionState(bool hot, bool pressed)
+    {
+        if (_maximizeCaptionHot == hot && _maximizeCaptionPressed == pressed) return;
+        _maximizeCaptionHot = hot;
+        _maximizeCaptionPressed = pressed;
+        MaximizeCaptionButton.Background = !hot ? Brushes.Transparent
+            : new SolidColorBrush(pressed ? Color.FromRgb(0x3A, 0x3A, 0x3A) : Color.FromRgb(0x2D, 0x2D, 0x2D));
+    }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

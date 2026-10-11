@@ -62,8 +62,8 @@ The normal window uses four vertical zones after the ribbon:
 - Full-page mode hides tabs and collapses the rail column completely. It starts with both panes
   closed, leaves independent section/page recovery buttons, and keeps their open state transient so
   entering or leaving full page never rewrites the normal-workspace pane preferences. Its top
-  controls remain clickable inside the 34 px native caption region and stay clear of DWM caption
-  buttons. When either pane is open in full-page mode, its header `+` is explicitly opted into
+  controls remain clickable inside the 34 px native caption region and stay clear of the
+  app-drawn caption buttons. When either pane is open in full-page mode, its header `+` is explicitly opted into
   `WindowChrome` hit testing so notebook/section/page creation remains clickable. The 34 px canvas actions preserve the Android 24 x 24 icon viewport inside their border
   instead of clipping path geometry to the content box; the visible enter/exit glyph bounds are
   raster-checked against the button center rather than trusting WPF's nominal layout bounds.
@@ -82,10 +82,30 @@ palette from `MainActivity`: title `#141414`, ribbon `#111111`, toolbar `#232323
 `#374048`, accent `#DAB2E9`, primary text `#F4F4F4`, and secondary text `#B9B9B9`.
 
 Windows adaptations are limited to native title-bar behavior, keyboard focus, mouse hover/context
-menus, scrollbars, pointer cursors, and accessibility. The 34 px top row reserves the Windows DWM
-caption hit zone and uses the OS-owned minimize/maximize/close glyphs; it must not simulate them with
-text or custom vectors. These adaptations must not reorder the Android product's navigation or
-replace its established visual language.
+menus, scrollbars, pointer cursors, and accessibility. These adaptations must not reorder the
+Android product's navigation or replace its established visual language.
+
+### Caption buttons
+
+DWM-owned caption buttons (`UseAeroCaptionButtons=True` with a 34 px glass frame) still answered
+`WM_NCHITTEST`, but on this Windows 11 host they were invisible: the opaque WPF top row is composited
+over them. The window therefore draws its own minimize/maximize/close buttons in the 34 px top row:
+
+- `WindowChrome` uses `UseAeroCaptionButtons=False` and `GlassFrameThickness=0,0,0,1`; no DWM
+  caption region remains to intercept clicks behind the app buttons, while the frame keeps its shadow.
+- `CaptionButtons` is one root-level 3 x 46 x 34 px overlay at the top-right, so it is present in
+  the normal ribbon row, full-page mode (whose canvas actions keep a 145 px right margin) and
+  Backstage. Glyphs are the OS caption codepoints from `Segoe Fluent Icons` / `Segoe MDL2 Assets`
+  (`E921`, `E922`/`E923`, `E8BB`); close hover is `#C42B1C`.
+- The maximize button returns `HTMAXBUTTON` from a `WM_NCHITTEST` hook so Windows 11 Snap Layouts
+  appear on hover. Because Windows then routes that button as non-client input, the same hook owns its
+  hover/pressed visuals and toggles on `WM_NCLBUTTONUP` after a matching `WM_NCLBUTTONDOWN`.
+  Minimize and close stay ordinary `HTCLIENT` WPF buttons.
+- A maximized `WindowChrome` client overhangs the monitor by the sizing frame plus padded border.
+  `RootLayout` is inset by `SM_CXSIZEFRAME/SM_CYSIZEFRAME + SM_CXPADDEDBORDER` for the window DPI
+  whenever the state or DPI changes, so the top row and caption buttons stay on screen.
+- `UiRenderTests` checks position, rasterized glyphs and `HTMAXBUTTON`/`HTCLIENT` hit testing in
+  normal, Backstage and full-page modes.
 
 The Page/PDF creation window is an opaque WPF window with layout rounding, device-pixel snapping,
 Display text formatting, and ClearType text. Do not restore `AllowsTransparency` or a window-level

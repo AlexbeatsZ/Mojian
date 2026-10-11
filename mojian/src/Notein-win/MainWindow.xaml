@@ -14,7 +14,7 @@
         Deactivated="OnWindowDeactivated"
         Closing="OnWindowClosing">
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0,34,0,0" UseAeroCaptionButtons="True" />
+        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0,0,0,1" UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
@@ -159,9 +159,47 @@
             </Setter>
         </Style>
 
+        <!-- App-drawn caption buttons inside the 34 px top row; glyphs are the OS caption font codepoints. -->
+        <Style x:Key="CaptionButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <TextBlock x:Name="glyph" Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" TextOptions.TextRenderingMode="Grayscale" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#2D2D2D" /></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="#3A3A3A" /></Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions><Condition Property="Tag" Value="Close" /><Condition Property="IsMouseOver" Value="True" /></MultiTrigger.Conditions>
+                                <Setter TargetName="border" Property="Background" Value="#C42B1C" />
+                                <Setter TargetName="glyph" Property="Foreground" Value="#FFFFFF" />
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions><Condition Property="Tag" Value="Close" /><Condition Property="IsPressed" Value="True" /></MultiTrigger.Conditions>
+                                <Setter TargetName="border" Property="Background" Value="#A8271A" />
+                                <Setter TargetName="glyph" Property="Foreground" Value="#FFFFFF" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="glyph" Property="Opacity" Value="0.4" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </Window.Resources>
 
-    <Grid>
+    <Grid x:Name="RootLayout">
         <DockPanel Visibility="{Binding IsBackstageOpen, Converter={StaticResource InverseBoolToVisibility}}">
             <StackPanel DockPanel.Dock="Top" Background="{StaticResource RibbonBackground}"
                         Visibility="{Binding IsNormalChromeVisible, Converter={StaticResource BoolToVisibility}}">
@@ -639,5 +677,16 @@
         </Popup>
 
         <controls:BackstageView x:Name="Backstage" Visibility="{Binding IsBackstageOpen, Converter={StaticResource BoolToVisibility}}" />
+
+        <!-- Caption buttons float above the top row, full-page canvas and Backstage alike. -->
+        <StackPanel x:Name="CaptionButtons" Panel.ZIndex="100" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
+            <Button x:Name="MinimizeCaptionButton" Style="{StaticResource CaptionButtonStyle}" Content="&#xE921;" ToolTip="最小化"
+                    AutomationProperties.AutomationId="MinimizeCaptionButton" Click="OnMinimizeCaptionClick" />
+            <Button x:Name="MaximizeCaptionButton" Style="{StaticResource CaptionButtonStyle}" Content="&#xE922;" ToolTip="最大化"
+                    AutomationProperties.AutomationId="MaximizeCaptionButton" Click="OnMaximizeCaptionClick" />
+            <Button x:Name="CloseCaptionButton" Style="{StaticResource CaptionButtonStyle}" Tag="Close" Content="&#xE8BB;" ToolTip="关闭"
+                    AutomationProperties.AutomationId="CloseCaptionButton" Click="OnCloseCaptionClick" />
+        </StackPanel>
     </Grid>
 </Window>
