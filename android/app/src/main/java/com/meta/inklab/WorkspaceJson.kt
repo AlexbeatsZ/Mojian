@@ -40,7 +40,31 @@ internal object WorkspaceJson {
     fun fingerprint(value: JSONObject): String {
         val digest=MessageDigest.getInstance("SHA-256")
         val sink=object : OutputStream() { override fun write(value: Int) = Unit;override fun write(bytes: ByteArray,offset: Int,length: Int) = Unit }
-        OutputStreamWriter(DigestOutputStream(sink,digest),Charsets.UTF_8).use { write(value,it) }
+        // Content comparison needs stable typed values, not another JSON text encoding. This
+        // avoids quoting long outline strings and decimal-formatting millions of coordinates
+        // merely to identify an unchanged imported page.
+        val output=java.io.DataOutputStream(java.io.BufferedOutputStream(DigestOutputStream(sink,digest)))
+        fun string(text: String) {
+            val bytes=text.toByteArray(Charsets.UTF_8)
+            output.writeInt(bytes.size);output.write(bytes)
+        }
+        fun visit(item: Any?) {
+            when(item) {
+                null, JSONObject.NULL -> output.writeByte(0)
+                is JSONObject -> {
+                    output.writeByte(1);output.writeInt(item.length())
+                    item.keys().forEach { key -> string(key);visit(item.get(key)) }
+                }
+                is JSONArray -> {
+                    output.writeByte(2);output.writeInt(item.length())
+                    for(index in 0 until item.length()) visit(item.get(index))
+                }
+                is Number -> { output.writeByte(3);output.writeLong(item.toDouble().toBits()) }
+                is Boolean -> { output.writeByte(4);output.writeBoolean(item) }
+                else -> { output.writeByte(5);string(item.toString()) }
+            }
+        }
+        output.use { visit(value) }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

@@ -14,6 +14,9 @@ after complete initial transfer, canonical-store compatibility and a disposable 
 Do not seed from Android's sample library. Preserve existing Syncthing identities and folders.
 
 Ignore device-local `settings.json`, `.previous` recovery copies and temporary writes.
+Use `(?d)*.tmp` and `(?d)*.previous` so these local copies cannot block a remotely deleted
+notebook directory. Keep root settings excluded. Ignored files otherwise prevent deletion of
+an empty synchronized directory; see [Syncthing's ignore documentation](https://docs.syncthing.net/users/ignoring.html).
 Keep all source notebook/page/asset identifiers and imported vector/layer metadata.
 One active writer per notebook remains the version-one rule; Syncthing conflict files must
 remain available. Do not claim an application-level merge of simultaneous edits.
@@ -82,7 +85,9 @@ A disposable canonical notebook/page was created on OMEN only. The phone authore
 appended a three-point native stroke. Windows' actual store/canvas read both strokes and rendered
 their filled vector outlines, then added text. Both Android application views displayed that
 OMEN addition. An additional phone text edit reached OMEN after committing the configured input
-method's composition. The disposable notebook is removed after acceptance.
+method's composition. The disposable notebook and its test conflict copy were removed after
+acceptance. The current five-book / 653-page library includes a real OMEN page added during
+deployment; cleanup removed only the test notebook and did not restore an older whole library.
 
 Windows 161 tests pass, including real-window/clipboard checks and incoming-file/stale-writer
 regressions. Android 162 unit tests pass; debug APK, separate test APK and lint build successfully
@@ -94,6 +99,15 @@ Large received pages must be parsed once per file generation. Display/export con
 a weakly cached document, and cache replacement follows successful writes. Page snapshots keep
 a small streaming content fingerprint rather than another full-page string; JSON writes stream
 to the temporary file. Inactive page sessions release their content graphs but retain viewports.
-Parsing a second copy
-of a 59,564,124-byte imported page caused an observed 512-MiB Android heap exhaustion.
+Parsing a second copy of a 59,564,124-byte imported page caused an observed 512-MiB Android heap
+exhaustion. Textual comparison also spent about 88 seconds formatting/escaping that source
+graph. Typed streaming comparison reduced the measured load to about 9 seconds on the phone;
+the complete native read/decode/render probe passed on both devices in about 15-16 seconds,
+retaining 10,245 strokes / 402,710 points. The real MainActivity also opened the source page
+and displayed its image assets. Offscreen assets are rejected before bitmap decoding.
 Do not restore the previous double-parse implementation or an unbounded strong page cache.
+
+The final installed APK includes the separate stored-ink appearance and captured-navigation
+repairs. Both devices' native color probes pass all twelve RGB cases and ten source-alpha cases,
+with source JSON preserved. The separate gesture instrumentation APK is compiled but Xiaomi
+rejects its installation; physical pen/button interaction remains user acceptance.

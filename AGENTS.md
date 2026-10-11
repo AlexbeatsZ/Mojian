@@ -17,10 +17,15 @@
   paths/layers/unknown metadata, and durably saves ordinary handwriting, tags and text on a
   serial worker. Both clients refresh incoming changes while idle and reject stale saves.
   Actual phone -> tablet -> OMEN -> phone/tablet edits and cold reopen passed on a disposable
-  page. The original homework retains 1,110 strokes / 26,821 points. Large imported-page native
-  acceptance is being completed after fixing nullable PDF metadata and duplicate JSON parsing.
-  Windows 161 tests pass; latest Android 161 tests pass, with final lint/package checks pending
-  the large-page fix. Existing Syncthing identities and other folders remain. The database
+  page, which was removed after acceptance. The current library retains five notebooks / 653
+  pages, including a source page added during deployment. Original homework ink, objects and
+  tags are identical to the pre-acceptance data (1,110 strokes / 26,821 points). Both devices
+  read/render the 59.6-MB imported page with 10,245 strokes / 402,710 points after nullable PDF,
+  single-parse and streaming-content comparison fixes; cold native checks take about 15-16 s.
+  Windows 161 and Android 162 tests pass; APK/test-APK/lint builds pass (0 errors, 130 warnings).
+  Both installed APKs include the legacy pen-color and two-finger/right-button fixes. Native
+  color checks pass on both devices; gesture instrumentation remains blocked by Xiaomi's test
+  APK installation restriction. Existing Syncthing identities and other folders remain. The database
   minimum was changed from 1% to 1 GB when C: had 2.1 GiB free; a separate task freed space.
   See `docs/design/live-note-sync.md` for format, permission, concurrency and runtime evidence.
 
@@ -227,11 +232,11 @@
 
 # Active Work
 
-- [ ] Shared synchronization integration owner: the deployment chat is completing native
-  acceptance of the large imported page after single-parse, weak document reuse, streaming JSON
-  writes/fingerprints and inactive-session release. Preserve the other chat's stored-color and
-  two-finger navigation policy in the final build. Do not clean shared Android outputs while
-  either integration build is running; final APK delivery follows both chats' completed changes.
+- [x] Complete OMEN/phone/tablet canonical note storage, durable ordinary Android content,
+  idle incoming refresh, stale-write rejection and disposable native round-trip acceptance.
+  Deliver the unified version including the separately verified color/navigation fixes.
+  Large-page duplicate JSON/string graphs and inactive-session accumulation are removed;
+  cold loading of very large imported pages still has a visible wait.
 
 - [x] Android old synced pen/color and two-finger/right-button repairs: legacy ordinary fountain
   pens display opaque without rewriting JSON; source outlines/shapes retain alpha. Two fingers
