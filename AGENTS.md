@@ -9,6 +9,14 @@
 
 # Current State
 
+- On 2026-10-12 the Windows EXE crashed repeatedly after Syncthing deployment: `File.Replace` of
+  `library.json`/page JSON hit a sharing violation from Syncthing's hasher during
+  `OnLeftCanvasFocus -> SaveDocument`. `AtomicWrite` now retries transient lock errors
+  (32/33/1175-1177, access denied) for up to 3 s; synchronous save failures set
+  `保存失败，请重试` and abort the navigation; page-metadata saves run at idle; a dispatcher
+  handler logs to `%LOCALAPPDATA%\Mojian\logs\crash.log` instead of terminating. Windows 162 tests
+  pass; the sole Release EXE was republished and reopened. Android is unaffected (POSIX atomic rename has no sharing locks).
+
 - On 2026-10-12 OMEN's complete five-notebook / 652-page workspace seeded Syncthing `Mojian`
   (1,793 files / 5,285,164,934 bytes). OMEN, Redmi K70 and Xiaomi Pad 6 Pro now use send/receive;
   Android's folder is `/storage/emulated/0/Documents/Mojian`. Both applications are version
@@ -394,6 +402,11 @@
 - Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
 # Durable Lessons
+
+- Syncthing (Go) and scanners open synced files without `FILE_SHARE_DELETE`, so Windows
+  rename/replace of a note can transiently fail while the file is being hashed. Every write into the
+  synced workspace must tolerate that lock; never let a storage exception escape a WPF input handler.
+  Real-window tests can flake while the delivered EXE is running; rerun before treating as a regression.
 
 - A .NET dictionary can reuse a removed entry's old slot. Coalesced autosave jobs must select by an
   explicit submission sequence; remove/reinsert does not guarantee current enqueue order and can

@@ -110,8 +110,23 @@ public partial class MainWindow : Window
             if (ReferenceEquals(other.Document, canvas.Document)) other.InvalidateVisual();
         };
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
-        canvas.PageMetadataChanged += (_, _) => ViewModel.SavePageMetadata();
+        canvas.PageMetadataChanged += (_, _) => QueuePageMetadataSave();
         canvas.ObjectContextRequested += OnObjectContextRequested;
+    }
+
+    private bool _pageMetadataSavePending;
+
+    // Saving the library flushes the page save queue and writes to disk; keep it out
+    // of the pointer-up handler and coalesce repeated growth from consecutive gestures.
+    private void QueuePageMetadataSave()
+    {
+        if (_pageMetadataSavePending) return;
+        _pageMetadataSavePending = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _pageMetadataSavePending = false;
+            ViewModel.SavePageMetadata();
+        }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void OnObjectActivated(object? sender, PageObjectEventArgs e)

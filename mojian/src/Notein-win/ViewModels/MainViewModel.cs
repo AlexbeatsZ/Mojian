@@ -798,9 +798,18 @@ public sealed class MainViewModel : ObservableObject
         var page = notebook?.FindPage(document.PageId, out _);
         if (page == null) return;
         SaveStateText = "正在保存…";
-        _store.SavePage(document);
-        page.UpdatedAt = document.UpdatedAt;
-        _store.SaveLibrary(_library);
+        try
+        {
+            _store.SavePage(document);
+            page.UpdatedAt = document.UpdatedAt;
+            _store.SaveLibrary(_library);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Rethrow so the caller's navigation stops and the unsaved page stays in memory.
+            SaveStateText = "保存失败，请重试";
+            throw;
+        }
         SaveStateText = "已保存";
         RefreshPagePaneRows();
     }
@@ -826,7 +835,17 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    public void SavePageMetadata() => SaveLibrary();
+    // A4 auto-growth is raised at the end of pan, wheel and zoom gestures. A blocked
+    // library write (sync update from another device, file locked, earlier page save
+    // failure) must surface as save state instead of escaping into input handling.
+    public void SavePageMetadata()
+    {
+        try { SaveLibrary(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            SaveStateText = "保存失败，请重试";
+        }
+    }
 
     public void SaveAll()
     {

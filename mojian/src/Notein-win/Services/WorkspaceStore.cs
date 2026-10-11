@@ -242,11 +242,44 @@ public sealed class WorkspaceStore
                 stream.Write(content);
                 stream.Flush(flushToDisk: true);
             }
-            if (File.Exists(path)) File.Replace(temporary, path, path + ".previous");
-            else File.Move(temporary, path);
+            ReplaceWithRetry(temporary, path);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
+
+    // Syncthing and antivirus scanners briefly open synced notes without FILE_SHARE_DELETE
+    // while hashing them, so File.Replace fails with a sharing violation. Those locks clear
+    // within milliseconds; retry for a bounded time instead of failing the save (and, on the
+    // UI thread, the whole process). A Replace that already moved the old file to
+    // `.previous` leaves `path` missing, which the next attempt completes with Move.
+    private static readonly TimeSpan ReplaceRetryBudget = TimeSpan.FromSeconds(3);
+
+    private static void ReplaceWithRetry(string temporary, string path)
+    {
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Replace(temporary, path, path + ".previous");
+                else File.Move(temporary, path);
+                return;
+            }
+            catch (Exception error) when (IsTransientLock(error) && elapsed.Elapsed < ReplaceRetryBudget)
+            {
+                Thread.Sleep(Math.Min(20 << Math.Min(attempt, 4), 200));
+            }
+        }
+    }
+
+    private static bool IsTransientLock(Exception error) => error switch
+    {
+        UnauthorizedAccessException => true,
+        // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_UNABLE_TO_REMOVE_REPLACED,
+        // ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2).
+        IOException io => (io.HResult & 0xFFFF) is 32 or 33 or 1175 or 1176 or 1177,
+        _ => false,
+    };
 
     private void SaveWelcomePage(NotebookWorkspace notebook)
     {

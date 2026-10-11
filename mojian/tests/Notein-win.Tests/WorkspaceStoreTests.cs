@@ -22,6 +22,24 @@ public class WorkspaceStoreTests
     }
 
     [Fact]
+    public async Task SaveLibrary_WaitsForSyncScannerToReleaseFile()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new WorkspaceStore(temp.Path);
+        var library = store.LoadLibrary();
+        // Syncthing hashes files with read/write sharing but without FILE_SHARE_DELETE.
+        var scanner = new FileStream(store.LibraryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var release = Task.Run(async () => { await Task.Delay(300); scanner.Dispose(); });
+
+        library.Notebooks[0].Title = "扫描后保存";
+        store.SaveLibrary(library);
+        await release;
+
+        Assert.Equal("扫描后保存", store.LoadLibrary().Notebooks[0].Title);
+        Assert.Empty(Directory.GetFiles(temp.Path, "*.tmp"));
+    }
+
+    [Fact]
     public void PageAndAssets_UseSyncthingFriendlyAndroidCompatibleLayout()
     {
         using var temp = new TemporaryDirectory();
