@@ -106,6 +106,12 @@ class SelectionOverlayView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            // Host takeovers cancel with any pointer count/tool; always stop the long-press timer.
+            val active = gestureMode != GestureMode.NONE || longPressTriggered
+            cancelDirectGesture()
+            return active
+        }
         if (!selectionEnabled) return false
         if (event.pointerCount > 1) return false
         val toolType = event.getToolType(event.actionIndex.coerceIn(0, event.pointerCount - 1))
@@ -207,17 +213,6 @@ class SelectionOverlayView(
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> {
-                if (gestureMode == GestureMode.NONE) return false
-                val transformed = gestureCommitted
-                val mode = gestureMode
-                gestureMode = GestureMode.NONE
-                gestureCommitted = false
-                parent?.requestDisallowInterceptTouchEvent(false)
-                if (mode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
-                else if (transformed) onTransformFinished?.invoke()
-                return true
-            }
         }
         return gestureMode != GestureMode.NONE || longPressTriggered
     }
@@ -248,7 +243,14 @@ class SelectionOverlayView(
     }
 
     fun cancelDirectGesture() {
-        if (gestureMode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
+        val now = android.os.SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        longPressDetector.onTouchEvent(cancel)
+        cancel.recycle()
+        val mode = gestureMode
+        // A selection already moved/resized by one finger is kept and saved, not left half-applied.
+        if (mode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
+        else if (mode != GestureMode.NONE && gestureCommitted) onTransformFinished?.invoke()
         gestureMode = GestureMode.NONE
         gestureCommitted = false
         longPressTriggered = false

@@ -9,6 +9,15 @@
 
 # Current State
 
+- On 2026-10-12 Android two-finger tap/short page drag was found to pop the canvas context menu
+  afterwards: `CanvasInputHost` swallowed the rest of the sequence without cancelling the child
+  that received the first finger, so `SelectionOverlayView`'s long-press timer (system 300 ms on
+  both devices) still fired after navigation ended. The host now sends `ACTION_CANCEL` on any
+  mid-sequence takeover (`ChildStreamHandoff`), the overlay stops the timer on every cancel, and a
+  one-finger move interrupted by a second finger is finished/saved. Android 165 tests, APK and lint
+  (0 errors, 130 warnings) pass; device installation awaits the user. No Mojian Android crash was
+  in either device's logcat; Android saves use POSIX rename and catch refused writes with a toast.
+
 - On 2026-10-12 the Windows EXE crashed repeatedly after Syncthing deployment: `File.Replace` of
   `library.json`/page JSON hit a sharing violation from Syncthing's hasher during
   `OnLeftCanvasFocus -> SaveDocument`. `AtomicWrite` now retries transient lock errors
@@ -402,6 +411,10 @@
 - Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
 # Durable Lessons
+
+- An Android parent that starts consuming a touch sequence in `dispatchTouchEvent` must hand the
+  already-targeted children an `ACTION_CANCEL`; returning true alone leaves their timers (long
+  press, GestureDetector) running and produces delayed menus after the gesture has ended.
 
 - Syncthing (Go) and scanners open synced files without `FILE_SHARE_DELETE`, so Windows
   rename/replace of a note can transiently fail while the file is being hashed. Every write into the
