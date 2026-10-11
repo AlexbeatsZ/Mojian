@@ -19,7 +19,7 @@ class CanvasInputHost(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchHoverEvent(event: MotionEvent): Boolean {
-        onPointerEventObserved?.invoke(event)
+        if (onPointerEventObserved?.invoke(event) == true) return true
         return super.dispatchHoverEvent(event)
     }
 }
