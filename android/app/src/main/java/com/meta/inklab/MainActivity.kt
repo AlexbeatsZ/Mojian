@@ -1460,7 +1460,7 @@ class MainActivity : Activity() {
                     )
                     XiaomiStylusKey.entries.forEach { key ->
                         val profile = xiaomiPenShortcutSettings.profile(key)
-                        val label = if (key == XiaomiStylusKey.PAGE_UP) "PageUp" else "PageDown"
+                        val label = if (key == XiaomiStylusKey.PAGE_UP) "上键（远离笔尖，PageUp）" else "下键（靠近笔尖，PageDown）"
                         addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
                         addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, allowLassoContext = true, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
                         addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, allowLassoContext = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))

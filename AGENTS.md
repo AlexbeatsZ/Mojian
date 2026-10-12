@@ -9,6 +9,15 @@
 
 # Current State
 
+- On 2026-10-12 Android pen-key settings were found unusable: every `MojianCommandMenu` submenu
+  (pen-key `切换到工具`/`按住切换到工具`, image `顺序`/`旋转`) crashed with `BadTokenException`
+  because the child popup was anchored to a row inside the root popup. Submenus now attach to the
+  root's host window, and the root ignores `ACTION_OUTSIDE` touches inside the submenu. A real
+  tablet check opened the submenu, saved `上键 -> 橡皮` and did not crash. The tablet's PageUp had
+  been left on `套索/菜单`, which is why it acted as right-click. Settings now label the keys by
+  physical position (上键 = far from the nib = PageUp). Android tests and lint (0 errors, 131
+  warnings) pass; installed on the tablet and K70. Physical pen-key confirmation is pending.
+
 - On 2026-10-12 the Windows panorama Hand / middle-drag pan lag was traced to a full scene
   re-rasterization per pan sample (real-window GPU: 22-31 ms/frame at 50% on 1-3k stroke pages).
   Pans now move a temporary overscanned `BitmapCache` of `SceneLayer` (about 4 ms/frame), re-render
@@ -424,6 +433,11 @@
 - Tablet install: direct `adb install -r -t -d` succeeds over wireless ADB and immediately launches via `am start`.
 
 # Durable Lessons
+
+- An Android `PopupWindow` is a panel; a second popup anchored to a view inside it crashes with
+  `BadTokenException`. Anchor nested menus to the root menu's host window, and stop the root's
+  outside-touch dismissal from firing on taps inside the nested menu. Unit tests cannot catch this:
+  open every submenu on a real device.
 
 - An Android parent that starts consuming a touch sequence in `dispatchTouchEvent` must hand the
   already-targeted children an `ACTION_CANCEL`; returning true alone leaves their timers (long

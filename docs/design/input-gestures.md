@@ -200,6 +200,8 @@ Windows 与 Android 的缩放范围统一为 50–6400%（0.5–64 倍）。预�
 
 实机证明 `NVTCapacitivePen` 提供位置/压力/倾角，`Xiaomi Smart Pen Keyboard` 以 PageUp/PageDown 键盘事件提供两个实体快捷键。只在设备名完全等于 `Xiaomi Smart Pen Keyboard` 时拦截，普通键盘 PageUp/PageDown 必须保持原义。
 
+实测（2026-10-12，平板 liuqin）：远离笔尖的上键发 PageUp，靠近笔尖的下键发 PageDown；设置页按物理位置标注“上键/下键”并附键码。
+
 每个实体键独立支持单击、急促双击和按住；双击窗口 150–600 ms，按住阈值 200–1200 ms，由用户设置。这里的“双击”是实体快捷键时序，不是画布双击手势。单击若需等待双击判定，只能延迟快捷键动作，不能延迟画布单击。
 
 ## 10. 压力临时橡皮

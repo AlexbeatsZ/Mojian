@@ -39,11 +39,13 @@ class MojianCommandMenu private constructor(
 
     private var rootPopup: PopupWindow? = null
     private var childPopup: PopupWindow? = null
+    private var hostAnchor: View? = null
 
     fun show(anchor: View) {
         dismiss()
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
+        hostAnchor = anchor
         activeMenu = this
         val location = IntArray(2)
         anchor.getLocationOnScreen(location)
@@ -59,6 +61,7 @@ class MojianCommandMenu private constructor(
         dismiss()
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
+        hostAnchor = anchor
         activeMenu = this
         val metrics = context.resources.displayMetrics
         val expectedHeight = menuHeight(items)
@@ -82,6 +85,12 @@ class MojianCommandMenu private constructor(
             elevation = dp(12).toFloat()
             setBackgroundDrawable(rounded(MENU_BACKGROUND, dp(5).toFloat(), MENU_BORDER))
             if (isRoot) {
+                // The submenu is a separate window above the root. A tap inside it reaches the root
+                // as ACTION_OUTSIDE; letting that dismiss the root would also remove the submenu
+                // mid-tap and silently drop the chosen item.
+                setTouchInterceptor { _, event ->
+                    event.actionMasked == MotionEvent.ACTION_OUTSIDE && childContains(event.rawX, event.rawY)
+                }
                 setOnDismissListener {
                     childPopup?.dismiss()
                     childPopup = null
@@ -190,7 +199,18 @@ class MojianCommandMenu private constructor(
             }
         }
 
+    private fun childContains(screenX: Float, screenY: Float): Boolean {
+        val content = childPopup?.takeIf(PopupWindow::isShowing)?.contentView ?: return false
+        val location = IntArray(2)
+        content.getLocationOnScreen(location)
+        return screenX >= location[0] && screenX < location[0] + content.width &&
+            screenY >= location[1] && screenY < location[1] + content.height
+    }
+
     private fun showSubmenu(anchor: View, submenu: List<Item>) {
+        // Attach to the root's host window: a row inside the root popup is itself a panel, and
+        // Android rejects a panel parented to another panel with BadTokenException.
+        val host = hostAnchor ?: return
         childPopup?.dismiss()
         val popup = createPopup(submenu, isRoot = false)
         childPopup = popup
@@ -201,7 +221,7 @@ class MojianCommandMenu private constructor(
         val openRight = location[0] + anchor.width + width <= metrics.widthPixels - dp(8)
         val x = if (openRight) location[0] + anchor.width - dp(3) else location[0] - width + dp(3)
         val y = location[1].coerceIn(dp(8), (metrics.heightPixels - expectedHeight - dp(8)).coerceAtLeast(dp(8)))
-        popup.showAtLocation(anchor, Gravity.TOP or Gravity.START, x, y)
+        popup.showAtLocation(host, Gravity.TOP or Gravity.START, x, y)
     }
 
     private fun icon(name: String) =
