@@ -392,6 +392,9 @@ class MainActivity : Activity() {
         window.navigationBarColor = NAV_BACKGROUND
         loadPreferences()
         shortcutDispatcher.handler = StylusShortcutHandler(::handleXiaomiStylusSignal)
+        xiaomiGestureInterpreter.waitsForDoubleTap = { key ->
+            xiaomiPenShortcutSettings.profile(key).double.type != StylusBindingType.NONE
+        }
         try { initializeWorkspaceRepository() } catch (error: Exception) { showWorkspaceLoadFailure(error); return }
         selectIncomingNote(intent.data)
         assetStore = AssetStore(this, pageContentRepository)
@@ -665,12 +668,8 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun xiaomiProfileUsesSecondaryLasso(key: XiaomiStylusKey): Boolean {
-        val binding = xiaomiPenShortcutSettings.profile(key).single
-        if (binding.type == StylusBindingType.LASSO_CONTEXT) return true
-        if (binding.type != StylusBindingType.TOGGLE_TOOL) return false
-        return toolShelf.tools.firstOrNull { it.id == binding.toolId }?.kind == DrawingToolKind.LASSO
-    }
+    private fun xiaomiProfileUsesSecondaryLasso(key: XiaomiStylusKey): Boolean =
+        xiaomiPenShortcutSettings.profile(key).single.type == StylusBindingType.LASSO_CONTEXT
 
     private fun handleXiaomiSecondarySignal(signal: StylusShortcutSignal): Boolean {
         if (pageNavigationBlocksSecondary()) {
@@ -1557,10 +1556,7 @@ class MainActivity : Activity() {
 
     private fun stylusBindingLabel(binding: StylusActionBinding): String =
         when (binding.type) {
-            StylusBindingType.TOGGLE_TOOL -> {
-                val tool = toolShelf.tools.firstOrNull { it.id == binding.toolId }
-                if (tool?.kind == DrawingToolKind.LASSO) "套索（短按菜单）" else tool?.displayName ?: binding.type.label
-            }
+            StylusBindingType.TOGGLE_TOOL,
             StylusBindingType.HOLD_TOOL -> toolShelf.tools.firstOrNull { it.id == binding.toolId }?.displayName ?: binding.type.label
             else -> binding.type.label
         }

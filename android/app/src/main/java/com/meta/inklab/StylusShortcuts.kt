@@ -39,6 +39,8 @@ data class StylusGestureDecision(
 class XiaomiStylusGestureInterpreter(
     var doubleTapMillis: Long = 260L,
     var holdMillis: Long = 450L,
+    /** Keys without a double-tap action report SINGLE_TAP on release instead of waiting. */
+    var waitsForDoubleTap: (XiaomiStylusKey) -> Boolean = { true },
 ) {
     private data class State(
         var isDown: Boolean = false,
@@ -78,6 +80,8 @@ class XiaomiStylusGestureInterpreter(
                     result += StylusGestureDecision(signal.key, StylusGestureKind.HOLD_END)
                 } else if (state.secondTap) {
                     result += StylusGestureDecision(signal.key, StylusGestureKind.DOUBLE_TAP)
+                } else if (!waitsForDoubleTap(signal.key)) {
+                    result += StylusGestureDecision(signal.key, StylusGestureKind.SINGLE_TAP)
                 } else {
                     state.pendingSingleAt = eventTime
                 }

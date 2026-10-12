@@ -15,7 +15,12 @@
   root's host window, and the root ignores `ACTION_OUTSIDE` touches inside the submenu. A real
   tablet check opened the submenu, saved `上键 -> 橡皮` and did not crash. The tablet's PageUp had
   been left on `套索/菜单`, which is why it acted as right-click. Settings now label the keys by
-  physical position (上键 = far from the nib = PageUp). Android tests and lint (0 errors, 131
+  physical position (上键 = far from the nib = PageUp). Per the user, `切换到工具 -> 套索` is now a
+  plain tool toggle (the old right-click compatibility mapping is removed), and a key with no
+  double-tap action fires its single action on release without the double-tap wait. HyperOS's
+  `MiuiStylusShortcutManager` intercepts pen-key long presses in system_server for apps outside
+  its cloud whitelist; an ordinary app cannot block it, so pen-key features must not depend on
+  long press. Android tests and lint (0 errors, 131
   warnings) pass; installed on the tablet and K70. Physical pen-key confirmation is pending.
 
 - On 2026-10-12 the Windows panorama Hand / middle-drag pan lag was traced to a full scene

@@ -54,6 +54,22 @@ class StylusShortcutsTest {
     }
 
     @Test
+    fun keyWithoutDoubleActionEmitsSingleOnRelease() {
+        val interpreter = XiaomiStylusGestureInterpreter(waitsForDoubleTap = { false })
+        assertTrue(interpreter.acceptAt(signal(StylusKeyPhase.DOWN), 1_000).isEmpty())
+        assertEquals(
+            listOf(StylusGestureDecision(XiaomiStylusKey.PAGE_UP, StylusGestureKind.SINGLE_TAP)),
+            interpreter.acceptAt(signal(StylusKeyPhase.UP), 1_040),
+        )
+        assertNull(interpreter.nextDeadline())
+        interpreter.acceptAt(signal(StylusKeyPhase.DOWN), 1_120)
+        assertEquals(
+            listOf(StylusGestureDecision(XiaomiStylusKey.PAGE_UP, StylusGestureKind.SINGLE_TAP)),
+            interpreter.acceptAt(signal(StylusKeyPhase.UP), 1_160),
+        )
+    }
+
+    @Test
     fun rapidSecondTapSuppressesSingleAndEmitsDouble() {
         val interpreter = XiaomiStylusGestureInterpreter(doubleTapMillis = 260, holdMillis = 450)
         interpreter.acceptAt(signal(StylusKeyPhase.DOWN), 1_000)
