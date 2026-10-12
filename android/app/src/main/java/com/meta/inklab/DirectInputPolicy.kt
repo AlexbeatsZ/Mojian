@@ -41,12 +41,13 @@ object DirectInputPolicy {
         editingTextHit: Boolean,
         selectedContentHit: Boolean,
         selectionHandleHit: Boolean,
+        selectionFrameHit: Boolean,
     ): DirectPointerDownIntent =
         when {
             pointerCount >= 2 -> DirectPointerDownIntent.PAGE_NAVIGATION
             !primaryDirectPointer -> DirectPointerDownIntent.IGNORE
             editingTextHit -> DirectPointerDownIntent.NATIVE_TEXT_EDIT
-            selectedContentHit || selectionHandleHit -> DirectPointerDownIntent.TRANSFORM_SELECTION
+            selectedContentHit || selectionHandleHit || selectionFrameHit -> DirectPointerDownIntent.TRANSFORM_SELECTION
             else -> DirectPointerDownIntent.MARQUEE_CANDIDATE
         }
 }

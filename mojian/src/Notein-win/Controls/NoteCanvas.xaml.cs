@@ -1337,13 +1337,17 @@ public partial class NoteCanvas : UserControl
         var editingHit = editingEditor is { IsKeyboardFocusWithin: true, IsHitTestVisible: true };
         var selectedHit = HitSelectedContent(viewPoint);
         var handleHit = false;
+        var frameHit = false;
         var handle = -1;
         if (_selectionBounds is { } bounds)
         {
-            handle = SelectionGeometry.HitSelectionHandle(viewPoint, _viewport.DocumentToView(bounds), fromTouch ? 24 : 12);
+            var viewBounds = _viewport.DocumentToView(bounds);
+            handle = SelectionGeometry.HitSelectionHandle(viewPoint, viewBounds, fromTouch ? 24 : 12);
             handleHit = handle >= 0;
+            // The whole visible frame moves the selection, including gaps between strokes.
+            frameHit = viewBounds.Contains(viewPoint);
         }
-        var intent = DirectInputPolicy.PointerDownIntent(1, true, editingHit, selectedHit, handleHit);
+        var intent = DirectInputPolicy.PointerDownIntent(1, true, editingHit, selectedHit, handleHit, frameHit);
         if (intent == DirectPointerDownIntent.NativeTextEdit) return;
 
         _directGestureMode = intent == DirectPointerDownIntent.TransformSelection

@@ -1,6 +1,6 @@
 # 墨笺输入设备与交互契约
 
-Last verified: 2026-10-12
+Last verified: 2026-10-13
 
 修改 Android / Windows 的指针分发、对象选择、文本框、画布变换、触控笔工具、快捷键或压力橡皮前，必须先读本文。
 本文是输入行为的唯一设计来源；`workspace-ui.md` 与 `windows-desktop.md` 只能引用，不能另行定义冲突手势。
@@ -48,12 +48,12 @@ Last verified: 2026-10-12
 
 ### 单指拖动
 
-- 起点命中当前已选内容或选择框控制柄：越过平台 slop 后移动/缩放当前选择。
+- 起点命中当前已选内容、选择框控制柄或可见选择框内部任意位置：越过平台 slop 后移动/缩放当前选择。
 - 控制柄采用触摸最大 24 dp、鼠标最大 12 px/dp 命中半径；内容内部的命中侵入量每轴最多占尺寸的四分之一，中央至少一半宽高保留为移动区并优先于控制柄。小图和狭长图片的中心不能因手柄重叠变成缩放。
 - 四角沿起始对角线投影拖动，固定对角、保持起始宽高比；四边中点只改变对应轴。以按下位置到当前位置的位移作用于起始内容手柄，不能吸附到按下点或带 padding 的显示框。最小尺寸在公共选框统一限制，并以起始短边封顶，避免小图尺寸跳变或逐对象限制导致变形。
 - 其他任何起点：越过平台 slop 后开始矩形框选。
 
-因此未选中的图片、文本、表格或其他对象不能“一拖就移动”；在它们表面起拖仍是框选。移动必须先点击选中，再从已选内容上拖动。多选框内部的空白间隙不算“已选内容命中”，从间隙起拖仍应框选。
+因此未选中的图片、文本、表格或其他对象不能“一拖就移动”；在它们表面起拖仍是框选。移动必须先点击选中，再从选择框内拖动。用户 2026-10-13 明确要求：在选择框内拖动一律优先移动，不再精确命中笔迹线条或对象；框内笔画之间、多选对象之间的空白间隙同样移动整个选择。Android 以绘制的虚线框（内容外扩 8 dp）为判定区，Windows 以绘制的虚线框为判定区。要在已选框内重新框选，先点击空白处取消选择。框内点按（未越过 slop）仍走普通单击分支，不改变 Select -> Edit。
 
 ### 框选
 
@@ -149,7 +149,7 @@ Spring-loaded 不是画布内部的第二套私有逻辑。压力橡皮、中键
 Touch
 第二根手指加入         -> 取消单指候选 / 临时空文本 -> Viewport Pan / Zoom
 已在正式文本编辑中     -> 原生文本组件
-已选内容或控制柄上拖动 -> Move / Resize Selection
+选择框内或控制柄上拖动 -> Move / Resize Selection
 其他单指拖动           -> Rectangle Marquee
 单指点击               -> Select / Edit Selected Text / Create Temporary Text
 ```
@@ -160,7 +160,7 @@ Middle Drag            -> Viewport Pan
 Ctrl + Middle Drag     -> Viewport Radial Zoom (Windows)
 Ctrl / Shift / Wheel   -> Viewport Zoom / Horizontal Pan / Vertical Pan
 Right Click            -> Context Menu
-Left Drag on Selection -> Move / Resize Selection
+Left Drag in Selection Frame -> Move / Resize Selection
 Other Left Drag        -> Rectangle Marquee
 Left Click             -> Select / Edit Selected Text / Create Temporary Text
 ```
@@ -224,7 +224,7 @@ Notein 资源只证明默认开启 hold-to-erase 和可见默认灵敏度 20%，
 - 笔工具状态不参与手指/鼠标 direct-pointer 决策；
 - 第二指在任何命中目标上都得到 Viewport 优先权；
 - Android 双指抢占右键/小米键候选；残余单指、鼠标释放和笔悬浮保持捕获，最后一指抬起/取消/暂停后才能恢复，松键不得补弹菜单；
-- 只有已选内容可拖动，其他起点进入矩形框选；
+- 只有已选内容可拖动：选择框内（含空白间隙）起拖移动，框外起点进入矩形框选；
 - 小图/狭长图在 50–6400% 和触摸/鼠标命中半径下保留中心移动区，八柄仍可命中；四角保持比例/对角锚点且越过锚点不翻转，边柄只改变一个轴；柄附近按下不跳变，反向原路拖动恢复起始几何；
 - 完整包含选择拒绝仅部分覆盖的大对象，边界上的完整对象仍可选；
 - 临时空文本不进入快照/持久化/Undo，首个有效字符提交，失焦或页面导航删除；

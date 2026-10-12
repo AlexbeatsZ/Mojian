@@ -142,6 +142,8 @@ class SelectionOverlayView(
                         editingTextHit = editingTextHitTest?.invoke(event.x, event.y) == true,
                         selectedContentHit = selectedContentHitTest?.invoke(event.x, event.y) == true,
                         selectionHandleHit = handleIndex != null,
+                        // The whole visible frame moves the selection, including gaps between strokes.
+                        selectionFrameHit = displayBounds?.contains(point.x, point.y) == true,
                     )
                 if (intent == DirectPointerDownIntent.NATIVE_TEXT_EDIT) return false
                 if (intent == DirectPointerDownIntent.IGNORE) return false

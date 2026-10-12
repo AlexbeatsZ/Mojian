@@ -12,10 +12,21 @@ public class DirectInputPolicyTests
     {
         Assert.Equal(
             DirectPointerDownIntent.MarqueeCandidate,
-            DirectInputPolicy.PointerDownIntent(1, true, false, false, false));
+            DirectInputPolicy.PointerDownIntent(1, true, false, false, false, false));
         Assert.Equal(
             DirectPointerDownIntent.TransformSelection,
-            DirectInputPolicy.PointerDownIntent(1, true, false, true, false));
+            DirectInputPolicy.PointerDownIntent(1, true, false, true, false, false));
+    }
+
+    [Fact]
+    public void DragInsideSelectionFrameGapMovesInsteadOfMarquee()
+    {
+        Assert.Equal(
+            DirectPointerDownIntent.TransformSelection,
+            DirectInputPolicy.PointerDownIntent(1, true, false, false, false, true));
+        Assert.Equal(
+            DirectPointerDownIntent.NativeTextEdit,
+            DirectInputPolicy.PointerDownIntent(1, true, true, false, false, true));
     }
 
     [Fact]
@@ -23,7 +34,7 @@ public class DirectInputPolicyTests
     {
         Assert.Equal(
             DirectPointerDownIntent.PageNavigation,
-            DirectInputPolicy.PointerDownIntent(2, true, true, true, true));
+            DirectInputPolicy.PointerDownIntent(2, true, true, true, true, true));
     }
 
     [Fact]
@@ -31,7 +42,7 @@ public class DirectInputPolicyTests
     {
         Assert.Equal(
             DirectPointerDownIntent.NativeTextEdit,
-            DirectInputPolicy.PointerDownIntent(1, true, true, true, false));
+            DirectInputPolicy.PointerDownIntent(1, true, true, true, false, false));
     }
 
     [Fact]

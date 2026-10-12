@@ -9,6 +9,14 @@
 
 # Current State
 
+- On 2026-10-13, per the user, a finger/primary-mouse drag starting anywhere inside the visible
+  selection frame (including gaps between selected strokes/objects) moves the selection instead
+  of starting a marquee; previously only an exact stroke/object hit moved it. `DirectInputPolicy`
+  gained `selectionFrameHit` on both clients (Android: drawn frame with 8 dp padding; Windows:
+  drawn frame). Taps inside the frame keep the ordinary Select -> Edit path. Windows 164 and
+  Android 167 tests and lint (0 errors, 131 warnings) pass; the sole Release EXE was republished
+  and reopened, and the APK was updated in place on the tablet (K70 not connected).
+
 - On 2026-10-12 Android pen-key settings were found unusable: every `MojianCommandMenu` submenu
   (pen-key `切换到工具`/`按住切换到工具`, image `顺序`/`旋转`) crashed with `BadTokenException`
   because the child popup was anchored to a row inside the root popup. Submenus now attach to the

@@ -9,11 +9,23 @@ class DirectInputPolicyTest {
     fun penToolDoesNotParticipateInFingerOrMouseDecision() {
         assertEquals(
             DirectPointerDownIntent.MARQUEE_CANDIDATE,
-            DirectInputPolicy.pointerDownIntent(1, true, false, false, false),
+            DirectInputPolicy.pointerDownIntent(1, true, false, false, false, false),
         )
         assertEquals(
             DirectPointerDownIntent.TRANSFORM_SELECTION,
-            DirectInputPolicy.pointerDownIntent(1, true, false, true, false),
+            DirectInputPolicy.pointerDownIntent(1, true, false, true, false, false),
+        )
+    }
+
+    @Test
+    fun dragInsideSelectionFrameGapMovesInsteadOfMarquee() {
+        assertEquals(
+            DirectPointerDownIntent.TRANSFORM_SELECTION,
+            DirectInputPolicy.pointerDownIntent(1, true, false, false, false, true),
+        )
+        assertEquals(
+            DirectPointerDownIntent.NATIVE_TEXT_EDIT,
+            DirectInputPolicy.pointerDownIntent(1, true, true, false, false, true),
         )
     }
 
@@ -21,7 +33,7 @@ class DirectInputPolicyTest {
     fun secondFingerAlwaysPromotesSequenceToPageNavigation() {
         assertEquals(
             DirectPointerDownIntent.PAGE_NAVIGATION,
-            DirectInputPolicy.pointerDownIntent(2, true, true, true, true),
+            DirectInputPolicy.pointerDownIntent(2, true, true, true, true, true),
         )
     }
 
@@ -29,7 +41,7 @@ class DirectInputPolicyTest {
     fun activeTextEditingKeepsNativeCaretAndSelectionGestures() {
         assertEquals(
             DirectPointerDownIntent.NATIVE_TEXT_EDIT,
-            DirectInputPolicy.pointerDownIntent(1, true, true, true, false),
+            DirectInputPolicy.pointerDownIntent(1, true, true, true, false, false),
         )
     }
 

@@ -43,10 +43,11 @@ public static class DirectInputPolicy
         bool primaryDirectPointer,
         bool editingTextHit,
         bool selectedContentHit,
-        bool selectionHandleHit) =>
+        bool selectionHandleHit,
+        bool selectionFrameHit) =>
         pointerCount >= 2 ? DirectPointerDownIntent.PageNavigation :
         !primaryDirectPointer ? DirectPointerDownIntent.Ignore :
         editingTextHit ? DirectPointerDownIntent.NativeTextEdit :
-        selectedContentHit || selectionHandleHit ? DirectPointerDownIntent.TransformSelection :
+        selectedContentHit || selectionHandleHit || selectionFrameHit ? DirectPointerDownIntent.TransformSelection :
         DirectPointerDownIntent.MarqueeCandidate;
 }
