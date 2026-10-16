@@ -15,7 +15,8 @@
   below the drag threshold still performs the ordinary direct tap. Real-window synthetic pen and
   `SendInput` mouse drags both inserted space on Windows (pen injection later stopped reaching any
   window after the display layout changed, also on the unchanged baseline). Windows 166 and Android
-  167 tests and lint (0 errors, 130 warnings) pass; APK copied, not installed (no ADB device).
+  167 tests and lint (0 errors, 130 warnings) pass; the sole Release EXE was republished and
+  reopened; the APK is copied but not installed (no ADB device).
 
 - On 2026-10-13, per the user, a finger/primary-mouse drag starting anywhere inside the visible
   selection frame (including gaps between selected strokes/objects) moves the selection instead
