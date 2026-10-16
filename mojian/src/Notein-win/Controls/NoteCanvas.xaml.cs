@@ -146,6 +146,9 @@ public partial class NoteCanvas : UserControl
     private bool _panoramaSpringLoaded;
     private TouchDevice? _directTouchDevice;
     private bool _touchInsertSpaceActive;
+    private bool _mouseInsertSpaceActive;
+    private bool _mouseInsertSpaceDragged;
+    private Point _mouseInsertSpaceDown;
     private DirectGestureMode _directGestureMode;
     private bool _directGestureCommitted;
     private bool _directGestureFromTouch;
@@ -922,7 +925,11 @@ public partial class NoteCanvas : UserControl
         Focus();
         var point = e.GetPosition(this);
         var forcePan = Keyboard.IsKeyDown(Key.Space);
-        if (forcePan || PendingTagKind.HasValue)
+        if (!forcePan && !PendingTagKind.HasValue && InsertSpaceModeEnabled &&
+            DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Mouse) &&
+            !(e.OriginalSource is TextBox focusedEditor && focusedEditor.IsKeyboardFocusWithin))
+            BeginMouseInsertSpace(point);
+        else if (forcePan || PendingTagKind.HasValue)
             BeginPointer(point, pressure: 0.65f, tiltX: 0, tiltY: 0, isStylus: false, forcePan, forceErase: false);
         else
             BeginDirectPointer(point, fromTouch: false);
@@ -970,7 +977,8 @@ public partial class NoteCanvas : UserControl
         UpdatePointerCursor();
         if (e.LeftButton == MouseButtonState.Pressed || e.MiddleButton == MouseButtonState.Pressed || IsMouseCaptured)
         {
-            if (_directGestureMode != DirectGestureMode.None) ContinueDirectPointer(_hoverViewPoint.Value);
+            if (_mouseInsertSpaceActive) ContinueMouseInsertSpace(_hoverViewPoint.Value);
+            else if (_directGestureMode != DirectGestureMode.None) ContinueDirectPointer(_hoverViewPoint.Value);
             else ContinuePointer(_hoverViewPoint.Value, 0.65f, 0, 0, isStylus: false);
             e.Handled = true;
         }
@@ -1002,6 +1010,7 @@ public partial class NoteCanvas : UserControl
     {
         base.OnLostMouseCapture(e);
         if (!_finishingPointer && _explicitShape && _directTouchDevice == null) CancelStylusToolActionForNavigation();
+        if (!_finishingPointer && _mouseInsertSpaceActive) CancelInsertSpace();
         if (_rightLassoArmed && !_rightLassoUsesStylus) CancelRightButtonLasso();
     }
 
@@ -1039,7 +1048,8 @@ public partial class NoteCanvas : UserControl
             return;
         }
         if (CanvasPointerFeedback.SuppressMouseStream(_stylusActive, IsPhysicalStylus(e.StylusDevice), stylusDrivenMiddleNavigation: false) || Environment.TickCount64 < _ignoreMouseUntil) return;
-        if (_directGestureMode != DirectGestureMode.None) EndDirectPointer(e.GetPosition(this));
+        if (_mouseInsertSpaceActive) EndMouseInsertSpace();
+        else if (_directGestureMode != DirectGestureMode.None) EndDirectPointer(e.GetPosition(this));
         else EndPointer(isStylus: false);
         e.Handled = true;
     }
@@ -1485,6 +1495,7 @@ public partial class NoteCanvas : UserControl
     {
         _isInsertingSpace = false;
         _touchInsertSpaceActive = false;
+        _mouseInsertSpaceActive = false;
         if (_insertSpaceUndoPushed && _undo.Count > 0) _undo.Pop();
         _insertSpaceUndoPushed = false;
         InvalidateVisual();
@@ -1843,6 +1854,40 @@ public partial class NoteCanvas : UserControl
         InvalidateVisual();
     }
 
+    private void BeginMouseInsertSpace(Point viewPoint)
+    {
+        if (Document == null) return;
+        BeginInsertSpace(viewPoint);
+        _mouseInsertSpaceActive = true;
+        _mouseInsertSpaceDragged = false;
+        _mouseInsertSpaceDown = viewPoint;
+        CaptureMouse();
+    }
+
+    private void ContinueMouseInsertSpace(Point viewPoint)
+    {
+        var threshold = Math.Max(SystemParameters.MinimumHorizontalDragDistance, SystemParameters.MinimumVerticalDragDistance);
+        if (Distance(viewPoint, _mouseInsertSpaceDown) >= threshold) _mouseInsertSpaceDragged = true;
+        ContinuePointer(viewPoint, 0.65f, 0, 0, isStylus: false);
+    }
+
+    private void EndMouseInsertSpace()
+    {
+        _mouseInsertSpaceActive = false;
+        if (_mouseInsertSpaceDragged)
+        {
+            EndPointer(isStylus: false);
+            return;
+        }
+        // A stationary primary click keeps the ordinary Select -> Edit behavior.
+        CancelInsertSpace();
+        _finishingPointer = true;
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        _finishingPointer = false;
+        HandleDirectTap(_mouseInsertSpaceDown);
+        InvalidateVisual();
+    }
+
     private void ContinuePointer(Point viewPoint, float pressure, float tiltX, float tiltY, bool isStylus)
     {
         if (Document == null) return;
@@ -2054,6 +2099,7 @@ public partial class NoteCanvas : UserControl
         _isLassoing = false;
         _lasso.Clear();
         _isInsertingSpace = false;
+        _mouseInsertSpaceActive = false;
         _insertSpaceUndoPushed = false;
         _isTransforming = false;
         _stylusSelectionTransformActive = false;
@@ -3416,6 +3462,7 @@ public partial class NoteCanvas : UserControl
         _directLongPressTimer.Stop();
         _directTouchDevice = null;
         _touchInsertSpaceActive = false;
+        _mouseInsertSpaceActive = false;
         _insertSpaceUndoPushed = false;
         _directGestureMode = DirectGestureMode.None;
         _activeStroke = null; _isPanning = false; _isDragZooming = false; _isLassoing = false; _isTransforming = false; _isInsertingSpace = false;

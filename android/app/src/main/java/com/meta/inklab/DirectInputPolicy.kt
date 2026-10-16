@@ -30,7 +30,7 @@ object DirectInputPolicy {
             (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL)
 
     fun canDragInsertSpace(device: DirectInputDevice): Boolean =
-        device == DirectInputDevice.FINGER || device == DirectInputDevice.PEN
+        device == DirectInputDevice.FINGER || device == DirectInputDevice.PEN || device == DirectInputDevice.MOUSE
 
     fun showsInsertSpaceHover(device: DirectInputDevice): Boolean =
         device == DirectInputDevice.MOUSE || device == DirectInputDevice.PEN

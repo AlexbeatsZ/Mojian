@@ -205,8 +205,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   idempotent cleanup path that clears the lasso overlay before releasing WPF capture.
 - Pen/highlighter contact inside the current mixed-selection frame drags that selection instead of
   authoring ink. Contact outside the frame clears the selection and writes normally.
-- Insert Space is the explicit exception: one-finger touch or real-stylus drag shifts content, while
-  stylus and mouse hover both show its dashed position preview. Mouse-left remains direct-content.
+- Insert Space is the explicit exception: one-finger touch, real-stylus or primary-mouse/touchpad
+  drag shifts content, while stylus and mouse hover both show its dashed position preview. A mouse
+  click that stays below the system drag threshold cancels the insertion and performs the ordinary
+  direct tap (Select -> Edit).
 - `Shift+wheel` pans horizontally and ordinary wheel pans vertically; these are fixed gestures, not
   user-configurable shortcut entries. The old cursor/text-insertion mode does not exist. A blank
   primary click/tap creates an uncommitted caret; the first valid character commits it, while focus

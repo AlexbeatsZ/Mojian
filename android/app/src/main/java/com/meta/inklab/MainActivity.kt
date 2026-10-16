@@ -295,6 +295,10 @@ class MainActivity : Activity() {
     private var insertSpacePointerId: Int? = null
     private var insertSpaceStartDocY = 0f
     private var insertSpaceCurrentDocY = 0f
+    private var insertSpaceFromMouse = false
+    private var insertSpaceMouseDragged = false
+    private var insertSpaceDownX = 0f
+    private var insertSpaceDownY = 0f
     private val twoFingerNavigation = CanvasNavigationGuard()
     private var mouseCanvasGesture = CanvasDragIntent.NONE
     private var lastMouseGestureY = 0f
@@ -2393,6 +2397,11 @@ class MainActivity : Activity() {
                 val toolType = event.getToolType(pointerIndex)
                 val device = if (toolType == MotionEvent.TOOL_TYPE_FINGER) DirectInputDevice.FINGER else if (isStylus(toolType)) DirectInputDevice.PEN else DirectInputDevice.MOUSE
                 if (!DirectInputPolicy.canDragInsertSpace(device)) return false
+                if (device == DirectInputDevice.MOUSE && event.buttonState != MotionEvent.BUTTON_PRIMARY) return false
+                insertSpaceFromMouse = device == DirectInputDevice.MOUSE
+                insertSpaceMouseDragged = false
+                insertSpaceDownX = event.getX(pointerIndex)
+                insertSpaceDownY = event.getY(pointerIndex)
                 insertSpacePointerId = event.getPointerId(pointerIndex)
                 val docPoint = viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex))
                 insertSpaceStartDocY = docPoint.y
@@ -2406,7 +2415,12 @@ class MainActivity : Activity() {
                 if (insertSpaceActive) {
                     val pointerIndex = insertSpacePointerId?.let(event::findPointerIndex) ?: -1
                     if (pointerIndex < 0) return false
-                    val docPoint = viewport.viewToDocument(event.getX(pointerIndex), event.getY(pointerIndex))
+                    val x = event.getX(pointerIndex)
+                    val y = event.getY(pointerIndex)
+                    if (kotlin.math.hypot(x - insertSpaceDownX, y - insertSpaceDownY) > ViewConfiguration.get(this).scaledTouchSlop) {
+                        insertSpaceMouseDragged = true
+                    }
+                    val docPoint = viewport.viewToDocument(x, y)
                     insertSpaceCurrentDocY = docPoint.y
                     dryInkView.setInsertSpaceGuide(insertSpaceStartDocY, insertSpaceCurrentDocY)
                     return true
@@ -2416,6 +2430,16 @@ class MainActivity : Activity() {
             MotionEvent.ACTION_POINTER_UP -> {
                 if (insertSpaceActive && event.getPointerId(event.actionIndex) == insertSpacePointerId) {
                     val deltaY = insertSpaceCurrentDocY - insertSpaceStartDocY
+                    if (insertSpaceFromMouse && !insertSpaceMouseDragged) {
+                        // A stationary primary click keeps the ordinary Select -> Edit behavior.
+                        insertSpaceActive = false
+                        insertSpacePointerId = null
+                        insertSpaceFromMouse = false
+                        dryInkView.setInsertSpaceGuide(null, null)
+                        handleDirectTap(insertSpaceDownX, insertSpaceDownY, fromFinger = false)
+                        return true
+                    }
+                    insertSpaceFromMouse = false
                     if (kotlin.math.abs(deltaY) >= 2f) {
                         dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
                         tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
@@ -5129,6 +5153,13 @@ class MainActivity : Activity() {
             if (!overChrome && handleShapePointer(event)) return true
         }
         if (insertSpaceModeEnabled && fingerCount == 1) return handleInsertSpaceGesture(event)
+        // Primary-mouse drags insert space from any surface, so the host owns the sequence
+        // before text/object/selection children can turn it into a marquee.
+        if (insertSpaceModeEnabled && fingerCount == 0 && mouseIndex != null && event.isFromSource(InputDevice.SOURCE_MOUSE)) {
+            val editingText = event.actionMasked == MotionEvent.ACTION_DOWN &&
+                textInputLayer.isEditingAt(event.getX(mouseIndex), event.getY(mouseIndex))
+            if (!editingText) return handleInsertSpaceGesture(event)
+        }
         return false
     }
 

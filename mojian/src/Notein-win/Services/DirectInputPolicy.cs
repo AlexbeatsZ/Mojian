@@ -25,7 +25,7 @@ public static class DirectInputPolicy
         modifiers == ModifierKeys.None && key is Key.Delete or Key.Back;
 
     public static bool CanDragInsertSpace(DirectInputDevice device) =>
-        device is DirectInputDevice.Finger or DirectInputDevice.Pen;
+        device is DirectInputDevice.Finger or DirectInputDevice.Pen or DirectInputDevice.Mouse;
 
     public static bool ShowsInsertSpaceHover(DirectInputDevice device) =>
         device is DirectInputDevice.Mouse or DirectInputDevice.Pen;

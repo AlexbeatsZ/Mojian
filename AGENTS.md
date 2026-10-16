@@ -9,6 +9,14 @@
 
 # Current State
 
+- On 2026-10-16 the user reported that Insert Space did not work on OMEN: they drag with the
+  mouse/touchpad, which the old contract kept as direct marquee (the dashed hover line showed but
+  dragging did nothing). Per the user, primary-mouse drag now inserts space on both clients; a click
+  below the drag threshold still performs the ordinary direct tap. Real-window synthetic pen and
+  `SendInput` mouse drags both inserted space on Windows (pen injection later stopped reaching any
+  window after the display layout changed, also on the unchanged baseline). Windows 166 and Android
+  167 tests and lint (0 errors, 130 warnings) pass; APK copied, not installed (no ADB device).
+
 - On 2026-10-13, per the user, a finger/primary-mouse drag starting anywhere inside the visible
   selection frame (including gaps between selected strokes/objects) moves the selection instead
   of starting a marquee; previously only an exact stroke/object hit moved it. `DirectInputPolicy`

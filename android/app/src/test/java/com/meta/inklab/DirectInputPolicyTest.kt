@@ -46,9 +46,9 @@ class DirectInputPolicyTest {
     }
 
     @Test
-    fun insertSpaceUsesFingerOrPenDragAndPenOrMouseHover() {
+    fun insertSpaceUsesFingerPenOrMouseDragAndPenOrMouseHover() {
         assertEquals(true, DirectInputPolicy.canDragInsertSpace(DirectInputDevice.FINGER))
-        assertEquals(false, DirectInputPolicy.canDragInsertSpace(DirectInputDevice.MOUSE))
+        assertEquals(true, DirectInputPolicy.canDragInsertSpace(DirectInputDevice.MOUSE))
         assertEquals(true, DirectInputPolicy.canDragInsertSpace(DirectInputDevice.PEN))
         assertEquals(false, DirectInputPolicy.showsInsertSpaceHover(DirectInputDevice.FINGER))
         assertEquals(true, DirectInputPolicy.showsInsertSpaceHover(DirectInputDevice.MOUSE))

@@ -46,10 +46,10 @@ public class DirectInputPolicyTests
     }
 
     [Fact]
-    public void InsertSpaceUsesFingerOrPenDragAndPenOrMouseHover()
+    public void InsertSpaceUsesFingerPenOrMouseDragAndPenOrMouseHover()
     {
         Assert.True(DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger));
-        Assert.False(DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Mouse));
+        Assert.True(DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Mouse));
         Assert.True(DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Pen));
         Assert.False(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Finger));
         Assert.True(DirectInputPolicy.ShowsInsertSpaceHover(DirectInputDevice.Mouse));
