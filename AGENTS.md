@@ -9,6 +9,16 @@
 
 # Current State
 
+- On 2026-10-19 both clients' native-selection and system-image paste were changed from source
+  coordinates plus a fixed offset to the destination caret in document coordinates. The caret
+  survives ribbon/menu focus and is cleared on page change. Direct selection movement now previews
+  an original-position copy while Ctrl is held, responds to key changes without pointer motion,
+  and commits at most one independent copy on normal pointer release. Resize/cancel do not copy.
+  Windows uses one Undo for the move/copy. The sole Windows Release EXE is refreshed/restarted
+  (build: 0 warnings/0 errors), and the current Android APK is refreshed but not installed.
+  Final tests and UI/device acceptance are intentionally not performed at the user's request.
+  See `docs/log/2026-10.md` for delivery state.
+
 - On 2026-10-16 the user reported that Insert Space did not work on OMEN: they drag with the
   mouse/touchpad, which the old contract kept as direct marquee (the dashed hover line showed but
   dragging did nothing). Per the user, primary-mouse drag now inserts space on both clients; a click

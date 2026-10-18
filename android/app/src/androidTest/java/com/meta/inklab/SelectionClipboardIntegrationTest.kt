@@ -17,7 +17,7 @@ class SelectionClipboardIntegrationTest {
             val context = ApplicationProvider.getApplicationContext<android.content.Context>()
             val source = ShapeStrokeCodec.create(listOf(ShapePoint(30f, 40f), ShapePoint(150f, 100f)),
                 InkPalette.BLACK, .7f, 85, InkPalette.BLACK.argb)
-            val copy = SelectionClipboard.translatedStroke(source, 18f)
+            val copy = SelectionClipboard.translatedStroke(source, 18f, 45f)
             assertNotSame(source, copy)
             assertEquals(source.brush.size, copy.brush.size, .001f)
             assertEquals(source.brush.colorIntArgb, copy.brush.colorIntArgb)
@@ -25,7 +25,7 @@ class SelectionClipboardIntegrationTest {
             assertEquals(source.inputs.size, copy.inputs.size)
             for (index in 0 until source.inputs.size) {
                 val before = source.inputs.get(index); val after = copy.inputs.get(index)
-                assertEquals(before.x + 18, after.x, .001f); assertEquals(before.y + 18, after.y, .001f)
+                assertEquals(before.x + 18, after.x, .001f); assertEquals(before.y + 45, after.y, .001f)
                 assertEquals(before.pressure, after.pressure, .001f)
                 assertEquals(before.elapsedTimeMillis, after.elapsedTimeMillis)
                 assertEquals(before.tiltRadians, after.tiltRadians, .001f)
@@ -35,6 +35,10 @@ class SelectionClipboardIntegrationTest {
             val view = DryInkView(context)
             view.replaceStrokes(listOf(source)); view.appendSelectedStrokes(listOf(copy))
             assertEquals(listOf(copy), view.snapshotSelectedStrokes())
+            val originalPositionCopy = SelectionClipboard.translatedStroke(source, 0f)
+            view.appendSelectedStrokes(listOf(originalPositionCopy), select = false)
+            assertEquals(listOf(copy), view.snapshotSelectedStrokes())
+            assertEquals(3, view.strokeCount())
             val paths = SelectionSvg.inkPaths(view.snapshotSelectedStrokes())
             assertTrue(paths.contains("<path")); assertTrue(paths.contains("fill=\"#1B1B1F\"")); assertFalse(paths.contains("<image"))
             view.setDarkBackground(true)
@@ -42,7 +46,7 @@ class SelectionClipboardIntegrationTest {
             val bitmap = Bitmap.createBitmap(220, 180, Bitmap.Config.ARGB_8888)
             view.renderVectorInkForExport(Canvas(bitmap), Matrix(), selectedOnly = true)
             assertEquals(0, bitmap.getPixel(0, 0))
-            assertEquals(1, view.deleteSelection()); assertEquals(listOf(source), view.snapshotStrokes())
+            assertEquals(1, view.deleteSelection()); assertEquals(listOf(source, originalPositionCopy), view.snapshotStrokes())
             bitmap.recycle()
         }
     }

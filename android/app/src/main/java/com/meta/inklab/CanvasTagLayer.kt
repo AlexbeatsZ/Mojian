@@ -75,9 +75,9 @@ class CanvasTagLayer(
     fun snapshotSelectedTags(): List<CanvasTagSnapshot> =
         tags.filter { it in selectedTags }.map { CanvasTagSnapshot(it.kind, it.documentX, it.documentY,it.id) }
 
-    fun appendSelectedTags(items: List<CanvasTagSnapshot>) {
-        selectedTags.clear()
-        items.map { CanvasTag(it.kind, it.documentX, it.documentY) }.forEach { tags += it; selectedTags += it }
+    fun appendSelectedTags(items: List<CanvasTagSnapshot>, select: Boolean = true) {
+        if (select) selectedTags.clear()
+        items.map { CanvasTag(it.kind, it.documentX, it.documentY) }.forEach { tags += it; if (select) selectedTags += it }
         invalidate()
         onContentChanged?.invoke()
     }

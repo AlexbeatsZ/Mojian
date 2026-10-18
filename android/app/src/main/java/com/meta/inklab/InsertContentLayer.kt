@@ -91,12 +91,14 @@ class InsertContentLayer(
 
     fun snapshotSelectedObjects(): List<InsertObject> = selectedItems().map { InsertObject.fromJson(it.toJson()) }
 
-    fun appendSelectedObjects(items: List<InsertObject>) {
+    fun appendSelectedObjects(items: List<InsertObject>, select: Boolean = true) {
         val target = document ?: return
         target.objects.addAll(items)
-        selectedObject = null
-        lassoSelectedObjects.clear()
-        lassoSelectedObjects.addAll(items)
+        if (select) {
+            selectedObject = null
+            lassoSelectedObjects.clear()
+            lassoSelectedObjects.addAll(items)
+        }
         changed(target)
     }
 

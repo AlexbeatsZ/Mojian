@@ -369,7 +369,8 @@ public partial class NoteCanvas : UserControl
             _selectedTextItems.Select(item => { var copy = CloneText(item); copy.ZOrder = order[item]; return copy; }).ToList(),
             _selectedObjects.Select(item => new SelectionObjectClipboard(
                 CopyObjectWithOrder(item, order[item]),
-                CaptureClipboardAsset(item.AssetName), CaptureClipboardAsset(item.SourceAssetName))).ToList());
+                CaptureClipboardAsset(item.AssetName), CaptureClipboardAsset(item.SourceAssetName))).ToList(),
+            _selectionBounds ?? Rect.Empty);
         var data = new DataObject(); data.SetData(NativeClipboardFormat, new MemoryStream(System.Text.Encoding.UTF8.GetBytes(token)), false);
         try { Clipboard.SetDataObject(data, true); }
         catch (System.Runtime.InteropServices.ExternalException) { return false; }
@@ -379,18 +380,22 @@ public partial class NoteCanvas : UserControl
         return true;
     }
 
-    public bool PasteSelection()
+    public bool PasteSelection(Point? insertionPoint = null)
     {
         var clipboard = _selectionClipboard;
         if (Document == null || clipboard == null || !HasNativeClipboard) return false;
-        const float offset = 24;
+        var target = insertionPoint ?? PasteInsertionPoint;
+        var dx = (float)(target.X - clipboard.Bounds.Left);
+        var dy = (float)(target.Y - clipboard.Bounds.Top);
         var objects = clipboard.Objects.Select(source =>
         {
-            var item = source.Item.CloneWithNewId(offset);
+            var item = source.Item.CloneWithNewId(0);
+            item.X += dx; item.Y += dy;
             if (source.Asset is { } asset) item.AssetName = ImportClipboardAsset?.Invoke(asset.Name, asset.Bytes) ?? item.AssetName;
             if (source.SourceAsset is { } sourceAsset) item.SourceAssetName = ImportClipboardAsset?.Invoke(sourceAsset.Name, sourceAsset.Bytes) ?? item.SourceAssetName;
             return item;
         }).ToList();
+        AbandonTemporaryText();
         PushUndo();
         ClearSelection();
         var layerId = string.Empty;
@@ -403,20 +408,22 @@ public partial class NoteCanvas : UserControl
 
         foreach (var source in clipboard.Strokes)
         {
-            var item = CloneStroke(source, offset);
+            var item = CloneStroke(source);
+            foreach (var point in item.Points) { point.X += dx; point.Y += dy; }
+            item.TransformVector(new Matrix(1, 0, 0, 1, dx, dy));
             item.LayerId = layerId; item.ZOrder += orderOffset;
             Document.Strokes.Add(item);
             _selectedStrokes.Add(item);
         }
         foreach (var source in clipboard.Tags)
         {
-            var item = CloneTag(source, offset);
+            var item = CloneTag(source); item.DocumentX += dx; item.DocumentY += dy;
             Document.Tags.Add(item);
             _selectedTags.Add(item);
         }
         foreach (var source in clipboard.TextItems)
         {
-            var item = CloneText(source, offset);
+            var item = CloneText(source); item.X += dx; item.Y += dy;
             item.LayerId = layerId; item.ZOrder += orderOffset;
             Document.TextItems.Add(item);
             _selectedTextItems.Add(item);
@@ -437,8 +444,9 @@ public partial class NoteCanvas : UserControl
 
     public bool DuplicateSelection()
     {
+        var target = _selectionBounds?.TopLeft + new Vector(24, 24);
         if (!CopySelection()) return false;
-        return PasteSelection();
+        return PasteSelection(target);
     }
 
     public bool ApplySelectionColor(InkPalette color)
@@ -939,6 +947,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        UpdateSelectionMoveCopy(Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
         if (Document == null) return;
         var promotedByStylus = IsPhysicalStylus(e.StylusDevice);
         if (CanvasPointerFeedback.RefreshHoverFromPromotedMouse(promotedByStylus, _stylusActive))
@@ -1009,6 +1018,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
+        if (!_finishingPointer && _directGestureMode != DirectGestureMode.None) CancelDirectPointer();
         if (!_finishingPointer && _explicitShape && _directTouchDevice == null) CancelStylusToolActionForNavigation();
         if (!_finishingPointer && _mouseInsertSpaceActive) CancelInsertSpace();
         if (_rightLassoArmed && !_rightLassoUsesStylus) CancelRightButtonLasso();
@@ -1024,6 +1034,8 @@ public partial class NoteCanvas : UserControl
     protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
     {
         base.OnLostKeyboardFocus(e);
+        if (_directGestureMode != DirectGestureMode.None &&
+            (e.NewFocus is not DependencyObject focused || !IsAncestorOf(focused))) CancelDirectPointer();
         if (_activeStroke != null) CancelStylusToolActionForNavigation();
         CancelRightButtonLasso();
     }
@@ -1031,6 +1043,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
         base.OnMouseUp(e);
+        UpdateSelectionMoveCopy(Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
         if (Document == null) return;
         if (e.ChangedButton == MouseButton.Right && _rightLassoArmed)
         {
@@ -1400,6 +1413,7 @@ public partial class NoteCanvas : UserControl
                 PushUndo();
                 _directUndoPushed = true;
                 _isTransforming = true;
+                if (_directGestureMode == DirectGestureMode.Move) BeginSelectionMove();
             }
             else
             {
@@ -1428,7 +1442,7 @@ public partial class NoteCanvas : UserControl
     private void EndDirectPointer(Point viewPoint)
     {
         _directLongPressTimer.Stop();
-        if (IsMouseCaptured) ReleaseMouseCapture();
+        if (_directGestureCommitted) ContinueDirectPointer(viewPoint);
         if (_directLongPressTriggered)
         {
             ResetDirectPointer();
@@ -1447,6 +1461,7 @@ public partial class NoteCanvas : UserControl
         }
         else
         {
+            FinishSelectionMove(commit: true);
             _isTransforming = false;
             RecomputeSelectionBounds();
             MarkChanged(immediate: true);
@@ -1464,6 +1479,7 @@ public partial class NoteCanvas : UserControl
 
     private void CancelDirectPointer()
     {
+        FinishSelectionMove(commit: false);
         _directLongPressTimer.Stop();
         if (_isInsertingSpace) CancelInsertSpace();
         if (_directGestureMode == DirectGestureMode.Marquee)
@@ -1488,6 +1504,7 @@ public partial class NoteCanvas : UserControl
         _directLongPressTriggered = false;
         _isTransforming = false;
         _resizeHandle = -1;
+        if (IsMouseCaptured) ReleaseMouseCapture();
         InvalidateVisual();
     }
 
@@ -2540,6 +2557,7 @@ public partial class NoteCanvas : UserControl
         editor.IsHitTestVisible = true;
         editor.Focus();
         editor.CaretIndex = 0;
+        _pasteAnchor = documentPoint;
         InvalidateVisual();
     }
 
@@ -2603,7 +2621,8 @@ public partial class NoteCanvas : UserControl
             CaretBrush = Appearance.Theme == PageTheme.Dark ? Brushes.White : Brushes.Black,
         };
         ApplyTextItemStyle(editor, item);
-        editor.GotKeyboardFocus += (_, _) => { editor.Opacity = 1; InvalidateVisual(); };
+        editor.GotKeyboardFocus += (_, _) => { editor.Opacity = 1; RememberPasteAnchor(editor, item); InvalidateVisual(); };
+        editor.SelectionChanged += (_, _) => RememberPasteAnchor(editor, item);
         editor.TextChanged += (_, _) =>
         {
             if (_suppressEditorChange) return;
@@ -2752,6 +2771,7 @@ public partial class NoteCanvas : UserControl
             }
             dc.PushTransform(new MatrixTransform(matrix));
             DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, extent);
+            if (_moveCopyVisible && _moveOriginalDrawing != null) dc.DrawDrawing(_moveOriginalDrawing);
             dc.Pop();
             if (_panCacheActive) dc.Pop();
         }
@@ -3453,6 +3473,8 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        FinishSelectionMove(commit: false);
+        _pasteAnchor = null;
         _pressureTravel.Reset();
         _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         CancelRightButtonLasso();
@@ -3551,7 +3573,8 @@ public partial class NoteCanvas : UserControl
         List<StrokeRecord> Strokes,
         List<CanvasTag> Tags,
         List<TextItem> TextItems,
-        List<SelectionObjectClipboard> Objects);
+        List<SelectionObjectClipboard> Objects,
+        Rect Bounds);
 
     public Func<string, byte[], string>? ImportClipboardAsset { get; set; }
     private ClipboardAsset? CaptureClipboardAsset(string? name)

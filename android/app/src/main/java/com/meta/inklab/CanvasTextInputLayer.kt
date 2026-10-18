@@ -105,6 +105,19 @@ class CanvasTextInputLayer(
 
     fun isEditing(): Boolean = activeEditor?.hasFocus() == true
 
+    private var lastPasteAnchor: DocumentPoint? = null
+
+    fun pasteInsertionPoint(): DocumentPoint? {
+        val editor = currentEditor() ?: return lastPasteAnchor
+        val textLayout = editor.layout
+        val offset = editor.selectionStart.coerceAtLeast(0)
+        val line = textLayout?.getLineForOffset(offset) ?: 0
+        return viewport.viewToDocument(
+            editor.x + (editor.paddingLeft + (textLayout?.getPrimaryHorizontal(offset) ?: 0f) - editor.scrollX) * editor.scaleX,
+            editor.y + (editor.paddingTop + (textLayout?.getLineTop(line) ?: 0) - editor.scrollY) * editor.scaleY,
+        ).let { DocumentPoint(it.x, it.y) }
+    }
+
     fun isEditingAt(viewX: Float, viewY: Float): Boolean =
         activeEditor?.takeIf { it.hasFocus() && it in formalEditingEditors }
             ?.let { editorAt(viewX, viewY) === it } == true
@@ -133,6 +146,7 @@ class CanvasTextInputLayer(
         endEditing(discardEmptyTemporary = false)
         clearSelection()
         addEditor(viewX, viewY, temporary = true)
+        lastPasteAnchor = viewport.viewToDocument(viewX, viewY).let { DocumentPoint(it.x, it.y) }
     }
 
     fun abandonTemporaryEditors() = abandonTemporaryEditors(except = null)
@@ -149,6 +163,7 @@ class CanvasTextInputLayer(
 
     fun endEditing(discardEmptyTemporary: Boolean = true) {
         val editor = activeEditor ?: return
+        lastPasteAnchor = pasteInsertionPoint()
         activeEditor = null
         editor.clearFocus()
         editor.isEnabled = false
@@ -164,6 +179,7 @@ class CanvasTextInputLayer(
 
     fun clearAll() {
         endEditing()
+        lastPasteAnchor = null
         removeAllViews()
         capturedFormat = null
         selectedEditors.clear()
@@ -353,8 +369,8 @@ class CanvasTextInputLayer(
         appendEditors(snapshots, select = false)
     }
 
-    fun appendEditors(snapshots: List<CanvasTextSnapshot>, select: Boolean = true) {
-        selectedEditors.clear()
+    fun appendEditors(snapshots: List<CanvasTextSnapshot>, select: Boolean = true, notify: Boolean = select) {
+        if (select) selectedEditors.clear()
         restoringEditors=true
         try {
         snapshots.forEach { snapshot ->
@@ -371,7 +387,7 @@ class CanvasTextInputLayer(
             editor.post { applyEditorTransform(editor) }
         }
         } finally { restoringEditors=false }
-        if(select && snapshots.isNotEmpty()) onContentChanged?.invoke()
+        if(notify && snapshots.isNotEmpty()) onContentChanged?.invoke()
     }
 
     fun paste(): Boolean = contextAction(android.R.id.paste)
@@ -550,6 +566,7 @@ class CanvasTextInputLayer(
                     activeEditor = view as EditText
                     onEditingChanged?.invoke(true)
                 } else if (activeEditor === view) {
+                    lastPasteAnchor = pasteInsertionPoint()
                     activeEditor = null
                     view.isEnabled = false
                     discardTemporaryIfEmpty(view as EditText)

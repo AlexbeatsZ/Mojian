@@ -335,8 +335,11 @@ class MainActivity : Activity() {
     private data class NativeSelection(
         val token: String, val strokes: List<Stroke>, val tags: List<CanvasTagSnapshot>,
         val text: List<CanvasTextSnapshot>, val objects: List<InsertObject>, val assets: Map<String, ByteArray>,
+        val bounds: RectF,
     )
     private var nativeSelection: NativeSelection? = null
+    private var moveOriginal: NativeSelection? = null
+    private var moveOriginalPicture: android.graphics.Picture? = null
     private var pendingImageSaveFile: File? = null
     private val toggledPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
     private val heldPreviousTools = mutableMapOf<XiaomiStylusKey, String>()
@@ -569,6 +572,16 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (::selectionOverlay.isInitialized) {
+            val control = when (event.keyCode) {
+                KeyEvent.KEYCODE_CTRL_LEFT -> event.action == KeyEvent.ACTION_DOWN || event.metaState and KeyEvent.META_CTRL_RIGHT_ON != 0
+                KeyEvent.KEYCODE_CTRL_RIGHT -> event.action == KeyEvent.ACTION_DOWN || event.metaState and KeyEvent.META_CTRL_LEFT_ON != 0
+                else -> event.isCtrlPressed
+            }
+            selectionOverlay.updateControlKey(control)
+            if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.action == KeyEvent.ACTION_DOWN)
+                selectionOverlay.cancelDirectGesture()
+        }
         if (shortcutDispatcher.dispatch(event)) return true
         val keyIdentity = event.deviceId to event.keyCode
         if (event.action == KeyEvent.ACTION_UP && consumedKeyboardShortcutKeys.remove(keyIdentity)) return true
@@ -629,6 +642,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         if(!::dryInkView.isInitialized) { super.onPause();return }
+        if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
         mainHandler.removeCallbacks(syncRefresh)
         mainHandler.removeCallbacks(saveSharedContent)
         if(workspaceLoaded && ::dryInkView.isInitialized) saveBoundPageSession()
@@ -2899,6 +2913,16 @@ class MainActivity : Activity() {
         selectionOverlay =
             SelectionOverlayView(this, viewport).apply {
                 selectionBoundsProvider = ::combinedSelectionBounds
+                onBeginMove = ::beginSelectionMove
+                onFinishMove = ::finishSelectionMove
+                drawMoveOriginal = { canvas ->
+                    moveOriginal?.bounds?.let { bounds ->
+                        canvas.save()
+                        canvas.translate(bounds.left, bounds.top)
+                        moveOriginalPicture?.draw(canvas)
+                        canvas.restore()
+                    }
+                }
                 onTranslateSelection = { deltaX, deltaY ->
                     dryInkView.translateSelection(deltaX, deltaY)
                     tagLayer.translateSelection(deltaX, deltaY)
@@ -3951,6 +3975,7 @@ class MainActivity : Activity() {
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
         val nextKey = pageId?.let { PageSessionKey(workspace.id, it) }
         if (nextKey != boundPageKey) {
+            if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
             cancelStylusAction()
             saveBoundPageSession()
             if(contentDirty) return
@@ -6258,7 +6283,7 @@ class MainActivity : Activity() {
                 assetStore.assetFile(document.notebookId, document.pageId, name).readBytes()
             }
             val token = UUID.randomUUID().toString()
-            val selection = NativeSelection(token, strokes, tags, text, objects, assets)
+            val selection = NativeSelection(token, strokes, tags, text, objects, assets, RectF(combinedSelectionBounds() ?: return))
             val clip = ClipData("墨笺原格式", arrayOf(SelectionClipboard.NATIVE_MIME),
                 ClipData.Item(Intent().putExtra("mojian-selection", token)))
             (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
@@ -6270,11 +6295,46 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun pasteInsertionPoint(): DocumentPoint = textInputLayer.pasteInsertionPoint()
+        ?: viewport.viewToDocument(dp(34).toFloat(), dp(68).toFloat()).let { DocumentPoint(it.x, it.y) }
+
+    private fun beginSelectionMove() {
+        if (insertContentLayer.currentDocument() == null) return
+        val bounds = RectF(combinedSelectionBounds() ?: return).apply { inset(-2f, -2f) }
+        moveOriginal = NativeSelection("", dryInkView.snapshotSelectedStrokes(), tagLayer.snapshotSelectedTags(),
+            textInputLayer.snapshotEditors(selectedOnly = true), insertContentLayer.snapshotSelectedObjects(), emptyMap(), bounds)
+        moveOriginalPicture = android.graphics.Picture().apply {
+            val canvas = beginRecording(kotlin.math.ceil(bounds.width()).toInt().coerceAtLeast(1),
+                kotlin.math.ceil(bounds.height()).toInt().coerceAtLeast(1))
+            canvas.translate(-bounds.left, -bounds.top)
+            val matrix = Matrix()
+            insertContentLayer.renderForExport(canvas, matrix, selectedOnly = true)
+            dryInkView.renderVectorInkForExport(canvas, matrix, selectedOnly = true)
+            textInputLayer.renderForExport(canvas, matrix, selectedOnly = true)
+            tagLayer.renderForExport(canvas, matrix, selectedOnly = true)
+            endRecording()
+        }
+    }
+
+    private fun finishSelectionMove(copy: Boolean) {
+        val original = moveOriginal
+        moveOriginal = null
+        moveOriginalPicture = null
+        if (!copy || original == null) return
+        // Same-page copies may share immutable asset files; every content identity is new.
+        dryInkView.appendSelectedStrokes(original.strokes.map { SelectionClipboard.translatedStroke(it, 0f) }, select = false)
+        tagLayer.appendSelectedTags(original.tags, select = false)
+        textInputLayer.appendEditors(original.text.map { it.copy(id = "text-${UUID.randomUUID()}") }, select = false, notify = true)
+        insertContentLayer.appendSelectedObjects(original.objects.map { SelectionClipboard.translatedObject(it, 0f, emptyMap()) }, select = false)
+    }
+
     private fun pasteNativeSelection(): Boolean {
         if (!hasNativeSelectionClipboard()) return false
         val selection = nativeSelection ?: return false
         val target = insertContentLayer.currentDocument() ?: return false
-        val offset = dp(18).toFloat()
+        val anchor = pasteInsertionPoint()
+        val offset = anchor.x - selection.bounds.left
+        val offsetY = anchor.y - selection.bounds.top
         try {
             val directory = pageContentRepository.assetDirectory(target.notebookId, target.pageId)
             val names = selection.assets.mapValues { (name, bytes) ->
@@ -6282,14 +6342,14 @@ class MainActivity : Activity() {
                 File(directory, newName).writeBytes(bytes)
                 newName
             }
-            val strokes = selection.strokes.map { SelectionClipboard.translatedStroke(it, offset) }
-            val objects = selection.objects.map { SelectionClipboard.translatedObject(it, offset, names) }
+            val strokes = selection.strokes.map { SelectionClipboard.translatedStroke(it, offset, offsetY) }
+            val objects = selection.objects.map { SelectionClipboard.translatedObject(it, offset, names, offsetY) }
             textInputLayer.endEditing()
             clearContentSelection()
             dryInkView.appendSelectedStrokes(strokes)
             dryInkView.setDarkBackground(darkCanvasActive)
-            tagLayer.appendSelectedTags(selection.tags.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offset) })
-            textInputLayer.appendEditors(selection.text.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offset) })
+            tagLayer.appendSelectedTags(selection.tags.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
+            textInputLayer.appendEditors(selection.text.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
             insertContentLayer.appendSelectedObjects(objects)
             saveBoundPageSession()
             expandPageIfNeeded()
@@ -6359,9 +6419,10 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "请先选择页面", Toast.LENGTH_SHORT).show()
                 return
             }
+            val anchor = pasteInsertionPoint()
             textInputLayer.endEditing()
             chooseDisplayFilter(imageImportDisplayMode, "剪贴板图片如何显示？") { inverted ->
-                importImages(imageUris, inverted)
+                importImages(imageUris, inverted, anchor)
             }
             return
         }
@@ -6441,8 +6502,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun importImages(uris: List<Uri>, inverted: Boolean) {
-        val target = insertTarget() ?: return
+    private fun importImages(uris: List<Uri>, inverted: Boolean, insertionPoint: DocumentPoint? = null) {
+        val base = insertTarget() ?: return
+        val target = insertionPoint?.let { base.copy(startX = it.x, startY = it.y) } ?: base
         val maxWidth = dp(620).toFloat()
         Toast.makeText(this, "正在导入 ${uris.size} 张图片…", Toast.LENGTH_SHORT).show()
         ioExecutor.execute {

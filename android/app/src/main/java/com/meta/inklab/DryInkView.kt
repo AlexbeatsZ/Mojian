@@ -218,9 +218,10 @@ class DryInkView(context: Context) : View(context) {
 
     fun snapshotSelectedStrokes(): List<Stroke> = strokes.filter { it in selectedStrokes }
 
-    fun appendSelectedStrokes(items: List<Stroke>) {
+    fun appendSelectedStrokes(items: List<Stroke>, select: Boolean = true) {
+        val previous = if (select) emptyList() else selectedStrokes.toList()
         addStrokes(items)
-        selectedStrokes.addAll(items)
+        selectedStrokes.addAll(if (select) items else previous)
     }
 
     fun replaceStrokes(replacement: List<Stroke>) {

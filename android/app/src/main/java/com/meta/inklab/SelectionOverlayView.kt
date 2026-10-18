@@ -30,8 +30,7 @@ class SelectionOverlayView(
         set(value) {
             field = value
             if (!value) {
-                gestureMode = GestureMode.NONE
-                gestureCommitted = false
+                cancelDirectGesture()
             }
             invalidate()
         }
@@ -45,6 +44,17 @@ class SelectionOverlayView(
     var onTranslateSelection: ((Float, Float) -> Unit)? = null
     var onScaleSelection: ((Float, Float, Float, Float) -> Unit)? = null
     var onTransformFinished: (() -> Unit)? = null
+    var onBeginMove: (() -> Unit)? = null
+    var onFinishMove: ((Boolean) -> Unit)? = null
+    var drawMoveOriginal: ((Canvas) -> Unit)? = null
+    private val moveCopy = SelectionMoveCopy()
+    private var controlDown = false
+
+    fun updateControlKey(control: Boolean) {
+        controlDown = control
+        moveCopy.update(control)
+        invalidate()
+    }
     var onDirectTap: ((Float, Float, Boolean) -> Unit)? = null
     var onDirectLongPress: ((Float, Float) -> Boolean)? = null
     var onBeginMarquee: ((Float, Float) -> Unit)? = null
@@ -118,6 +128,7 @@ class SelectionOverlayView(
         val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
         val isMouse = toolType == MotionEvent.TOOL_TYPE_MOUSE
         if (!isFinger && !isMouse) return false
+        if (isMouse) updateControlKey(event.metaState and android.view.KeyEvent.META_CTRL_ON != 0)
         if (isFinger && !fingerDirectInputEnabled) return false
         if (isMouse && event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
             if (editingTextHitTest?.invoke(event.x, event.y) == true) return false
@@ -173,6 +184,10 @@ class SelectionOverlayView(
                     gestureCommitted = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                     if (gestureMode == GestureMode.MARQUEE) onBeginMarquee?.invoke(downViewX, downViewY)
+                    if (gestureMode == GestureMode.MOVE) {
+                        onBeginMove?.invoke()
+                        moveCopy.begin(controlDown)
+                    }
                 }
                 when (gestureMode) {
                     GestureMode.MOVE -> {
@@ -205,6 +220,11 @@ class SelectionOverlayView(
                 }
                 if (gestureMode == GestureMode.NONE) return false
                 if (gestureCommitted) {
+                    // The release position may be newer than the final move event.
+                    if (gestureMode == GestureMode.MOVE) {
+                        onTranslateSelection?.invoke(point.x - lastPoint.x, point.y - lastPoint.y)
+                        onFinishMove?.invoke(moveCopy.finish(commit = true))
+                    }
                     if (gestureMode == GestureMode.MARQUEE) onFinishMarquee?.invoke() else onTransformFinished?.invoke()
                 } else {
                     performClick()
@@ -230,6 +250,7 @@ class SelectionOverlayView(
         val bounds = selectionBoundsProvider?.invoke() ?: return
         canvas.save()
         canvas.concat(viewport.documentToViewMatrix())
+        if (moveCopy.preview) drawMoveOriginal?.invoke(canvas)
         selectionPaint.strokeWidth = dp(1.5f) / viewport.scale
         handleStrokePaint.strokeWidth = dp(1.5f) / viewport.scale
         val padding = dp(8f) / viewport.scale
@@ -250,6 +271,7 @@ class SelectionOverlayView(
         longPressDetector.onTouchEvent(cancel)
         cancel.recycle()
         val mode = gestureMode
+        if (moveCopy.active) onFinishMove?.invoke(moveCopy.finish(commit = false))
         // A selection already moved/resized by one finger is kept and saved, not left half-applied.
         if (mode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
         else if (mode != GestureMode.NONE && gestureCommitted) onTransformFinished?.invoke()

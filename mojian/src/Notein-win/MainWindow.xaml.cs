@@ -934,11 +934,11 @@ public partial class MainWindow : Window
         FocusedCanvas.AddObject(item);
     }
 
-    private double InsertImageFile(string path, bool inverted, double y)
+    private double InsertImageFile(string path, bool inverted, double y, Point? insertionPoint = null)
     {
         var asset = ViewModel.ImportAsset(path);
         var info = new FileInfo(path);
-        var point = InsertPoint(y);
+        var point = insertionPoint ?? InsertPoint(y);
         var item = PageObject.Asset(PageObjectKind.Image, (float)point.X, (float)point.Y, asset, info.Name, MimeFor(path), info.Length);
         try
         {
@@ -997,7 +997,7 @@ public partial class MainWindow : Window
             {
                 var bytes = BitmapToPng(bitmap);
                 var asset = ViewModel.WriteAsset(".png", bytes);
-                var point = InsertPoint(110);
+                var point = FocusedCanvas.PasteInsertionPoint;
                 var item = PageObject.Asset(PageObjectKind.Image, (float)point.X, (float)point.Y, asset, "剪贴板图片.png", "image/png", bytes.Length);
                 ApplyFittedImageSize(item, bitmap.PixelWidth, bitmap.PixelHeight);
                 item.ViewInverted = invert.Value;
@@ -1005,8 +1005,9 @@ public partial class MainWindow : Window
                 return true;
             }
 
-            var y = 110d;
-            foreach (var path in paths) y += InsertImageFile(path, invert.Value, y) + 18;
+            var anchor = FocusedCanvas.PasteInsertionPoint;
+            var y = 0d;
+            foreach (var path in paths) y += InsertImageFile(path, invert.Value, y, new Point(anchor.X, anchor.Y + y)) + 18;
             return true;
         }
         catch (ExternalException ex)

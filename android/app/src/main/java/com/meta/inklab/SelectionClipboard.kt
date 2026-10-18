@@ -10,24 +10,24 @@ import java.util.UUID
 /** Immutable native ink is kept separately from the external PNG/SVG clipboard formats. */
 object SelectionClipboard {
     const val NATIVE_MIME = "application/vnd.mojian.selection-v1"
-    fun translatedStroke(stroke: Stroke, offset: Float): Stroke {
+    fun translatedStroke(stroke: Stroke, offset: Float, offsetY: Float = offset): Stroke {
         val inputs = MutableStrokeInputBatch()
         for (index in 0 until stroke.inputs.size) {
             val p = stroke.inputs.get(index)
-            inputs.add(p.toolType, p.x + offset, p.y + offset, p.elapsedTimeMillis,
+            inputs.add(p.toolType, p.x + offset, p.y + offsetY, p.elapsedTimeMillis,
                 p.strokeUnitLengthCm, p.pressure, p.tiltRadians, p.orientationRadians)
         }
         val shape = ShapeStrokeCodec.encode(stroke)
         val brush = if (shape == null) stroke.brush else ShapeStrokeCodec.brush(
             InkPalette.entries[shape.getInt("color")], stroke.brush.size / ShapeStrokeCodec.UNITS_PER_MM,
             shape.getInt("opacityPercent"), stroke.brush.colorIntArgb)
-        return Stroke(brush, inputs).also { SharedStrokeCodec.transformed(stroke,it,{x,y->DocumentPoint(x+offset,y+offset)},copy=true) }
+        return Stroke(brush, inputs).also { SharedStrokeCodec.transformed(stroke,it,{x,y->DocumentPoint(x+offset,y+offsetY)},copy=true) }
     }
 
-    fun translatedObject(item: InsertObject, offset: Float, assets: Map<String, String>): InsertObject {
+    fun translatedObject(item: InsertObject, offset: Float, assets: Map<String, String>, offsetY: Float = offset): InsertObject {
         val json = item.toJson().apply {
             put("id", "paste-${UUID.randomUUID()}")
-            put("x", item.documentX + offset); put("y", item.documentY + offset)
+            put("x", item.documentX + offset); put("y", item.documentY + offsetY)
             put("pageBackground", false)
             listOf("assetName", "sourceAssetName").forEach { key ->
                 assets[optString(key)]?.let { put(key, it) }

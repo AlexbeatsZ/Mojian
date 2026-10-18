@@ -81,6 +81,7 @@ public class SelectionClipboardTests
                 Strokes = [stroke], TextItems = [new TextItem { Text = "墨笺", X = 20, Y = 30 }],
                 Tags = [new CanvasTag { DocumentX = 20, DocumentY = 75 }] } };
             source.SelectAllContent();
+            var sourceBounds = (Rect)typeof(NoteCanvas).GetField("_selectionBounds", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(source)!;
             Clipboard.SetImage(SelectionImageExport.PngBitmap(new GeometryDrawing(Brushes.Red, null,
                 new RectangleGeometry(new Rect(0, 0, 10, 10))), new Rect(0, 0, 10, 10)));
             Assert.True(source.CopySelection());
@@ -89,7 +90,7 @@ public class SelectionClipboardTests
             var nativeClipboard = SnapshotClipboard();
             stroke.Points[0] = new InkPoint(999, 999);
             var target = new NoteCanvas { Document = new PageDocument("target", "page2") };
-            Assert.True(target.PasteSelection());
+            Assert.True(target.PasteSelection(sourceBounds.TopLeft + new Vector(24, 24)));
             var copy = Assert.Single(target.Document.Strokes);
             Assert.NotEqual(stroke.Id, copy.Id);
             Assert.Equal(34f, copy.Points[0].X); Assert.Equal(.23f, copy.Points[0].Pressure);

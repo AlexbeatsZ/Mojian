@@ -32,6 +32,15 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - Paste checks current native ownership before system image/text content, through the same route
   for `Ctrl+V`, Home, and context menus. It never falls back to an older native/image-object snapshot
   after a new external clipboard value replaced it.
+- Native selection and system-image paste use the current insertion caret in the destination
+  canvas. The copied selection's top-left aligns to that document point, translating X/Y independently
+  while retaining all internal offsets and native vector transforms. Capture the anchor before
+  removing a blank temporary editor or transferring focus to the ribbon/menu. A remembered caret
+  is local to the current page; with no caret, use a visible viewport insertion point. Never add a
+  constant offset to the source coordinates. Repeated paste follows the same current caret.
+  The explicit Duplicate command keeps its separate 24-unit offset behavior.
+- Ctrl direct-selection movement has a display-only original-position preview and commits only
+  on pointer release; see `input-gestures.md`. It does not modify the OS clipboard.
 - SVG/PNG contain only the chosen content on a transparent cropped surface, without paper patterns,
   selection frames, hover marks, or a viewport screenshot. They preserve current displayed content
   colors, image inversion and opacity; the independent print conversion is not applied. PNG renders
