@@ -464,7 +464,7 @@ class DryInkView(context: Context) : View(context) {
             canvas.drawRect(pageRect, Paint().apply { color = paperColor })
             canvas.save()
             canvas.clipRect(pageRect)
-            if (!output.printing || !output.hideBackgroundFormat) drawGrid(canvas, exportTheme = printingDark, visible = clip)
+            if (!output.printing || !output.hideBackgroundFormat) drawGrid(canvas, exportTheme = printingDark, visible = clip, forOutput = true)
             canvas.restore()
         }
         if (settings.pageTitleVisible && outputPageTitle.isNotBlank() && settings.paperSize != PaperSize.BOUNDLESS) {
@@ -491,7 +491,7 @@ class DryInkView(context: Context) : View(context) {
             if (!visible.intersect(clip)) return@forEach
             canvas.save()
             canvas.clipRect(clip)
-            drawGrid(canvas, visible = visible)
+            drawGrid(canvas, visible = visible, viewMatrix = documentMatrix)
             canvas.restore()
         }
         canvas.restore()
@@ -506,7 +506,7 @@ class DryInkView(context: Context) : View(context) {
         } else visibleDocumentBounds()
         canvas.save()
         canvas.concat(documentMatrix)
-        drawGrid(canvas, exportTheme, bounds)
+        drawGrid(canvas, exportTheme, bounds, viewMatrix = documentMatrix)
         canvas.restore()
     }
 
@@ -654,7 +654,7 @@ class DryInkView(context: Context) : View(context) {
         canvas.drawPath(path, lassoPaint)
     }
 
-    private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false, visible: RectF = visibleDocumentBounds()) {
+    private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false, visible: RectF = visibleDocumentBounds(), forOutput: Boolean = false, viewMatrix: Matrix = documentToView) {
         if (backgroundFormat.category == BackgroundCategory.BLANK) return
         val spec = BackgroundPatternCatalog
         val step = spec.documentUnits(backgroundFormat.pattern.spacing)
@@ -663,10 +663,13 @@ class DryInkView(context: Context) : View(context) {
         majorGridPaint.color = palette.major
         dotPaint.color = palette.dot
         marginLinePaint.color = palette.margin
-        thinGridPaint.strokeWidth = spec.documentUnits(spec.lineWidth)
+        thinGridPaint.strokeWidth = if (spec.screenLineWidth && !forOutput) {
+            val values = FloatArray(9).also(viewMatrix::getValues)
+            spec.lineWidth * resources.displayMetrics.density / kotlin.math.abs(values[Matrix.MSCALE_X]).coerceAtLeast(.1f)
+        } else spec.documentUnits(spec.lineWidth)
         majorGridPaint.strokeWidth = thinGridPaint.strokeWidth
         marginLinePaint.strokeWidth = spec.documentUnits(spec.marginWidth)
-        fun linePaint(index: Int) = if (index % spec.majorEvery == 0) majorGridPaint else thinGridPaint
+        fun linePaint(index: Int) = if (spec.majorEvery > 0 && index % spec.majorEvery == 0) majorGridPaint else thinGridPaint
 
         when (backgroundFormat.category) {
             BackgroundCategory.BLANK -> return

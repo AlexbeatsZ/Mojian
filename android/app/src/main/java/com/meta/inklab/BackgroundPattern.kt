@@ -34,6 +34,7 @@ object BackgroundPatternCatalog {
     }.bufferedReader(Charsets.UTF_8).use { it.readText() })
     val baseSpacing = source.getDouble("baseSpacing").toFloat()
     val lineWidth = source.getDouble("lineWidth").toFloat()
+    val screenLineWidth = source.getBoolean("screenLineWidth")
     val marginWidth = source.getDouble("marginWidth").toFloat()
     val marginX = source.getDouble("marginX").toFloat()
     val dotRadius = source.getDouble("dotRadius").toFloat()

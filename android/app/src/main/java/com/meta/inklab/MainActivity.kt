@@ -118,6 +118,8 @@ private data class PageSessionState(
     val viewport: ViewportSnapshot,
 )
 
+private data class LoadedCanvasPage(val document: PageInsertDocument?, val strokes: List<Stroke>)
+
 private data class ExportSnapshot(
     val layers: LinkedHashMap<String, Bitmap>,
     val pageSize: PdfOutputPageSize?,
@@ -213,6 +215,10 @@ class MainActivity : Activity() {
     private var notebookLibrary = NotebookLibrary.sample()
     private val splitViewState = SplitViewState()
     private val pageSessions = mutableMapOf<PageSessionKey, PageSessionState>()
+    private val pageViewports = PageViewportMemory<PageSessionKey>()
+    private val pageLoadExecutor = Executors.newSingleThreadExecutor()
+    private val pageLoads = LatestPageLoader<PageSessionKey, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
+    private var pageLoadingOverlay: View? = null
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val workspace: NotebookWorkspace
@@ -422,6 +428,8 @@ class MainActivity : Activity() {
         mainHandler.removeCallbacks(syncRefresh)
         mainHandler.removeCallbacks(saveSharedContent)
         ioExecutor.shutdown()
+        pageLoads.cancel()
+        pageLoadExecutor.shutdown()
         pageWrites.close()
         super.onDestroy()
     }
@@ -429,9 +437,9 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if(!workspaceLoaded) return
-        saveBoundPageSession()
+        saveBoundPageSession(flush = false)
         if(contentDirty) return
-        if(selectIncomingNote(intent.data)) { persistWorkspacePreferences();renderWorkspace() }
+        if(selectIncomingNote(intent.data)) { persistWorkspacePreferences(saveLibrary = false);renderWorkspace() }
     }
 
     private fun selectIncomingNote(uri: Uri?): Boolean {
@@ -495,6 +503,8 @@ class MainActivity : Activity() {
 
     private fun refreshSharedWorkspace(force: Boolean = false) {
         if(!workspaceLoaded || !pageContentRepository.isShared || !pageWrites.isIdle || pageWrites.hasFailures) return
+        if (pageLoads.isLoading || (::paperContainer.isInitialized && paperContainer.hasActivePointerSequence) ||
+            pressurePointerId != null || shapePointerId != null || insertSpaceActive || pageNavigationBlocksSecondary()) return
         try {
             val key=boundPageKey
             val changed=force || pageContentRepository.libraryChanged() || (key!=null && pageContentRepository.pageChanged(key.notebookId,key.pageId))
@@ -503,6 +513,8 @@ class MainActivity : Activity() {
             val location=notebookLibrary.captureLocation()
             notebookLibrary=pageContentRepository.loadLibrary()
             notebookLibrary.restoreLocation(location)
+            key?.let { pageViewports.remember(it, viewport.snapshot()) }
+            pageSessions.forEach { (id, session) -> if (id != key) pageViewports.remember(id, session.viewport) }
             boundPageKey=null;pageSessions.clear()
             insertContentLayer.bind(null)
             renderWorkspace()
@@ -572,6 +584,7 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (pageLoadingOverlay != null) return true
         if (::selectionOverlay.isInitialized) {
             val control = when (event.keyCode) {
                 KeyEvent.KEYCODE_CTRL_LEFT -> event.action == KeyEvent.ACTION_DOWN || event.metaState and KeyEvent.META_CTRL_RIGHT_ON != 0
@@ -607,7 +620,21 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (pageLoadingOverlay != null) {
+            // Keep notebook/page navigation responsive while content is being prepared. Editing
+            // controls must not mutate the outgoing document under the destination page header.
+            fun inside(view: View): Boolean {
+                val bounds = android.graphics.Rect()
+                return view.getGlobalVisibleRect(bounds) && bounds.contains(event.rawX.toInt(), event.rawY.toInt())
+            }
+            if (!inside(navigationPane) && !inside(pagePane)) return true
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (pageLoadingOverlay != null) return true
         if (
             event.action == MotionEvent.ACTION_SCROLL &&
             event.isFromSource(InputDevice.SOURCE_MOUSE) &&
@@ -643,6 +670,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         if(!::dryInkView.isInitialized) { super.onPause();return }
         if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
+        if (::paperContainer.isInitialized) paperContainer.cancelPointerSequence()
         mainHandler.removeCallbacks(syncRefresh)
         mainHandler.removeCallbacks(saveSharedContent)
         if(workspaceLoaded && ::dryInkView.isInitialized) saveBoundPageSession()
@@ -833,7 +861,7 @@ class MainActivity : Activity() {
         val current = pages.indexOfFirst { it.page.id == workspace.selectedPageId }.takeIf { it >= 0 } ?: 0
         val next = (current + direction).mod(pages.size)
         workspace.selectPage(pages[next].sectionId, pages[next].page.id)
-        persistWorkspacePreferences()
+        persistWorkspacePreferences(saveLibrary = false)
         renderWorkspace()
     }
 
@@ -1133,7 +1161,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
                         clearContentSelection()
-                        persistWorkspacePreferences()
+                        persistWorkspacePreferences(saveLibrary = false)
                         renderWorkspace()
                         dialog.dismiss()
                     }
@@ -1802,8 +1830,8 @@ class MainActivity : Activity() {
             .apply()
     }
 
-    private fun persistWorkspacePreferences() {
-        if(::pageContentRepository.isInitialized && pageContentRepository.isShared) {
+    private fun persistWorkspacePreferences(saveLibrary: Boolean = true) {
+        if(saveLibrary && ::pageContentRepository.isInitialized && pageContentRepository.isShared) {
             runCatching { pageContentRepository.saveLibrary(notebookLibrary) }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
         }
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
@@ -3061,7 +3089,7 @@ class MainActivity : Activity() {
     private fun exitSplitView() {
         if (!splitViewState.enabled) return
         if (splitViewState.focusedSide != SplitPaneSide.RIGHT) focusSplitPane(SplitPaneSide.RIGHT)
-        saveBoundPageSession()
+        saveBoundPageSession(flush = false)
         val kept = splitViewState.exitKeepingRight() ?: return
         mainHandler.removeCallbacks(hideSplitFocus)
         splitFocusVisible = false
@@ -3081,7 +3109,7 @@ class MainActivity : Activity() {
         captureLivePagePreview()?.let { preview ->
             installPreview(hostFor(splitViewState.focusedSide), preview)
         }
-        saveBoundPageSession()
+        saveBoundPageSession(flush = false)
         if (!splitViewState.focus(side) || !notebookLibrary.restoreLocation(destination)) return
         moveLivePaperTo(hostFor(side))
         renderWorkspace()
@@ -3155,9 +3183,11 @@ class MainActivity : Activity() {
         mainHandler.postDelayed(hideSplitFocus, SPLIT_FOCUS_PULSE_MILLIS)
     }
 
-    private fun saveBoundPageSession() {
+    private fun saveBoundPageSession(flush: Boolean = true) {
+        if (pageLoads.isLoading) return
         val key = boundPageKey ?: return
-        persistGeneratedShapes()
+        persistGeneratedShapes(flush)
+        pageViewports.remember(key, viewport.snapshot())
         pageSessions[key] =
             PageSessionState(
                 strokes = dryInkView.snapshotStrokes(),
@@ -3237,7 +3267,7 @@ class MainActivity : Activity() {
                         notebookLibrary.selectNotebook(notebook.id)
                         notebook.focusNotebook()
                         clearContentSelection()
-                        persistWorkspacePreferences()
+                        persistWorkspacePreferences(saveLibrary = false)
                         renderWorkspace()
                     }
                 }
@@ -3285,7 +3315,7 @@ class MainActivity : Activity() {
                             notebookLibrary.selectNotebook(notebook.id)
                             notebook.selectSection(section.id)
                             clearContentSelection()
-                            persistWorkspacePreferences()
+                            persistWorkspacePreferences(saveLibrary = false)
                             renderWorkspace()
                         }
                     }
@@ -3442,7 +3472,7 @@ class MainActivity : Activity() {
                 )
                 setOnClickListener {
                     workspace.selectPage(row.sectionId, page.id)
-                    persistWorkspacePreferences()
+                    persistWorkspacePreferences(saveLibrary = false)
                     renderPages()
                 }
             }
@@ -3478,7 +3508,7 @@ class MainActivity : Activity() {
                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 view.parent?.requestDisallowInterceptTouchEvent(true)
                 view.isPressed = false
-                onLongPress()
+                if (!pageLoads.isLoading) onLongPress()
             }
         view.setOnTouchListener { _, event ->
             if (event.isFromSource(InputDevice.SOURCE_MOUSE)) return@setOnTouchListener false
@@ -3945,6 +3975,7 @@ class MainActivity : Activity() {
     private fun removePageRuntimeAndData(notebookId: String, pageId: String) {
         val key = PageSessionKey(notebookId, pageId)
         pageSessions.remove(key)
+        pageViewports.forget(key)
         if (boundPageKey == key) boundPageKey = null
         pageContentRepository.deletePageData(notebookId, pageId)
     }
@@ -3981,28 +4012,114 @@ class MainActivity : Activity() {
     private fun bindSelectedPageContent() {
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty)
         val nextKey = pageId?.let { PageSessionKey(workspace.id, it) }
+        if (pageLoads.isLoading && pageLoads.loadingKey == nextKey) return
+        if (nextKey == boundPageKey && pageLoads.isLoading) {
+            pageLoads.cancel()
+            showPageLoading(false)
+        }
         if (nextKey != boundPageKey) {
             if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
             cancelStylusAction()
-            saveBoundPageSession()
-            if(contentDirty) return
-            boundPageKey = nextKey
-            val session = nextKey?.let(pageSessions::get)
-            val document = try { nextKey?.let { pageContentRepository.load(it.notebookId,it.pageId) } } catch(error: Exception) {
-                boundPageKey=null;Toast.makeText(this,error.message,Toast.LENGTH_LONG).show();null
+            textInputLayer.endEditing()
+            // Snapshot the outgoing page now; the worker waits for durable writes before reading.
+            // UI navigation must never wait for file sync or decode a dense imported page.
+            saveBoundPageSession(flush = false)
+            if(contentDirty || pageWrites.hasFailures) {
+                if (restoreBoundPageSelection()) mainHandler.post { renderWorkspace() }
+                return
             }
-            val restoredShapes = document?.strokes?.let { array -> (0 until array.length()).map { SharedStrokeCodec.decode(array.getJSONObject(it),::displayColor,SharedSceneOrder.visible(document.sharedSource,array.getJSONObject(it))) } }.orEmpty()
-            restoringPageInk = true
-            try {
-                dryInkView.replaceStrokes(session?.strokes ?: restoredShapes)
-                tagLayer.replaceTags(session?.tags ?: document?.let(SharedContentCodec::tags).orEmpty())
-                textInputLayer.replaceEditors(session?.textBoxes ?: document?.let(SharedContentCodec::text).orEmpty())
-                insertContentLayer.bind(null);insertContentLayer.bind(document)
-                configureSharedScene(document)
-            } finally { restoringPageInk = false;contentDirty=false }
-            if (session == null) viewport.reset() else viewport.restore(session.viewport)
-            applyViewportToLayers()
+            val session = nextKey?.let(pageSessions::get)
+            if (nextKey == null) {
+                pageLoads.cancel()
+                installLoadedPage(null, null, LoadedCanvasPage(null, emptyList()))
+                return
+            }
+            val repository = pageContentRepository
+            val dark = workspace.selectedPage()?.viewSettings?.darkBackground ?: true
+            showPageLoading(true)
+            pageLoads.load(nextKey, prepare = { isCurrent ->
+                pageWrites.flush()
+                check(isCurrent()) { "Page request superseded" }
+                val document = repository.load(nextKey.notebookId, nextKey.pageId)
+                val restored = session?.strokes ?: (0 until document.strokes.length()).map { index ->
+                    check(isCurrent()) { "Page request superseded" }
+                    val source = document.strokes.getJSONObject(index)
+                    SharedStrokeCodec.decode(source, { color ->
+                        if (color == InkPalette.BLACK && dark) Color.rgb(239,239,239) else color.argb
+                    }, SharedSceneOrder.visible(document.sharedSource, source))
+                }
+                restored.forEach { check(isCurrent()) { "Page request superseded" }; SharedStrokeCodec.path(it) }
+                LoadedCanvasPage(document, restored)
+            }) { result ->
+                if (isFinishing || isDestroyed || repository !== pageContentRepository) return@load
+                if (workspace.id != nextKey.notebookId || workspace.selectedPageId != nextKey.pageId) {
+                    bindSelectedPageContent()
+                    return@load
+                }
+                runCatching { installLoadedPage(nextKey, session, result.getOrThrow()) }.onFailure { error ->
+                    android.util.Log.e("MojianSync", "Page load failed", error)
+                    Toast.makeText(this, "页面暂时无法读取：${error.message}", Toast.LENGTH_LONG).show()
+                    if (restoreBoundPageSelection()) {
+                        showPageLoading(false)
+                        renderWorkspace()
+                    } else showPageLoading(true, "页面暂时无法读取，请重新选择页面")
+                }
+            }
+            return
         }
+        finishPageBinding()
+    }
+
+    private fun installLoadedPage(key: PageSessionKey?, session: PageSessionState?, loaded: LoadedCanvasPage) {
+        val tags = session?.tags ?: loaded.document?.let(SharedContentCodec::tags).orEmpty()
+        val text = session?.textBoxes ?: loaded.document?.let(SharedContentCodec::text).orEmpty()
+        boundPageKey = key
+        restoringPageInk = true
+        try {
+            dryInkView.replaceStrokes(loaded.strokes)
+            tagLayer.replaceTags(tags)
+            textInputLayer.replaceEditors(text)
+            insertContentLayer.bind(null)
+            insertContentLayer.bind(loaded.document)
+            configureSharedScene(loaded.document)
+        } finally { restoringPageInk = false; contentDirty = false }
+        val remembered = key?.let(pageViewports::recall) ?: session?.viewport
+        if (remembered == null) viewport.reset() else viewport.restore(remembered)
+        showPageLoading(false)
+        applySelectedPageAppearance()
+        applyViewportToLayers()
+        finishPageBinding()
+    }
+
+    private fun restoreBoundPageSelection(): Boolean {
+        val key = boundPageKey ?: return false
+        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == key.notebookId } ?: return false
+        val section = notebook.allSections().firstOrNull { node -> node.pages.any { it.id == key.pageId } } ?: return false
+        notebookLibrary.selectNotebook(notebook.id)
+        notebook.selectPage(section.id, key.pageId)
+        return true
+    }
+
+    private fun showPageLoading(loading: Boolean, message: String = "正在打开页面…") {
+        pageLoadingOverlay?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        pageLoadingOverlay = null
+        if (!loading) return
+        MojianCommandMenu.dismissActive()
+        pageLoadingOverlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(NAV_BACKGROUND)
+            isClickable = true
+            addView(android.widget.ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(32), dp(32)))
+            addView(TextView(this@MainActivity).apply {
+                text = message
+                setTextColor(TEXT_SECONDARY)
+                setPadding(0, dp(12), 0, 0)
+            })
+        }.also { paperContainer.addView(it, FrameLayout.LayoutParams(MATCH, MATCH)) }
+    }
+
+    private fun finishPageBinding() {
         expandPageIfNeeded()
         if (splitViewState.enabled) splitViewState.updateFocused(notebookLibrary.captureLocation())
         if(!contentDirty && !pageWrites.hasFailures) {
@@ -5151,6 +5268,7 @@ class MainActivity : Activity() {
     }
 
     private fun observeCanvasPointerEvent(event: MotionEvent): Boolean {
+        if (pageLoads.isLoading) return true
         rememberStylusCanvasPoint(event)
         val fingerCount = (0 until event.pointerCount).count { event.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
         val endsTouchSequence =
@@ -5544,6 +5662,7 @@ class MainActivity : Activity() {
     }
 
     private fun applySelectedPageAppearance() {
+        if (pageLoadingOverlay != null) return
         if (!::pageSurfaceBackground.isInitialized) return
         val page = workspace.selectedPage()
         val settings = page?.viewSettings ?: PageViewSettings()
@@ -6978,7 +7097,7 @@ class MainActivity : Activity() {
             Toast.makeText(this, "链接的笔记已不存在", Toast.LENGTH_SHORT).show()
             return
         }
-        persistWorkspacePreferences()
+        persistWorkspacePreferences(saveLibrary = false)
         renderWorkspace()
     }
 

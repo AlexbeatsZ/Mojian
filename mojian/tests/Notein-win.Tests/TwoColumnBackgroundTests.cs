@@ -93,7 +93,7 @@ public class TwoColumnBackgroundTests
     [Theory]
     [InlineData(CanvasBackgroundFormat.RuledTwoColumnStandard, 32d)]
     [InlineData(CanvasBackgroundFormat.RuledTwoColumnNarrow, 24d)]
-    [InlineData(CanvasBackgroundFormat.RuledTwoColumnWide, 43.2d)]
+    [InlineData(CanvasBackgroundFormat.RuledTwoColumnWide, 48d)]
     public void RealCanvasCentersOnPaperAndKeepsGapAndPrintPolicy(CanvasBackgroundFormat format, double spacing)
     {
         OnSta(() =>

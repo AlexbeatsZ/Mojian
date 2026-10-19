@@ -19,7 +19,7 @@ import java.util.WeakHashMap
 /** Exact source outlines remain separate from AndroidX authoring meshes. */
 object SharedStrokeCodec {
     private data class Record(val json: JSONObject, var path: Path? = null, val visible: Boolean = true)
-    private val records = WeakHashMap<Stroke,Record>()
+    private val records = java.util.Collections.synchronizedMap(WeakHashMap<Stroke,Record>())
     private val unit = SharedWorkspaceCodec.TO_SHARED.toFloat()
 
     fun metadata(stroke: Stroke): JSONObject? = records[stroke]?.json

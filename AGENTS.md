@@ -9,17 +9,22 @@
 
 # Current State
 
-- On 2026-10-19 Windows/Android page backgrounds were unified through the packaged
-  `shared/page-backgrounds.json` in canonical 96-DPI document units. Rules/grid/dots now share
-  spacing, widths, dark/light colors, margin/divider positions and the 32-unit A4 gap; Android
-  no longer multiplies paper geometry by device density. Saved enums/ink are unchanged. Read
-  `docs/design/page-backgrounds.md` before changing background geometry or output. Windows
-  background/output tests pass 19/19 and all 28 format/theme renders pass. The full suite is
-  170/172; both failures also reproduce on unchanged `6dfa270` (caret focus and cached-pan
-  pixel threshold). Android 173 tests, APK/native-test APK and lint (0 errors, 131 warnings)
-  pass. The sole Windows EXE was updated/reopened in the same five-notebook workspace, with
-  the active page retaining 216 strokes / 5,663 points. Current APK is refreshed; no ADB or mDNS
-  endpoint was available, so tablet installation and native density/device acceptance are pending.
+- On 2026-10-19 the user corrected the background direction: Android must match the original
+  Windows appearance before `0033213`. The shared JSON now preserves desktop spacing 24/32/48,
+  uniform #2D3238 in both themes, no red margin/major rules, dot radius 1, desktop live line width
+  and the 32-unit A4 gap. All 28 rendered format/theme images match an independent build of the
+  original desktop reference exactly; background/output checks pass 19/19. Read
+  `docs/design/page-backgrounds.md`. Android's delayed return to 100% was traced to sync refresh
+  clearing session viewports; view memory is now independent of content invalidation and refresh
+  waits for contact/navigation end. Page switching now submits outgoing saves without a UI flush,
+  prepares JSON/native strokes on a worker and rejects stale completions; a loading surface keeps
+  navigation available. Read `docs/design/android-page-navigation.md`. Android 179 tests,
+  APK/native-test APK and lint (0 errors, 131 warnings) pass. Original physical eraser/freeze
+  acceptance is still pending. The corrected sole Windows EXE is refreshed/reopened; the same
+  five-notebook workspace and active page retain 216 strokes / 5,663 points. The current APK is
+  refreshed. The tablet Tailscale node 100.90.114.103 was reverified online
+  through a peer relay; no ADB service was found at 5555 or 30000-65535, so the current wireless
+  connection port was requested.
 
 - On 2026-10-19 Ctrl drag-copy was extended to pen/highlighter contact dragging an existing
   selection on Windows and Android. Pen movement shares the original-position preview, updates
@@ -325,10 +330,11 @@
 
 # Active Work
 
-- [ ] Install the 2026-10-19 unified-background APK in place when a current tablet ADB endpoint is
-  available; confirm the same saved page's ruled/grid geometry on both devices. Android native
-  density/viewport/output regression APK is built, not executed. Two unrelated Windows full-suite
-  failures also reproduce on unchanged `6dfa270`; see `docs/log/2026-10.md`.
+- [ ] Install the corrected desktop-reference / Android navigation APK using a freshly verified
+  tablet wireless ADB connection. Check delayed refresh after erasing, page-switch responsiveness
+  and shared-page backgrounds on the tablet. Native Android regression APK is built, not executed.
+  Use `C:\Users\Meta\.agents\mojian--android-navigation\AGENTS.md` for cross-device continuation.
+  Previous full Windows suite has two unchanged baseline failures (caret-focus/cache pixels).
 
 - [x] Complete OMEN/phone/tablet canonical note storage, durable ordinary Android content,
   idle incoming refresh, stale-write rejection and disposable native round-trip acceptance.
@@ -557,6 +563,7 @@
 
 # Docs Index
 
+- `docs/design/android-page-navigation.md`: Android background loading, save barriers and viewport retention.
 - `docs/design/page-backgrounds.md`: shared rule/grid/dot geometry, palettes, A4 gaps and output.
 - `docs/design/cross-platform-parity.md`: Windows/Android scope and delivery gate.
 - `docs/design/workspace-ui.md`: navigation, tools, background choices and page settings.

@@ -23,8 +23,13 @@ public class BackgroundPatternTests
         Assert.Equal(9, (int)CanvasBackgroundFormat.DotsWide);
         Assert.Equal(13, (int)CanvasBackgroundFormat.RuledClean);
         Assert.Equal(32, A4PageLayout.PageGap);
-        Assert.Equal(16, catalog.For(CanvasBackgroundFormat.GridDense).Spacing);
-        Assert.Equal(43.2, catalog.For(CanvasBackgroundFormat.RuledWide).Spacing);
+        Assert.Equal(24, catalog.For(CanvasBackgroundFormat.GridDense).Spacing);
+        Assert.Equal(48, catalog.For(CanvasBackgroundFormat.RuledWide).Spacing);
+        Assert.Equal("#2D3238", catalog.Dark.Line);
+        Assert.Equal(catalog.Dark, catalog.Light);
+        Assert.Equal(1, catalog.DotRadius);
+        Assert.Equal(0, catalog.MajorEvery);
+        Assert.True(catalog.ScreenLineWidth);
     }
 
     [Fact]
@@ -68,7 +73,7 @@ public class BackgroundPatternTests
                     using var stream = File.Create(Path.Combine(output, $"{theme}-{format}.png")); encoder.Save(stream);
                 }
                 var ruled = BackgroundPatternCatalog.Shared.For(CanvasBackgroundFormat.RuledStandard);
-                Assert.True(ruled.Margin);
+                Assert.False(ruled.Margin);
                 Assert.False(BackgroundPatternCatalog.Shared.For(CanvasBackgroundFormat.RuledClean).Margin);
             }
             catch (Exception error) { failure = error; }

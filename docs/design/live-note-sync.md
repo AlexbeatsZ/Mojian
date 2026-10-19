@@ -57,6 +57,10 @@ an active editor's reload. Finish editing and wait for Syncthing before handing 
 to another device. This is file-based synchronization with one active writer, not a concurrent
 operation-merge protocol. Syncthing conflict copies and ten simple file versions are retained.
 
+Android reload now retains local page zoom/translation independently of invalidated content sessions,
+defers through active canvas contact and prepares page JSON/native strokes on a worker. Read
+`android-page-navigation.md` before changing binding, refresh eligibility or save/load ordering.
+
 ## Required acceptance
 
 - Both devices contain the complete OMEN library with the same IDs, page count and assets.

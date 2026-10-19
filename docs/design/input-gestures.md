@@ -205,6 +205,8 @@ Windows 的 `NoteCanvas` 同样在一个直接操作状态机内处理鼠标左�
 - AndroidX Ink 的 wet/dry transform 必须保持一致；
 - 缩放锚是双指 centroid 或鼠标指针，而不是任意固定屏幕点；
 - 触控笔书写期间不得改变 Viewport。
+- Android 橡皮接触、直接拖动及导航手势中不执行共享内容重载；自动同步刷新也必须保留当前缩放和平移。
+  Android 页面绑定、异步加载与重载的状态边界见 `android-page-navigation.md`。
 
 Windows 与 Android 的缩放范围统一为 50–6400%（0.5–64 倍）。预设保留原有档位并增加 1600%、3200%、6400%；菜单、按钮、滚轮、拖动和捏合缩放都使用 `ViewportState` 的同一范围，视图恢复也不得截回旧的 800% 上限。到达上限后双指仍可平移并立即缩小，锚点保持规则不变。范围和预设由各端 `ViewportState` 集中定义，Android 的快捷动作目录复用同一预设。这是墨笺产品范围，不是对 Notein 私有运行时的推断。
 

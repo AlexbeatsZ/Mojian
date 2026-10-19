@@ -8,9 +8,15 @@ import android.widget.FrameLayout
 class CanvasInputHost(context: Context) : FrameLayout(context) {
     var onPointerEventObserved: ((MotionEvent) -> Boolean)? = null
     private val childStream = ChildStreamHandoff()
+    var hasActivePointerSequence = false
+        private set
+
+    fun cancelPointerSequence() { hasActivePointerSequence = false }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         val masked = event.actionMasked
+        if (masked == MotionEvent.ACTION_DOWN) hasActivePointerSequence = true
+        if (masked == MotionEvent.ACTION_UP || masked == MotionEvent.ACTION_CANCEL) hasActivePointerSequence = false
         val claimed = onPointerEventObserved?.invoke(event) == true
         val cancelChildren =
             childStream.observe(

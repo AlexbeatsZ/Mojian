@@ -186,7 +186,7 @@ restores the prior drawing/insert-space state on release instead of running a hi
 The insert space and background format group directly to the right of panorama hand provides:
 - an insert-space exception supporting finger or stylus drag displacement and downward content
   shifting. Stylus and mouse hover show the dashed insertion preview, but mouse-left keeps direct-content routing;
-- a background format tool that opens a flyout menu offering ruled lines (narrow, standard with margin line, wide, clean), grid styles (standard, dense, wide), dot matrix styles (standard, dense, wide), and blank page formatting, instantly updating and persisting on the underlying canvas.
+- a background format tool that opens a flyout menu offering ruled lines (narrow, standard, wide, clean), grid styles (standard, dense, wide), dot matrix styles (standard, dense, wide), and blank page formatting, instantly updating and persisting on the underlying canvas. The user's original Windows background appearance is the cross-platform reference; do not add mobile-only margin/major lines to it.
 
 The dark canvas displays logical black ink as light ink, mirroring the readability behavior of a
 dark note theme. A future persisted document must store the logical palette value and theme-map it

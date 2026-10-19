@@ -14,6 +14,7 @@ public sealed class BackgroundPatternCatalog
 {
     public double BaseSpacing { get; init; }
     public double LineWidth { get; init; }
+    public bool ScreenLineWidth { get; init; }
     public double MarginWidth { get; init; }
     public double MarginX { get; init; }
     public double DotRadius { get; init; }

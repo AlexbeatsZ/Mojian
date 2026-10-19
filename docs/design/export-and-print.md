@@ -8,7 +8,8 @@ print adapters. Rendering color is owned by `OutputAppearance`; object/container
 
 Background-pattern geometry/colors and the shared 32-unit A4 gap are defined in
 `page-backgrounds.md` and packaged from `shared/page-backgrounds.json`. Live canvas and output use
-the same document-space widths and spacing; dark-page printing selects the light pattern palette.
+the same document-space spacing; output widths are physical while live rules keep the original
+desktop screen width. Both pattern palettes currently use the original uniform desktop gray.
 
 ## User-visible behavior
 

@@ -40,8 +40,11 @@ class BackgroundPatternIntegrationTest {
                         view.setViewport(matrix)
                         bitmap.eraseColor(settings.pageColor.displayArgb(dark))
                         view.renderBackground(Canvas(bitmap), listOf(RectF(0f, 0f, settings.documentWidth!!, settings.documentHeight!!)), matrix)
-                        val live = IntArray(pixels.size).also { bitmap.getPixels(it, 0, 320, 0, 0, 320, 240) }
-                        assertArrayEquals(pixels, live)
+                        // Desktop live rules have a fixed screen width; export widths are physical.
+                        if (format != CanvasBackgroundFormat.BLANK) {
+                            val step = kotlin.math.round(format.pattern.spacing).toInt()
+                            assertNotEquals(bitmap.getPixel(7, 7), bitmap.getPixel(step, step))
+                        }
                         view.renderBackgroundForExport(Canvas(bitmap), matrix, OutputAppearance(printing = true, hideBackgroundFormat = true))
                         assertEquals(bitmap.getPixel(7, 7), bitmap.getPixel(64, 32))
                     } finally { bitmap.recycle() }
