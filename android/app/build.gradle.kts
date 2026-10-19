@@ -5,6 +5,7 @@ plugins {
 
 android {
     namespace = "com.meta.inklab"
+    sourceSets.getByName("main").resources.srcDir("../../shared")
     compileSdk = 36
 
     defaultConfig {

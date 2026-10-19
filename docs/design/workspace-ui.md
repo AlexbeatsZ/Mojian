@@ -11,6 +11,10 @@ drawing-tool flyout. Read `shapes-and-straightening.md` before modifying this to
 Boundless paper dimensions, content-only right/down growth, and smart-cropped PDF output follow
 `docs/design/boundless-canvas.md`; viewport browsing never expands this paper mode.
 
+Page rules, grids, dots, margin/divider lines, colors and A4 gaps use the single packaged
+`shared/page-backgrounds.json` contract in 96-DPI document units. Read `page-backgrounds.md` before
+changing these; Android display density must never change their position relative to ink.
+
 ## Product intent
 
 Turn the handwriting lab into a usable tablet workspace whose hierarchy can later be shared with a

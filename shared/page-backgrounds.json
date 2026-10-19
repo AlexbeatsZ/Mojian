@@ -1,0 +1,27 @@
+{
+  "baseSpacing": 32,
+  "lineWidth": 0.8,
+  "marginWidth": 1.2,
+  "marginX": 64,
+  "dotRadius": 1.25,
+  "majorEvery": 4,
+  "a4PageGap": 32,
+  "dark": { "line": "#1F303A", "major": "#2A424F", "dot": "#344C5C", "margin": "#A03232" },
+  "light": { "line": "#DCE5EB", "major": "#C6D7E0", "dot": "#BECFD8", "margin": "#D57D7D" },
+  "formats": [
+    { "id": "BLANK", "windowsName": "Blank", "label": "空白 (无底纹)", "category": "BLANK", "spacing": 32 },
+    { "id": "RULE_STANDARD", "windowsName": "RuledStandard", "label": "标准横线 (带边线)", "category": "RULE_LINES", "spacing": 32, "margin": true },
+    { "id": "RULE_NARROW", "windowsName": "RuledNarrow", "label": "窄行距横线", "category": "RULE_LINES", "spacing": 24, "margin": true },
+    { "id": "RULE_WIDE", "windowsName": "RuledWide", "label": "宽行距横线", "category": "RULE_LINES", "spacing": 43.2, "margin": true },
+    { "id": "RULE_CLEAN", "windowsName": "RuledClean", "label": "纯横线 (无边线)", "category": "RULE_LINES", "spacing": 32 },
+    { "id": "RULE_TWO_COLUMN_STANDARD", "windowsName": "RuledTwoColumnStandard", "label": "标准双栏横线", "category": "RULE_LINES", "spacing": 32, "margin": true, "divider": true },
+    { "id": "RULE_TWO_COLUMN_NARROW", "windowsName": "RuledTwoColumnNarrow", "label": "窄双栏横线", "category": "RULE_LINES", "spacing": 24, "margin": true, "divider": true },
+    { "id": "RULE_TWO_COLUMN_WIDE", "windowsName": "RuledTwoColumnWide", "label": "宽双栏横线", "category": "RULE_LINES", "spacing": 43.2, "margin": true, "divider": true },
+    { "id": "GRID_STANDARD", "windowsName": "GridStandard", "label": "标准方格", "category": "GRID", "spacing": 32 },
+    { "id": "GRID_DENSE", "windowsName": "GridDense", "label": "密集方格", "category": "GRID", "spacing": 16 },
+    { "id": "GRID_WIDE", "windowsName": "GridWide", "label": "宽距方格", "category": "GRID", "spacing": 48 },
+    { "id": "DOTS_STANDARD", "windowsName": "DotsStandard", "label": "标准点阵", "category": "DOTS", "spacing": 32 },
+    { "id": "DOTS_DENSE", "windowsName": "DotsDense", "label": "密集点阵", "category": "DOTS", "spacing": 16 },
+    { "id": "DOTS_WIDE", "windowsName": "DotsWide", "label": "宽距点阵", "category": "DOTS", "spacing": 48 }
+  ]
+}

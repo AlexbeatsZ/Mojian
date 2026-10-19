@@ -6,6 +6,10 @@ Read before changing the Export/Print surfaces, scope resolution, output page ge
 print adapters. Rendering color is owned by `OutputAppearance`; object/container details remain in
 `insert-and-export.md`.
 
+Background-pattern geometry/colors and the shared 32-unit A4 gap are defined in
+`page-backgrounds.md` and packaged from `shared/page-backgrounds.json`. Live canvas and output use
+the same document-space widths and spacing; dark-page printing selects the light pattern palette.
+
 ## User-visible behavior
 
 - Export has Page, Section and Notebook scopes. Section includes its descendants; Notebook follows

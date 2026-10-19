@@ -29,7 +29,7 @@ enum class PaperSize(
 }
 
 object A4PageLayout {
-    const val PAGE_GAP_MM = 12f
+    val PAGE_GAP_MM: Float = BackgroundPatternCatalog.a4PageGap * 25.4f / 96f
     const val AUTO_GROW_MARGIN_MM = 24f
 
     val pageWidth: Float = 210f * DOCUMENT_UNITS_PER_MM
@@ -37,9 +37,9 @@ object A4PageLayout {
     val pageGap: Float = PAGE_GAP_MM * DOCUMENT_UNITS_PER_MM
     val autoGrowMargin: Float = AUTO_GROW_MARGIN_MM * DOCUMENT_UNITS_PER_MM
 
-    fun pageTop(index: Int): Float = index.coerceAtLeast(0) * (pageHeight + pageGap)
+    fun pageTop(index: Int, height: Float = pageHeight): Float = index.coerceAtLeast(0) * (height + pageGap)
 
-    fun pageBottom(index: Int): Float = pageTop(index) + pageHeight
+    fun pageBottom(index: Int, height: Float = pageHeight): Float = pageTop(index, height) + height
 
     fun requiredPageCount(
         contentBottom: Float,
@@ -50,10 +50,11 @@ object A4PageLayout {
         contentBottom: Float,
         visibleDocumentBottom: Float,
         currentPageCount: Int,
+        height: Float = pageHeight,
     ): Int {
         var count = currentPageCount.coerceAtLeast(1)
         val observedBottom = maxOf(contentBottom, visibleDocumentBottom)
-        while (observedBottom >= pageBottom(count - 1) - autoGrowMargin) count++
+        while (observedBottom >= pageBottom(count - 1, height) - autoGrowMargin) count++
         return count
     }
 }

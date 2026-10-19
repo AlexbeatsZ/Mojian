@@ -32,24 +32,7 @@ public enum CanvasBackgroundFormat
 
 public static class CanvasBackgroundFormatExtensions
 {
-    public static string GetLabel(this CanvasBackgroundFormat value) => value switch
-    {
-        CanvasBackgroundFormat.Blank => "空白",
-        CanvasBackgroundFormat.RuledNarrow => "窄横线",
-        CanvasBackgroundFormat.RuledStandard => "标准横线",
-        CanvasBackgroundFormat.RuledWide => "宽横线",
-        CanvasBackgroundFormat.RuledClean => "纯横线",
-        CanvasBackgroundFormat.RuledTwoColumnStandard => "标准双栏横线",
-        CanvasBackgroundFormat.RuledTwoColumnNarrow => "窄双栏横线",
-        CanvasBackgroundFormat.RuledTwoColumnWide => "宽双栏横线",
-        CanvasBackgroundFormat.GridDense => "密集网格",
-        CanvasBackgroundFormat.GridStandard => "标准网格",
-        CanvasBackgroundFormat.GridWide => "宽网格",
-        CanvasBackgroundFormat.DotsDense => "密集点阵",
-        CanvasBackgroundFormat.DotsStandard => "标准点阵",
-        CanvasBackgroundFormat.DotsWide => "宽点阵",
-        _ => "空白",
-    };
+    public static string GetLabel(this CanvasBackgroundFormat value) => BackgroundPatternCatalog.Shared.For(value).Label;
 }
 
 public sealed class PageAppearance

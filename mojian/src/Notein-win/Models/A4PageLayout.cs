@@ -2,7 +2,7 @@ namespace Notein_win.Models;
 
 public static class A4PageLayout
 {
-    public const double PageGap = 32d;
+    public static double PageGap => BackgroundPatternCatalog.Shared.A4PageGap;
     public const double AutoGrowMargin = 24d * 96d / 25.4d;
 
     public static int RequiredSheetCount(

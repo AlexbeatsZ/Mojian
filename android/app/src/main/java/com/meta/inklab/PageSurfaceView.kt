@@ -100,7 +100,9 @@ class PageSurfaceView(
         output: RectF,
     ) {
         if (settings.paperSize == PaperSize.A4) {
-            output.set(0f, A4PageLayout.pageTop(index), A4PageLayout.pageWidth, A4PageLayout.pageBottom(index))
+            val width = settings.documentWidth ?: A4PageLayout.pageWidth
+            val height = settings.documentHeight ?: A4PageLayout.pageHeight
+            output.set(0f, A4PageLayout.pageTop(index, height), width, A4PageLayout.pageBottom(index, height))
         } else {
             output.set(
                 0f,

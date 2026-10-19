@@ -5599,6 +5599,7 @@ class MainActivity : Activity() {
                 contentBottom,
                 visibleDocumentBottom,
                 targetPage.viewSettings.a4PageCount,
+                targetPage.viewSettings.documentHeight ?: A4PageLayout.pageHeight,
             )
         if (required == targetPage.viewSettings.a4PageCount) return false
         targetPage.viewSettings.a4PageCount = required

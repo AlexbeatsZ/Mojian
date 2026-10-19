@@ -2884,7 +2884,7 @@ public partial class NoteCanvas : UserControl
             var rect = new Rect(0, 0, Appearance.InfiniteWidth, Appearance.InfiniteHeight);
             dc.DrawRectangle(paper, _outputAppearance != null ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
             var visiblePaper = Rect.Intersect(rect, extent);
-            if (!visiblePaper.IsEmpty) DrawPattern(dc, visiblePaper, lightExport);
+            if (!visiblePaper.IsEmpty) DrawPattern(dc, visiblePaper, lightExport, rect);
         }
         else
         {
@@ -2897,7 +2897,7 @@ public partial class NoteCanvas : UserControl
                 var rect = new Rect(0, i * (Appearance.Height + A4PageLayout.PageGap), Appearance.Width, Appearance.Height);
                 if (!rect.IntersectsWith(extent)) continue;
                 dc.DrawRectangle(paper, _outputAppearance != null ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
-                DrawPattern(dc, rect, lightExport);
+                DrawPattern(dc, Rect.Intersect(rect, extent), lightExport, rect);
             }
         }
         if (Appearance.ShowTitle && !string.IsNullOrWhiteSpace(PageTitle) && !(lightExport && Appearance.PaperKind == PaperKind.Infinite))
@@ -2906,44 +2906,49 @@ public partial class NoteCanvas : UserControl
         }
     }
 
-    private void DrawPattern(DrawingContext dc, Rect bounds, bool lightExport)
+    private void DrawPattern(DrawingContext dc, Rect bounds, bool lightExport, Rect paperBounds)
     {
         if (_outputAppearance is { Printing: true, HideBackgroundFormat: true }) return;
         if (Appearance.Background == CanvasBackgroundFormat.Blank) return;
-        var spacing = Appearance.Background switch
-        {
-            CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledTwoColumnNarrow or CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.DotsDense => 24d,
-            CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.RuledTwoColumnWide or CanvasBackgroundFormat.GridWide or CanvasBackgroundFormat.DotsWide => 48d,
-            _ => 32d,
-        };
-        var color = Color.FromRgb(45, 50, 56);
-        var pen = new Pen(new SolidColorBrush(color), _outputAppearance != null ? 0.8 : 0.8 / Math.Max(0.1, _viewport.Scale));
-        var isTwoColumn = Appearance.Background is CanvasBackgroundFormat.RuledTwoColumnStandard or CanvasBackgroundFormat.RuledTwoColumnNarrow or CanvasBackgroundFormat.RuledTwoColumnWide;
-        var isRuled = isTwoColumn || Appearance.Background is CanvasBackgroundFormat.RuledNarrow or CanvasBackgroundFormat.RuledStandard or CanvasBackgroundFormat.RuledWide or CanvasBackgroundFormat.RuledClean;
-        var isGrid = Appearance.Background is CanvasBackgroundFormat.GridDense or CanvasBackgroundFormat.GridStandard or CanvasBackgroundFormat.GridWide;
-        var isDots = Appearance.Background is CanvasBackgroundFormat.DotsDense or CanvasBackgroundFormat.DotsStandard or CanvasBackgroundFormat.DotsWide;
-        if (isRuled || isGrid)
-        {
-            for (var y = Math.Ceiling(bounds.Top / spacing) * spacing; y <= bounds.Bottom; y += spacing) dc.DrawLine(pen, new Point(bounds.Left, y), new Point(bounds.Right, y));
-        }
-        if (isTwoColumn)
+        var spec = BackgroundPatternCatalog.Shared;
+        var pattern = spec.For(Appearance.Background);
+        var palette = lightExport || Appearance.Theme == PageTheme.Light ? spec.Light : spec.Dark;
+        var spacing = pattern.Spacing;
+        var pen = new Pen(ParseBrush(palette.Line, Brushes.Transparent), spec.LineWidth);
+        var majorPen = new Pen(ParseBrush(palette.Major, Brushes.Transparent), spec.LineWidth);
+        var isRuled = pattern.Category == "RULE_LINES";
+        var isGrid = pattern.Category == "GRID";
+        var isDots = pattern.Category == "DOTS";
+        Pen LinePen(int index) => index % spec.MajorEvery == 0 ? majorPen : pen;
+        dc.PushClip(new RectangleGeometry(paperBounds));
+        if (pattern.Divider)
         {
             // Use the paper center, never the culled viewport or export crop center.
-            var centerX = (Appearance.PaperKind == PaperKind.Infinite ? Appearance.InfiniteWidth : Appearance.Width) / 2;
+            var centerX = paperBounds.Left + paperBounds.Width / 2;
             if (centerX >= bounds.Left && centerX <= bounds.Right)
-                dc.DrawLine(pen, new Point(centerX, bounds.Top), new Point(centerX, bounds.Bottom));
+                dc.DrawLine(majorPen, new Point(centerX, bounds.Top), new Point(centerX, bounds.Bottom));
         }
+        if (pattern.Margin && spec.MarginX >= bounds.Left && spec.MarginX <= bounds.Right)
+            dc.DrawLine(new Pen(ParseBrush(palette.Margin, Brushes.Transparent), spec.MarginWidth),
+                new Point(spec.MarginX, bounds.Top), new Point(spec.MarginX, bounds.Bottom));
         if (isGrid)
         {
-            for (var x = Math.Ceiling(bounds.Left / spacing) * spacing; x <= bounds.Right; x += spacing) dc.DrawLine(pen, new Point(x, bounds.Top), new Point(x, bounds.Bottom));
+            for (var column = (int)Math.Ceiling(bounds.Left / spacing); column * spacing <= bounds.Right; column++)
+                dc.DrawLine(LinePen(column), new Point(column * spacing, bounds.Top), new Point(column * spacing, bounds.Bottom));
+        }
+        if (isRuled || isGrid)
+        {
+            for (var row = (int)Math.Ceiling(bounds.Top / spacing); row * spacing <= bounds.Bottom; row++)
+                dc.DrawLine(LinePen(row), new Point(bounds.Left, row * spacing), new Point(bounds.Right, row * spacing));
         }
         if (isDots)
         {
-            var brush = new SolidColorBrush(color);
-            for (var y = Math.Ceiling(bounds.Top / spacing) * spacing; y <= bounds.Bottom; y += spacing)
-            for (var x = Math.Ceiling(bounds.Left / spacing) * spacing; x <= bounds.Right; x += spacing)
-                dc.DrawEllipse(brush, null, new Point(x, y), 1, 1);
+            var brush = ParseBrush(palette.Dot, Brushes.Transparent);
+            for (var column = (int)Math.Ceiling(bounds.Left / spacing); column * spacing <= bounds.Right; column++)
+            for (var row = (int)Math.Ceiling(bounds.Top / spacing); row * spacing <= bounds.Bottom; row++)
+                dc.DrawEllipse(brush, null, new Point(column * spacing, row * spacing), spec.DotRadius, spec.DotRadius);
         }
+        dc.Pop();
     }
 
     private void DrawObjects(DrawingContext dc, bool lightExport, Rect extent, IEnumerable<PageObject>? items = null)

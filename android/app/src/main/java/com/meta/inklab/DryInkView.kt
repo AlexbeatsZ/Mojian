@@ -20,36 +20,6 @@ import java.util.IdentityHashMap
 import kotlin.math.floor
 import kotlin.math.sqrt
 
-enum class BackgroundCategory(val label: String) {
-    BLANK("空白"),
-    RULE_LINES("横线"),
-    GRID("网格"),
-    DOTS("点阵"),
-}
-
-enum class CanvasBackgroundFormat(
-    val label: String,
-    val category: BackgroundCategory,
-    val stepMultiplier: Float = 1f,
-    val showMarginLine: Boolean = false,
-    val showColumnDivider: Boolean = false,
-) {
-    BLANK("空白 (无底纹)", BackgroundCategory.BLANK),
-    RULE_STANDARD("标准横线 (带边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = true),
-    RULE_NARROW("窄行距横线", BackgroundCategory.RULE_LINES, 0.75f, showMarginLine = true),
-    RULE_WIDE("宽行距横线", BackgroundCategory.RULE_LINES, 1.35f, showMarginLine = true),
-    RULE_CLEAN("纯横线 (无边线)", BackgroundCategory.RULE_LINES, 1f, showMarginLine = false),
-    RULE_TWO_COLUMN_STANDARD("标准双栏横线", BackgroundCategory.RULE_LINES, 1f, showMarginLine = true, showColumnDivider = true),
-    RULE_TWO_COLUMN_NARROW("窄双栏横线", BackgroundCategory.RULE_LINES, 0.75f, showMarginLine = true, showColumnDivider = true),
-    RULE_TWO_COLUMN_WIDE("宽双栏横线", BackgroundCategory.RULE_LINES, 1.35f, showMarginLine = true, showColumnDivider = true),
-    GRID_STANDARD("标准方格", BackgroundCategory.GRID, 1f),
-    GRID_DENSE("密集方格", BackgroundCategory.GRID, 0.5f),
-    GRID_WIDE("宽距方格", BackgroundCategory.GRID, 1.5f),
-    DOTS_STANDARD("标准点阵", BackgroundCategory.DOTS, 1f),
-    DOTS_DENSE("密集点阵", BackgroundCategory.DOTS, 0.5f),
-    DOTS_WIDE("宽距点阵", BackgroundCategory.DOTS, 1.5f),
-}
-
 class DryInkView(context: Context) : View(context) {
     var sceneRenderer: ((Canvas,List<Stroke>,(Stroke)->Unit)->Unit)? = null
     var onContentChanged: (() -> Unit)? = null
@@ -65,8 +35,12 @@ class DryInkView(context: Context) : View(context) {
     private var outputPageTitle = ""
 
     fun configureOutputPage(settings: PageViewSettings, title: String = "") {
-        outputPageSettings = settings.copy()
+        updateBackgroundPage(settings)
         outputPageTitle = title
+    }
+
+    internal fun updateBackgroundPage(settings: PageViewSettings) {
+        outputPageSettings = settings.copy()
         backgroundFormat = settings.backgroundFormat
     }
 
@@ -80,32 +54,11 @@ class DryInkView(context: Context) : View(context) {
     private val lassoPoints = mutableListOf<DocumentPoint>()
     private var lassoShape = LassoShape.FREEFORM
     private var lassoStartPoint: DocumentPoint? = null
-    private val thinGridPaint = Paint().apply { color = Color.rgb(31, 48, 58) }
-    private val majorGridPaint = Paint().apply { color = Color.rgb(42, 66, 79) }
-    private val dotPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(52, 76, 92)
-            style = Paint.Style.FILL
-        }
-    private val marginLinePaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(160, 50, 50)
-            strokeWidth = 1.2f * resources.displayMetrics.density
-        }
-    private val exportThinGridPaint = Paint().apply { color = Color.rgb(220, 229, 235) }
-    private val exportMajorGridPaint = Paint().apply { color = Color.rgb(198, 215, 224) }
-    private val exportDotPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(190, 207, 216)
-            style = Paint.Style.FILL
-        }
-    private val exportMarginLinePaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(213, 125, 125)
-            strokeWidth = 1.2f * resources.displayMetrics.density
-        }
+    private val thinGridPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val majorGridPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val marginLinePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
-    private val gridStep = 28f * resources.displayMetrics.density
     private val documentToView = Matrix()
     private val eraserCursorPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -254,6 +207,7 @@ class DryInkView(context: Context) : View(context) {
 
     fun setDarkBackground(enabled: Boolean) {
         outputPageSettings.darkBackground = enabled
+        invalidateBackground()
         val replacements = LinkedHashMap<Stroke, Stroke>()
         for (stroke in strokes) {
             val color = stroke.brush.colorIntArgb
@@ -510,7 +464,7 @@ class DryInkView(context: Context) : View(context) {
             canvas.drawRect(pageRect, Paint().apply { color = paperColor })
             canvas.save()
             canvas.clipRect(pageRect)
-            if (!output.printing || !output.hideBackgroundFormat) drawGrid(canvas, exportTheme = false, visible = clip)
+            if (!output.printing || !output.hideBackgroundFormat) drawGrid(canvas, exportTheme = printingDark, visible = clip)
             canvas.restore()
         }
         if (settings.pageTitleVisible && outputPageTitle.isNotBlank() && settings.paperSize != PaperSize.BOUNDLESS) {
@@ -533,9 +487,11 @@ class DryInkView(context: Context) : View(context) {
         canvas.save()
         canvas.concat(documentMatrix)
         documentClips.forEach { clip ->
+            val visible = visibleDocumentBounds()
+            if (!visible.intersect(clip)) return@forEach
             canvas.save()
             canvas.clipRect(clip)
-            drawGrid(canvas, exportTheme = false)
+            drawGrid(canvas, visible = visible)
             canvas.restore()
         }
         canvas.restore()
@@ -700,7 +656,17 @@ class DryInkView(context: Context) : View(context) {
 
     private fun drawGrid(canvas: Canvas, exportTheme: Boolean = false, visible: RectF = visibleDocumentBounds()) {
         if (backgroundFormat.category == BackgroundCategory.BLANK) return
-        val step = gridStep * backgroundFormat.stepMultiplier
+        val spec = BackgroundPatternCatalog
+        val step = spec.documentUnits(backgroundFormat.pattern.spacing)
+        val palette = if (exportTheme || !outputPageSettings.darkBackground) spec.light else spec.dark
+        thinGridPaint.color = palette.line
+        majorGridPaint.color = palette.major
+        dotPaint.color = palette.dot
+        marginLinePaint.color = palette.margin
+        thinGridPaint.strokeWidth = spec.documentUnits(spec.lineWidth)
+        majorGridPaint.strokeWidth = thinGridPaint.strokeWidth
+        marginLinePaint.strokeWidth = spec.documentUnits(spec.marginWidth)
+        fun linePaint(index: Int) = if (index % spec.majorEvery == 0) majorGridPaint else thinGridPaint
 
         when (backgroundFormat.category) {
             BackgroundCategory.BLANK -> return
@@ -710,60 +676,48 @@ class DryInkView(context: Context) : View(context) {
                     // Paper width is independent of the visible viewport/export crop.
                     val centerX = (outputPageSettings.documentWidth ?: A4PageLayout.pageWidth) * 0.5f
                     if (visible.left <= centerX && visible.right >= centerX) {
-                        canvas.drawLine(centerX, visible.top, centerX, visible.bottom, if (exportTheme) exportMajorGridPaint else majorGridPaint)
+                        canvas.drawLine(centerX, visible.top, centerX, visible.bottom, majorGridPaint)
                     }
                 }
                 if (backgroundFormat.showMarginLine) {
-                    val marginX = 64f * resources.displayMetrics.density
+                    val marginX = spec.documentUnits(spec.marginX)
                     if (visible.left <= marginX && visible.right >= marginX) {
-                        canvas.drawLine(marginX, visible.top, marginX, visible.bottom, if (exportTheme) exportMarginLinePaint else marginLinePaint)
+                        canvas.drawLine(marginX, visible.top, marginX, visible.bottom, marginLinePaint)
                     }
                 }
-                var y = floor(visible.top / step) * step
-                while (y <= visible.bottom) {
-                    val index = floor(y / step).toInt()
-                    val paint =
-                        if (exportTheme) {
-                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
-                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
-                    canvas.drawLine(visible.left, y, visible.right, y, paint)
-                    y += step
+                var index = kotlin.math.ceil(visible.top / step).toInt()
+                while (index * step <= visible.bottom) {
+                    val y = index * step
+                    canvas.drawLine(visible.left, y, visible.right, y, linePaint(index))
+                    index++
                 }
             }
 
             BackgroundCategory.GRID -> {
-                var x = floor(visible.left / step) * step
-                while (x <= visible.right) {
-                    val index = floor(x / step).toInt()
-                    val paint =
-                        if (exportTheme) {
-                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
-                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
-                    canvas.drawLine(x, visible.top, x, visible.bottom, paint)
-                    x += step
+                var column = kotlin.math.ceil(visible.left / step).toInt()
+                while (column * step <= visible.right) {
+                    val x = column * step
+                    canvas.drawLine(x, visible.top, x, visible.bottom, linePaint(column))
+                    column++
                 }
-                var y = floor(visible.top / step) * step
-                while (y <= visible.bottom) {
-                    val index = floor(y / step).toInt()
-                    val paint =
-                        if (exportTheme) {
-                            if (index % 4 == 0) exportMajorGridPaint else exportThinGridPaint
-                        } else if (index % 4 == 0) majorGridPaint else thinGridPaint
-                    canvas.drawLine(visible.left, y, visible.right, y, paint)
-                    y += step
+                var row = kotlin.math.ceil(visible.top / step).toInt()
+                while (row * step <= visible.bottom) {
+                    val y = row * step
+                    canvas.drawLine(visible.left, y, visible.right, y, linePaint(row))
+                    row++
                 }
             }
 
             BackgroundCategory.DOTS -> {
-                val dotRadius = 1.25f * resources.displayMetrics.density
-                var x = floor(visible.left / step) * step
-                while (x <= visible.right) {
-                    var y = floor(visible.top / step) * step
-                    while (y <= visible.bottom) {
-                        canvas.drawCircle(x, y, dotRadius, if (exportTheme) exportDotPaint else dotPaint)
-                        y += step
+                val dotRadius = spec.documentUnits(spec.dotRadius)
+                var column = kotlin.math.ceil(visible.left / step).toInt()
+                while (column * step <= visible.right) {
+                    var row = kotlin.math.ceil(visible.top / step).toInt()
+                    while (row * step <= visible.bottom) {
+                        canvas.drawCircle(column * step, row * step, dotRadius, dotPaint)
+                        row++
                     }
-                    x += step
+                    column++
                 }
             }
         }

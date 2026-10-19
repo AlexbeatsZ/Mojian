@@ -9,6 +9,18 @@
 
 # Current State
 
+- On 2026-10-19 Windows/Android page backgrounds were unified through the packaged
+  `shared/page-backgrounds.json` in canonical 96-DPI document units. Rules/grid/dots now share
+  spacing, widths, dark/light colors, margin/divider positions and the 32-unit A4 gap; Android
+  no longer multiplies paper geometry by device density. Saved enums/ink are unchanged. Read
+  `docs/design/page-backgrounds.md` before changing background geometry or output. Windows
+  background/output tests pass 19/19 and all 28 format/theme renders pass. The full suite is
+  170/172; both failures also reproduce on unchanged `6dfa270` (caret focus and cached-pan
+  pixel threshold). Android 173 tests, APK/native-test APK and lint (0 errors, 131 warnings)
+  pass. The sole Windows EXE was updated/reopened in the same five-notebook workspace, with
+  the active page retaining 216 strokes / 5,663 points. Current APK is refreshed; no ADB or mDNS
+  endpoint was available, so tablet installation and native density/device acceptance are pending.
+
 - On 2026-10-19 Ctrl drag-copy was extended to pen/highlighter contact dragging an existing
   selection on Windows and Android. Pen movement shares the original-position preview, updates
   while Ctrl changes without pointer motion, and commits from the modifier state at pen lift.
@@ -313,6 +325,11 @@
 
 # Active Work
 
+- [ ] Install the 2026-10-19 unified-background APK in place when a current tablet ADB endpoint is
+  available; confirm the same saved page's ruled/grid geometry on both devices. Android native
+  density/viewport/output regression APK is built, not executed. Two unrelated Windows full-suite
+  failures also reproduce on unchanged `6dfa270`; see `docs/log/2026-10.md`.
+
 - [x] Complete OMEN/phone/tablet canonical note storage, durable ordinary Android content,
   idle incoming refresh, stale-write rejection and disposable native round-trip acceptance.
   Deliver the unified version including the separately verified color/navigation fixes.
@@ -476,6 +493,10 @@
 
 # Durable Lessons
 
+- Shared file coordinates alone do not guarantee shared paper: background spacing, widths, dot
+  radii and page gaps must use the same physical document units. Android display density is not
+  a document-unit conversion. The packaged JSON contract prevents these constants drifting again.
+
 - An Android `PopupWindow` is a panel; a second popup anchored to a view inside it crashes with
   `BadTokenException`. Anchor nested menus to the root menu's host window, and stop the root's
   outside-touch dismissal from firing on taps inside the nested menu. Unit tests cannot catch this:
@@ -533,3 +554,22 @@
   actual pixels (app-drawn buttons are client content, so `PrintWindow` with a DPI-aware capturing
   process sees them). Snap Layouts require returning `HTMAXBUTTON` for the app-drawn maximize button.
 - Keep semantic canvas layers in distinct top-level views: paper and rule/grid/dot patterns below inserted content, then dry/wet ink, text, and tags above it. Combining page patterns with dry ink forces the patterns above otherwise opaque images even when the pattern is drawn first inside that view.
+
+# Docs Index
+
+- `docs/design/page-backgrounds.md`: shared rule/grid/dot geometry, palettes, A4 gaps and output.
+- `docs/design/cross-platform-parity.md`: Windows/Android scope and delivery gate.
+- `docs/design/workspace-ui.md`: navigation, tools, background choices and page settings.
+- `docs/design/windows-desktop.md`: native Windows shell and desktop persistence.
+- `docs/design/input-gestures.md`: pen/touch/mouse input and selection.
+- `docs/design/insert-and-export.md`: inserted objects, clipboard and vector output.
+- `docs/design/export-and-print.md`: output scopes, pagination and print policy.
+- `docs/design/boundless-canvas.md`: monotonic paper growth and content crop.
+- `docs/design/live-note-sync.md`: canonical shared folder and device synchronization.
+- `docs/design/sync-architecture.md`: original interoperability/storage investigation.
+- `docs/design/data-migration.md`: Notein/OneNote source migration.
+- `docs/design/writing-performance-and-durability.md`: rendering, autosave and recovery.
+- `docs/design/stored-ink-appearance.md`: imported/new ink color and opacity.
+- `docs/design/shapes-and-straightening.md`: shapes and hold recognition.
+- `docs/design/handwriting-engine.md`: pressure ink and clean-room brush engine.
+- `docs/design/ios-client.md`: native Apple client and parity gaps.

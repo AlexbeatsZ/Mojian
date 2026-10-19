@@ -4,6 +4,7 @@ Last verified: 2026-10-02
 
 修改无界页面的尺寸、自动拓展、底纹绘制或 PDF 裁剪前，先阅读本文件。
 本契约同时适用于 Windows `PaperKind.Infinite` 与 Android `PaperSize.BOUNDLESS`。
+底纹参数与坐标换算遵循 `docs/design/page-backgrounds.md`，不得以设备 density 决定间距或点半径。
 
 ## 页面范围
 

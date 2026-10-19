@@ -46,6 +46,9 @@ Parity means the same product outcome, not identical operating-system APIs. For 
 
 ## Completion gate
 
+Page backgrounds now have one executable contract, `shared/page-backgrounds.json`, packaged by
+both clients. See `page-backgrounds.md`; fixed screen/density-based spacing must not return.
+
 For a shared product change:
 
 1. Trace the corresponding Windows and Android routes before editing.

@@ -24,6 +24,7 @@ class CanvasBackgroundLayer(
 
     fun updatePage(settings: PageViewSettings) {
         pageSettings = settings
+        inkView.updateBackgroundPage(settings)
         invalidate()
     }
 
@@ -35,9 +36,11 @@ class CanvasBackgroundLayer(
                 listOf(RectF(0f, 0f, pageSettings.boundlessDocumentWidth, pageSettings.boundlessDocumentHeight)),
             )
             PaperSize.A4 -> {
+                val width = pageSettings.documentWidth ?: A4PageLayout.pageWidth
+                val height = pageSettings.documentHeight ?: A4PageLayout.pageHeight
                 val pages =
                     List(pageSettings.a4PageCount.coerceAtLeast(1)) { index ->
-                        RectF(0f, A4PageLayout.pageTop(index), A4PageLayout.pageWidth, A4PageLayout.pageBottom(index))
+                        RectF(0f, A4PageLayout.pageTop(index, height), width, A4PageLayout.pageBottom(index, height))
                     }
                 inkView.renderBackground(canvas, pages)
             }
