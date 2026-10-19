@@ -2915,6 +2915,13 @@ class MainActivity : Activity() {
                 selectionBoundsProvider = ::combinedSelectionBounds
                 onBeginMove = ::beginSelectionMove
                 onFinishMove = ::finishSelectionMove
+                blankContentHitTest = { x, y ->
+                    val point = viewport.viewToDocument(x, y)
+                    !textInputLayer.hasEditorAt(x, y) && !tagLayer.hasTagAtView(x, y) &&
+                        !insertContentLayer.hasSelectableAtView(x, y) &&
+                        !dryInkView.hasStrokeAtDocument(point.x, point.y, dp(12).toFloat() / viewport.scale)
+                }
+                onPenDismissSelection = { clearContentSelection(); renderToolDetails() }
                 drawMoveOriginal = { canvas ->
                     moveOriginal?.bounds?.let { bounds ->
                         canvas.save()
@@ -4676,6 +4683,7 @@ class MainActivity : Activity() {
     }
 
     private fun cancelStylusAction() {
+        if (::selectionOverlay.isInitialized) selectionOverlay.cancelStylusSelectionMove()
         val wasErasing = pressureEraser.isErasing
         cancelShapeGesture()
         mainHandler.removeCallbacks(activatePressureEraser)
@@ -5168,13 +5176,16 @@ class MainActivity : Activity() {
         if (handleXiaomiSecondaryStylusEvent(event)) return true
         val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
         if (mouseIndex != null && handleCanvasMousePointerEvent(event, event.getX(mouseIndex), event.getY(mouseIndex))) return true
-        if (toolShelf.selected.kind == DrawingToolKind.SHAPE && !singleFingerPanEnabled && !insertSpaceModeEnabled) {
-            val overChrome = event.actionMasked == MotionEvent.ACTION_DOWN && listOf(floatingToolbox, fullPagePaneButtons, fullPageToggle.parent as View).any { control ->
-                if (!control.isShown) false else {
-                    val rect = android.graphics.Rect(); control.getGlobalVisibleRect(rect)
-                    rect.contains(event.rawX.toInt(), event.rawY.toInt())
-                }
+        val overChrome = event.actionMasked == MotionEvent.ACTION_DOWN && listOf(floatingToolbox, fullPagePaneButtons, fullPageToggle.parent as View).any { control ->
+            if (!control.isShown) false else {
+                val rect = android.graphics.Rect(); control.getGlobalVisibleRect(rect)
+                rect.contains(event.rawX.toInt(), event.rawY.toInt())
             }
+        }
+        val penCanMoveSelection = !overChrome && !singleFingerPanEnabled && !insertSpaceModeEnabled &&
+            (toolShelf.selected.kind == DrawingToolKind.PEN || toolShelf.selected.kind == DrawingToolKind.HIGHLIGHTER)
+        if (selectionOverlay.handleStylusSelection(event, penCanMoveSelection)) return true
+        if (toolShelf.selected.kind == DrawingToolKind.SHAPE && !singleFingerPanEnabled && !insertSpaceModeEnabled) {
             if (!overChrome && handleShapePointer(event)) return true
         }
         if (insertSpaceModeEnabled && fingerCount == 1) return handleInsertSpaceGesture(event)

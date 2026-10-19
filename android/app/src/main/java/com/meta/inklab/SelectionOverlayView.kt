@@ -49,6 +49,47 @@ class SelectionOverlayView(
     var drawMoveOriginal: ((Canvas) -> Unit)? = null
     private val moveCopy = SelectionMoveCopy()
     private var controlDown = false
+    private var stylusMovePointerId: Int? = null
+    private var stylusDeselectOnly = false
+    var blankContentHitTest: ((Float, Float) -> Boolean)? = null
+    var onPenDismissSelection: (() -> Unit)? = null
+
+    /** The host claims pen selection moves before an editor or wet-ink child consumes DOWN. */
+    fun handleStylusSelection(event: MotionEvent, canStart: Boolean): Boolean {
+        if (stylusMovePointerId == null) {
+            if (!canStart || !selectionEnabled || event.actionMasked != MotionEvent.ACTION_DOWN ||
+                event.getToolType(event.actionIndex) != MotionEvent.TOOL_TYPE_STYLUS) return false
+            val point = viewport.viewToDocument(event.x, event.y)
+            val bounds = selectionBoundsProvider?.invoke()?.let { RectF(it).apply {
+                inset(-dp(8f) / viewport.scale, -dp(8f) / viewport.scale)
+            } } ?: return false
+            if (!bounds.contains(point.x, point.y)) {
+                if (blankContentHitTest?.invoke(event.x, event.y) != true) return false
+                // The complete contact only deselects. It cannot turn into ink after DOWN.
+                stylusDeselectOnly = true
+            }
+            stylusMovePointerId = event.getPointerId(event.actionIndex)
+            if (stylusDeselectOnly) onPenDismissSelection?.invoke()
+        }
+        val pointerIndex = event.findPointerIndex(stylusMovePointerId ?: return false)
+        if (pointerIndex < 0 || event.getToolType(pointerIndex) != MotionEvent.TOOL_TYPE_STYLUS) return false
+        if (event.pointerCount > 1) {
+            cancelDirectGesture()
+            return true
+        }
+        if (stylusDeselectOnly) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                stylusMovePointerId = null
+                stylusDeselectOnly = false
+            }
+            return true
+        }
+        return onTouchEvent(event)
+    }
+
+    fun cancelStylusSelectionMove() {
+        if (stylusMovePointerId != null) cancelDirectGesture()
+    }
 
     fun updateControlKey(control: Boolean) {
         controlDown = control
@@ -127,22 +168,24 @@ class SelectionOverlayView(
         val toolType = event.getToolType(event.actionIndex.coerceIn(0, event.pointerCount - 1))
         val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
         val isMouse = toolType == MotionEvent.TOOL_TYPE_MOUSE
-        if (!isFinger && !isMouse) return false
-        if (isMouse) updateControlKey(event.metaState and android.view.KeyEvent.META_CTRL_ON != 0)
+        val isPenMove = toolType == MotionEvent.TOOL_TYPE_STYLUS &&
+            stylusMovePointerId == event.getPointerId(event.actionIndex)
+        if (!isFinger && !isMouse && !isPenMove) return false
+        if (isMouse || isPenMove) updateControlKey(event.metaState and android.view.KeyEvent.META_CTRL_ON != 0)
         if (isFinger && !fingerDirectInputEnabled) return false
         if (isMouse && event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
             if (editingTextHitTest?.invoke(event.x, event.y) == true) return false
             return onDirectLongPress?.invoke(event.x, event.y) == true
         }
-        val primaryPointer = isFinger || event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 || gestureMode != GestureMode.NONE
+        val primaryPointer = isFinger || isPenMove || event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 || gestureMode != GestureMode.NONE
         if (!primaryPointer) return false
-        longPressDetector.onTouchEvent(event)
+        if (!isPenMove) longPressDetector.onTouchEvent(event)
         val point = viewport.viewToDocument(event.x, event.y).let { DocumentPoint(it.x, it.y) }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val bounds = selectionBoundsProvider?.invoke()
                 val displayBounds = bounds?.let { RectF(it).apply { inset(-dp(8f) / viewport.scale, -dp(8f) / viewport.scale) } }
-                val handleIndex = if (bounds != null && displayBounds != null) {
+                val handleIndex = if (!isPenMove && bounds != null && displayBounds != null) {
                     SelectionGeometry.hitSelectionHandle(point, bounds.documentRect(), displayBounds.documentRect(), dp(if (isFinger) 24f else 12f) / viewport.scale)
                         .takeIf { it >= 0 }
                 } else null
@@ -150,8 +193,8 @@ class SelectionOverlayView(
                     DirectInputPolicy.pointerDownIntent(
                         pointerCount = 1,
                         primaryDirectPointer = primaryPointer,
-                        editingTextHit = editingTextHitTest?.invoke(event.x, event.y) == true,
-                        selectedContentHit = selectedContentHitTest?.invoke(event.x, event.y) == true,
+                        editingTextHit = !isPenMove && editingTextHitTest?.invoke(event.x, event.y) == true,
+                        selectedContentHit = isPenMove || selectedContentHitTest?.invoke(event.x, event.y) == true,
                         selectionHandleHit = handleIndex != null,
                         // The whole visible frame moves the selection, including gaps between strokes.
                         selectionFrameHit = displayBounds?.contains(point.x, point.y) == true,
@@ -226,12 +269,13 @@ class SelectionOverlayView(
                         onFinishMove?.invoke(moveCopy.finish(commit = true))
                     }
                     if (gestureMode == GestureMode.MARQUEE) onFinishMarquee?.invoke() else onTransformFinished?.invoke()
-                } else {
+                } else if (!isPenMove) {
                     performClick()
                     onDirectTap?.invoke(event.x, event.y, isFinger)
                 }
                 gestureMode = GestureMode.NONE
                 gestureCommitted = false
+                stylusMovePointerId = null
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
@@ -277,6 +321,8 @@ class SelectionOverlayView(
         else if (mode != GestureMode.NONE && gestureCommitted) onTransformFinished?.invoke()
         gestureMode = GestureMode.NONE
         gestureCommitted = false
+        stylusMovePointerId = null
+        stylusDeselectOnly = false
         longPressTriggered = false
         parent?.requestDisallowInterceptTouchEvent(false)
     }

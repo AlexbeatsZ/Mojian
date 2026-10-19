@@ -298,7 +298,7 @@ public partial class NoteCanvas : UserControl
     private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
-        if (canvas._activeStroke != null) canvas.CancelStylusToolActionForNavigation();
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -307,7 +307,7 @@ public partial class NoteCanvas : UserControl
     private static void OnSelectedToolChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
-        if (canvas._activeStroke != null) canvas.CancelStylusToolActionForNavigation();
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -1027,7 +1027,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnLostStylusCapture(StylusEventArgs e)
     {
         base.OnLostStylusCapture(e);
-        if (!_finishingPointer && _activeStroke != null) CancelStylusToolActionForNavigation();
+        if (!_finishingPointer && (_activeStroke != null || _stylusSelectionTransformActive || _stylusDeselectOnly)) CancelStylusToolActionForNavigation();
         if (_rightLassoArmed && _rightLassoUsesStylus) CancelRightButtonLasso();
     }
 
@@ -1036,7 +1036,7 @@ public partial class NoteCanvas : UserControl
         base.OnLostKeyboardFocus(e);
         if (_directGestureMode != DirectGestureMode.None &&
             (e.NewFocus is not DependencyObject focused || !IsAncestorOf(focused))) CancelDirectPointer();
-        if (_activeStroke != null) CancelStylusToolActionForNavigation();
+        if (_activeStroke != null || _stylusSelectionTransformActive || _stylusDeselectOnly) CancelStylusToolActionForNavigation();
         CancelRightButtonLasso();
     }
 
@@ -1241,6 +1241,11 @@ public partial class NoteCanvas : UserControl
             InvalidateVisual();
             e.Handled = true;
             return;
+        }
+        if (_stylusSelectionTransformActive)
+        {
+            var finalPoint = e.GetPosition(this);
+            ContinuePointer(finalPoint, 0, 0, 0, isStylus: true);
         }
         EndPointer(isStylus: true);
         _stylusActive = false;
@@ -1783,6 +1788,8 @@ public partial class NoteCanvas : UserControl
             return;
         }
 
+        if (BeginPenBlankDeselection(viewPoint, isStylus, forceErase, tool.Kind)) return;
+
         switch (forceErase ? DrawingToolKind.Eraser : tool.Kind)
         {
             case DrawingToolKind.Shape:
@@ -1907,6 +1914,7 @@ public partial class NoteCanvas : UserControl
 
     private void ContinuePointer(Point viewPoint, float pressure, float tiltX, float tiltY, bool isStylus)
     {
+        if (_stylusDeselectOnly) return;
         if (Document == null) return;
         var docPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
         if (_isDragZooming)
@@ -1940,6 +1948,11 @@ public partial class NoteCanvas : UserControl
                 var dy = docPoint.Y - _transformPoint.Y;
                 if (Math.Abs(dx) > 0.001 || Math.Abs(dy) > 0.001)
                 {
+                    if (_stylusSelectionTransformActive)
+                    {
+                        if (!_stylusSelectionTransformMoved) BeginSelectionMove();
+                        UpdateSelectionMoveCopy(Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+                    }
                     TranslateSelection(dx, dy);
                     if (_stylusSelectionTransformActive) _stylusSelectionTransformMoved = true;
                 }
@@ -1997,6 +2010,7 @@ public partial class NoteCanvas : UserControl
 
     private void EndPointer(bool isStylus)
     {
+        _stylusDeselectOnly = false;
         _pressureTravel.Reset();
         if (Document == null) return;
         _straightenTimer.Stop();
@@ -2026,6 +2040,11 @@ public partial class NoteCanvas : UserControl
         }
         if (_isTransforming)
         {
+            if (_stylusSelectionTransformActive)
+            {
+                UpdateSelectionMoveCopy(Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+                FinishSelectionMove(commit: _stylusSelectionTransformMoved);
+            }
             _isTransforming = false;
             RecomputeSelectionBounds();
             if (_stylusSelectionTransformActive && !_stylusSelectionTransformMoved)
@@ -2096,6 +2115,8 @@ public partial class NoteCanvas : UserControl
 
     private void CancelStylusToolActionForNavigation()
     {
+        _stylusDeselectOnly = false;
+        if (_stylusSelectionTransformActive) FinishSelectionMove(commit: false);
         _pressureTravel.Reset();
         _straightenTimer.Stop(); _straighten.Cancel(); _explicitShape = false;
         var restoreDocument =
@@ -3473,6 +3494,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        _stylusDeselectOnly = false;
         FinishSelectionMove(commit: false);
         _pasteAnchor = null;
         _pressureTravel.Reset();

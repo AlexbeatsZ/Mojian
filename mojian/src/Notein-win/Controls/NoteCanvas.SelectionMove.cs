@@ -12,6 +12,19 @@ public partial class NoteCanvas
     private SelectionClipboardData? _moveOriginal;
     private DrawingGroup? _moveOriginalDrawing;
     private bool _moveCopyVisible;
+    private bool _stylusDeselectOnly;
+
+    private bool BeginPenBlankDeselection(Point viewPoint, bool isStylus, bool forceErase, DrawingToolKind kind)
+    {
+        if (!isStylus || forceErase || kind is not (DrawingToolKind.Pen or DrawingToolKind.Highlighter) ||
+            !HasContentSelection() || HitText(viewPoint) != null || HitTag(viewPoint) != null ||
+            HitStroke(viewPoint) != null || HitObject(viewPoint) is { IsPageBackground: false }) return false;
+        ClearSelection();
+        _stylusDeselectOnly = true;
+        CaptureInput(isStylus: true);
+        InvalidateVisual();
+        return true;
+    }
 
     // Remember the caret before ribbon/menu focus removes an empty temporary editor.
     private void RememberPasteAnchor(TextBox editor, TextItem item)
@@ -66,6 +79,11 @@ public partial class NoteCanvas
     {
         base.OnPreviewKeyDown(e);
         if (e.Key is Key.LeftCtrl or Key.RightCtrl) UpdateSelectionMoveCopy(true);
+        if (e.Key == Key.Escape && _stylusSelectionTransformActive)
+        {
+            CancelStylusToolActionForNavigation();
+            e.Handled = true;
+        }
         if (e.Key == Key.Escape && _directGestureMode != DirectGestureMode.None)
         {
             CancelDirectPointer();

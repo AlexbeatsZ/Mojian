@@ -9,6 +9,16 @@
 
 # Current State
 
+- On 2026-10-19 Ctrl drag-copy was extended to pen/highlighter contact dragging an existing
+  selection on Windows and Android. Pen movement shares the original-position preview, updates
+  while Ctrl changes without pointer motion, and commits from the modifier state at pen lift.
+  Cancellation/capture loss/tool or page switching discard the preview; no-move contact does
+  not duplicate. With a selection, pen contact on blank paper now only clears the selection and
+  consumes that complete contact without ink/Undo; the next contact resumes writing. Per the user,
+  this follow-up received build/package/install only, without tests or UI/device acceptance.
+  The Windows Release EXE is refreshed/reopened; the current APK was installed in place on the
+  connected Xiaomi Pad 6 Pro and its MainActivity was launched (ADB install: Success).
+
 - On 2026-10-19 both clients' native-selection and system-image paste were changed from source
   coordinates plus a fixed offset to the destination caret in document coordinates. The caret
   survives ribbon/menu focus and is cleared on page change. Direct selection movement now previews
