@@ -11,7 +11,10 @@ Last verified: 2026-10-19
   `viewport.reset()`，丢失当前缩放和平移。工具切换本身没有 reset。
 - 用户另报告切换笔记偶尔卡死。原 `bindSelectedPageContent` 在主线程 flush 保存队列、
   读取/解析整页 JSON、构造全部 native strokes；大导入页会占住界面。
-  在未取得实机 ANR 堆栈前，不将所有“卡死”都归因为这一条路径。
+- 2026-10-19 实机另复现内存崩溃：打开 59.6 MB 导入页后切到另一张 60.2 MB 页，
+  512 MiB Java heap 耗尽，主线程在 Choreographer 分配 16 bytes 时抛出 OutOfMemoryError。
+  异步读取本身不足以限制峰值；读取新页时不能继续持有旧页的 JSON、native strokes 和 paths。
+  仍不将所有用户报告的“卡死”都归因为同一条路径。
 
 ## 视图与内容生命周期
 
@@ -31,12 +34,26 @@ Last verified: 2026-10-19
   防止在目标页标题下修改尚未卸载的旧页。失败显示错误并优先回到仍有效的旧页，不创建可编辑空页。
 - 完成结果回到 UI 时还要核对 Activity 生命周期、repository 身份和目标 notebook/page 身份。
   View、文本编辑器和图层绑定仍只在 UI 线程执行。
-- 本机页面选择只保存导航偏好，不在每次点页面时争用共享 library/page 文件写锁。
+- 保存屏障成功后，工作线程先投递 UI 释放旧页的图层、scene 闭包和 session 内容引用，
+  完成后才分配新页 JSON。仅保留旧页身份和独立 viewport；读取失败时重新读取旧页。
+  保存失败时尚未释放旧内容，继续保留待恢复数据；不能先释放再等待保存。
+- 普通切换不复用 session 的 native stroke 列表，避免排队的完成闭包继续钉住旧页。
+  `SharedStrokeCodec` 使用带 ReferenceQueue 消费线程的弱身份缓存；WeakHashMap 仅在下次
+  get/put 时清理已回收键，其值仍可能在下一页 JSON 解析期间保留整个旧笔迹图。
+  仍被剪贴板等持有的 stroke 会继续保留其轮廓和 metadata。
+- 本机页面选择和栏位开合只保存导航偏好，不在每次点页面时争用共享 library/page 文件写锁。
 - `SharedStrokeCodec` 的全局弱引用记录表必须支持工作线程创建笔迹与 UI 使用旧笔迹并发。
 
 ## 验证边界
 
 `LatestPageLoaderTest` 检查后台准备/UI 投递边界、快速切换的过期结果、取消、读取失败，
 以及保存屏障阻塞时导航调用仍返回。`PageViewportMemoryTest` 检查重绑保留缩放和平移、
-页面独立和删除范围。179 项 Android 单元测试、APK、lint 和 native-test APK 构建通过。
-这些结果不等于物理橡皮或原报告卡死的设备验收；实机检查需另记录。
+页面独立和删除范围。180 项 Android 单元测试、APK、lint 和 native-test APK 构建通过
+（0 lint errors / 132 warnings）。弱身份缓存另检查相等对象的独立 metadata 和替换。
+
+2026-10-19 在 Xiaomi Pad 6 Pro / Android 15 上覆盖安装后，连续打开上述两张密集页成功，
+进程保持同一 PID；此前步骤曾实际触发 OOM。加载期间可操作导航栏，快速切去大页并返回
+原页后保持 400%，较早的结果未覆盖原页。选择橡皮并在 400% 下重新加载共享库后，倍率保持。
+首次检查前后原页 383 strokes / 9,572 points 的笔迹内容逐项相同；后续电脑继续编辑并同步到平板，
+因此不能把整个验收时段的最终文件与起始文件当作静态不变的数据比较。
+未对真实笔迹执行擦除，物理笔接触后的用户验收仍需区分；native-test APK 只构建，未安装执行。

@@ -18,13 +18,18 @@
   clearing session viewports; view memory is now independent of content invalidation and refresh
   waits for contact/navigation end. Page switching now submits outgoing saves without a UI flush,
   prepares JSON/native strokes on a worker and rejects stale completions; a loading surface keeps
-  navigation available. Read `docs/design/android-page-navigation.md`. Android 179 tests,
-  APK/native-test APK and lint (0 errors, 131 warnings) pass. Original physical eraser/freeze
-  acceptance is still pending. The corrected sole Windows EXE is refreshed/reopened; the same
+  navigation available. Device acceptance additionally reproduced a 512 MiB Java-heap OOM when
+  switching between 59.6/60.2 MB imported pages. The worker now releases the saved outgoing page's
+  layers/session graph before parsing another; source metadata uses an actively drained weak
+  identity cache. Both dense pages and rapid return now succeed in one tablet process. Read
+  `docs/design/android-page-navigation.md`. Android 180 tests, APK/native-test APK and lint
+  (0 errors, 132 warnings) pass. Eraser-selected 400% survives shared reload and page return;
+  no real ink was erased, so physical pen acceptance remains pending. The corrected sole Windows
+  EXE is refreshed/reopened; the same
   five-notebook workspace and active page retain 216 strokes / 5,663 points. The current APK is
-  refreshed. The tablet Tailscale node 100.90.114.103 was reverified online
-  through a peer relay; no ADB service was found at 5555 or 30000-65535, so the current wireless
-  connection port was requested.
+  refreshed and installed in place on Xiaomi Pad 6 Pro (install: Success). The user supplied
+  Tailscale port 43257; that route timed out, but a freshly verified LAN transport at
+  192.168.31.227:5555 recovered and was used. This is session-only connection information.
 
 - On 2026-10-19 Ctrl drag-copy was extended to pen/highlighter contact dragging an existing
   selection on Windows and Android. Pen movement shares the original-position preview, updates
@@ -330,9 +335,9 @@
 
 # Active Work
 
-- [ ] Install the corrected desktop-reference / Android navigation APK using a freshly verified
-  tablet wireless ADB connection. Check delayed refresh after erasing, page-switch responsiveness
-  and shared-page backgrounds on the tablet. Native Android regression APK is built, not executed.
+- [ ] Collect physical eraser-after-contact acceptance after the corrected desktop-reference /
+  Android navigation APK delivery. Native UI shared reload at 400%, dense-page switching and
+  rapid return passed on the tablet; native Android regression APK is built, not executed.
   Use `C:\Users\Meta\.agents\mojian--android-navigation\AGENTS.md` for cross-device continuation.
   Previous full Windows suite has two unchanged baseline failures (caret-focus/cache pixels).
 

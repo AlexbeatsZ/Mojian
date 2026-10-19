@@ -215,6 +215,7 @@ class MainActivity : Activity() {
     private var notebookLibrary = NotebookLibrary.sample()
     private val splitViewState = SplitViewState()
     private val pageSessions = mutableMapOf<PageSessionKey, PageSessionState>()
+    private var pageLoadFallbackKey: PageSessionKey? = null
     private val pageViewports = PageViewportMemory<PageSessionKey>()
     private val pageLoadExecutor = Executors.newSingleThreadExecutor()
     private val pageLoads = LatestPageLoader<PageSessionKey, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
@@ -4028,7 +4029,9 @@ class MainActivity : Activity() {
                 if (restoreBoundPageSelection()) mainHandler.post { renderWorkspace() }
                 return
             }
-            val session = nextKey?.let(pageSessions::get)
+            // Durable content is reloaded by the worker. Do not pin the previous native graph
+            // in a queued completion while another dense page is being parsed.
+            val session = nextKey?.let(pageSessions::get)?.copy(strokes = null, tags = null, textBoxes = null)
             if (nextKey == null) {
                 pageLoads.cancel()
                 installLoadedPage(null, null, LoadedCanvasPage(null, emptyList()))
@@ -4039,6 +4042,15 @@ class MainActivity : Activity() {
             showPageLoading(true)
             pageLoads.load(nextKey, prepare = { isCurrent ->
                 pageWrites.flush()
+                check(isCurrent()) { "Page request superseded" }
+                val released = java.util.concurrent.CompletableFuture<Unit>()
+                mainHandler.post {
+                    try {
+                        if (isCurrent() && !isFinishing && !isDestroyed) releasePageBeforeRead()
+                        released.complete(Unit)
+                    } catch (error: Exception) { released.completeExceptionally(error) }
+                }
+                released.get()
                 check(isCurrent()) { "Page request superseded" }
                 val document = repository.load(nextKey.notebookId, nextKey.pageId)
                 val restored = session?.strokes ?: (0 until document.strokes.length()).map { index ->
@@ -4074,6 +4086,7 @@ class MainActivity : Activity() {
         val tags = session?.tags ?: loaded.document?.let(SharedContentCodec::tags).orEmpty()
         val text = session?.textBoxes ?: loaded.document?.let(SharedContentCodec::text).orEmpty()
         boundPageKey = key
+        pageLoadFallbackKey = null
         restoringPageInk = true
         try {
             dryInkView.replaceStrokes(loaded.strokes)
@@ -4092,12 +4105,29 @@ class MainActivity : Activity() {
     }
 
     private fun restoreBoundPageSelection(): Boolean {
-        val key = boundPageKey ?: return false
+        val key = boundPageKey ?: pageLoadFallbackKey ?: return false
+        pageLoadFallbackKey = null
         val notebook = notebookLibrary.notebooks.firstOrNull { it.id == key.notebookId } ?: return false
         val section = notebook.allSections().firstOrNull { node -> node.pages.any { it.id == key.pageId } } ?: return false
         notebookLibrary.selectNotebook(notebook.id)
         notebook.selectPage(section.id, key.pageId)
         return true
+    }
+
+    /** Called on UI only after the outgoing save barrier succeeds, before allocating new JSON. */
+    private fun releasePageBeforeRead() {
+        boundPageKey?.let { pageLoadFallbackKey = it }
+        boundPageKey = null
+        pageSessions.replaceAll { _, session -> session.copy(strokes = null, tags = null, textBoxes = null) }
+        restoringPageInk = true
+        try {
+            clearContentSelection()
+            dryInkView.replaceStrokes(emptyList())
+            tagLayer.replaceTags(emptyList())
+            textInputLayer.replaceEditors(emptyList())
+            insertContentLayer.bind(null)
+            configureSharedScene(null)
+        } finally { restoringPageInk = false }
     }
 
     private fun showPageLoading(loading: Boolean, message: String = "正在打开页面…") {
@@ -5611,7 +5641,7 @@ class MainActivity : Activity() {
         if (fullPageMode) fullPageSectionPaneOpen = !fullPageSectionPaneOpen
         else {
             sectionPaneVisible = !sectionPaneVisible
-            persistWorkspacePreferences()
+            persistWorkspacePreferences(saveLibrary = false)
         }
         applyChromeVisibility()
     }
@@ -5620,7 +5650,7 @@ class MainActivity : Activity() {
         if (fullPageMode) fullPagePagePaneOpen = !fullPagePagePaneOpen
         else {
             pagePaneVisible = !pagePaneVisible
-            persistWorkspacePreferences()
+            persistWorkspacePreferences(saveLibrary = false)
         }
         applyChromeVisibility()
     }
