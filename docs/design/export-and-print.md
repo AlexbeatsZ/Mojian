@@ -1,6 +1,26 @@
 # Export scopes and physical pagination
 
-Last verified: 2026-10-08
+Last verified: 2026-10-28
+
+## Android preparation and memory boundary (2026-10-28)
+
+The product export/print entries capture page identities, not a map of fully decoded page views.
+`ExportProductSession` prepares summaries on the serial worker; `ExportPlan` retains only the
+logical source index and physical sheet geometry. Options summaries and print-image discovery
+also run off the UI thread, rejecting results after dialog dismissal or a newer request.
+
+Output acquires one logical page at a time, reuses it for its physical sheets, and releases its
+layers on success, failure or cancellation before acquiring the next page. Scene indexing and
+ordering reuse `SharedSceneComposer`; the existing `SharedContentCodec.readText` provides a
+pure read without mutating the editor's restored-text metadata cache. Source size/time checks reject changed pages instead of
+silently combining generations. They are not a whole-library cross-device snapshot.
+
+This removes the previous whole-notebook native view/ink retention, not all large-output risk.
+The current editor and one export page coexist; summary bounds scale with source content.
+Single-page binding, text measurement, image decoding and native drawing still use the UI
+thread. Android `PdfDocument` retains native records for the complete PDF until write/close;
+very long dense PDFs can still exhaust memory. Cancellation works between preparation/drawing
+steps and cannot preempt a currently executing native draw or final write.
 
 Read before changing the Export/Print surfaces, scope resolution, output page geometry, or native
 print adapters. Rendering color is owned by `OutputAppearance`; object/container details remain in
@@ -58,6 +78,16 @@ offscreen ink/object/text/tag layers, including live page-session strokes, and r
 native `PdfDocument`. Scope export must never navigate/bind the live page to render other pages.
 Android's native adapter respects output page ranges; writes/compression run on the serial I/O
 executor after UI-owned vector capture. PNG pages are captured individually and recycled.
+
+## Current validation (2026-10-28)
+
+Android 0.7.0 passes 228/228 unit tests, debug/test APK compilation and lint (0 errors,
+136 warnings). Product-session native tests compile but were not installed/executed. The final
+Windows build/publish succeeds, but its full suite is not green: existing STA/Application test
+lifetime problems can leave subsequent windows unloaded. The export-panel test passes in its
+own testhost on both baseline HEAD 22126a5 and current source, and the same-process stale-summary
+failure reproduces on HEAD after another window test. See the dated log for exact evidence.
+The historical counts below describe the 2026-10-08 delivery, not a current all-suite result.
 
 ## Evidence and failure boundary
 

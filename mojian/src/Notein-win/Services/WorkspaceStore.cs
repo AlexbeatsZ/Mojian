@@ -7,7 +7,7 @@ namespace Notein_win.Services;
 public sealed class WorkspaceStore
 {
     private readonly Dictionary<string, (long Length, long Modified)?> _observedFiles = new();
-    private readonly object _sync = new();
+    private readonly object _sync;
     private readonly Dictionary<string, HashSet<string?>> _localVersions = new();
     private static string? PageStamp(string path) => Stamp(path) is { } stamp ? $"{stamp.Length}:{stamp.Modified}" : null;
     private static (long Length, long Modified)? Stamp(string path) => File.Exists(path)
@@ -51,11 +51,18 @@ public sealed class WorkspaceStore
     public WorkspaceStore(string? rootDirectory = null)
     {
         RootDirectory = Path.GetFullPath(string.IsNullOrWhiteSpace(rootDirectory) ? DefaultRoot : rootDirectory);
+        _sync = WorkspaceFileGate.ForRoot(RootDirectory);
         Directory.CreateDirectory(RootDirectory);
         Directory.CreateDirectory(Path.Combine(RootDirectory, "notebooks"));
     }
 
     public NotebookLibrary LoadLibrary()
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) return LoadLibraryCore();
+    }
+
+    private NotebookLibrary LoadLibraryCore()
     {
         RestoreMissingCurrent(LibraryPath);
         if (!File.Exists(LibraryPath))
@@ -72,26 +79,47 @@ public sealed class WorkspaceStore
             library.ActiveNotebookId = library.Notebooks[0].Id;
         }
         NormalizeSelections(library);
+        WorkspaceDeletionTransaction.Recover(RootDirectory, relative =>
+        {
+            var parts = relative.Replace('\\', '/').Split('/');
+            if (parts.Length < 4 || parts[0] != "notebooks") return false;
+            var notebook = library.Notebooks.FirstOrDefault(item => SafeId(item.Id) == parts[1]);
+            if (notebook == null) return false;
+            var pageId = parts[2] == "pages" ? parts[3].Split('.')[0] : parts[3];
+            return notebook.FindPage(pageId, out _) != null;
+        });
         Observe(LibraryPath);
         return library;
     }
 
     public void SaveLibrary(NotebookLibrary library)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
         lock (_sync) { GuardExternalWrite(LibraryPath); AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, JsonOptions)); Observe(LibraryPath); }
     }
 
     public WorkspaceSettings LoadSettings()
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
         RestoreMissingCurrent(SettingsPath);
         var settings = File.Exists(SettingsPath) ? ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions) : new WorkspaceSettings();
         settings.UpgradeDarkImageImportPolicy();
         return settings;
     }
 
-    public void SaveSettings(WorkspaceSettings settings) => AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+    public void SaveSettings(WorkspaceSettings settings)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+    }
 
     public PageDocument LoadPage(string notebookId, string pageId)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) return LoadPageCore(notebookId, pageId);
+    }
+
+    private PageDocument LoadPageCore(string notebookId, string pageId)
     {
         var path = GetPageDocumentPath(notebookId, pageId);
         RestoreMissingCurrent(path);
@@ -117,6 +145,7 @@ public sealed class WorkspaceStore
 
     public void WritePageSnapshot(PageDocument snapshot)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
         var path = GetPageDocumentPath(snapshot.NotebookId, snapshot.PageId);
         lock (_sync)
         {
@@ -142,6 +171,12 @@ public sealed class WorkspaceStore
 
     public void DeleteNotebookData(string notebookId)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) DeleteNotebookDataCore(notebookId);
+    }
+
+    private void DeleteNotebookDataCore(string notebookId)
+    {
         if (string.IsNullOrWhiteSpace(notebookId) || notebookId is "." or "..")
             throw new ArgumentException("笔记本标识无效。", nameof(notebookId));
         var notebooksRoot = Path.GetFullPath(Path.Combine(RootDirectory, "notebooks"));
@@ -149,6 +184,39 @@ public sealed class WorkspaceStore
         if (!string.Equals(Path.GetDirectoryName(directory), notebooksRoot, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("笔记本目录必须位于工作区内。", nameof(notebookId));
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
+    public void CommitDeletion(NotebookLibrary library, string notebookId, IReadOnlyCollection<string>? pageIds = null)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync)
+        {
+            GuardExternalWrite(LibraryPath);
+            var directory = GetNotebookDirectory(notebookId);
+            var files = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Where(path =>
+            {
+                if (pageIds == null) return true;
+                var parts = Path.GetRelativePath(directory, path).Replace('\\', '/').Split('/');
+                return parts.Length >= 2 && (parts[0] == "pages" && pageIds.Any(id => parts[1] == SafeId(id) + ".json" || parts[1] == SafeId(id) + ".json.previous") ||
+                    parts[0] == "assets" && pageIds.Any(id => parts[1] == SafeId(id)));
+            }).ToArray();
+            foreach (var path in files) GuardExternalWrite(path);
+            WorkspaceDeletionTransaction.Execute(RootDirectory, files, () => SaveLibrary(library));
+            if (pageIds == null && !library.Notebooks.Any(notebook => SafeId(notebook.Id) == SafeId(notebookId)))
+                RemoveEmptyNotebookDirectories(directory);
+        }
+    }
+
+    private static void RemoveEmptyNotebookDirectories(string directory)
+    {
+        try
+        {
+            if (!Directory.Exists(directory) || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) return;
+            foreach (var child in Directory.EnumerateDirectories(directory)) RemoveEmptyNotebookDirectories(child);
+            if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory, recursive: false);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     public string GetPageDirectory(string notebookId, string pageId)
@@ -172,6 +240,12 @@ public sealed class WorkspaceStore
 
     public string ImportAsset(string notebookId, string pageId, string sourcePath)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) return ImportAssetCore(notebookId, pageId, sourcePath);
+    }
+
+    private string ImportAssetCore(string notebookId, string pageId, string sourcePath)
+    {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("找不到要插入的文件。", sourcePath);
         var extension = Path.GetExtension(sourcePath);
         var assetName = $"asset-{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
@@ -182,6 +256,12 @@ public sealed class WorkspaceStore
 
     public string WriteAsset(string notebookId, string pageId, string extension, ReadOnlySpan<byte> bytes)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) return WriteAssetCore(notebookId, pageId, extension, bytes);
+    }
+
+    private string WriteAssetCore(string notebookId, string pageId, string extension, ReadOnlySpan<byte> bytes)
+    {
         var normalizedExtension = extension.StartsWith('.') ? extension : $".{extension}";
         var assetName = $"asset-{Guid.NewGuid():N}{normalizedExtension.ToLowerInvariant()}";
         File.WriteAllBytes(ResolveAsset(notebookId, pageId, assetName), bytes.ToArray());
@@ -189,6 +269,12 @@ public sealed class WorkspaceStore
     }
 
     public void CopyPageData(string sourceNotebookId, string sourcePageId, string targetNotebookId, string targetPageId)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) CopyPageDataCore(sourceNotebookId, sourcePageId, targetNotebookId, targetPageId);
+    }
+
+    private void CopyPageDataCore(string sourceNotebookId, string sourcePageId, string targetNotebookId, string targetPageId)
     {
         var sourceDocument = LoadPage(sourceNotebookId, sourcePageId);
         sourceDocument.NotebookId = targetNotebookId;
@@ -208,6 +294,12 @@ public sealed class WorkspaceStore
     }
 
     public void DeletePageData(string notebookId, string pageId)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+        lock (_sync) DeletePageDataCore(notebookId, pageId);
+    }
+
+    private void DeletePageDataCore(string notebookId, string pageId)
     {
         var documentPath = GetPageDocumentPath(notebookId, pageId);
         if (File.Exists(documentPath)) File.Delete(documentPath);

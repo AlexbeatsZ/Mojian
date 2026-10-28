@@ -21,7 +21,10 @@ object SharedContentCodec {
         CanvasTagSnapshot(CanvasTagKind.entries[value.optInt("kind").coerceIn(0,1)],(value.getDouble("documentX")/unit).toFloat(),
             (value.getDouble("documentY")/unit).toFloat(),value.getString("id"))
     }
-    fun text(document: PageInsertDocument): List<CanvasTextSnapshot> = SharedWorkspaceCodec.items(document.sharedSource.optJSONArray("textItems")).map { value ->
+    fun text(document: PageInsertDocument): List<CanvasTextSnapshot> = readText(document).also {
+        restoredText[textKey(document)] = it.associateBy { item -> item.id }
+    }
+    fun readText(document: PageInsertDocument): List<CanvasTextSnapshot> = SharedWorkspaceCodec.items(document.sharedSource.optJSONArray("textItems")).map { value ->
         val mobileText=value.optString("androidRichText").takeIf(String::isNotBlank)?.let { Html.fromHtml(it,Html.FROM_HTML_MODE_COMPACT) }
         val basis=value.optJSONObject("androidRichTextCanonical")
         val compatible = mobileText!=null && mobileText.toString().trimEnd('\n')==value.optString("text").trimEnd('\n') &&
@@ -39,7 +42,7 @@ object SharedContentCodec {
         CanvasTextSnapshot(text,(value.optDouble("x")/unit).toFloat(),(value.optDouble("y")/unit).toFloat(),
             (value.optDouble("width",300.0)/unit).roundToInt().coerceAtLeast(1),(value.optDouble("height",50.0)/unit).roundToInt().coerceAtLeast(1),
             if(compatible) value.optDouble("androidContentScale",1.0).toFloat() else 1f,0f,value.optDouble("lineSpacing",1.0).toFloat(),value.getString("id"))
-    }.also { restoredText[textKey(document)] = it.associateBy { item->item.id } }
+    }
     fun save(document: PageInsertDocument,tags: List<CanvasTagSnapshot>,text: List<CanvasTextSnapshot>,density: Float = 1f) {
         val source = document.sharedSource
         fun previous(key: String,id: String) = SharedWorkspaceCodec.items(source.optJSONArray(key)).firstOrNull { it.optString("id")==id }?.let(SharedWorkspaceCodec::copy) ?: JSONObject()
@@ -54,15 +57,21 @@ object SharedContentCodec {
             val prior = previous("textItems",item.id)
             val restored = restoredText[textKey(document)]?.get(item.id)
             fun html(value: CharSequence) = Html.toHtml(SpannableString(value),Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL)
+            val itemHtml = html(item.text)
+            val richTextChanged = restored==null || restored.contentScale!=item.contentScale || html(restored.text)!=itemHtml
+            val lineSpacingChanged = restored==null || restored.lineSpacingMultiplier!=item.lineSpacingMultiplier
             if(restored!=null && kotlin.math.abs(restored.documentX-item.documentX)<.001f && kotlin.math.abs(restored.documentY-item.documentY)<.001f &&
-                restored.width==item.width && restored.height==item.height && restored.contentScale==item.contentScale &&
-                restored.lineSpacingMultiplier==item.lineSpacingMultiplier && html(restored.text)==html(item.text)) {
+                restored.width==item.width && restored.height==item.height && !richTextChanged && !lineSpacingChanged) {
                 put(prior); return@forEach
             }
             val value = SharedWorkspaceCodec.copy(prior).put("id",item.id).put("x",item.documentX*unit).put("y",item.documentY*unit)
                 .put("width",item.width*unit).put("height",item.height*unit).put("text",item.text.toString())
-            if (restored==null || html(restored.text)!=html(item.text) || restored.contentScale!=item.contentScale) {
-                value.put("androidRichText",Html.toHtml(SpannableString(item.text),Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL))
+            if (lineSpacingChanged) {
+                value.put("lineSpacing",item.lineSpacingMultiplier)
+                value.optJSONObject("androidRichTextCanonical")?.put("lineSpacing",item.lineSpacingMultiplier)
+            }
+            if (richTextChanged) {
+                value.put("androidRichText",itemHtml)
                     .put("androidContentScale",item.contentScale).put("lineSpacing",item.lineSpacingMultiplier)
                 if(!value.has("fontSize")) value.put("fontSize",16.0)
                 val spanned=item.text as? Spanned

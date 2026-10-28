@@ -4,6 +4,7 @@ import java.io.File
 import org.json.JSONObject
 
 class PageContentRepository(val root: File) {
+    private val localMutations = LocalMutationEpoch.forWorkspace(root)
     private val observed = mutableMapOf<String, String?>()
     private val loadedPages = mutableMapOf<String, java.lang.ref.WeakReference<PageInsertDocument>>()
     private var librarySource: JSONObject? = null
@@ -32,7 +33,9 @@ class PageContentRepository(val root: File) {
         if (next.toString() == source.toString()) return
         check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
         val text = next.toString()
-        atomicWrite(File(root,"library.json"),text)
+        atomicWrite(File(root,"library.json"), beforeReplace = {
+            check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
+        }) { it.write(text) }
         librarySource = next; libraryContent = text
     }
 
@@ -83,17 +86,19 @@ class PageContentRepository(val root: File) {
     private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?) = atomicWrite(file,
         beforeReplace={ check(stamp(file)==expectedStamp) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it) }
     private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},write: (java.io.Writer)->Unit) {
-        check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs()) { "Unable to create workspace directory" }
-        val temp = File(file.parentFile,"${file.name}.${java.util.UUID.randomUUID()}.tmp")
-        try {
-            java.io.FileOutputStream(temp).use { stream ->
-                val writer=java.io.OutputStreamWriter(stream,Charsets.UTF_8)
-                write(writer);writer.flush();stream.fd.sync()
-            }
-            beforeReplace()
-            if (file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
-            java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        } finally { temp.delete() }
+        localMutations.begin().use {
+            check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs()) { "Unable to create workspace directory" }
+            val temp = File(file.parentFile,"${file.name}.${java.util.UUID.randomUUID()}.tmp")
+            try {
+                java.io.FileOutputStream(temp).use { stream ->
+                    val writer=java.io.OutputStreamWriter(stream,Charsets.UTF_8)
+                    write(writer);writer.flush();stream.fd.sync()
+                }
+                beforeReplace()
+                if (file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
+                java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } finally { temp.delete() }
+        }
     }
 
     fun pageFile(notebookId: String, pageId: String): File =
@@ -105,18 +110,34 @@ class PageContentRepository(val root: File) {
     fun notebookDirectory(notebookId: String): File =
         File(File(root, "notebooks"), safeId(notebookId))
 
+    @Synchronized
     fun deleteNotebookData(notebookId: String) {
-        val directory = notebookDirectory(notebookId).canonicalFile
-        require(directory.parentFile == File(root, "notebooks").canonicalFile) {
-            "Notebook directory must be inside the workspace"
+        localMutations.begin().use {
+            if (isShared && libraryChanged()) return
+            if (isShared && currentLibrary().notebooks.any { it.id == notebookId }) return
+            val directory = notebookDirectory(notebookId).canonicalFile
+            require(directory.parentFile == File(root, "notebooks").canonicalFile) {
+                "Notebook directory must be inside the workspace"
+            }
+            check(!directory.exists() || directory.deleteRecursively()) { "Unable to delete notebook data" }
         }
-        check(!directory.exists() || directory.deleteRecursively()) { "Unable to delete notebook data" }
     }
 
+    @Synchronized
     fun deletePageData(notebookId: String, pageId: String) {
-        pageFile(notebookId, pageId).delete()
-        assetDirectory(notebookId, pageId).deleteRecursively()
+        localMutations.begin().use {
+            if (isShared && libraryChanged()) return
+            if (isShared && currentLibrary().notebooks.firstOrNull { it.id == notebookId }?.allSections()
+                    ?.flatMap { it.pages }?.any { it.id == pageId || it.pdfPage?.sourceOwnerPageId == pageId } == true) return
+            val page = pageFile(notebookId, pageId)
+            check(!page.exists() || page.delete()) { "Unable to delete page data" }
+            val assets = assetDirectory(notebookId, pageId)
+            check(assets.deleteRecursively()) { "Unable to delete page assets" }
+        }
     }
+
+    private fun currentLibrary(): NotebookLibrary = SharedWorkspaceCodec.decodeLibrary(
+        JSONObject(File(root, "library.json").readText(Charsets.UTF_8)))
 
     fun copyPageData(
         sourceNotebookId: String,
@@ -125,25 +146,26 @@ class PageContentRepository(val root: File) {
         targetPageId: String,
         extraAssets: List<File> = emptyList(),
     ) {
-        val sourceDocument = load(sourceNotebookId, sourcePageId)
-        if (sourceDocument.objects.isNotEmpty() || pageFile(sourceNotebookId, sourcePageId).isFile) {
-            save(
-                PageInsertDocument(
-                    notebookId = targetNotebookId,
-                    pageId = targetPageId,
-                    objects = sourceDocument.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
-                    strokes = org.json.JSONArray(sourceDocument.strokes.toString()),
-                    sharedSource = SharedWorkspaceCodec.copy(sourceDocument.sharedSource),
-                ),
-            )
-        }
-        val destination = assetDirectory(targetNotebookId, targetPageId)
-        val sourceDirectory = assetDirectory(sourceNotebookId, sourcePageId)
-        sourceDirectory.listFiles()?.filter(File::isFile)?.forEach { source ->
-            source.copyTo(File(destination, source.name), overwrite = true)
-        }
-        extraAssets.filter(File::isFile).forEach { source ->
-            source.copyTo(File(destination, source.name), overwrite = true)
+        localMutations.begin().use {
+            val sourceDocument = load(sourceNotebookId, sourcePageId)
+            check(!pageFile(targetNotebookId, targetPageId).exists()) { "Target page already exists" }
+            val destination = assetDirectory(targetNotebookId, targetPageId)
+            val sourceDirectory = assetDirectory(sourceNotebookId, sourcePageId)
+            val assets = (sourceDirectory.listFiles()?.filter(File::isFile).orEmpty() + extraAssets)
+                .distinctBy { it.canonicalFile }
+            assets.forEach { source -> check(source.isFile) { "Source asset has not synchronized: ${source.name}" } }
+            assets.forEach { source -> source.copyTo(File(destination, source.name), overwrite = false) }
+            if (sourceDocument.objects.isNotEmpty() || pageFile(sourceNotebookId, sourcePageId).isFile) {
+                save(
+                    PageInsertDocument(
+                        notebookId = targetNotebookId,
+                        pageId = targetPageId,
+                        objects = sourceDocument.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
+                        strokes = org.json.JSONArray(sourceDocument.strokes.toString()),
+                        sharedSource = SharedWorkspaceCodec.copy(sourceDocument.sharedSource),
+                    ),
+                )
+            }
         }
     }
 

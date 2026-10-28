@@ -1,9 +1,34 @@
 # Windows writing performance and durability
 
-Last verified: 2026-10-08
+Last verified: 2026-10-28
 
 Read before changing Windows wet/dry rendering, pointer feedback, undo history,
 autosave scheduling, recovery, or same-page split document ownership.
+
+## Recoverable deletion and native-sync publication (2026-10-28)
+
+Notebook/section/page deletion now builds a candidate library without mutating the live model.
+`WorkspaceDeletionTransaction` writes a manifest under `.mojian-deletions.previous`, stages
+selected page/asset/recovery files, then publishes the candidate index. Refused publication
+restores staged files and keeps the original VM model. A rollback failure exposes the recovery
+path; do not delete that directory to clear an error. Successful deletion retains recovery files.
+On load, restore only missing files referenced by the current library, newest recovery first;
+never overwrite an existing file or resurrect an unreferenced page. Empty notebook directories
+are removed only after index publication, without recursively deleting surviving files/journals.
+This is local recovery, not a transaction with an external Syncthing process.
+
+Repository save, deletion/recovery and incoming publication share the per-root file gate and
+`NativeSyncMutationEpoch`. A queued page+library save spans one mutation, and failed retries keep
+both snapshots. Outgoing hashing/staging runs without this gate; only final small outbox
+publication checks its captured epoch. Concurrent writes invalidate the candidate instead of
+making the UI wait for a large-library scan. Native incoming preparation/copies run on a worker;
+the host's UI gate executes the short publication and checks repository reload success. Partial
+apply or reload refusal locks editing/saving until full local recovery and reload succeed.
+See `native-sync.md` and `sync-server/PROTOCOL.md` for the transport/recovery contract.
+
+Focused deletion/epoch/gate/recovery regressions pass 14/14. Full Windows test execution still
+has pre-existing UI-harness lifecycle and caret failures; this record is not a green full-suite
+claim. The 2026-10-28 log records independent HEAD comparisons and the Release FailFast boundary.
 
 ## Incident and measured baseline
 

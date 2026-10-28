@@ -47,6 +47,8 @@ class DryInkView(context: Context) : View(context) {
     var shapePreview: Stroke? = null
         set(value) { field=value; invalidate() }
     private val strokes = mutableListOf<Stroke>()
+    var contentRevision = 0L
+        private set
     private val strokeBounds = IdentityHashMap<Stroke, StrokeViewportBounds>()
     private var cachedContentBottom = 0f
     private val redoStrokes = ArrayDeque<Stroke>()
@@ -154,6 +156,7 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun clear() {
+        contentRevision++
         strokes.clear()
         strokeBounds.clear()
         cachedContentBottom = 0f
@@ -736,12 +739,14 @@ class DryInkView(context: Context) : View(context) {
         visibleDocumentBounds().let { StrokeViewportBounds(it.left, it.top, it.right, it.bottom) }
 
     private fun registerStroke(stroke: Stroke) {
+        contentRevision++
         val bounds = computeStrokeBounds(stroke)
         strokeBounds[stroke] = bounds
         cachedContentBottom = maxOf(cachedContentBottom, bounds.bottom)
     }
 
     private fun rebuildStrokeMetrics(notify: Boolean = true) {
+        contentRevision++
         strokeBounds.clear()
         cachedContentBottom = 0f
         strokes.forEach(::registerStroke)

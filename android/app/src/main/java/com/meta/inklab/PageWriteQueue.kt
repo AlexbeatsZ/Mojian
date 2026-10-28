@@ -13,7 +13,7 @@ class PageWriteQueue {
     val hasFailures get() = failures.isNotEmpty()
 
     fun submit(repository: PageContentRepository, live: PageInsertDocument, snapshot: PageInsertDocument,
-        failed: (Exception)->Unit) {
+        saved: () -> Unit = {}, failed: (Exception)->Unit) {
         pending.incrementAndGet()
         val key = "${repository.root}/${live.notebookId}/${live.pageId}"
         executor.execute {
@@ -32,6 +32,7 @@ class PageWriteQueue {
                     if(live.sharedSource === originalSource) live.sharedSource = snapshot.sharedSource
                 }
                 failures.remove(key)
+                saved()
             } catch(error: Exception) {
                 failures[key] = error
                 failed(error)

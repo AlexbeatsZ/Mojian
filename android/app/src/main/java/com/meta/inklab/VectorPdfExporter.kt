@@ -11,6 +11,43 @@ data class VectorPdfSource(val settings: PageViewSettings, val content: List<Str
 data class VectorPdfPage(val sheet: ExportSheet, val backgroundArgb: Int = android.graphics.Color.WHITE, val render: (Canvas, Matrix) -> Unit)
 
 object VectorPdfExporter {
+    fun capturePages(plan: ExportPlan, provider: ExportPageProvider, options: ExportOptions,
+        indices: List<Int> = plan.pages.indices.toList(), cancelled: () -> Boolean = { false },
+        ui: ExportUiDispatcher = ExportUiDispatcher()): PdfDocument {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { "逐页导出必须在工作线程启动" }
+        require(indices.isNotEmpty()) { "当前范围没有页面" }
+        val document = PdfDocument()
+        var outputIndex = 0
+        try {
+            forEachPage(plan, provider, options, indices, cancelled) { _, item ->
+                ui.call {
+                    if (cancelled()) throw java.util.concurrent.CancellationException()
+                    val sheet = item.sheet
+                    val page = document.startPage(PdfDocument.PageInfo.Builder(
+                        sheet.widthPoints.roundToInt().coerceAtLeast(1),
+                        sheet.heightPoints.roundToInt().coerceAtLeast(1), ++outputIndex).create())
+                    try { renderPage(page.canvas, item) } finally { document.finishPage(page) }
+                }
+            }
+            return document
+        } catch (error: Throwable) {
+            document.close()
+            throw error
+        }
+    }
+
+    fun forEachPage(plan: ExportPlan, provider: ExportPageProvider, options: ExportOptions,
+        indices: List<Int> = plan.pages.indices.toList(), cancelled: () -> Boolean = { false },
+        render: (Int, VectorPdfPage) -> Unit) {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { "逐页准备必须在工作线程启动" }
+        ExportPageTraversal.visit(indices, { plan.pages[it].sourceIndex }, provider::acquire, cancelled) { index, lease ->
+            val page = plan.pages[index]
+            render(index, VectorPdfPage(page.sheet, page.backgroundArgb) { canvas, matrix ->
+                lease.source.render(canvas, matrix, options)
+            })
+        }
+    }
+
     fun pages(sources: List<VectorPdfSource>, options: ExportOptions, outputSize: PdfOutputPageSize? = null): List<VectorPdfPage> {
         val pages = sources.flatMap { source ->
             val paper=source.settings.pageColor.displayArgb(source.settings.darkBackground)

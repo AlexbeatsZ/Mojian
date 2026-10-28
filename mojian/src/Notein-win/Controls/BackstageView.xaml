@@ -148,6 +148,8 @@
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding IsBackstageOptions, Converter={StaticResource BoolToVisibility}}" MaxWidth="820">
+                    <Button Content="原生同步设置（独立副本）" Style="{StaticResource ActionCard}" Click="OnNativeSyncClick" />
+                    <TextBlock Text="{Binding NativeSyncStatus}" TextWrapping="Wrap" Margin="0,6,0,12" />
                     <TextBlock Text="墨笺选项" Foreground="{StaticResource TextPrimary}" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24" />
                     
                     <!-- Section 1: 绘图与页面 -->

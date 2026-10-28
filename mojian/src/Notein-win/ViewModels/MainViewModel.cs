@@ -15,6 +15,7 @@ public sealed class MainViewModel : ObservableObject
 
     private readonly PreferencesStore _preferencesStore;
     private readonly PageSaveQueue _pageSaves = new();
+    private readonly WorkspaceUiMutationGate _workspaceUiGate = new();
     private AppPreferences _preferences;
     private WorkspaceStore _store;
     private WorkspaceSettings _settings;
@@ -162,7 +163,42 @@ public sealed class MainViewModel : ObservableObject
         get => _saveStateText;
         private set { if (SetField(ref _saveStateText, value)) OnPropertyChanged(nameof(HasSaveError)); }
     }
-    public bool HasSaveError => SaveStateText.StartsWith("保存失败", StringComparison.Ordinal);
+    public bool HasSaveError => SaveStateText.StartsWith("保存失败", StringComparison.Ordinal) || SaveStateText.StartsWith("删除失败", StringComparison.Ordinal);
+    private bool _nativeSyncRecoveryRequired;
+    public bool NativeSyncRecoveryRequired { get => _nativeSyncRecoveryRequired; private set => SetField(ref _nativeSyncRecoveryRequired, value); }
+    public bool CanApplyNativeSync => !NativeSyncRecoveryRequired && _pageSaves.IsIdle && !_pageSaves.HasFailures && !HasSaveError && SaveStateText != "正在保存…";
+    public bool TryApplyNativeSync(Action apply, Func<bool> editorIdle) => _workspaceUiGate.TryRun(
+        () => CanApplyNativeSync && editorIdle(),
+        () =>
+        {
+            try
+            {
+                using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
+                lock (WorkspaceFileGate.ForRoot(_store.RootDirectory))
+                {
+                    apply();
+                    if (!RefreshSharedWorkspace(force: true)) throw new IOException("接收内容尚未完整重新加载，编辑保持锁定。");
+                }
+            }
+            catch { NativeSyncRecoveryRequired = true; throw; }
+        });
+    public bool TryRecoverNativeSync(Action recover) => _workspaceUiGate.TryRun(() => NativeSyncRecoveryRequired, () =>
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
+        lock (WorkspaceFileGate.ForRoot(_store.RootDirectory))
+        {
+            recover();
+            if (!RefreshSharedWorkspace(force: true)) throw new IOException("本地接收尚未完整重新加载，编辑保持锁定。");
+            NativeSyncRecoveryRequired = false;
+        }
+    });
+    private void RequireRecoveredWorkspace()
+    {
+        if (NativeSyncRecoveryRequired) throw new IOException("同步接收尚未完整恢复，已暂停编辑和保存。");
+    }
+    public event Action? LocalSaveCompleted;
+    private string _nativeSyncStatus = "原生同步未启用";
+    public string NativeSyncStatus { get => _nativeSyncStatus; set => SetField(ref _nativeSyncStatus, value); }
     public bool HasActivePage => FocusedDocument != null;
 
     public bool IsSectionPaneVisible
@@ -507,6 +543,7 @@ public sealed class MainViewModel : ObservableObject
         _preferences = _preferencesStore.Load();
         var root = workspaceRoot ?? (string.IsNullOrWhiteSpace(_preferences.WorkspaceRoot) ? WorkspaceStore.DefaultRoot : _preferences.WorkspaceRoot);
         _store = new WorkspaceStore(root);
+        RecoverNativeSyncBeforeOpen(_store.RootDirectory);
         _library = _store.LoadLibrary();
         _settings = _store.LoadSettings();
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
@@ -577,11 +614,15 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public bool DeleteNotebook(string notebookId)
+        => _workspaceUiGate.Run(() => DeleteNotebookCore(notebookId));
+
+    private bool DeleteNotebookCore(string notebookId)
     {
         if (_library.Notebooks.All(notebook => notebook.Id != notebookId)) return false;
         SaveAll();
-        _store.DeleteNotebookData(notebookId);
-        _library.DeleteNotebook(notebookId);
+        var candidate = _library.CopyForSave();
+        candidate.DeleteNotebook(notebookId);
+        CommitDeletion(candidate, notebookId);
         // Detach both split slots before any later autosave or shutdown can recreate deleted pages.
         if (PrimaryDocument?.NotebookId == notebookId) PrimaryDocument = null;
         if (SecondaryDocument?.NotebookId == notebookId) SecondaryDocument = null;
@@ -589,7 +630,6 @@ public sealed class MainViewModel : ObservableObject
         if (FocusedDocument == null) LoadSelectedIntoFocusedSlot();
         if (FocusedDocument is { } remaining) SelectLibraryLocation(remaining.NotebookId, remaining.PageId);
         SearchResults.Clear();
-        SaveLibrary();
         RefreshNavigation();
         NotifyAllWorkspaceProperties();
         return true;
@@ -621,6 +661,7 @@ public sealed class MainViewModel : ObservableObject
 
     public PageDocument? AddPdfPage(string title, RenderedPdfPage sourcePage, string sourcePath, bool invert)
     {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
         var rememberedPageAppearance = _settings.LastPageAppearance.Clone();
         var appearance = new PageAppearance
         {
@@ -677,14 +718,18 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public bool DeleteSection(string sectionId)
+        => _workspaceUiGate.Run(() => DeleteSectionCore(sectionId));
+
+    private bool DeleteSectionCore(string sectionId)
     {
-        SaveFocusedDocument();
+        SaveAll();
         var section = ActiveWorkspace.FindSection(sectionId);
         if (section == null) return false;
         var pageIds = PagesInTree(section).Select(page => page.Id).ToList();
-        if (ActiveWorkspace.DeleteSection(sectionId) == null) return false;
-        foreach (var pageId in pageIds) _store.DeletePageData(ActiveWorkspace.Id, pageId);
-        FinishNavigationMutation();
+        var candidate = _library.CopyForSave();
+        if (candidate.ActiveNotebook.DeleteSection(sectionId) == null) return false;
+        CommitDeletion(candidate, ActiveWorkspace.Id, pageIds);
+        FinishDeletionMutation();
         return true;
     }
 
@@ -699,6 +744,7 @@ public sealed class MainViewModel : ObservableObject
     public bool CopySection(string sectionId, string? targetParentId)
     {
         SaveFocusedDocument();
+        using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
         if (ActiveWorkspace.CopySectionToParent(sectionId, targetParentId, out var pageIds) == null) return false;
         foreach (var (sourcePageId, targetPageId) in pageIds)
             _store.CopyPageData(ActiveWorkspace.Id, sourcePageId, ActiveWorkspace.Id, targetPageId);
@@ -729,11 +775,15 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public bool DeletePage(string sectionId, string pageId)
+        => _workspaceUiGate.Run(() => DeletePageCore(sectionId, pageId));
+
+    private bool DeletePageCore(string sectionId, string pageId)
     {
-        SaveFocusedDocument();
-        if (ActiveWorkspace.DeletePage(sectionId, pageId) == null) return false;
-        _store.DeletePageData(ActiveWorkspace.Id, pageId);
-        FinishNavigationMutation();
+        SaveAll();
+        var candidate = _library.CopyForSave();
+        if (candidate.ActiveNotebook.DeletePage(sectionId, pageId) == null) return false;
+        CommitDeletion(candidate, ActiveWorkspace.Id, new[] { pageId });
+        FinishDeletionMutation();
         return true;
     }
 
@@ -756,6 +806,7 @@ public sealed class MainViewModel : ObservableObject
     public NotePage? CopyPage(string sourceSectionId, string pageId, string targetSectionId, int? targetIndex = null)
     {
         SaveFocusedDocument();
+        using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
         var copy = ActiveWorkspace.CopyPage(sourceSectionId, pageId, targetSectionId, targetIndex);
         if (copy == null) return null;
         _store.CopyPageData(ActiveWorkspace.Id, pageId, ActiveWorkspace.Id, copy.Id);
@@ -782,6 +833,25 @@ public sealed class MainViewModel : ObservableObject
         NotifyAllWorkspaceProperties();
     }
 
+    private void CommitDeletion(NotebookLibrary candidate, string notebookId, IReadOnlyCollection<string>? pages = null)
+    {
+        try { _store.CommitDeletion(candidate, notebookId, pages); }
+        catch { SaveStateText = "删除失败，内容已保留，请重试"; throw; }
+        _library = candidate;
+        if (PrimaryDocument is { } primary && candidate.Notebooks.FirstOrDefault(item => item.Id == primary.NotebookId)?.FindPage(primary.PageId, out _) == null) PrimaryDocument = null;
+        if (SecondaryDocument is { } secondary && candidate.Notebooks.FirstOrDefault(item => item.Id == secondary.NotebookId)?.FindPage(secondary.PageId, out _) == null) SecondaryDocument = null;
+        LocalSaveCompleted?.Invoke();
+    }
+
+    private void FinishDeletionMutation()
+    {
+        if (FocusedSlot == CanvasSlot.Right && SecondaryDocument == null) FocusedSlot = CanvasSlot.Left;
+        LoadSelectedIntoFocusedSlot();
+        _store.ForgetInactivePages(PrimaryDocument, SecondaryDocument);
+        RefreshNavigation();
+        NotifyAllWorkspaceProperties();
+    }
+
     private static IEnumerable<NotePage> PagesInTree(SectionNode section)
     {
         foreach (var page in section.Pages) yield return page;
@@ -792,6 +862,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void SaveDocument(PageDocument? document)
     {
+        RequireRecoveredWorkspace();
         _pageSaves.Flush();
         if (document == null || string.IsNullOrWhiteSpace(document.PageId)) return;
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
@@ -800,9 +871,13 @@ public sealed class MainViewModel : ObservableObject
         SaveStateText = "正在保存…";
         try
         {
-            _store.SavePage(document);
-            page.UpdatedAt = document.UpdatedAt;
-            _store.SaveLibrary(_library);
+            using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
+            lock (WorkspaceFileGate.ForRoot(_store.RootDirectory))
+            {
+                _store.SavePage(document);
+                page.UpdatedAt = document.UpdatedAt;
+                _store.SaveLibrary(_library);
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
@@ -811,11 +886,13 @@ public sealed class MainViewModel : ObservableObject
             throw;
         }
         SaveStateText = "已保存";
+        LocalSaveCompleted?.Invoke();
         RefreshPagePaneRows();
     }
 
     public void QueueSaveDocument(PageDocument? document)
     {
+        RequireRecoveredWorkspace();
         if (document == null) return;
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
         var page = notebook?.FindPage(document.PageId, out _);
@@ -832,6 +909,7 @@ public sealed class MainViewModel : ObservableObject
         _pageSaves.Completed += error => dispatcher.BeginInvoke(() =>
         {
             SaveStateText = error != null ? "保存失败，请重试" : _pageSaves.IsIdle ? "已保存" : "正在保存…";
+            if (error == null && _pageSaves.IsIdle) LocalSaveCompleted?.Invoke();
         });
     }
 
@@ -849,6 +927,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void SaveAll()
     {
+        RequireRecoveredWorkspace();
         var documents = new[] { PrimaryDocument, SecondaryDocument }
             .Where(document => document != null)
             .GroupBy(document => $"{document!.NotebookId}/{document.PageId}")
@@ -878,9 +957,13 @@ public sealed class MainViewModel : ObservableObject
     public void SwitchWorkspace(string rootDirectory)
     {
         SaveAll();
-        _store = new WorkspaceStore(rootDirectory);
-        _library = _store.LoadLibrary();
-        _settings = _store.LoadSettings();
+        var nextStore = new WorkspaceStore(rootDirectory);
+        RecoverNativeSyncBeforeOpen(nextStore.RootDirectory);
+        var nextLibrary = nextStore.LoadLibrary();
+        var nextSettings = nextStore.LoadSettings();
+        _store = nextStore;
+        _library = nextLibrary;
+        _settings = nextSettings;
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
         var settingsMigrated = MigrateWorkspaceSettings();
@@ -897,9 +980,19 @@ public sealed class MainViewModel : ObservableObject
         NotifyAllWorkspaceProperties();
     }
 
-    public bool RefreshSharedWorkspace()
+    private void RecoverNativeSyncBeforeOpen(string root)
     {
-        if (!_store.HasExternalChanges || !_pageSaves.IsIdle || _pageSaves.HasFailures) return false;
+        if (!File.Exists(Path.Combine(root, ".mojian-sync", "incoming.json"))) return;
+        var configuration = NativeSyncConfiguration.Load(root);
+        using var client = new NativeSyncClient(root, configuration.Endpoint, configuration.Token);
+        if (!_workspaceUiGate.Run(client.RecoverPendingIncoming) || client.HasPendingIncoming)
+            throw new IOException("接收恢复尚未完成，已阻止打开此副本。请保留 .mojian-sync 恢复目录：" + client.Status);
+    }
+
+    public bool RefreshSharedWorkspace(bool force = false)
+    {
+        if (NativeSyncRecoveryRequired && !force) return false;
+        if ((!force && !_store.HasExternalChanges) || !_pageSaves.IsIdle || _pageSaves.HasFailures) return false;
         var notebookId = ActiveWorkspace.Id;
         var primaryId = PrimaryDocument?.PageId;
         var secondaryId = SecondaryDocument?.PageId;
@@ -1497,7 +1590,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
-    private void SaveLibrary() { _pageSaves.Flush(); _store.SaveLibrary(_library); }
+    private void SaveLibrary() { RequireRecoveredWorkspace(); _pageSaves.Flush(); _store.SaveLibrary(_library); LocalSaveCompleted?.Invoke(); }
 
     private bool MigrateWorkspaceSettings()
     {

@@ -81,6 +81,10 @@ class InsertContentLayer(
         try { drawObjects(canvas,output.printsDark(darkBackground),matrix,output=output) } finally { sceneObjectId=null }
     }
 
+    fun renderSceneObject(canvas: Canvas, item: InsertObject, matrix: android.graphics.Matrix = android.graphics.Matrix(), output: OutputAppearance = OutputAppearance()) {
+        drawObjects(canvas, output.printsDark(darkBackground), matrix, output = output, sceneItem = item)
+    }
+
     fun contentBottom(): Float = document?.objects?.maxOfOrNull { it.documentY + it.height } ?: 0f
 
     fun contentBounds(): Sequence<StrokeViewportBounds> = document?.objects.orEmpty().asSequence().map {
@@ -374,13 +378,14 @@ class InsertContentLayer(
         if(!sceneComposed) drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
     }
 
-    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
+    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance(), sceneItem: InsertObject? = null) {
         val target = document ?: return
+        val metadataById = if (sceneItem == null) SharedWorkspaceCodec.items(target.sharedSource.optJSONArray("objects")).associateBy { it.optString("id") } else emptyMap()
         canvas.save()
         canvas.concat(documentMatrix)
-        target.objects.forEach { item ->
+        (sceneItem?.let(::listOf) ?: target.objects).forEach { item ->
             if(sceneObjectId!=null && sceneObjectId!=item.id) return@forEach
-            val metadata=SharedWorkspaceCodec.items(target.sharedSource.optJSONArray("objects")).firstOrNull { it.optString("id")==item.id }
+            val metadata=metadataById[item.id]
             if(metadata!=null && !SharedSceneOrder.visible(target.sharedSource,metadata)) return@forEach
             if (selectedOnly && item !in selectedItems()) return@forEach
             // The composed imported scene visits objects in source order. Reject offscreen

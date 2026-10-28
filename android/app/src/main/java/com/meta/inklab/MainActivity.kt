@@ -218,10 +218,19 @@ class MainActivity : Activity() {
     private var pageLoadFallbackKey: PageSessionKey? = null
     private val pageViewports = PageViewportMemory<PageSessionKey>()
     private val pageLoadExecutor = Executors.newSingleThreadExecutor()
-    private val pageLoads = LatestPageLoader<PageSessionKey, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
+    private val pageLoads = LatestPageLoader<PageSessionKey?, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
     private var pageLoadingOverlay: View? = null
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
     private val ioExecutor = Executors.newSingleThreadExecutor()
+    private var nativeSyncStatusView: TextView? = null
+    private var nativeSyncStatus = "原生同步未启用"
+    private var nativeSyncForeground = false
+    private val nativeSyncController by lazy {
+        WorkspaceSyncController(this, ::applyNativeSyncIncoming) { status, visible ->
+            nativeSyncStatus = status
+            nativeSyncStatusView?.apply { text = status; visibility = if (visible) View.VISIBLE else View.GONE }
+        }
+    }
     private val workspace: NotebookWorkspace
         get() = notebookLibrary.activeNotebook()
 
@@ -333,6 +342,8 @@ class MainActivity : Activity() {
     private var pdfPrintoutDisplayMode = ImageImportDisplayMode.INVERT
     private var pendingExport: PendingExport? = null
     private var pendingRichExport: ((Uri) -> Unit)? = null
+    private var pendingRichExportSession: ExportProductSession? = null
+    private val richExportSessions = mutableSetOf<ExportProductSession>()
     private var pendingSectionExport: SectionExportTarget? = null
     private var pendingPdfPageTarget: PdfPageTarget? = null
     private var boundPageKey: PageSessionKey? = null
@@ -425,6 +436,11 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        nativeSyncController.close()
+        richExportSessions.forEach { it.cancel() }
+        richExportSessions.clear()
+        pendingRichExportSession=null
+        pendingRichExport=null
         dismissDarkTooltip()
         mainHandler.removeCallbacks(syncRefresh)
         mainHandler.removeCallbacks(saveSharedContent)
@@ -456,6 +472,7 @@ class MainActivity : Activity() {
     }
 
     private var contentDirty = false
+    private var sceneContentRevision = 0L
     private var workspaceLoaded = false
     private val pageWrites = PageWriteQueue()
     private val saveSharedContent = Runnable { persistGeneratedShapes(flush=false) }
@@ -481,7 +498,14 @@ class MainActivity : Activity() {
         val root = if(configured != null) java.io.File(configured) else if(hasSharedStorageAccess() && java.io.File(defaultRoot,"library.json").isFile) defaultRoot else filesDir
         pageContentRepository = PageContentRepository(root)
         if(root != filesDir) {
-            check(hasSharedStorageAccess()) { "共享文件夹需要 Android 11 或更高版本，并允许墨笺访问共享笔记文件夹" }
+            check(root.canonicalFile.toPath().startsWith(filesDir.canonicalFile.toPath()) || hasSharedStorageAccess()) {
+                "共享文件夹需要 Android 11 或更高版本，并允许墨笺访问共享笔记文件夹"
+            }
+            if (File(root, ".mojian-sync/incoming.json").isFile) {
+                val configuration = NativeSyncConfiguration.load(this, root)
+                val recovery = NativeSyncClient(root, configuration.endpoint, configuration.token)
+                check(recovery.recoverIncoming()) { recovery.status }
+            }
             notebookLibrary = pageContentRepository.loadLibrary()
             prefs.edit().putString("sharedWorkspaceRoot",root.absolutePath).apply()
             prefs.getString(KEY_ACTIVE_NOTEBOOK_ID,null)?.let { id -> if(notebookLibrary.notebooks.any { it.id==id }) notebookLibrary.selectNotebook(id) }
@@ -496,13 +520,13 @@ class MainActivity : Activity() {
     private fun showWorkspaceLoadFailure(error: Exception) {
         setContentView(LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL;setPadding(dp(24),dp(30),dp(24),dp(24));setBackgroundColor(NAV_BACKGROUND)
-            addView(TextView(this@MainActivity).apply { text="笔记库暂时无法读取\n${error.message}\n请确认 Syncthing 已完成传输。";setTextColor(TEXT_PRIMARY) })
+            addView(TextView(this@MainActivity).apply { text="笔记库暂时无法读取\n${error.message}\n恢复完成前不会打开笔记。原生同步接收日志会在重新加载时离线恢复；共享文件夹请确认传输完整。";setTextColor(TEXT_PRIMARY) })
             addView(android.widget.Button(this@MainActivity).apply { text="重新加载";setOnClickListener { recreate() } })
             addView(android.widget.Button(this@MainActivity).apply { text="共享文件夹权限";setOnClickListener { openSharedStoragePermission() } })
         })
     }
 
-    private fun refreshSharedWorkspace(force: Boolean = false) {
+    private fun refreshSharedWorkspace(force: Boolean = false, failOnError: Boolean = false) {
         if(!workspaceLoaded || !pageContentRepository.isShared || !pageWrites.isIdle || pageWrites.hasFailures) return
         if (pageLoads.isLoading || (::paperContainer.isInitialized && paperContainer.hasActivePointerSequence) ||
             pressurePointerId != null || shapePointerId != null || insertSpaceActive || pageNavigationBlocksSecondary()) return
@@ -521,16 +545,20 @@ class MainActivity : Activity() {
             renderWorkspace()
         } catch(error: Exception) {
             android.util.Log.e("MojianSync","Unable to reload shared notes",error)
+            if (failOnError) throw error
             if(force) Toast.makeText(this,error.message,Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onResume() {
         super.onResume()
+        nativeSyncForeground = true
+        if (workspaceLoaded) nativeSyncController.resume(pageContentRepository.root)
         if(workspaceLoaded) { refreshSharedWorkspace();mainHandler.removeCallbacks(syncRefresh);mainHandler.postDelayed(syncRefresh,3000) }
     }
 
     private fun markPageContentChanged() {
+        sceneContentRevision++
         if(restoringPageInk || boundPageKey==null) return
         contentDirty=true
         dryInkView.invalidate()
@@ -538,6 +566,73 @@ class MainActivity : Activity() {
     }
 
     private fun showSyncOptions() {
+        AlertDialog.Builder(this).setTitle("笔记同步")
+            .setItems(arrayOf("原生 HTTPS 同步（独立副本）", "现有 Syncthing 共享文件夹")) { _, index ->
+                if (index == 0) showNativeSyncOptions() else showLegacySyncOptions()
+            }.setNegativeButton("取消", null).show()
+    }
+
+    private fun applyNativeSyncIncoming(action: () -> Unit): Boolean {
+        if (!nativeSyncForeground || isDestroyed || !workspaceLoaded || contentDirty || pageWrites.hasFailures || !pageWrites.isIdle ||
+            pageLoads.isLoading || currentFocus is EditText || activeStrokes.isNotEmpty() || navigationMutation != null ||
+            (::paperContainer.isInitialized && paperContainer.hasActivePointerSequence) || pressurePointerId != null ||
+            shapePointerId != null || insertSpaceActive || pageNavigationBlocksSecondary()) return false
+        try {
+            synchronized(pageContentRepository) {
+                action()
+                refreshSharedWorkspace(true, failOnError = true)
+            }
+        } catch (error: Exception) {
+            workspaceLoaded = false
+            nativeSyncController.pause()
+            mainHandler.removeCallbacks(syncRefresh)
+            mainHandler.removeCallbacks(saveSharedContent)
+            pageLoads.cancel()
+            boundPageKey = null
+            pageSessions.clear()
+            showWorkspaceLoadFailure(error)
+            throw error
+        }
+        return true
+    }
+
+    private fun showNativeSyncOptions() {
+        runCatching {
+            WorkspaceSyncOptionsDialog(this, pageContentRepository.root, nativeSyncStatus) { configuration, destination ->
+                if (!saveBoundPageSession() || !persistWorkspacePreferences()) return@WorkspaceSyncOptionsDialog
+                val source = pageContentRepository.root
+                val progress = AlertDialog.Builder(this).setMessage(if (destination == null) "正在保存同步设置…" else "正在创建独立同步副本，原笔记保持不变…")
+                    .setCancelable(false).create()
+                progress.show()
+                nativeSyncController.pause()
+                ioExecutor.execute {
+                    val result = runCatching {
+                        val target = destination ?: source
+                        if (destination != null) NativeSyncConfiguration.cloneWorkspace(source, target)
+                        NativeSyncConfiguration.requireDedicatedWorkspace(target)
+                        configuration.save(this, target)
+                        target
+                    }
+                    runOnUiThread {
+                        progress.dismiss()
+                        if (!isDestroyed) result.onSuccess { target ->
+                            val saved = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+                                .putString("sharedWorkspaceRoot", target.path).commit()
+                            if (saved) recreate() else {
+                                Toast.makeText(this, "无法保存笔记库路径，原笔记仍在使用", Toast.LENGTH_LONG).show()
+                                if (nativeSyncForeground) nativeSyncController.resume(source)
+                            }
+                        }.onFailure { error ->
+                            Toast.makeText(this, "同步设置未应用：${error.message}", Toast.LENGTH_LONG).show()
+                            if (nativeSyncForeground) nativeSyncController.resume(source)
+                        }
+                    }
+                }
+            }.show()
+        }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+    }
+
+    private fun showLegacySyncOptions() {
         val input=EditText(this).apply { setText(if(::pageContentRepository.isInitialized && pageContentRepository.root!=filesDir) pageContentRepository.root.absolutePath else "/storage/emulated/0/Documents/Mojian");setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Syncthing 共享笔记库")
             .setMessage("选择 Syncthing 同步的笔记文件夹。首次请先完成 OMEN 笔记传输。同一本笔记请轮流编辑，切换设备前等待同步完成。")
@@ -548,7 +643,7 @@ class MainActivity : Activity() {
                     check(hasSharedStorageAccess()) { "请先开启共享文件夹权限（需要 Android 11 或更高版本）" }
                     val target=java.io.File(input.text.toString()).canonicalFile
                     PageContentRepository(target).loadLibrary()
-                    saveBoundPageSession()
+                    check(saveBoundPageSession()) { "笔记未保存，无法切换笔记库" }
                     getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE).edit().putString("sharedWorkspaceRoot",target.path).apply()
                     recreate()
                 } catch(error: Exception) { Toast.makeText(this,error.message,Toast.LENGTH_LONG).show() }
@@ -559,7 +654,11 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || data == null) {
-            if (requestCode == REQUEST_EXPORT) { pendingExport=null; pendingRichExport=null; pendingSectionExport=null }
+            if (requestCode == REQUEST_EXPORT) {
+                pendingRichExportSession?.let { it.cancel(); richExportSessions.remove(it) }
+                pendingRichExportSession=null
+                pendingExport=null; pendingRichExport=null; pendingSectionExport=null
+            }
             if (requestCode == REQUEST_PDF_PAGES) pendingPdfPageTarget = null
             if (requestCode == REQUEST_SAVE_IMAGE) pendingImageSaveFile = null
             return
@@ -575,7 +674,15 @@ class MainActivity : Activity() {
                 chooseDisplayFilter(imageImportDisplayMode, "这批图片如何显示？") { inverted -> importImages(uris, inverted) }
             }
             REQUEST_STICKER_IMPORT -> if (uris.isNotEmpty()) importStickerPresets(uris)
-            REQUEST_EXPORT -> pendingExport?.let { type -> exportToUri(data.data ?: return, type) }.also {
+            REQUEST_EXPORT -> pendingExport?.let { type ->
+                val uri=data.data
+                if(uri!=null) exportToUri(uri,type)
+                else {
+                    pendingRichExportSession?.let { it.cancel(); richExportSessions.remove(it) }
+                    pendingRichExportSession=null
+                    pendingRichExport=null
+                }
+            }.also {
                 pendingExport = null
                 pendingSectionExport = null
             }
@@ -669,6 +776,8 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        nativeSyncForeground = false
+        nativeSyncController.pause()
         if(!::dryInkView.isInitialized) { super.onPause();return }
         if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
         if (::paperContainer.isInitialized) paperContainer.cancelPointerSequence()
@@ -939,7 +1048,7 @@ class MainActivity : Activity() {
         }
         return when (actionId) {
             "file:backstage" -> { showBackstage(); true }
-            "file:save" -> { saveBoundPageSession(); persistWorkspacePreferences(); Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show(); true }
+            "file:save" -> { if (saveBoundPageSession() && persistWorkspacePreferences()) Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show(); true }
             "file:export-page-pdf" -> { startExport(PendingExport.PDF); true }
             "file:export-notebook" -> { startExport(PendingExport.PRIVATE_PACKAGE); true }
             "insert:table-2x2" -> { insertTable(2, 2); true }
@@ -1004,6 +1113,16 @@ class MainActivity : Activity() {
             }
         rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(34)))
         rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(50)))
+        nativeSyncStatusView = TextView(this).apply {
+            text = nativeSyncStatus
+            textSize = 11f
+            setTextColor(TEXT_SECONDARY)
+            setBackgroundColor(TOOLBAR_BACKGROUND)
+            setPadding(dp(10), dp(2), dp(10), dp(2))
+            visibility = View.GONE
+            setOnClickListener { showNativeSyncOptions() }
+        }
+        rootLayout.addView(nativeSyncStatusView, LinearLayout.LayoutParams(MATCH, WRAP))
 
         val workArea =
             LinearLayout(this).apply {
@@ -1831,9 +1950,10 @@ class MainActivity : Activity() {
             .apply()
     }
 
-    private fun persistWorkspacePreferences(saveLibrary: Boolean = true) {
+    private fun persistWorkspacePreferences(saveLibrary: Boolean = true): Boolean {
         if(saveLibrary && ::pageContentRepository.isInitialized && pageContentRepository.isShared) {
-            runCatching { pageContentRepository.saveLibrary(notebookLibrary) }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
+            try { pageContentRepository.saveLibrary(notebookLibrary) }
+            catch (error: Exception) { Toast.makeText(this,error.message,Toast.LENGTH_LONG).show(); return false }
         }
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
             .edit()
@@ -1854,6 +1974,8 @@ class MainActivity : Activity() {
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
             .putString(KEY_BACKGROUND_FORMAT, dryInkView.backgroundFormat.name)
             .apply()
+        if (saveLibrary) nativeSyncController.localSaved()
+        return true
     }
 
     private fun restorePageViewSettings(
@@ -3184,10 +3306,10 @@ class MainActivity : Activity() {
         mainHandler.postDelayed(hideSplitFocus, SPLIT_FOCUS_PULSE_MILLIS)
     }
 
-    private fun saveBoundPageSession(flush: Boolean = true) {
-        if (pageLoads.isLoading) return
-        val key = boundPageKey ?: return
-        persistGeneratedShapes(flush)
+    private fun saveBoundPageSession(flush: Boolean = true): Boolean {
+        if (pageLoads.isLoading) return !flush
+        val key = boundPageKey ?: return true
+        val saved = persistGeneratedShapes(flush)
         pageViewports.remember(key, viewport.snapshot())
         pageSessions[key] =
             PageSessionState(
@@ -3196,6 +3318,7 @@ class MainActivity : Activity() {
                 textBoxes = textInputLayer.snapshotEditors(),
                 viewport = viewport.snapshot(),
             )
+        return saved
     }
 
     private fun buildFloatingToolbox(): View =
@@ -3684,9 +3807,10 @@ class MainActivity : Activity() {
             .setTitle("删除笔记本？")
             .setMessage("将删除“${notebook.title}”以及其中 ${sections.size} 个分区、$pages 个页面和本地附件。此操作无法撤销。")
             .setPositiveButton("删除") { _, _ ->
-                saveBoundPageSession()
-                pageContentRepository.deleteNotebookData(notebook.id)
-                if (!notebookLibrary.deleteNotebook(notebook.id)) return@setPositiveButton
+                runNavigationMutation {
+                if (!notebookLibrary.deleteNotebook(notebook.id)) return@runNavigationMutation
+                navigationMutation!!.afterCommit { pageContentRepository.deleteNotebookData(notebook.id) }
+                navigationMutation!!.afterCommit {
                 pageSessions.keys.removeAll { it.notebookId == notebook.id }
                 if (boundPageKey?.notebookId == notebook.id) {
                     boundPageKey = null
@@ -3700,7 +3824,9 @@ class MainActivity : Activity() {
                     if (splitViewState.location(side)?.notebookId == notebook.id) clearPreview(hostFor(side))
                 }
                 splitViewState.replaceNotebookLocations(notebook.id, notebookLibrary.captureLocation())
+                }
                 finishNavigationMutation()
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -3796,15 +3922,16 @@ class MainActivity : Activity() {
             .setTitle("删除分区？")
             .setMessage(message)
             .setPositiveButton("删除") { _, _ ->
-                saveBoundPageSession()
+                runNavigationMutation {
                 val removedPageIds = pages.mapTo(mutableSetOf()) { it.id }
                 pages.forEach { rehomeSharedPdfSource(notebook, it, removedPageIds) }
-                val removed = notebook.deleteSection(section.id) ?: return@setPositiveButton
+                val removed = notebook.deleteSection(section.id) ?: return@runNavigationMutation
                 removedPageIds(removed).forEach { pageId -> removePageRuntimeAndData(notebook.id, pageId) }
                 if (notebookLibrary.activeNotebookId == notebook.id && workspace.focusedSectionId == null && workspace.sections.isNotEmpty()) {
                     workspace.selectSection(workspace.sections.first().id)
                 }
                 finishNavigationMutation()
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -3815,7 +3942,7 @@ class MainActivity : Activity() {
             .setTitle("删除页面？")
             .setMessage("将删除“${page.title}”及其本地内容。此操作无法撤销。")
             .setPositiveButton("删除") { _, _ ->
-                saveBoundPageSession()
+                runNavigationMutation {
                 rehomeSharedPdfSource(notebook, page)
                 if (notebook.deletePage(sectionId, page.id) != null) {
                     removePageRuntimeAndData(notebook.id, page.id)
@@ -3823,6 +3950,7 @@ class MainActivity : Activity() {
                         pageNavigationClipboard = null
                     }
                     finishNavigationMutation()
+                }
                 }
             }
             .setNegativeButton("取消", null)
@@ -3846,10 +3974,12 @@ class MainActivity : Activity() {
                 if (notebook.moveSectionToParent(section.id, candidates[selectedIndex].second)) finishNavigationMutation()
             }
             .setNeutralButton("复制") { _, _ ->
+                runNavigationMutation {
                 val copied = notebook.copySectionToParent(section.id, candidates[selectedIndex].second)
                 if (copied != null) {
                     copied.pages.forEach { copyPageRuntimeAndData(notebook.id, it.source, notebook.id, it.copy) }
                     finishNavigationMutation()
+                }
                 }
             }
             .setNegativeButton("取消", null)
@@ -3895,10 +4025,12 @@ class MainActivity : Activity() {
                 if (notebook.movePage(sourceSectionId, page.id, candidates[selectedIndex].id)) finishNavigationMutation()
             }
             .setNeutralButton("复制") { _, _ ->
+                runNavigationMutation {
                 val copied = notebook.copyPage(sourceSectionId, page.id, candidates[selectedIndex].id)
                 if (copied != null) {
                     copyPageRuntimeAndData(notebook.id, copied.source, notebook.id, copied.copy)
                     finishNavigationMutation()
+                }
                 }
             }
             .setNegativeButton("取消", null)
@@ -3906,6 +4038,10 @@ class MainActivity : Activity() {
     }
 
     private fun pastePageAfter(targetNotebook: NotebookWorkspace, targetSectionId: String, targetPageId: String) {
+        runNavigationMutation { pastePageAfterSaved(targetNotebook, targetSectionId, targetPageId) }
+    }
+
+    private fun pastePageAfterSaved(targetNotebook: NotebookWorkspace, targetSectionId: String, targetPageId: String) {
         val clipboard = pageNavigationClipboard ?: return
         val sourceNotebook = notebookLibrary.notebooks.firstOrNull { it.id == clipboard.notebookId } ?: return
         val sourcePage = sourceNotebook.page(clipboard.sectionId, clipboard.pageId) ?: run {
@@ -3940,7 +4076,7 @@ class MainActivity : Activity() {
     ) {
         val sourcePdf = sourcePage.pdfPage
         val extraAssets =
-            sourcePdf?.takeIf { it.sourceOwnerPageId != sourcePage.id }?.let { pdf ->
+            sourcePdf?.let { pdf ->
                 listOf(File(pageContentRepository.assetDirectory(sourceNotebookId, pdf.sourceOwnerPageId), pdf.sourceAssetName))
             }.orEmpty()
         pageContentRepository.copyPageData(sourceNotebookId, sourcePage.id, targetNotebookId, targetPage.id, extraAssets)
@@ -3965,20 +4101,24 @@ class MainActivity : Activity() {
             notebook.allSections()
                 .flatMap { it.pages }
                 .filter { candidate -> candidate.id !in excludedPageIds && candidate.pdfPage?.sourceOwnerPageId == page.id }
-        val newOwner = dependents.firstOrNull() ?: return
+        if (dependents.isEmpty()) return
         val source = File(pageContentRepository.assetDirectory(notebook.id, page.id), pdf.sourceAssetName)
-        if (source.isFile) source.copyTo(File(pageContentRepository.assetDirectory(notebook.id, newOwner.id), source.name), overwrite = true)
+        check(source.isFile) { "PDF 源文件尚未同步，无法删除源页面" }
         dependents.forEach { dependent ->
-            dependent.pdfPage = dependent.pdfPage?.copy(sourceOwnerPageId = newOwner.id)
+            source.copyTo(File(pageContentRepository.assetDirectory(notebook.id, dependent.id), source.name), overwrite = true)
+            dependent.pdfPage = dependent.pdfPage?.copy(sourceOwnerPageId = dependent.id)
         }
     }
 
     private fun removePageRuntimeAndData(notebookId: String, pageId: String) {
+        val mutation = checkNotNull(navigationMutation)
+        mutation.afterCommit {
         val key = PageSessionKey(notebookId, pageId)
         pageSessions.remove(key)
         pageViewports.forget(key)
         if (boundPageKey == key) boundPageKey = null
         pageContentRepository.deletePageData(notebookId, pageId)
+        }
     }
 
     private fun removedPageIds(section: SectionNode): List<String> =
@@ -3990,7 +4130,42 @@ class MainActivity : Activity() {
             visit(section)
         }
 
+    private var navigationMutation: NavigationMutation? = null
+
+    private fun runNavigationMutation(action: () -> Unit) {
+        if (!saveBoundPageSession()) return
+        LocalMutationEpoch.forWorkspace(pageContentRepository.root).begin().use {
+            val before = notebookLibrary.toJsonString()
+            val clipboardBefore = pageNavigationClipboard
+            val mutation = NavigationMutation()
+            navigationMutation = mutation
+            var published = false
+            try {
+                action()
+                mutation.commit {
+                    if (pageContentRepository.isShared) pageContentRepository.saveLibrary(notebookLibrary)
+                    else check(getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+                        .putString(KEY_NOTEBOOK_LIBRARY, notebookLibrary.toJsonString()).commit()) { "无法保存笔记目录" }
+                    published = true
+                }
+            } catch (error: Exception) {
+                if (!published) {
+                    notebookLibrary = checkNotNull(NotebookLibrary.fromJson(before))
+                    pageNavigationClipboard = clipboardBefore
+                }
+                Toast.makeText(this, "页面操作失败：${error.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                navigationMutation = null
+            }
+            persistWorkspacePreferences(saveLibrary = false)
+            persistPageViewSettings()
+            clearContentSelection()
+            renderWorkspace()
+        }
+    }
+
     private fun finishNavigationMutation() {
+        if (navigationMutation != null) return
         persistWorkspacePreferences()
         persistPageViewSettings()
         clearContentSelection()
@@ -4032,17 +4207,13 @@ class MainActivity : Activity() {
             // Durable content is reloaded by the worker. Do not pin the previous native graph
             // in a queued completion while another dense page is being parsed.
             val session = nextKey?.let(pageSessions::get)?.copy(strokes = null, tags = null, textBoxes = null)
-            if (nextKey == null) {
-                pageLoads.cancel()
-                installLoadedPage(null, null, LoadedCanvasPage(null, emptyList()))
-                return
-            }
             val repository = pageContentRepository
             val dark = workspace.selectedPage()?.viewSettings?.darkBackground ?: true
             showPageLoading(true)
             pageLoads.load(nextKey, prepare = { isCurrent ->
                 pageWrites.flush()
                 check(isCurrent()) { "Page request superseded" }
+                if (nextKey == null) return@load LoadedCanvasPage(null, emptyList())
                 val released = java.util.concurrent.CompletableFuture<Unit>()
                 mainHandler.post {
                     try {
@@ -4064,7 +4235,8 @@ class MainActivity : Activity() {
                 LoadedCanvasPage(document, restored)
             }) { result ->
                 if (isFinishing || isDestroyed || repository !== pageContentRepository) return@load
-                if (workspace.id != nextKey.notebookId || workspace.selectedPageId != nextKey.pageId) {
+                val selectedKey = workspace.selectedPageId.takeIf(String::isNotEmpty)?.let { PageSessionKey(workspace.id, it) }
+                if (selectedKey != nextKey) {
                     bindSelectedPageContent()
                     return@load
                 }
@@ -4166,6 +4338,7 @@ class MainActivity : Activity() {
     }
 
     private fun configureSharedScene(document: PageInsertDocument?) {
+        val orderCache = SceneOrderCache<Any>()
         insertContentLayer.sceneComposed=document!=null
         textInputLayer.sceneComposed=document!=null
         textInputLayer.contentVisible={ id -> document?.let { doc ->
@@ -4173,23 +4346,33 @@ class MainActivity : Activity() {
                 ?.let { SharedSceneOrder.visible(doc.sharedSource,it) } ?: true
         } ?: true }
         dryInkView.sceneRenderer=if(document==null) null else { canvas,strokes,draw ->
-            data class Entry(val metadata: JSONObject,val index: Int,val action: ()->Unit)
             val source=document.sharedSource
-            val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
-            val entries=mutableListOf<Entry>()
-            document.objects.forEachIndexed { index,item ->
-                val metadata=objects[item.id] ?: JSONObject().put("isPageBackground",item is InsertObject.Image && item.pageBackground)
-                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,index) { insertContentLayer.renderSceneObject(canvas,item.id) }
+            val ordered = orderCache.get(source, sceneContentRevision, dryInkView.contentRevision) {
+                val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
+                val textItems=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).associateBy { it.optString("id") }
+                val entries=mutableListOf<SharedSceneComposer.Item<Any>>()
+                document.objects.forEach { item ->
+                    val metadata=objects[item.id] ?: JSONObject().put("isPageBackground",item is InsertObject.Image && item.pageBackground)
+                    entries+=SharedSceneComposer.Item(item,metadata)
+                }
+                dryInkView.snapshotStrokes().forEach { stroke ->
+                    val metadata=SharedStrokeCodec.metadata(stroke) ?: JSONObject()
+                    entries+=SharedSceneComposer.Item(stroke,metadata,SharedStrokeCodec.visible(stroke))
+                }
+                textInputLayer.sceneEditorIds().forEach { id ->
+                    entries+=SharedSceneComposer.Item(id,textItems[id] ?: JSONObject())
+                }
+                SharedSceneComposer.ordered(source,entries)
             }
-            strokes.forEachIndexed { index,stroke ->
-                val metadata=SharedStrokeCodec.metadata(stroke) ?: JSONObject()
-                if(SharedStrokeCodec.visible(stroke)) entries+=Entry(metadata,document.objects.size+index) { draw(stroke) }
+            val visibleStrokes = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<androidx.ink.strokes.Stroke, Boolean>())
+            visibleStrokes.addAll(strokes)
+            ordered.forEach { item ->
+                when(item) {
+                    is InsertObject -> insertContentLayer.renderSceneObject(canvas,item)
+                    is androidx.ink.strokes.Stroke -> if (item in visibleStrokes) draw(item)
+                    is String -> textInputLayer.renderForExport(canvas,android.graphics.Matrix(),onlyId=item)
+                }
             }
-            textInputLayer.snapshotEditors().forEachIndexed { index,item ->
-                val metadata=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).firstOrNull { it.optString("id")==item.id } ?: JSONObject()
-                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,document.objects.size+strokes.size+index) { textInputLayer.renderForExport(canvas,android.graphics.Matrix(),onlyId=item.id) }
-            }
-            entries.sortedWith(compareBy<Entry> { SharedSceneOrder.layer(source,it.metadata) }.thenBy { it.metadata.optLong("zOrder") }.thenBy { it.index }).forEach { it.action() }
         }
     }
 
@@ -4901,15 +5084,15 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun persistGeneratedShapes(flush: Boolean = true) {
-        val key=boundPageKey ?: return
-        if (restoringPageInk) return
+    private fun persistGeneratedShapes(flush: Boolean = true): Boolean {
+        val key=boundPageKey ?: return true
+        if (restoringPageInk) return false
         if (!contentDirty) {
             if(flush) try { pageWrites.flush() } catch(error: Exception) { contentDirty=true;Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show() }
-            return
+            return !contentDirty
         }
-        val document=insertContentLayer.currentDocument() ?: return
-        if (document.notebookId!=key.notebookId || document.pageId!=key.pageId) return
+        val document=insertContentLayer.currentDocument() ?: return false
+        if (document.notebookId!=key.notebookId || document.pageId!=key.pageId) return false
         try {
             val snapshot = synchronized(document) {
                 document.strokes=org.json.JSONArray().apply { dryInkView.snapshotStrokes().forEach { put(SharedStrokeCodec.encode(it)) } }
@@ -4919,14 +5102,15 @@ class MainActivity : Activity() {
                 PageInsertDocument(document.notebookId,document.pageId,document.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
                     document.strokes,source,document.diskStamp)
             }
-            pageWrites.submit(pageContentRepository,document,snapshot) { error -> runOnUiThread {
+            pageWrites.submit(pageContentRepository,document,snapshot, failed = { error -> runOnUiThread {
                 if(boundPageKey==key) contentDirty=true
                 Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show()
                 android.util.Log.e("MojianSync","Save refused",error)
-            } }
+            } }, saved = { nativeSyncController.localSaved() })
             contentDirty=false
             if(flush) pageWrites.flush()
         } catch(error: Exception) { contentDirty=true;Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show();android.util.Log.e("MojianSync","Save refused",error) }
+        return !contentDirty
     }
 
     private fun selectTool(id: String) {
@@ -6031,18 +6215,18 @@ class MainActivity : Activity() {
             )
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
-                dryInkView.clear()
-                textInputLayer.clearAll()
-                tagLayer.clear()
-                insertContentLayer.currentDocument()?.let { document ->
-                    assetStore.clearPageAssetsExcept(
-                        document.notebookId,
-                        document.pageId,
-                        insertContentLayer.retainedPageAssetNames(),
-                    )
+                if (!saveBoundPageSession()) return@setPositiveButton
+                LocalMutationEpoch.forWorkspace(pageContentRepository.root).begin().use {
+                    val document = insertContentLayer.currentDocument()
+                    val retained = insertContentLayer.retainedPageAssetNames()
+                    dryInkView.clear()
+                    textInputLayer.clearAll()
+                    tagLayer.clear()
+                    insertContentLayer.clearObjects(preservePageBackgrounds = true)
+                    if (saveBoundPageSession() && document != null) {
+                        assetStore.clearPageAssetsExcept(document.notebookId, document.pageId, retained)
+                    }
                 }
-                insertContentLayer.clearObjects(preservePageBackgrounds = true)
-                saveBoundPageSession()
                 renderToolDetails()
             }
             .show()
@@ -7150,141 +7334,144 @@ class MainActivity : Activity() {
         ExportScope.NOTEBOOK -> workspace.title
     }
 
-    /** Independent layers preserve the active page, selection, viewport, and session-only freehand. */
-    private fun exportSource(page: NotePage): VectorPdfSource {
-        val key=PageSessionKey(workspace.id,page.id)
-        val session=pageSessions[key]
-        val stored=pageContentRepository.load(workspace.id,page.id)
-        val settings=page.viewSettings.copy()
-        val strokes=session?.strokes ?: (0 until stored.strokes.length()).map { index ->
-            SharedStrokeCodec.decode(stored.strokes.getJSONObject(index),{ color ->
-                if(color==InkPalette.BLACK && settings.darkBackground) Color.rgb(239,239,239) else color.argb
-            },SharedSceneOrder.visible(stored.sharedSource,stored.strokes.getJSONObject(index)))
-        }
-        val exportViewport=ViewportState()
-        val ink=DryInkView(this).apply { configureOutputPage(settings,page.title); setDarkBackground(settings.darkBackground); replaceStrokes(strokes) }
-        val inserts=InsertContentLayer(this,exportViewport,pageContentRepository).apply { setDarkBackground(settings.darkBackground); bind(stored) }
-        val tags=CanvasTagLayer(this,exportViewport).apply { replaceTags(session?.tags ?: SharedContentCodec.tags(stored)) }
-        val text=CanvasTextInputLayer(this,exportViewport).apply {
-            setDarkBackground(settings.darkBackground)
-            replaceEditors(session?.textBoxes ?: SharedContentCodec.text(stored))
-            measure(View.MeasureSpec.makeMeasureSpec(dp(900),View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(dp(1200),View.MeasureSpec.EXACTLY))
-            layout(0,0,measuredWidth,measuredHeight)
-        }
-        val bounds=(ink.contentBounds()+inserts.contentBounds()+tags.contentBounds()+text.contentBounds()).toList()
-        return VectorPdfSource(settings,bounds,page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) { canvas,matrix,options ->
-            val output=OutputAppearance(options.printing,options.invertedImageIds,options.hideBackgroundFormat)
-            ink.renderBackgroundForExport(canvas,matrix,output)
-            data class Entry(val metadata: JSONObject,val index: Int,val action: ()->Unit)
-            val source=stored.sharedSource
-            val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
-            val entries=mutableListOf<Entry>()
-            stored.objects.forEachIndexed { index,item ->
-                val metadata=objects[item.id] ?: JSONObject().put("isPageBackground",item is InsertObject.Image && item.pageBackground)
-                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,index) { inserts.renderSceneObject(canvas,item.id,matrix,output) }
-            }
-            strokes.forEachIndexed { index,stroke -> entries+=Entry(SharedStrokeCodec.metadata(stroke) ?: JSONObject(),stored.objects.size+index) {
-                ink.renderVectorInkForExport(canvas,matrix,output=output,onlyStroke=stroke)
-            } }
-            text.snapshotEditors().forEachIndexed { index,item ->
-                val metadata=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).firstOrNull { it.optString("id")==item.id } ?: JSONObject()
-                if(SharedSceneOrder.visible(source,metadata)) entries+=Entry(metadata,stored.objects.size+strokes.size+index) { text.renderForExport(canvas,matrix,output=output,onlyId=item.id) }
-            }
-            entries.sortedWith(compareBy<Entry> { SharedSceneOrder.layer(source,it.metadata) }.thenBy { it.metadata.optLong("zOrder") }.thenBy { it.index }).forEach { it.action() }
-            tags.renderForExport(canvas,matrix,output=output)
-        }
+    private fun exportSession(notebookId: String, pages: List<NotePage>, repository: PageContentRepository): ExportProductSession {
+        val identities=pages.map { page -> ExportPageIdentity(page.id,page.title,page.viewSettings.copy(),
+            page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) }
+        return ExportProductSession(this,repository,notebookId,identities).also { richExportSessions += it }
     }
 
-    private fun startRichExport(options: ExportOptions, printing: Boolean, sources: List<VectorPdfSource>) {
-        val notebook=workspace
-        val pages=exportPages(options.scope)
+    private fun startRichExport(options: ExportOptions, printing: Boolean,
+        notebook: NotebookWorkspace = workspace, pages: List<NotePage> = exportPages(options.scope),
+        title: String = exportTitle(options.scope)) {
         require(pages.isNotEmpty()) { "当前范围没有页面" }
-        val title=exportTitle(options.scope)
-        if(printing) {
-            val sheets=VectorPdfExporter.pages(sources,options)
-            val first=sheets.first().sheet
-            val media=android.print.PrintAttributes.MediaSize("MOJIAN","墨笺页面",(first.widthPoints/72*1000).toInt(),(first.heightPoints/72*1000).toInt())
-            val margin=(options.marginMm/25.4f*1000).toInt()
-            val attributes=android.print.PrintAttributes.Builder().setMediaSize(media).setMinMargins(android.print.PrintAttributes.Margins(margin,margin,margin,margin))
-                .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR).build()
-            (getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager).print(title,PaginatedPrintAdapter(title,sources,options,ioExecutor),attributes)
-            return
-        }
+        val repository=pageContentRepository
         val section=notebook.selectedSection()
-        val pdfPages=if(options.format==ExportFormat.PACKAGE) emptyList() else VectorPdfExporter.pages(sources,options)
-        pendingRichExport={ uri ->
-            val pdf=if(options.format==ExportFormat.PDF) VectorPdfExporter.capturePages(pdfPages) else null
-            Toast.makeText(this,"正在导出…",Toast.LENGTH_SHORT).show()
+        val resolved=options.copy(printing=printing)
+        val session=if(resolved.format!=ExportFormat.PACKAGE || printing) exportSession(notebook.id,pages,repository) else null
+        if(printing) {
+            val provider=requireNotNull(session)
             ioExecutor.execute {
                 try {
+                    val first=provider.plan(resolved).pages.first().sheet
+                    runOnUiThread {
+                        if(provider.isCancelled || isDestroyed) return@runOnUiThread
+                        val media=android.print.PrintAttributes.MediaSize("MOJIAN","墨笺页面",(first.widthPoints/72*1000).toInt(),(first.heightPoints/72*1000).toInt())
+                        val margin=(resolved.marginMm/25.4f*1000).toInt()
+                        val attributes=android.print.PrintAttributes.Builder().setMediaSize(media)
+                            .setMinMargins(android.print.PrintAttributes.Margins(margin,margin,margin,margin))
+                            .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR).build()
+                        (getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager).print(title,
+                            PaginatedPrintAdapter(title,provider,resolved,ioExecutor) { richExportSessions.remove(provider) },attributes)
+                    }
+                } catch(error: Exception) {
+                    provider.cancel()
+                    runOnUiThread { richExportSessions.remove(provider); if(!isDestroyed) reportBackgroundFailure("导出失败",error) }
+                }
+            }
+            return
+        }
+        pendingRichExport={ uri ->
+            pendingRichExportSession=null
+            Toast.makeText(this,"正在导出…",Toast.LENGTH_SHORT).show()
+            ioExecutor.execute {
+                var count=0
+                try {
+                    val plan=session?.plan(resolved)
+                    count=plan?.pages?.size ?: 0
                     contentResolver.openOutputStream(uri,"w").use { output ->
                         requireNotNull(output) { "无法写入目标文件" }
-                        when(options.format) {
-                            ExportFormat.PDF -> requireNotNull(pdf).writeTo(output)
+                        when(resolved.format) {
+                            ExportFormat.PDF -> {
+                                val provider=requireNotNull(session)
+                                val pdf=VectorPdfExporter.capturePages(requireNotNull(plan),provider,resolved,cancelled={ provider.isCancelled })
+                                try { if(!provider.isCancelled) pdf.writeTo(output) } finally { pdf.close() }
+                            }
                             ExportFormat.PACKAGE -> {
-                                val exporter=NotebookPackageExporter(pageContentRepository)
-                                when(options.scope) {
+                                val exporter=NotebookPackageExporter(repository)
+                                when(resolved.scope) {
                                     ExportScope.PAGE -> exporter.writePage(output,notebook,pages.first())
                                     ExportScope.SECTION -> exporter.writeSection(output,notebook,requireNotNull(section),null,emptyMap())
                                     ExportScope.NOTEBOOK -> exporter.write(output,notebook,null,emptyMap())
                                 }
                             }
                             ExportFormat.PNG_ZIP -> java.util.zip.ZipOutputStream(output).use { zip ->
-                                pdfPages.forEachIndexed { index,page ->
-                                    val task=java.util.concurrent.FutureTask {
+                                val provider=requireNotNull(session)
+                                VectorPdfExporter.forEachPage(requireNotNull(plan),provider,resolved,cancelled={ provider.isCancelled }) { index,page ->
+                                    val bitmap=ExportUiDispatcher().call {
                                         val scale=200f/72
-                                        Bitmap.createBitmap(kotlin.math.ceil(page.sheet.widthPoints*scale).toInt(),kotlin.math.ceil(page.sheet.heightPoints*scale).toInt(),Bitmap.Config.ARGB_8888).also { bitmap ->
-                                            val canvas=Canvas(bitmap); canvas.scale(scale,scale); VectorPdfExporter.renderPage(canvas,page)
-                                        }
+                                        val width=kotlin.math.ceil(page.sheet.widthPoints*scale).toInt()
+                                        val height=kotlin.math.ceil(page.sheet.heightPoints*scale).toInt()
+                                        require(width.toLong()*height<=32_000_000L) { "输出图片过大，请选择较小纸张" }
+                                        val image=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
+                                        try {
+                                            val canvas=Canvas(image); canvas.scale(scale,scale)
+                                            VectorPdfExporter.renderPage(canvas,page)
+                                            image
+                                        } catch(error: Throwable) { image.recycle(); throw error }
                                     }
-                                    runOnUiThread(task)
-                                    val bitmap=task.get()
-                                    try { zip.putNextEntry(java.util.zip.ZipEntry("page-%04d.png".format(java.util.Locale.ROOT,index+1))); bitmap.compress(Bitmap.CompressFormat.PNG,100,zip); zip.closeEntry() }
-                                    finally { bitmap.recycle() }
+                                    try {
+                                        zip.putNextEntry(java.util.zip.ZipEntry("page-%04d.png".format(java.util.Locale.ROOT,index+1)))
+                                        check(bitmap.compress(Bitmap.CompressFormat.PNG,100,zip)) { "图片编码失败" }
+                                        zip.closeEntry()
+                                    } finally { bitmap.recycle() }
                                 }
                             }
                         }
                     }
-                    runOnUiThread { Toast.makeText(this,"导出完成${if(pdfPages.isNotEmpty()) " · ${pdfPages.size} 页" else ""}",Toast.LENGTH_LONG).show() }
-                } catch(error: Exception) { reportBackgroundFailure("导出失败",error) }
-                finally { pdf?.close() }
+                    if(session?.isCancelled!=true) runOnUiThread {
+                        if(!isDestroyed) Toast.makeText(this,"导出完成${if(count>0) " · $count 页" else ""}",Toast.LENGTH_LONG).show()
+                    }
+                } catch(error: Exception) {
+                    if(session?.isCancelled!=true) runOnUiThread { if(!isDestroyed) reportBackgroundFailure("导出失败",error) }
+                } finally {
+                    session?.cancel()
+                    runOnUiThread { richExportSessions.remove(session) }
+                }
             }
         }
-        pendingExport=PendingExport.PDF // The picker callback dispatches the captured scoped request above.
+        pendingRichExportSession?.let { it.cancel(); richExportSessions.remove(it) }
+        pendingRichExportSession=session
+        pendingExport=PendingExport.PDF
         startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE); type=options.format.mime; putExtra(Intent.EXTRA_TITLE,"${safeFileName(title)}.${options.format.extension}")
+            addCategory(Intent.CATEGORY_OPENABLE); type=resolved.format.mime
+            putExtra(Intent.EXTRA_TITLE,"${safeFileName(title)}.${resolved.format.extension}")
         },REQUEST_EXPORT)
     }
 
     private fun showExportDialog(printing: Boolean = false) {
-        saveBoundPageSession()
-        val sources = mutableMapOf<String, VectorPdfSource>()
-        fun selectedSources(options: ExportOptions) = exportPages(options.scope).map { page -> sources.getOrPut(page.id) { exportSource(page) } }
-        ExportOptionsDialog(this,printing,images = { options ->
-            val darkPages=exportPages(options.scope).filter { it.viewSettings.darkBackground }
-            darkPages.isNotEmpty() to darkPages.flatMap { page -> pageContentRepository.load(workspace.id,page.id).objects.filterIsInstance<InsertObject.Image>()
-                .mapIndexed { index,image -> ExportImageChoice(image.id,"${page.title} · 图片 ${index+1} · ${image.displayName}",image.viewInverted) } }
-        },describe = { options ->
-            val pages=exportPages(options.scope)
-            require(pages.isNotEmpty()) { "请先选择要导出的${options.scope.label}" }
-            if(!printing && options.format==ExportFormat.PACKAGE) "${exportTitle(options.scope)}\n${pages.size} 个笔记页面，包含可编辑内容和原始附件"
-            else {
-                val sheets=VectorPdfExporter.pages(selectedSources(options),options)
-                "${exportTitle(options.scope)}\n${pages.size} 个笔记页面 → 本次输出 ${sheets.size} 页"
-            }
-        },action = { options,preview ->
-            runCatching { startRichExport(options,printing || preview,if(options.format==ExportFormat.PACKAGE && !printing && !preview) emptyList() else selectedSources(options)) }
-                .onFailure { reportBackgroundFailure("导出失败",it) }
-        }).show()
+        if(!saveBoundPageSession()) return
+        val notebook=workspace
+        val repository=pageContentRepository
+        val scopePages=ExportScope.entries.associateWith { exportPages(it).toList() }
+        val titles=ExportScope.entries.associateWith { exportTitle(it) }
+        val sessions=scopePages.mapValues { (_,pages) -> exportSession(notebook.id,pages,repository) }
+        ExportOptionsDialog(this,printing,images={ options -> sessions.getValue(options.scope).images() },
+            describe={ options ->
+                val pages=scopePages.getValue(options.scope)
+                require(pages.isNotEmpty()) { "请先选择要导出的${options.scope.label}" }
+                if(!printing && options.format==ExportFormat.PACKAGE)
+                    "${titles.getValue(options.scope)}\n${pages.size} 个笔记页面，包含可编辑内容和原始附件"
+                else {
+                    val plan=sessions.getValue(options.scope).plan(options)
+                    "${titles.getValue(options.scope)}\n${pages.size} 个笔记页面 → 本次输出 ${plan.pages.size} 页"
+                }
+            },action={ options,preview ->
+                runCatching { startRichExport(options,printing || preview,notebook,scopePages.getValue(options.scope),titles.getValue(options.scope)) }
+                    .onFailure { reportBackgroundFailure("导出失败",it) }
+            },summaryExecutor=ioExecutor,onDismiss={
+                sessions.values.forEach { it.cancel(); richExportSessions.remove(it) }
+            }).show()
     }
 
     private fun startExport(type: PendingExport) {
         if(type==PendingExport.PDF) {
-            runCatching { saveBoundPageSession(); startRichExport(ExportOptions(),false,exportPages(ExportScope.PAGE).map(::exportSource)) }
+            runCatching { if(saveBoundPageSession()) startRichExport(ExportOptions(),false) }
                 .onFailure { reportBackgroundFailure("导出失败",it) }
             return
         }
         pendingRichExport = null
+        pendingRichExportSession?.let { it.cancel(); richExportSessions.remove(it) }
+        pendingRichExportSession=null
         if (type != PendingExport.SECTION_PACKAGE && workspace.selectedPageId.isEmpty()) {
             Toast.makeText(this, "请先选择要导出的页面", Toast.LENGTH_SHORT).show()
             return

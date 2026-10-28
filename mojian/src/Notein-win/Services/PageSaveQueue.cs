@@ -48,8 +48,12 @@ public sealed class PageSaveQueue
             }
             try
             {
-                job.Store.WritePageSnapshot(job.Page);
-                if (job.Library != null) job.Store.SaveLibrary(job.Library);
+                using var mutation = NativeSyncMutationEpoch.ForRoot(job.Store.RootDirectory).BeginMutation();
+                lock (WorkspaceFileGate.ForRoot(job.Store.RootDirectory))
+                {
+                    job.Store.WritePageSnapshot(job.Page);
+                    if (job.Library != null) job.Store.SaveLibrary(job.Library);
+                }
                 lock (_gate) _failed.Remove(key);
             }
             catch (Exception ex)
@@ -67,7 +71,7 @@ public sealed class PageSaveQueue
         worker.GetAwaiter().GetResult();
         Job[] retries;
         lock (_gate) retries = _failed.Values.Select(value => value.Job).ToArray();
-        foreach (var retry in retries) Enqueue(retry.Store, retry.Page);
+        foreach (var retry in retries) Enqueue(retry.Store, retry.Page, retry.Library);
         lock (_gate) worker = _worker;
         worker.GetAwaiter().GetResult();
         lock (_gate)

@@ -1,6 +1,29 @@
 # Android 页面加载与视图恢复
 
-Last verified: 2026-10-19
+Last verified: 2026-10-28
+
+## Save and mutation safety (2026-10-28)
+
+Save boundaries return success/failure. A failed flush blocks workspace switching, destructive
+navigation and copy operations rather than allowing unsaved UI state to be discarded. Copies
+save the source first and stage its assets before publishing the target page; missing source
+PDFs are errors rather than silently broken references. Required assets (including an owned source
+PDF) are checked before copying any target file, and duplicate references copy once. Navigation to
+an empty target still waits for the worker save barrier; it must not clear the outgoing layers
+while an asynchronous save can fail.
+
+`NavigationMutation` publishes the library before physical deletion cleanup. Until publication
+succeeds, the previous library and clipboard state can be restored and source files remain.
+Cleanup rechecks references/generation and skips files still owned by surviving pages. A cleanup
+failure can leave unreferenced files; it must not delete still-referenced content. This is not a
+cross-device transaction with Syncthing. Windows uses a separate recoverable deletion journal
+because its existing deletion route stages files before index publication.
+
+Clear-page follows the same save-before-cleanup order: first flush current content, then persist
+the cleared document, and only after success delete assets not retained by immutable page
+backgrounds. A refused save must never leave the old durable page referencing deleted files.
+Local mutation epochs span the complete navigation/cleanup operation and repository writes so
+native sync cannot publish an intermediate index/assets snapshot.
 
 修改 Android 页面绑定、跨页会话、后台加载或同步刷新前阅读本文；共享存储契约见 `live-note-sync.md`。
 
@@ -45,6 +68,10 @@ Last verified: 2026-10-19
 - `SharedStrokeCodec` 的全局弱引用记录表必须支持工作线程创建笔迹与 UI 使用旧笔迹并发。
 
 ## 验证边界
+
+2026-10-28 最终 0.7.0 构建通过 228/228 单元测试、APK、native-test APK 和 lint
+（0 errors / 136 warnings），新增覆盖空页导航保存失败、缺失源 PDF 和复制前资产预检。
+本轮不连接设备，文字/导出原生测试只编译；下面的实机记录仍属于 2026-10-19。
 
 `LatestPageLoaderTest` 检查后台准备/UI 投递边界、快速切换的过期结果、取消、读取失败，
 以及保存屏障阻塞时导航调用仍返回。`PageViewportMemoryTest` 检查重绑保留缩放和平移、

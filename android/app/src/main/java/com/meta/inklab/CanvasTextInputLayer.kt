@@ -293,6 +293,12 @@ class CanvasTextInputLayer(
             .maxOrNull()
             ?: 0f
 
+    fun sceneEditorIds(): List<String> = buildList {
+        forEachEditor { editor ->
+            if (editor !in temporaryEditors || editor.text.isNotBlank()) add(state(editor).id)
+        }
+    }
+
     fun snapshotEditors(selectedOnly: Boolean = false): List<CanvasTextSnapshot> =
         buildList {
             forEachEditor { editor ->

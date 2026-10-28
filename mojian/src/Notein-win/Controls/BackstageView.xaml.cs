@@ -9,6 +9,8 @@ public partial class BackstageView : UserControl
     public event EventHandler? NewNotebookRequested;
     public event EventHandler? OpenWorkspaceRequested;
     public event EventHandler? SwitchWorkspaceRequested;
+    public event EventHandler? NativeSyncRequested;
+    private void OnNativeSyncClick(object sender, RoutedEventArgs e) => NativeSyncRequested?.Invoke(this, EventArgs.Empty);
     public event EventHandler? ExportPdfRequested;
     public event EventHandler? ExportPackageRequested;
     public event Action<ShortcutActionDescriptor>? ConfigureShortcutRequested;

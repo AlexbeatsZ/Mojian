@@ -160,6 +160,7 @@ public partial class MainWindow : Window
         if (_eventsWired) return;
         _eventsWired = true;
         ViewModel.ObserveSaveCompletion(Dispatcher);
+        InitializeNativeSync();
         var syncTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         syncTimer.Tick += (_, _) =>
         {
@@ -1336,6 +1337,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, CancelEventArgs e)
     {
+        if (ViewModel.NativeSyncRecoveryRequired) return;
         try { ViewModel.SaveAll(); }
         catch (Exception error)
         {

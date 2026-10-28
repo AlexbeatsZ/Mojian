@@ -14,7 +14,11 @@ import android.widget.TextView
 /** The scope/format/layout choices mirror the desktop export surface. */
 class ExportOptionsDialog(private val context: Context, private val printing: Boolean,
     private val describe: (ExportOptions) -> String, private val action: (ExportOptions, Boolean) -> Unit,
-    private val images: (ExportOptions) -> Pair<Boolean,List<ExportImageChoice>> = { false to emptyList() }) {
+    private val images: (ExportOptions) -> Pair<Boolean,List<ExportImageChoice>> = { false to emptyList() },
+    private val summaryExecutor: java.util.concurrent.Executor? = null,
+    private val onDismiss: () -> Unit = {}) {
+    @Volatile private var refreshGeneration = 0
+    @Volatile private var dismissed = false
     private var options = ExportOptions(printing=printing)
     private lateinit var summary: TextView
     private lateinit var layout: LinearLayout
@@ -40,8 +44,52 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
         val packageFormat = !printing && options.format==ExportFormat.PACKAGE
         layout.visibility=if(packageFormat) View.GONE else View.VISIBLE
         preview.visibility=if(packageFormat) View.GONE else View.VISIBLE
+        val request = ++refreshGeneration
+        val snapshot = options
+        val selections = imageSelection.toMap()
+        val executor = summaryExecutor
+        if (executor != null) {
+            colorPanel.removeAllViews()
+            summary.text="正在计算分页…"
+            submit.isEnabled=false
+            preview.isEnabled=false
+            executor.execute {
+                if (request == refreshGeneration && !dismissed) {
+                    val result = runCatching {
+                        val metadata = if(printing) images(snapshot) else false to emptyList()
+                        val resolved = snapshot.copy(invertedImageIds=metadata.second.filter {
+                            selections[it.id] ?: it.displayInverted
+                        }.map { it.id }.toSet())
+                        Triple(metadata, resolved, describe(resolved))
+                    }
+                    summary.post {
+                        if (!dismissed && request == refreshGeneration) {
+                            result.onSuccess { (metadata, resolved, description) ->
+                                options=resolved
+                                updateColorPanel(metadata)
+                                summary.text=description
+                                submit.isEnabled=true
+                                preview.isEnabled=true
+                            }.onFailure {
+                                summary.text=it.message
+                                submit.isEnabled=false
+                                preview.isEnabled=false
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            runCatching {
+                updateColorPanel(if(printing) images(options) else false to emptyList())
+                describe(options)
+            }.onSuccess { summary.text=it; submit.isEnabled=true; preview.isEnabled=true }
+                .onFailure { summary.text=it.message; submit.isEnabled=false; preview.isEnabled=false }
+        }
+    }
+    private fun updateColorPanel(metadata: Pair<Boolean,List<ExportImageChoice>>) {
         colorPanel.removeAllViews()
-        val (darkPages,imageRows)=if(printing) images(options) else false to emptyList()
+        val (darkPages,imageRows)=metadata
         colorPanel.visibility=if(darkPages) View.VISIBLE else View.GONE
         if(darkPages) {
             heading(colorPanel,"深色页面打印")
@@ -56,10 +104,9 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
             }
         }
         options=options.copy(invertedImageIds=imageRows.filter { imageSelection[it.id] ?: it.displayInverted }.map { it.id }.toSet())
-        runCatching { describe(options) }.onSuccess { summary.text=it; submit.isEnabled=true; preview.isEnabled=true }
-            .onFailure { summary.text=it.message; submit.isEnabled=false; preview.isEnabled=false }
     }
     fun show() {
+        dismissed=false
         val root=column().apply { setPadding(dp(20),dp(12),dp(20),dp(20)); setBackgroundColor(Color.rgb(19,19,19)) }
         val body=LinearLayout(context).apply { orientation=if(context.resources.configuration.screenWidthDp>=600) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         val left=column(); val right=column()
@@ -91,6 +138,7 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
         summary=text("").apply { setTextColor(Color.rgb(207,188,223)) }; right.addView(summary)
         val buttons=LinearLayout(context).apply { gravity=Gravity.START }
         val dialog=AlertDialog.Builder(context).setTitle(if(printing) "打印" else "导出").setView(ScrollView(context).apply { addView(root) }).setNegativeButton("取消",null).create()
+        dialog.setOnDismissListener { dismissed=true; refreshGeneration++; onDismiss() }
         submit=text(if(printing) "打印…" else "导出…").apply { setBackgroundColor(Color.rgb(65,53,76)); setOnClickListener { dialog.dismiss(); action(options,false) } }
         preview=text("分页预览").apply { setOnClickListener { dialog.dismiss(); action(options,true) } }
         buttons.addView(submit); buttons.addView(preview); right.addView(buttons); root.addView(body)

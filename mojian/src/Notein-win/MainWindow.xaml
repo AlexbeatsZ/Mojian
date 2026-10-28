@@ -559,6 +559,9 @@
                         </DockPanel>
                     </Border>
 
+                    <Border Grid.ColumnSpan="3" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12,0,0,10" Padding="8,4" CornerRadius="3" Background="#EE232323" IsHitTestVisible="False">
+                        <TextBlock Text="{Binding NativeSyncStatus}" Foreground="{StaticResource TextSecondary}" FontSize="11" MaxWidth="430" TextTrimming="CharacterEllipsis" />
+                    </Border>
                     <Border Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,10" Padding="8,4" CornerRadius="3" Background="#EE232323" IsHitTestVisible="False">
                         <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding HasSaveError}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Border.Style>
                         <TextBlock Text="{Binding SaveStateText}" Foreground="#FFB4AB" FontSize="11" />

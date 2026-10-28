@@ -2,6 +2,10 @@
 
 Last verified: 2026-10-12
 
+The deployed Syncthing setup below is unchanged. The opt-in native HTTPS implementation added
+on 2026-10-28 uses a separate explicitly created clone, not this live tree. Read
+`native-sync.md` before enabling it; no public ingress or server deployment is implied.
+
 ## Authorized deployment and initial source
 
 The user requested the Android build on Redmi K70 and Xiaomi Pad 6 Pro and Syncthing between
