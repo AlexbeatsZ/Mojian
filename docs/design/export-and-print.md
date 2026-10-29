@@ -151,6 +151,10 @@ desktop screen width. Both pattern palettes currently use the original uniform d
 
 ## Print and color boundary
 
+The print panel remembers its last reusable choices and restores them on reopen/restart. There
+is no separate default-print settings surface. See `settings-memory.md` for the persisted fields,
+page-range validation and content-specific image selection boundary.
+
 Printing opens the real Windows print dialog or Android native print preview. Its pages come from
 the same planner used by export. Export preview shows export appearance; print preview shows print
 appearance. Printing never changes saved page appearance, image inversion, selected objects,

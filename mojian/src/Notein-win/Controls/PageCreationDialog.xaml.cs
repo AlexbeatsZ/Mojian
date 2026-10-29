@@ -30,14 +30,16 @@ public partial class PageCreationDialog : Window
     public PageAppearance PageAppearance { get; private set; } = new();
     public string PdfPath { get; private set; } = string.Empty;
 
-    private static readonly (string Hex, string Name)[] DarkThemeColors =
+    private static readonly (string Light, string Dark, string Name)[] ThemeColors =
     [
-        ("#1B1B1B", "墨黑"),
-        ("#2D2820", "复古棕"),
-        ("#1B2735", "深蓝"),
-        ("#1E2D24", "墨绿"),
-        ("#2B1D2E", "暗紫"),
+        ("#FAFAFA", "#1B1B1B", "白色"),
+        ("#F3E9D2", "#302A21", "米色"),
+        ("#E2EDF8", "#1D2B38", "蓝色"),
+        ("#E0F1E7", "#1E3028", "绿色"),
+        ("#F4E2E8", "#352329", "粉色"),
     ];
+    private (string Hex, string Name)[] AvailableColors => ThemeColors.Select(color =>
+        (PageAppearance.Theme == PageTheme.Dark ? color.Dark : color.Light, color.Name)).ToArray();
 
     private static readonly BackgroundFormatOption[] BackgroundOptions =
     [
@@ -45,6 +47,7 @@ public partial class PageCreationDialog : Window
         new() { Format = CanvasBackgroundFormat.RuledStandard, DisplayName = "标准横线" },
         new() { Format = CanvasBackgroundFormat.RuledNarrow, DisplayName = "窄行距横线" },
         new() { Format = CanvasBackgroundFormat.RuledWide, DisplayName = "宽行距横线" },
+        new() { Format = CanvasBackgroundFormat.RuledClean, DisplayName = "纯横线" },
         new() { Format = CanvasBackgroundFormat.RuledTwoColumnStandard, DisplayName = "标准双栏横线" },
         new() { Format = CanvasBackgroundFormat.RuledTwoColumnNarrow, DisplayName = "窄双栏横线" },
         new() { Format = CanvasBackgroundFormat.RuledTwoColumnWide, DisplayName = "宽双栏横线" },
@@ -67,7 +70,8 @@ public partial class PageCreationDialog : Window
 
         // Populate baseline dropdown
         BackgroundPicker.ItemsSource = BackgroundOptions;
-        var selectedBg = BackgroundOptions.FirstOrDefault(b => b.Format == initialAppearance.Background) ?? BackgroundOptions[5];
+        var selectedBg = BackgroundOptions.FirstOrDefault(b => b.Format == initialAppearance.Background)
+            ?? BackgroundOptions.Single(b => b.Format == CanvasBackgroundFormat.GridStandard);
         BackgroundPicker.SelectedItem = selectedBg;
 
         // Set paper card
@@ -95,7 +99,7 @@ public partial class PageCreationDialog : Window
         ColorSwatchesHost.Children.Clear();
         _swatchBorders.Clear();
 
-        foreach (var (hex, name) in DarkThemeColors)
+        foreach (var (hex, name) in AvailableColors)
         {
             var isSelected = string.Equals(hex, _selectedColorHex, StringComparison.OrdinalIgnoreCase);
             
@@ -136,9 +140,9 @@ public partial class PageCreationDialog : Window
 
     private void UpdateSwatchSelection()
     {
-        for (var i = 0; i < DarkThemeColors.Length; i++)
+        for (var i = 0; i < AvailableColors.Length; i++)
         {
-            var isSelected = string.Equals(DarkThemeColors[i].Hex, _selectedColorHex, StringComparison.OrdinalIgnoreCase);
+            var isSelected = string.Equals(AvailableColors[i].Hex, _selectedColorHex, StringComparison.OrdinalIgnoreCase);
             _swatchBorders[i].BorderBrush = isSelected ? (Brush)FindResource("AccentPurple") : (Brush)FindResource("BorderStrong");
             _swatchBorders[i].BorderThickness = new Thickness(isSelected ? 1.5 : 1);
         }
@@ -211,7 +215,7 @@ public partial class PageCreationDialog : Window
         {
             PaperKind = isA4 ? PaperKind.A4 : PaperKind.Infinite,
             Background = selectedBg,
-            Theme = PageTheme.Dark,
+            Theme = PageAppearance.Theme,
             PageColor = _selectedColorHex,
             ShowTitle = true,
             SheetCount = 1,

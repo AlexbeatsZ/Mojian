@@ -203,12 +203,17 @@ public partial class MainWindow : Window
         canvas.EndSpringLoadedTool = ViewModel.EndSpringLoadedTool;
         canvas.DocumentChanged += (_, _) =>
         {
+            ViewModel.UpdatePageExtent(canvas.Document, canvas.Appearance);
             ViewModel.QueueSaveDocument(canvas.Document);
             var other = canvas == LeftCanvas ? RightCanvas : LeftCanvas;
             if (ReferenceEquals(other.Document, canvas.Document)) other.InvalidateVisual();
         };
         canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
-        canvas.PageMetadataChanged += (_, _) => QueuePageMetadataSave();
+        canvas.PageMetadataChanged += (_, _) =>
+        {
+            ViewModel.UpdatePageExtent(canvas.Document, canvas.Appearance);
+            QueuePageMetadataSave();
+        };
         canvas.ObjectContextRequested += OnObjectContextRequested;
     }
 
@@ -725,6 +730,7 @@ public partial class MainWindow : Window
         AddBackground(menu, "标准横线", CanvasBackgroundFormat.RuledStandard);
         AddBackground(menu, "窄横线", CanvasBackgroundFormat.RuledNarrow);
         AddBackground(menu, "宽横线", CanvasBackgroundFormat.RuledWide);
+        AddBackground(menu, "纯横线", CanvasBackgroundFormat.RuledClean);
         AddBackground(menu, "标准双栏横线", CanvasBackgroundFormat.RuledTwoColumnStandard);
         AddBackground(menu, "窄双栏横线", CanvasBackgroundFormat.RuledTwoColumnNarrow);
         AddBackground(menu, "宽双栏横线", CanvasBackgroundFormat.RuledTwoColumnWide);
@@ -734,6 +740,14 @@ public partial class MainWindow : Window
         AddBackground(menu, "宽点阵", CanvasBackgroundFormat.DotsWide);
         menu.Items.Add(new Separator());
         AddBackground(menu, "空白", CanvasBackgroundFormat.Blank);
+        menu.Items.Add(new Separator());
+        AddMenuItem(menu, "设置默认页面背景…", () =>
+        {
+            ViewModel.BackstageTab = "Options";
+            ViewModel.IsBackstageOpen = true;
+            Backstage.FocusDefaultPageBackground();
+        });
+        button.ContextMenu = menu;
         menu.PlacementTarget = button;
         menu.IsOpen = true;
     }

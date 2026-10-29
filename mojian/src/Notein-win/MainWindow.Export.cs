@@ -17,9 +17,11 @@ public partial class MainWindow
     {
         Backstage.ExportSettings.Describe = DescribeExport;
         Backstage.PrintSettings.Describe = DescribeExport;
+        Backstage.PrintSettings.RestoreOptions(ViewModel.LastPrintOptions);
+        Backstage.PrintSettings.OptionsChanged += ViewModel.RememberPrintOptions;
         Backstage.PrintSettings.PrintImages = options =>
         {
-            var pages = ExportPages(options.Scope).Where(p => p.Appearance.Theme == PageTheme.Dark).ToArray();
+            var pages = ExportPages(options.Scope).Where(p => ViewModel.DisplayAppearance(p.Appearance).Theme == PageTheme.Dark).ToArray();
             return (pages.Length > 0, pages.SelectMany(page => ExportDocument(page).Objects
                 .Where(o => o.Kind is PageObjectKind.Image or PageObjectKind.Sticker or PageObjectKind.PdfPrintout)
                 .Select((o, i) => new ExportImageChoice(o.Id, $"{page.Title} · 图片 {i + 1} · {o.DisplayName}", o.ViewInverted))).ToArray());
@@ -68,7 +70,7 @@ public partial class MainWindow
         foreach (var page in ExportPages(options.Scope))
         {
             var document = ExportDocument(page);
-            var canvas = new NoteCanvas { Document = document, Appearance = page.Appearance.Clone(), PageTitle = page.Title,
+            var canvas = new NoteCanvas { Document = document, Appearance = ViewModel.DisplayAppearance(page.Appearance), PageTitle = page.Title,
                 ResolveAssetPath = name => ViewModel.ResolveAsset(document, name) };
             result.AddRange(PaginatedExportService.Capture(canvas, page, options));
         }

@@ -33,6 +33,9 @@ public sealed class AppPreferences
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 820;
     public bool WindowMaximized { get; set; }
+    public PageTheme? PageTheme { get; set; }
+    public CanvasBackgroundFormat? DefaultPageBackground { get; set; }
+    public PrintPreferences LastPrintOptions { get; set; } = new();
 }
 
 public sealed class SearchResult

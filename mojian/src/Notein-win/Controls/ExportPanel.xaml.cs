@@ -7,6 +7,7 @@ namespace Notein_win.Controls;
 public partial class ExportPanel : UserControl
 {
     public event Action<ExportOptions, bool, bool>? Requested;
+    public event Action<ExportOptions>? OptionsChanged;
     public Func<ExportOptions, (string Target, string Summary)>? Describe { get; set; }
     public Func<ExportOptions, (bool HasDarkPages, IReadOnlyList<ExportImageChoice> Images)>? PrintImages { get; set; }
     private readonly Dictionary<string, bool> _imageSelection = [];
@@ -37,6 +38,23 @@ public partial class ExportPanel : UserControl
         (ExportPaper)Math.Max(0, PaperList.SelectedIndex), OrientationList.SelectedIndex == 1,
         new[] { 0d, 6, 12, 20 }[Math.Max(0, MarginList.SelectedIndex)], TrimCheck.IsChecked == true, RangeText.Text, Printing,
         _images.Where(i => _imageSelection.GetValueOrDefault(i.Id, i.DisplayInverted)).Select(i => i.Id).ToHashSet(), HideFormatCheck.IsChecked == true);
+    public void RestoreOptions(ExportOptions options)
+    {
+        options = PrintPreferences.From(options).Restore();
+        _refreshing = true;
+        try
+        {
+            ScopeList.SelectedIndex = (int)options.Scope;
+            PaperList.SelectedIndex = (int)options.Paper;
+            OrientationList.SelectedIndex = options.Landscape ? 1 : 0;
+            MarginList.SelectedIndex = Array.IndexOf(new[] { 0d, 6, 12, 20 }, options.MarginMm);
+            TrimCheck.IsChecked = options.TrimTrailingBlank;
+            HideFormatCheck.IsChecked = options.HideBackgroundFormat;
+            RangeText.Text = options.PageRange;
+        }
+        finally { _refreshing = false; }
+        Refresh();
+    }
     public void Refresh()
     {
         if (Summary == null || _refreshing) return;
@@ -70,7 +88,12 @@ public partial class ExportPanel : UserControl
         catch (Exception e) { Summary.Text = e.Message; ActionButton.IsEnabled = PreviewButton.IsEnabled = false; }
         finally { _refreshing = false; }
     }
-    private void OnChanged(object sender, RoutedEventArgs e) => Refresh();
+    private void OnChanged(object sender, RoutedEventArgs e)
+    {
+        if (_refreshing || Summary == null) return;
+        Refresh();
+        if (Printing) OptionsChanged?.Invoke(Options);
+    }
     private void OnAction(object sender, RoutedEventArgs e) => Requested?.Invoke(Options, Printing, false);
     private void OnPreview(object sender, RoutedEventArgs e) => Requested?.Invoke(Options, Printing, true);
 }

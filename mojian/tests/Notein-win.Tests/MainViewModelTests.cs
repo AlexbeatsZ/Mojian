@@ -94,6 +94,7 @@ public class MainViewModelTests
             Background = CanvasBackgroundFormat.GridStandard,
             PageColor = "#E2EDF8",
         };
+        viewModel.TogglePageTheme(); // New pages follow the application-wide theme.
         Assert.NotNull(viewModel.AddPage("模板页", normalAppearance));
 
         var sourcePath = Path.Combine(temp.Path, "source.pdf");
@@ -292,6 +293,108 @@ public class MainViewModelTests
         Assert.False(vm.RenameNotebook(renamedId, "  "));
         Assert.Equal(focusedId, vm.ActiveWorkspace.Id);
         Assert.Equal("Renamed", new WorkspaceStore(root).LoadLibrary().Notebooks.Single(book => book.Id == renamedId).Title);
+    }
+
+    [Fact]
+    public void DefaultBackground_SurvivesOneOffPagesNotebookAndWorkspaceSwitchAndRestart()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        vm.DefaultPageBackground = CanvasBackgroundFormat.RuledTwoColumnNarrow;
+        var page = vm.AddPage("one-off", new PageAppearance { Background = CanvasBackgroundFormat.DotsWide })!;
+        vm.SetBackgroundFormat(CanvasBackgroundFormat.Blank);
+        Assert.Equal(CanvasBackgroundFormat.Blank, page.Appearance.Background);
+        Assert.Equal(CanvasBackgroundFormat.RuledTwoColumnNarrow, vm.LastPageAppearance.Background);
+        vm.AddNotebook("another");
+        Assert.Equal(CanvasBackgroundFormat.RuledTwoColumnNarrow, vm.ActivePageAppearance.Background);
+        vm.SwitchWorkspace(Path.Combine(temp.Path, "other"));
+        Assert.Equal(CanvasBackgroundFormat.RuledTwoColumnNarrow, vm.LastPageAppearance.Background);
+        vm.SaveAll();
+        var restored = new MainViewModel(root, preferences);
+        restored.AddPageCommand.Execute(null);
+        Assert.Equal(CanvasBackgroundFormat.RuledTwoColumnNarrow, restored.ActivePageAppearance.Background);
+        Assert.Equal(CanvasBackgroundFormat.Blank, restored.Library.Notebooks[0].FindPage(page.Id, out _)!.Appearance.Background);
+        restored.SaveAll();
+    }
+
+    [Fact]
+    public void GlobalTheme_CoversBothSplitSlotsExistingPagesNewPagesAndRestartWithoutRewritingNotes()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        var first = vm.ActiveWorkspace.SelectedPage()!;
+        vm.ToggleSplitViewCommand.Execute(null);
+        vm.AddPage("second", new PageAppearance { PageColor = "#302A21" });
+        var secondId = vm.FocusedDocument!.PageId;
+        var before = File.ReadAllText(vm.Store.LibraryPath);
+        vm.TogglePageTheme();
+        Assert.False(vm.IsDarkPageBackground);
+        Assert.Equal(PageTheme.Light, vm.PrimaryPageAppearance.Theme);
+        Assert.Equal(PageTheme.Light, vm.SecondaryPageAppearance.Theme);
+        Assert.Equal("#F3E9D2", vm.ActivePageAppearance.PageColor);
+        Assert.Equal(before, File.ReadAllText(vm.Store.LibraryPath));
+        Assert.Equal(PageTheme.Dark, first.Appearance.Theme);
+        vm.NavigateToPage(vm.ActiveWorkspace.Id, first.Id);
+        Assert.Equal(PageTheme.Light, vm.ActivePageAppearance.Theme);
+        vm.SaveAll();
+        var restored = new MainViewModel(root, preferences);
+        restored.NavigateToPage(restored.ActiveWorkspace.Id, secondId);
+        Assert.Equal(PageTheme.Light, restored.ActivePageAppearance.Theme);
+        restored.AddPageCommand.Execute(null);
+        Assert.Equal(PageTheme.Light, restored.ActivePageAppearance.Theme);
+        restored.TogglePageTheme();
+        Assert.Equal(PageTheme.Dark, restored.ActivePageAppearance.Theme);
+        Assert.Equal("#302A21", restored.ActivePageAppearance.PageColor);
+        restored.SaveAll();
+    }
+
+    [Fact]
+    public void DisplayPageGrowth_PersistsGeometryWithoutPersistingTheThemeOverride()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var vm = new MainViewModel(root, new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
+        var page = vm.ActiveWorkspace.SelectedPage()!;
+        vm.TogglePageTheme();
+        var display = vm.PrimaryPageAppearance;
+        display.SheetCount = 7;
+        display.InfiniteWidth *= 2;
+        display.InfiniteHeight *= 3;
+        vm.UpdatePageExtent(vm.PrimaryDocument, display);
+        vm.SavePageMetadata();
+        var saved = new WorkspaceStore(root).LoadLibrary().ActiveNotebook.SelectedPage()!.Appearance;
+        Assert.Equal(7, saved.SheetCount);
+        Assert.Equal(display.InfiniteWidth, saved.InfiniteWidth);
+        Assert.Equal(display.InfiniteHeight, saved.InfiniteHeight);
+        Assert.Equal(PageTheme.Dark, saved.Theme);
+        Assert.Equal(page.Appearance.Background, saved.Background);
+        vm.SaveAll();
+    }
+
+    [Fact]
+    public void PrintChoices_RestoreAcrossRestartAndIgnoreDocumentSpecificImageIds()
+    {
+        using var temp = new TemporaryDirectory();
+        var root = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var vm = new MainViewModel(root, preferences);
+        vm.RememberPrintOptions(new ExportOptions(Scope: ExportScope.Notebook, Paper: ExportPaper.A3,
+            Landscape: true, MarginMm: 12, TrimTrailingBlank: false, PageRange: "2-3", Printing: true,
+            InvertedImageIds: new HashSet<string> { "old-image" }, HideBackgroundFormat: true));
+        var restored = new MainViewModel(root, preferences).LastPrintOptions;
+        Assert.Equal(ExportScope.Notebook, restored.Scope);
+        Assert.Equal(ExportPaper.A3, restored.Paper);
+        Assert.True(restored.Landscape);
+        Assert.Equal(12, restored.MarginMm);
+        Assert.False(restored.TrimTrailingBlank);
+        Assert.Equal("2-3", restored.PageRange);
+        Assert.True(restored.HideBackgroundFormat);
+        Assert.Null(restored.InvertedImageIds);
+        Assert.True(restored.Printing);
     }
 
     private sealed class TemporaryDirectory : IDisposable

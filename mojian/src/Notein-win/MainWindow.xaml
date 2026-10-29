@@ -282,7 +282,7 @@
                                               IsChecked="{Binding SingleFingerPanEnabled, Mode=OneWay}" Click="OnPanoramaToolClick"><Path Data="{StaticResource Fluent_hand_left}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="插入空白空间" IsChecked="{Binding InsertSpaceModeEnabled}"><Image Source="{StaticResource FluentDrawing_insert_space}" Width="21" Height="21" Stretch="Uniform" /></ToggleButton>
-                                <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="设置背景格式" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
+                                <Button x:Name="PageBackgroundButton" Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="设置背景格式" Click="OnBackgroundFormatClick"><Image Source="{StaticResource FluentDrawing_rule_lines}" Width="21" Height="21" Stretch="Uniform" /></Button>
                                 <Border Style="{StaticResource HairlineVerticalSeparator}" />
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="清纸" Click="OnClearPageClick"><Path Data="{StaticResource Fluent_delete_dismiss}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                             </StackPanel>
@@ -305,7 +305,7 @@
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="页面颜色" Click="OnPageColorClick"><Ellipse Fill="{Binding ActivePageAppearance.PageColor}" Stroke="{StaticResource BorderHairline}" Width="21" Height="21" /></Button>
                                 <Button Style="{StaticResource RibbonIconButtonStyle}" Width="40" Height="42" Margin="0" ToolTip="纸张大小" Click="OnPaperSizeClick"><Path Data="{StaticResource Fluent_document_page}" Fill="{StaticResource TextPrimary}" Width="21" Height="21" /></Button>
                                 <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="隐藏页面标题" IsChecked="{Binding IsPageTitleHidden, Mode=OneWay}" Click="OnTogglePageTitleClick"><Path Data="{StaticResource Fluent_eye_off}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
-                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="切换背景" IsChecked="{Binding IsDarkPageBackground, Mode=OneWay}" Click="OnTogglePageThemeClick"><Path Data="{StaticResource Fluent_weather_moon}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
+                                <ToggleButton Style="{StaticResource AndroidCommandToggleButtonStyle}" ToolTip="暗色模式（所有页面）" IsChecked="{Binding IsDarkPageBackground, Mode=OneWay}" Click="OnTogglePageThemeClick"><Path Data="{StaticResource Fluent_weather_moon}" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Width="21" Height="21" /></ToggleButton>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>

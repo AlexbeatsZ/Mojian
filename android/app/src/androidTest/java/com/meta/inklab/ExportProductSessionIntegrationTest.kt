@@ -12,6 +12,35 @@ import java.util.concurrent.FutureTask
 
 @RunWith(AndroidJUnit4::class)
 class ExportProductSessionIntegrationTest {
+    @Test fun globalThemeControlsEveryOffscreenPageWithoutChangingStoredPageAppearance() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val root = File(context.cacheDir, "theme-export-${System.nanoTime()}").apply { mkdirs() }
+        val repository = PageContentRepository(root)
+        val stored = listOf(PageViewSettings(darkBackground=false, backgroundFormat=CanvasBackgroundFormat.BLANK, pageTitleVisible=false),
+            PageViewSettings(darkBackground=true, pageColor=PageColor.MINT, backgroundFormat=CanvasBackgroundFormat.BLANK, pageTitleVisible=false))
+        val bitmap = android.graphics.Bitmap.createBitmap(100, 100, android.graphics.Bitmap.Config.ARGB_8888)
+        try {
+            for (dark in listOf(false, true)) {
+                val preferences = AppearancePreferences(darkBackground=dark)
+                val session = ExportProductSession(context, repository, "notebook", stored.mapIndexed { index, settings ->
+                    ExportPageIdentity("page-$index", "", preferences.display(settings), null)
+                })
+                try {
+                    assertEquals(dark, session.images().first)
+                    stored.indices.forEach { index ->
+                        session.acquire(index).use { lease ->
+                            assertEquals(dark, lease.source.settings.darkBackground)
+                            lease.source.render(android.graphics.Canvas(bitmap), android.graphics.Matrix(), ExportOptions())
+                            assertEquals(stored[index].pageColor.displayArgb(dark), bitmap.getPixel(20, 20))
+                        }
+                    }
+                } finally { session.cancel() }
+            }
+            org.junit.Assert.assertFalse(stored[0].darkBackground)
+            org.junit.Assert.assertTrue(stored[1].darkBackground)
+        } finally { bitmap.recycle(); root.deleteRecursively() }
+    }
+
     @Test fun sourceDelegatesSoftwareCanvasAndCannotDrawAfterLeaseCloseOrCancel() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val root=File(context.cacheDir,"export-render-test-${System.nanoTime()}").apply { mkdirs() }

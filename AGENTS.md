@@ -8,11 +8,16 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.2**; Android retains
-  `com.meta.inklab.debug`, version code **10**. iOS remains a separate 0.1.0 client.
-  `v0.7.2` prerelease is published with EXE/APK assets uploaded; source is pushed to `origin/master`.
+- Current source/build version: Windows and Android **0.7.3**; Android retains
+  `com.meta.inklab.debug`, version code **11**. iOS remains a separate 0.1.0 client.
+  The release target is `v0.7.3`, with current EXE/APK artifacts at the paths below.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
+- Device-local preferences now own one global light/dark mode, an independent new-page default
+  background, and the last reusable print choices. Background menus link directly to the default
+  row in options; single-page/one-off creation backgrounds do not change that default. Read
+  `docs/design/settings-memory.md` before changing these paths. Theme overrides use display copies;
+  Windows paper-growth events copy dimensions back to stored metadata, not the display theme.
 - Android now explicitly opens a local folder using the system picker and remembers the choice.
   Unconfigured installs do not automatically select Documents/Mojian or private storage. An empty
   folder requires confirmation to create a canonical library; legacy private notes remain available.
@@ -44,10 +49,11 @@
   loopback and actual Sakura HTTPS. Windows focused safety/default-config checks **15/15** and
   Release self-contained publish succeed. Production was restored to revision 0/files 0 after
   disposable public tests. Physical Android acceptance remains outstanding.
-- Full Windows Debug and Release suites now pass **191/191** including caret and screenshots.
+- Latest Windows Release suite passes **196/196**, including menu/settings navigation and print
+  restoration after window restart; the previous 0.7.2 Debug suite passed 191/191.
   Tests share a persistent STA/Application/Dispatcher rather than reusing a dead owner; failures
-  close leaked windows and restore resources; assembly disposal shuts down Application and joins
-  the STA so testhost exits and releases DLLs. The caret fixture clears default sample content
+  close leaked windows and restore resources; assembly disposal requests Application shutdown and
+  joins the STA. The caret fixture clears default sample content
   before its blank click and asserts that a temporary caret was actually established.
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and
@@ -70,6 +76,9 @@
 - Combined Android 0.7.2: **239 passed / 1 opt-in public-HTTPS test skipped / 0 failed**;
   debug/test APK compilation and lint **0 errors / 137 warnings**. Popup tracking is weak, clears
   its host anchor and dismisses on Activity destruction instead of statically retaining Context.
+- Android 0.7.3 preference regressions bring the unit suite to **243 passed / 1 opt-in test skipped**.
+  Debug/test APK compilation and lint pass (0 errors / 140 warnings).
+  Native global-theme output coverage is compiled, not installed or executed.
 
 # Active Work
 
@@ -95,8 +104,10 @@
 - Windows: `dotnet build mojian/Notein-win.slnx`; `dotnet test mojian/Notein-win.slnx`.
   UI tests use isolated workspaces and the shared WPF executor, not per-test STA threads.
   Pre-fix orphan testhosts (last observed 37056/36176/59300) may still lock old outputs. This
-  round's process/recursive-build cleanup was policy-blocked; no retry through another shell or
-  forced product closure was attempted. Final fixed Release/Debug runs exited with no new hosts.
+  historical process/recursive-build cleanup was policy-blocked; no forced product closure was
+  attempted. In 0.7.3, a successful run also left testhost 51728 in the task's temporary build path;
+  do not infer process exit from the test command's exit code. Use `--artifacts-path` in a fresh
+  task-local temporary directory when output DLLs are locked, and preserve unrelated processes.
 - Focused Windows safety checks:
   `dotnet test mojian/tests/Notein-win.Tests/Notein-win.Tests.csproj -c Release --filter "FullyQualifiedName~WorkspaceDeletionTransactionTests|FullyQualifiedName~WorkspaceUiMutationGateTests|FullyQualifiedName~DeleteNotebook_RemovesNestedPagesAndAssetsAndSurvivesRestart|FullyQualifiedName~DeleteInactiveNotebook_PreservesFocusedPageAndOtherSplitSlot"`.
 - Publish: `dotnet publish mojian/src/Notein-win/Notein-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o mojian/artifacts/release`.
@@ -160,6 +171,7 @@
 - `docs/design/export-and-print.md`: scope, pagination, bounded preparation and output limitations.
 - `docs/design/insert-and-export.md`: assets, clipboard, vector output and image policy.
 - `docs/design/page-backgrounds.md`: shared background geometry and original desktop reference.
+- `docs/design/settings-memory.md`: global theme, default background, last print choices and migration.
 - `docs/design/windows-desktop.md`: native desktop storage/navigation/chrome and release contract.
 - `docs/design/writing-performance-and-durability.md`: WPF rendering, save queue and recovery.
 - `docs/design/cross-platform-parity.md`: two-client completion gate.

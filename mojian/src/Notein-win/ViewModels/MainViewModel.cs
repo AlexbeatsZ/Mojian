@@ -81,7 +81,38 @@ public sealed class MainViewModel : ObservableObject
     public bool SelectedToolIsLasso => SelectedTool.Kind == DrawingToolKind.Lasso;
     public bool SelectedLassoIsFreeform => SelectedToolIsLasso && SelectedTool.LassoShape == LassoShape.Freeform;
     public bool SelectedLassoIsRectangle => SelectedToolIsLasso && SelectedTool.LassoShape == LassoShape.Rectangle;
-    public PageAppearance LastPageAppearance => _settings.LastPageAppearance.Clone();
+    public PageAppearance LastPageAppearance
+    {
+        get
+        {
+            var appearance = DisplayAppearance(_settings.LastPageAppearance);
+            appearance.Background = DefaultPageBackground;
+            return appearance;
+        }
+    }
+    public IReadOnlyList<KeyValuePair<CanvasBackgroundFormat, string>> BackgroundChoices { get; } =
+        Enum.GetValues<CanvasBackgroundFormat>().Select(value => KeyValuePair.Create(value, value.GetLabel())).ToArray();
+    public CanvasBackgroundFormat DefaultPageBackground
+    {
+        get => _preferences.DefaultPageBackground ?? _settings.LastPageAppearance.Background;
+        set
+        {
+            if (!Enum.IsDefined(value) || DefaultPageBackground == value) return;
+            _preferences.DefaultPageBackground = value;
+            _preferencesStore.Save(_preferences);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DefaultPageBackgroundLabel));
+        }
+    }
+    public string DefaultPageBackgroundLabel => DefaultPageBackground.GetLabel();
+    public ExportOptions LastPrintOptions => (_preferences.LastPrintOptions ?? new()).Restore();
+    public void RememberPrintOptions(ExportOptions options)
+    {
+        _preferences.LastPrintOptions = PrintPreferences.From(options);
+        _preferencesStore.Save(_preferences);
+    }
+    public PageAppearance DisplayAppearance(PageAppearance appearance) =>
+        PageThemeAppearance.Apply(appearance, _preferences.PageTheme ?? PageTheme.Dark);
 
     public PageDocument? PrimaryDocument
     {
@@ -120,7 +151,8 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public bool IsPageTitleHidden => !ActivePageAppearance.ShowTitle;
-    public bool IsDarkPageBackground => ActivePageAppearance.Theme == PageTheme.Dark;
+    public bool IsDarkPageBackground => _preferences.PageTheme == PageTheme.Dark;
+    public string PageThemeButtonText => IsDarkPageBackground ? "开启" : "关闭";
 
     public CanvasSlot FocusedSlot
     {
@@ -546,6 +578,10 @@ public sealed class MainViewModel : ObservableObject
         RecoverNativeSyncBeforeOpen(_store.RootDirectory);
         _library = _store.LoadLibrary();
         _settings = _store.LoadSettings();
+        if (_preferences.PageTheme is not { } theme || !Enum.IsDefined(theme))
+            _preferences.PageTheme = _library.ActiveNotebook.SelectedPage()?.Appearance.Theme ?? PageTheme.Dark;
+        if (_preferences.DefaultPageBackground is not { } background || !Enum.IsDefined(background))
+            _preferences.DefaultPageBackground = _settings.LastPageAppearance.Background;
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
         var settingsMigrated = MigrateWorkspaceSettings();
@@ -567,7 +603,7 @@ public sealed class MainViewModel : ObservableObject
         AddSectionCommand = new RelayCommand(() => AddSection("新分区"));
         ToggleSectionExpandCommand = new RelayCommand<string>(ToggleSectionExpanded);
         SelectPageCommand = new RelayCommand<PagePaneRow>(SelectPage);
-        AddPageCommand = new RelayCommand(() => AddPage("无标题页", _settings.LastPageAppearance), () => CanAddPage);
+        AddPageCommand = new RelayCommand(() => AddPage("无标题页", LastPageAppearance), () => CanAddPage);
         SetPagePaneModeCommand = new RelayCommand<PagePaneMode>(mode => PagePaneMode = mode);
         SelectRibbonTabCommand = new RelayCommand<RibbonTab>(SelectRibbonTab);
         SelectToolCommand = new RelayCommand<string>(SelectTool);
@@ -599,7 +635,7 @@ public sealed class MainViewModel : ObservableObject
         SaveFocusedDocument();
         var notebook = _library.AddNotebook(title);
         notebook.AddSection("未归档");
-        notebook.AddPage("无标题页", _settings.LastPageAppearance);
+        notebook.AddPage("无标题页", LastPageAppearance);
         SaveLibrary();
         LoadSelectedIntoFocusedSlot();
         RefreshNavigation();
@@ -648,6 +684,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!CanAddPage) return null;
         SaveFocusedDocument();
+        appearance = DisplayAppearance(appearance);
         var page = ActiveWorkspace.AddPage(title, appearance);
         _settings.LastPageAppearance = appearance.Clone();
         var document = new PageDocument(ActiveWorkspace.Id, page.Id);
@@ -1055,7 +1092,7 @@ public sealed class MainViewModel : ObservableObject
         var page = ActiveWorkspace.SelectedPage();
         if (page == null) return;
         page.Appearance.Background = format;
-        ActivePageAppearance = page.Appearance.Clone();
+        RefreshPageAppearance();
         SaveLibrary();
         RequestAppearanceRefresh?.Invoke();
     }
@@ -1067,7 +1104,7 @@ public sealed class MainViewModel : ObservableObject
         page.Appearance.PaperKind = kind;
         page.Appearance.SheetCount = Math.Max(1, page.Appearance.SheetCount);
         if (FocusedDocument is { } document) InfinitePageLayout.EnsureCapacity(page.Appearance, document);
-        ActivePageAppearance = page.Appearance.Clone();
+        RefreshPageAppearance();
         SaveLibrary();
         RequestAppearanceRefresh?.Invoke();
     }
@@ -1078,7 +1115,7 @@ public sealed class MainViewModel : ObservableObject
         if (page == null) return;
         page.Appearance.PageColor = color;
         page.Appearance.Theme = theme;
-        ActivePageAppearance = page.Appearance.Clone();
+        RefreshPageAppearance();
         SaveLibrary();
         RequestAppearanceRefresh?.Invoke();
     }
@@ -1088,7 +1125,7 @@ public sealed class MainViewModel : ObservableObject
         var page = ActiveWorkspace.SelectedPage();
         if (page == null) return;
         page.Appearance.ShowTitle = !page.Appearance.ShowTitle;
-        ActivePageAppearance = page.Appearance.Clone();
+        RefreshPageAppearance();
         SaveLibrary();
         OnPropertyChanged(nameof(IsPageTitleHidden));
         RequestAppearanceRefresh?.Invoke();
@@ -1096,13 +1133,9 @@ public sealed class MainViewModel : ObservableObject
 
     public void TogglePageTheme()
     {
-        var page = ActiveWorkspace.SelectedPage();
-        if (page == null) return;
-        page.Appearance.Theme = page.Appearance.Theme == PageTheme.Dark ? PageTheme.Light : PageTheme.Dark;
-        page.Appearance.PageColor = page.Appearance.Theme == PageTheme.Dark ? "#1B1B1B" : "#FAFAFA";
-        ActivePageAppearance = page.Appearance.Clone();
-        SaveLibrary();
-        OnPropertyChanged(nameof(IsDarkPageBackground));
+        _preferences.PageTheme = IsDarkPageBackground ? PageTheme.Light : PageTheme.Dark;
+        _preferencesStore.Save(_preferences);
+        RefreshPageAppearance();
         RequestAppearanceRefresh?.Invoke();
     }
 
@@ -1450,7 +1483,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void RefreshPageAppearance()
     {
-        ActivePageAppearance = ActiveWorkspace.SelectedPage()?.Appearance.Clone() ?? new PageAppearance();
+        ActivePageAppearance = DisplayAppearance(ActiveWorkspace.SelectedPage()?.Appearance ?? new PageAppearance());
         OnPropertyChanged(nameof(PrimaryPageAppearance));
         OnPropertyChanged(nameof(SecondaryPageAppearance));
         OnPropertyChanged(nameof(PrimaryPageTitle));
@@ -1460,6 +1493,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(BreadcrumbText));
         OnPropertyChanged(nameof(IsPageTitleHidden));
         OnPropertyChanged(nameof(IsDarkPageBackground));
+        OnPropertyChanged(nameof(PageThemeButtonText));
     }
 
     public void RefreshNavigation()
@@ -1661,15 +1695,26 @@ public sealed class MainViewModel : ObservableObject
     private void PrepareInfinitePage(PageDocument? document)
     {
         if (document == null) return;
-        var appearance = AppearanceForDocument(document);
+        var appearance = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId)?.FindPage(document.PageId, out _)?.Appearance;
+        if (appearance == null) return;
         if (InfinitePageLayout.EnsureCapacity(appearance, document)) SaveLibrary();
+    }
+
+    public void UpdatePageExtent(PageDocument? document, PageAppearance display)
+    {
+        if (document == null) return;
+        var source = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId)?.FindPage(document.PageId, out _)?.Appearance;
+        if (source == null) return;
+        source.SheetCount = Math.Max(source.SheetCount, display.SheetCount);
+        source.InfiniteWidth = Math.Max(source.InfiniteWidth, display.InfiniteWidth);
+        source.InfiniteHeight = Math.Max(source.InfiniteHeight, display.InfiniteHeight);
     }
 
     private PageAppearance AppearanceForDocument(PageDocument? document)
     {
-        if (document == null) return new PageAppearance();
+        if (document == null) return DisplayAppearance(new PageAppearance());
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
-        return notebook?.FindPage(document.PageId, out _)?.Appearance ?? new PageAppearance();
+        return DisplayAppearance(notebook?.FindPage(document.PageId, out _)?.Appearance ?? new PageAppearance());
     }
 
     private string TitleForDocument(PageDocument? document)

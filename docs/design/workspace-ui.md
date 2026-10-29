@@ -225,23 +225,25 @@ paper-size menu names are visible. Accessibility descriptions and hover tooltips
   hides both the horizontal rules and the divider. Windows appends new enum values to preserve
   legacy numeric page settings; shared package names are `RULE_TWO_COLUMN_STANDARD`,
   `RULE_TWO_COLUMN_NARROW`, and `RULE_TWO_COLUMN_WIDE`.
-- Page color, paper size, baseline, page-title visibility, and light-versus-dark page background are
-  stored per page. Paper options are only unbounded and A4. A4 is a paginated document policy, not a
+- Page color, paper size, baseline, and page-title visibility are stored per page. Light/dark mode
+  is a device-wide persisted preference applied to all pages, including both split slots. Read
+  `settings-memory.md` before changing this override or new-page defaults.
+  Paper options are only unbounded and A4. A4 is a paginated document policy, not a
   fixed single sheet: it renders consecutive A4 sheets with visible gaps and appends sheets before
   edited content or the downward-moving viewport reaches the final sheet's bottom. It must therefore
   remain continuously browsable like Word even before new content is placed. Automatic editing and
   browsing never shrink the sheet count. Rule, grid, and dot backgrounds are clipped separately to
   every sheet so the workspace-colored inter-sheet gap remains visually empty.
-- Switching the page between light and dark backgrounds remaps logical black ink and default text
+- Switching all pages between light and dark backgrounds remaps logical black ink and default text
   editor colors for readability without changing blue/red ink.
 - Finite paper is a surface, not a clipping mask. Changing paper size never hides text, ink, tags,
   or inserted objects outside the new edge; those objects stay visible and movable over the
   `#0A0A0A` workspace until the user moves them back onto paper.
 
 The page pane's `+` opens a compact creation dialog with unbounded/A4 template cards, the shared
-baseline selector, and page-color swatches. It contains no explanatory paragraph. Only a successful
-creation becomes the next dialog's default configuration; cancelling leaves the remembered template
-unchanged.
+baseline selector, and page-color swatches. It contains no explanatory paragraph. A successful
+creation remembers paper type and color; the baseline always starts from the independent default
+in options. Cancelling leaves the remembered template unchanged. See `settings-memory.md`.
 
 The same dialog has a quiet two-item tab strip at its top: `页` keeps the normal-page template
 controls, while `PDF` exposes the system PDF picker. PDF import creates one real notebook page for

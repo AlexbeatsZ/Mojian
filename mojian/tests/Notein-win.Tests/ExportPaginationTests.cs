@@ -182,11 +182,11 @@ public class ExportPaginationTests
                 Assert.True(printPanel.Options.HideBackgroundFormat);
                 Assert.False(panel.Options.Printing);
                 Assert.False(panel.Options.HideBackgroundFormat);
-                model.ActiveWorkspace.SelectedPage()!.Appearance.Theme = PageTheme.Light;
+                model.TogglePageTheme();
                 printPanel.Refresh();
                 Assert.Equal(Visibility.Collapsed, ((StackPanel)printPanel.FindName("PrintColorPanel")).Visibility);
                 Assert.Equal(Visibility.Visible, ((CheckBox)printPanel.FindName("HideFormatCheck")).Visibility);
-                model.ActiveWorkspace.SelectedPage()!.Appearance.Theme = PageTheme.Dark; printPanel.Refresh();
+                model.TogglePageTheme(); printPanel.Refresh();
                 Capture(window, Path.Combine(output, "print-panel.png"));
             }
             finally { window.Close(); Directory.Delete(root, true); }

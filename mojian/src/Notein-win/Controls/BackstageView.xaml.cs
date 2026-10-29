@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using Notein_win.Models;
+using Notein_win.ViewModels;
 
 namespace Notein_win.Controls;
 
@@ -17,6 +18,26 @@ public partial class BackstageView : UserControl
     public event Action<ShortcutActionDescriptor>? ClearShortcutRequested;
 
     public BackstageView() { InitializeComponent(); PrintSettings.Printing = true; }
+
+    public void FocusDefaultPageBackground() => Dispatcher.BeginInvoke(() =>
+    {
+        DefaultPageBackgroundRow.BringIntoView();
+        DefaultPageBackgroundPicker.Focus();
+    }, System.Windows.Threading.DispatcherPriority.Loaded);
+
+    private void OnDefaultPageBackgroundClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+        var menu = new ContextMenu { PlacementTarget = DefaultPageBackgroundPicker };
+        foreach (var choice in model.BackgroundChoices)
+        {
+            var item = new MenuItem { Header = choice.Value, IsChecked = choice.Key == model.DefaultPageBackground };
+            item.Click += (_, _) => model.DefaultPageBackground = choice.Key;
+            menu.Items.Add(item);
+        }
+        DefaultPageBackgroundPicker.ContextMenu = menu;
+        menu.IsOpen = true;
+    }
 
     private void OnNewNotebookClick(object sender, RoutedEventArgs e) => NewNotebookRequested?.Invoke(this, EventArgs.Empty);
     private void OnOpenWorkspaceClick(object sender, RoutedEventArgs e) => OpenWorkspaceRequested?.Invoke(this, EventArgs.Empty);

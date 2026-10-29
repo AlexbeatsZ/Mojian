@@ -338,6 +338,8 @@ class MainActivity : Activity() {
     private var legacyBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
     private var zoomLocked = false
     private var lastPageTemplateSettings = PageViewSettings()
+    private var appearancePreferences = AppearancePreferences()
+    @Volatile private var splitAppearanceRevision = 0
     private var imageImportDisplayMode = ImageImportDisplayMode.INVERT
     private var pdfPrintoutDisplayMode = ImageImportDisplayMode.INVERT
     private var pendingExport: PendingExport? = null
@@ -1156,7 +1158,7 @@ class MainActivity : Activity() {
             "view:zoom-reset" -> { setZoomScale(1f); true }
             "view:fit-width" -> { fitPageWidth(); true }
             "view:toggle-title" -> { updateCurrentPageView { it.pageTitleVisible = !it.pageTitleVisible }; true }
-            "view:toggle-theme" -> { updateCurrentPageView { it.darkBackground = !it.darkBackground }; true }
+            "view:toggle-theme" -> { toggleGlobalPageTheme(); true }
             "view:paper:A4" -> { updateCurrentPageView { it.paperSize = PaperSize.A4; it.a4PageCount = it.a4PageCount.coerceAtLeast(1) }; true }
             "view:paper:BOUNDLESS" -> { updateCurrentPageView { it.paperSize = PaperSize.BOUNDLESS }; true }
             "view:section-pane" -> { toggleSectionPane(); true }
@@ -1371,11 +1373,11 @@ class MainActivity : Activity() {
             )
         }
 
-    private fun showOptionsDialog() {
+    private fun showOptionsDialog(focusDefaultBackground: Boolean = false) {
         backstageDialog?.dismiss()
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(buildOptionsPage(dialog))
+        dialog.setContentView(buildOptionsPage(dialog, focusDefaultBackground))
         dialog.show()
         dialog.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.rgb(37, 37, 37)))
@@ -1383,7 +1385,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun buildOptionsPage(dialog: Dialog): View =
+    private fun buildOptionsPage(dialog: Dialog, focusDefaultBackground: Boolean = false): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.rgb(37, 37, 37))
@@ -1423,6 +1425,28 @@ class MainActivity : Activity() {
                     addView(optionsSectionTitle("绘图与页面"), LinearLayout.LayoutParams(MATCH, dp(36)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
 
+                    val backgroundValue = settingsValueButton(appearancePreferences.defaultBackground.label)
+                    backgroundValue.setOnClickListener { anchor ->
+                        showBackgroundFormatChooser(anchor, appearancePreferences.defaultBackground, false) { format ->
+                            appearancePreferences = appearancePreferences.copy(defaultBackground = format)
+                            persistAppearancePreferences()
+                            backgroundValue.text = format.label
+                        }
+                    }
+                    val backgroundRow = settingsRow("默认页面背景", "用于以后新建的页面；页面中的背景菜单只修改当前页。", backgroundValue)
+                    backgroundValue.layoutParams.width = dp(150)
+                    addView(backgroundRow, LinearLayout.LayoutParams(MATCH, dp(76)))
+                    if (focusDefaultBackground) backgroundRow.post {
+                        backgroundRow.requestRectangleOnScreen(android.graphics.Rect(0, 0, backgroundRow.width, backgroundRow.height), true)
+                        backgroundValue.requestFocus()
+                    }
+                    val themeValue = settingsValueButton(if (appearancePreferences.darkBackground) "开启" else "关闭")
+                    themeValue.setOnClickListener {
+                        toggleGlobalPageTheme()
+                        dialog.setContentView(buildOptionsPage(dialog))
+                    }
+                    addView(settingsRow("暗色模式", "应用于所有页面，并在下次打开时保留。", themeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
+
                     val predictionValue = settingsValueButton(if (predictionEnabled) "开启" else "关闭")
                     predictionValue.setOnClickListener {
                         predictionEnabled = !predictionEnabled
@@ -1441,7 +1465,7 @@ class MainActivity : Activity() {
                     }
                     addView(settingsRow("页面栏显示范围", "本层只显示当前分区页面；递归还显示所有子分区及其页面。", pageModeValue), LinearLayout.LayoutParams(MATCH, dp(72)))
 
-                    if (workspace.selectedPage()?.viewSettings?.darkBackground == true) {
+                    if (appearancePreferences.darkBackground) {
                         val imageFilterValue = settingsValueButton(imageImportDisplayMode.label)
                         imageFilterValue.setOnClickListener {
                             imageImportDisplayMode = nextImportDisplayMode(imageImportDisplayMode)
@@ -2014,6 +2038,63 @@ class MainActivity : Activity() {
                 ?.let { runCatching { PageViewSettings.fromJson(JSONObject(it)) }.getOrNull() }
                 ?.copy(a4PageCount = 1)
                 ?: PageViewSettings(backgroundFormat = legacyBackgroundFormat)
+        appearancePreferences = AppearancePreferences.restore(prefs.getString(KEY_APPEARANCE_PREFERENCES, null),
+            workspace.selectedPage()?.viewSettings ?: lastPageTemplateSettings, lastPageTemplateSettings)
+        persistAppearancePreferences()
+    }
+
+    private fun persistAppearancePreferences() {
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+            .putString(KEY_APPEARANCE_PREFERENCES, appearancePreferences.toJson()).apply()
+    }
+
+    private fun toggleGlobalPageTheme() {
+        if (activeStrokes.isNotEmpty() || pageLoadingOverlay != null) return
+        appearancePreferences = appearancePreferences.copy(darkBackground = !appearancePreferences.darkBackground)
+        persistAppearancePreferences()
+        applySelectedPageAppearance()
+        refreshInactiveSplitPreview()
+    }
+
+    private fun refreshInactiveSplitPreview() {
+        val revision = ++splitAppearanceRevision
+        if (!splitViewState.enabled) return
+        val side = if (splitViewState.focusedSide == SplitPaneSide.LEFT) SplitPaneSide.RIGHT else SplitPaneSide.LEFT
+        val location = splitViewState.location(side) ?: return
+        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == location.notebookId } ?: return
+        val page = notebook.allSections().flatMap { it.pages }.firstOrNull { it.id == location.pageId } ?: return
+        val host = hostFor(side)
+        val width = host.width; val height = host.height
+        if (width <= 0 || height <= 0) return
+        val theme = appearancePreferences.darkBackground
+        val remembered = pageViewports.recall(PageSessionKey(notebook.id, page.id))
+        val matrix = ViewportState().apply { remembered?.let(::restore) }.documentToViewMatrix()
+        val session = exportSession(notebook.id, listOf(page), pageContentRepository)
+        // Discard the old-theme bitmap while the existing offscreen renderer rebuilds this pane.
+        clearPreview(host)
+        ioExecutor.execute {
+            var bitmap: Bitmap? = null
+            val result = runCatching {
+                check(revision == splitAppearanceRevision) { "Split preview superseded" }
+                pageWrites.flush()
+                session.acquire(0).use { lease ->
+                    bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(checkNotNull(bitmap))
+                    canvas.drawColor(Color.rgb(10, 10, 10))
+                    lease.source.render(canvas, matrix, ExportOptions())
+                }
+            }
+            session.cancel()
+            runOnUiThread {
+                richExportSessions.remove(session)
+                val current = !isDestroyed && splitViewState.enabled && splitViewState.focusedSide != side &&
+                    splitAppearanceRevision == revision && splitViewState.location(side) == location && appearancePreferences.darkBackground == theme &&
+                    host.width == width && host.height == height
+                if (result.isSuccess && current) bitmap?.let { installPreview(host, it) }
+                else bitmap?.recycle()
+                if (result.isFailure && current) android.util.Log.w("Mojian", "Split preview refresh failed", result.exceptionOrNull())
+            }
+        }
     }
 
     private fun nextImportDisplayMode(mode: ImageImportDisplayMode): ImageImportDisplayMode =
@@ -2436,10 +2517,10 @@ class MainActivity : Activity() {
                     backgroundViewButton =
                         pageBoundCommand(
                             "weather_moon",
-                            "切换背景",
-                            selected = workspace.selectedPage()?.viewSettings?.darkBackground == true,
+                            "暗色模式（所有页面）",
+                            selected = appearancePreferences.darkBackground,
                         ) {
-                            updateCurrentPageView { it.darkBackground = !it.darkBackground }
+                            toggleGlobalPageTheme()
                         }
                     addView(backgroundViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
                 },
@@ -2718,7 +2799,7 @@ class MainActivity : Activity() {
 
     private fun showBackgroundFormatMenu(anchor: View) {
         val current = workspace.selectedPage()?.viewSettings?.backgroundFormat ?: return
-        showBackgroundFormatChooser(anchor, current) { format ->
+        showBackgroundFormatChooser(anchor, current, true) { format ->
             updateCurrentPageView { it.backgroundFormat = format }
         }
     }
@@ -2726,6 +2807,7 @@ class MainActivity : Activity() {
     private fun showBackgroundFormatChooser(
         anchor: View,
         current: CanvasBackgroundFormat,
+        showDefaultLink: Boolean = false,
         onSelected: (CanvasBackgroundFormat) -> Unit,
     ) {
         MojianCommandMenu.show(
@@ -2738,7 +2820,9 @@ class MainActivity : Activity() {
                     checked = current == format,
                     action = { onSelected(format) },
                 )
-            },
+            } + if (showDefaultLink) listOf(MojianCommandMenu.Item(
+                label = "设置默认页面背景…", icon = "rule_lines", dividerBefore = true,
+                action = { showOptionsDialog(focusDefaultBackground = true) })) else emptyList(),
             widthDp = 242,
         )
     }
@@ -2746,7 +2830,7 @@ class MainActivity : Activity() {
     private fun showNewPageTemplateDialog() {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val draft = lastPageTemplateSettings.copy(a4PageCount = 1)
+        val draft = appearancePreferences.newPage(lastPageTemplateSettings)
         var activeTab = PageCreationTab.PAGE
         val tabHost = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val optionsHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -3309,6 +3393,7 @@ class MainActivity : Activity() {
 
     private fun focusSplitPane(side: SplitPaneSide) {
         if (!splitViewState.enabled || side == splitViewState.focusedSide) return
+        splitAppearanceRevision++
         val destination = splitViewState.location(side) ?: return
         captureLivePagePreview()?.let { preview ->
             installPreview(hostFor(splitViewState.focusedSide), preview)
@@ -4289,7 +4374,7 @@ class MainActivity : Activity() {
             // in a queued completion while another dense page is being parsed.
             val session = nextKey?.let(pageSessions::get)?.copy(strokes = null, tags = null, textBoxes = null)
             val repository = pageContentRepository
-            val dark = workspace.selectedPage()?.viewSettings?.darkBackground ?: true
+            val dark = appearancePreferences.darkBackground
             showPageLoading(true)
             pageLoads.load(nextKey, prepare = { isCurrent ->
                 pageWrites.flush()
@@ -5960,7 +6045,7 @@ class MainActivity : Activity() {
         if (pageLoadingOverlay != null) return
         if (!::pageSurfaceBackground.isInitialized) return
         val page = workspace.selectedPage()
-        val settings = page?.viewSettings ?: PageViewSettings()
+        val settings = appearancePreferences.display(page?.viewSettings ?: PageViewSettings())
         val nextDark = settings.darkBackground
         darkCanvasActive = nextDark
         dryInkView.backgroundFormat = settings.backgroundFormat
@@ -6038,9 +6123,10 @@ class MainActivity : Activity() {
         val page = workspace.selectedPage() ?: return
         if (!ensureA4Capacity(page) && !ensureBoundlessCapacity(page)) return
         persistPageViewSettings()
-        canvasBackgroundLayer.updatePage(page.viewSettings)
-        pageSurfaceBackground.updatePage(page.title, page.viewSettings)
-        pageSurfaceForeground.updatePage(page.title, page.viewSettings)
+        val display = appearancePreferences.display(page.viewSettings)
+        canvasBackgroundLayer.updatePage(display)
+        pageSurfaceBackground.updatePage(page.title, display)
+        pageSurfaceForeground.updatePage(page.title, display)
     }
 
     // Browsing may append A4 sheets, but must never grow boundless paper.
@@ -6054,7 +6140,7 @@ class MainActivity : Activity() {
         fullViewButton?.let { updateToggleVisual(it, fullPageMode) }
         normalViewButton?.let { updateToggleVisual(it, !fullPageMode) }
         splitViewButton?.let { updateToggleVisual(it, splitViewState.enabled) }
-        val settings = workspace.selectedPage()?.viewSettings
+        val settings = workspace.selectedPage()?.viewSettings?.let(appearancePreferences::display)
         pageTitleViewButton?.let { updateToggleVisual(it, settings?.pageTitleVisible == false) }
         backgroundViewButton?.let { updateToggleVisual(it, settings?.darkBackground == true) }
         pageColorSwatch?.background =
@@ -6104,7 +6190,7 @@ class MainActivity : Activity() {
         pageBoundCommand("paint_brush", "页面颜色") { anchor -> showPageColorMenu(anchor) }.also { button ->
             pageColorSwatch =
                 View(this).apply {
-                    val settings = workspace.selectedPage()?.viewSettings
+                    val settings = workspace.selectedPage()?.viewSettings?.let(appearancePreferences::display)
                     background =
                         rounded(
                             settings?.pageColor?.displayArgb(settings.darkBackground) ?: Color.TRANSPARENT,
@@ -6213,7 +6299,7 @@ class MainActivity : Activity() {
                         View(this@MainActivity).apply {
                             background =
                                 rounded(
-                                    color.displayArgb(page.viewSettings.darkBackground),
+                                    color.displayArgb(appearancePreferences.darkBackground),
                                     dp(2).toFloat(),
                                     if (color == page.viewSettings.pageColor) ACCENT_PURPLE else BORDER_STRONG,
                                 )
@@ -6890,7 +6976,7 @@ class MainActivity : Activity() {
         }
 
     private fun chooseDisplayFilter(mode: ImageImportDisplayMode, title: String, action: (Boolean) -> Unit) {
-        ImageImportPolicy.resolve(mode, workspace.selectedPage()?.viewSettings?.darkBackground == true)?.let {
+        ImageImportPolicy.resolve(mode, appearancePreferences.darkBackground)?.let {
             action(it)
             return
         }
@@ -7416,7 +7502,7 @@ class MainActivity : Activity() {
     }
 
     private fun exportSession(notebookId: String, pages: List<NotePage>, repository: PageContentRepository): ExportProductSession {
-        val identities=pages.map { page -> ExportPageIdentity(page.id,page.title,page.viewSettings.copy(),
+        val identities=pages.map { page -> ExportPageIdentity(page.id,page.title,appearancePreferences.display(page.viewSettings),
             page.pdfPage?.let { PdfOutputPageSize(it.widthPoints,it.heightPoints) }) }
         return ExportProductSession(this,repository,notebookId,identities).also { richExportSessions += it }
     }
@@ -7541,7 +7627,9 @@ class MainActivity : Activity() {
                     .onFailure { reportBackgroundFailure("导出失败",it) }
             },summaryExecutor=ioExecutor,onDismiss={
                 sessions.values.forEach { it.cancel(); richExportSessions.remove(it) }
-            }).show()
+            },initialOptions=if(printing) PrintPreferences.restore(getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).getString(KEY_LAST_PRINT_OPTIONS,null)) else ExportOptions(),
+            onOptionsChanged={ options -> if(printing) getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+                .putString(KEY_LAST_PRINT_OPTIONS, PrintPreferences.save(options)).apply() }).show()
     }
 
     private fun startExport(type: PendingExport) {
@@ -7861,6 +7949,8 @@ class MainActivity : Activity() {
         private const val KEY_BACKGROUND_FORMAT = "background-format"
         private const val KEY_ZOOM_LOCKED = "zoom-locked"
         private const val KEY_LAST_PAGE_TEMPLATE = "last-page-template"
+        private const val KEY_APPEARANCE_PREFERENCES = "appearance-preferences"
+        private const val KEY_LAST_PRINT_OPTIONS = "last-print-options"
         private const val KEY_IMAGE_IMPORT_DISPLAY_MODE = "image-import-display-mode"
         private const val KEY_DARK_IMAGE_POLICY_VERSION = "dark-image-import-policy-version"
         private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"

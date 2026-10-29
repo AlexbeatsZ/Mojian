@@ -156,6 +156,27 @@
                     <TextBlock Text="绘图与页面" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6" />
                     <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,12" />
 
+                    <Border x:Name="DefaultPageBackgroundRow" MinHeight="64" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button x:Name="DefaultPageBackgroundPicker" DockPanel.Dock="Right" Content="{Binding DefaultPageBackgroundLabel}" Click="OnDefaultPageBackgroundClick"
+                                    Style="{StaticResource ActionCard}" Width="180" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="默认页面背景" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="用于以后新建的页面；页面中的背景菜单只修改当前页。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <Border MinHeight="64" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding PageThemeButtonText}" Command="{Binding TogglePageThemeCommand}" Style="{StaticResource ActionCard}"
+                                    Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="暗色模式" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="应用于所有页面，并在下次打开时保留。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
                     <!-- Row 1: 笔迹预测 -->
                     <Border MinHeight="56" Padding="0,8">
                         <DockPanel LastChildFill="True">

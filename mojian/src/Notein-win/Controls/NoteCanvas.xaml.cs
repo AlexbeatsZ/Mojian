@@ -3450,8 +3450,9 @@ public partial class NoteCanvas : UserControl
     private void MarkChanged(bool immediate = false)
     {
         if (Document == null) return;
-        GrowA4IfNeeded();
-        InfinitePageLayout.EnsureCapacity(Appearance, Document);
+        var paperGrew = GrowA4IfNeeded();
+        paperGrew |= InfinitePageLayout.EnsureCapacity(Appearance, Document);
+        if (paperGrew) PageMetadataChanged?.Invoke(this, EventArgs.Empty);
         _viewport.CopyTo(Document.Viewport);
         if (immediate) { _saveTimer.Stop(); RaiseDocumentChanged(); }
         else { _saveTimer.Stop(); _saveTimer.Start(); }

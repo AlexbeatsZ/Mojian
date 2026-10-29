@@ -16,10 +16,12 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
     private val describe: (ExportOptions) -> String, private val action: (ExportOptions, Boolean) -> Unit,
     private val images: (ExportOptions) -> Pair<Boolean,List<ExportImageChoice>> = { false to emptyList() },
     private val summaryExecutor: java.util.concurrent.Executor? = null,
-    private val onDismiss: () -> Unit = {}) {
+    private val onDismiss: () -> Unit = {},
+    initialOptions: ExportOptions = ExportOptions(),
+    private val onOptionsChanged: (ExportOptions) -> Unit = {}) {
     @Volatile private var refreshGeneration = 0
     @Volatile private var dismissed = false
-    private var options = ExportOptions(printing=printing)
+    private var options = initialOptions.copy(printing=printing, format=if(printing) ExportFormat.PDF else initialOptions.format, invertedImageIds=null)
     private lateinit var summary: TextView
     private lateinit var layout: LinearLayout
     private lateinit var preview: TextView
@@ -40,6 +42,7 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
     }
     private fun refresh() {
         if (!::summary.isInitialized) return
+        onOptionsChanged(options)
         groups.forEach { (selected,views) -> views.forEachIndexed { i,v -> v.setBackgroundColor(if(i==selected()) Color.rgb(61,54,68) else Color.rgb(36,36,36)) } }
         val packageFormat = !printing && options.format==ExportFormat.PACKAGE
         layout.visibility=if(packageFormat) View.GONE else View.VISIBLE
@@ -126,10 +129,10 @@ class ExportOptionsDialog(private val context: Context, private val printing: Bo
         layout.addView(text("边距"))
         val margins=listOf(0f,6f,12f,20f)
         choices(layout,margins.map { "${it.toInt()} mm" },{ margins.indexOf(options.marginMm) },{ options=options.copy(marginMm=margins[it]) },true)
-        layout.addView(CheckBox(context).apply { text="省略 A4 末尾空白页"; isChecked=true; setTextColor(Color.LTGRAY); setOnCheckedChangeListener { _,checked -> options=options.copy(trimTrailingBlank=checked); refresh() } })
-        if(printing) layout.addView(CheckBox(context).apply { text="隐藏背景格式（横线、网格、点阵）"; setTextColor(Color.LTGRAY); setOnCheckedChangeListener { _,checked -> options=options.copy(hideBackgroundFormat=checked); refresh() } })
+        layout.addView(CheckBox(context).apply { text="省略 A4 末尾空白页"; isChecked=options.trimTrailingBlank; setTextColor(Color.LTGRAY); setOnCheckedChangeListener { _,checked -> options=options.copy(trimTrailingBlank=checked); refresh() } })
+        if(printing) layout.addView(CheckBox(context).apply { text="隐藏背景格式（横线、网格、点阵）"; isChecked=options.hideBackgroundFormat; setTextColor(Color.LTGRAY); setOnCheckedChangeListener { _,checked -> options=options.copy(hideBackgroundFormat=checked); refresh() } })
         layout.addView(text("输出页码（留空为全部，例如 1-3,5）",12f))
-        layout.addView(EditText(context).apply { setSingleLine(); setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(38,38,38)); addTextChangedListener(object: android.text.TextWatcher {
+        layout.addView(EditText(context).apply { setSingleLine(); setText(options.pageRange); setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(38,38,38)); addTextChangedListener(object: android.text.TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) { options=options.copy(pageRange=s.toString()); refresh() }
             override fun afterTextChanged(s:android.text.Editable?) {}
