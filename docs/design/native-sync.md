@@ -5,6 +5,39 @@ canonical folder format, not a replacement automatically applied to the deployed
 library. The iOS client does not implement this transport. See `sync-server/PROTOCOL.md` for
 the exact v1 wire contract and `sync-server/README.md` for operator setup and isolated tests.
 
+## Sakura shared ingress (2026-10-28)
+
+Windows/Android now prefill `https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/`.
+The hostname uses the existing Sakura Web public endpoint with certificate-verifiable HTTPS;
+no access token is embedded and sync remains disabled by default. Android workspace selection is explicit; see
+`android-folder-selection.md`.
+
+Read-only ROG inspection found that port 18781 is already the Dayweave shared gateway, which
+delegates subscription routes to 18782 and fixed Dayweave routes to 49732. Never replace it with
+the Mojian backend or restart SakuraFrpService. The prepared `shared-gateway.mjs` wrapper imports
+the original gateway module and delegates every non-Mojian request to its unchanged handler.
+Only exact v1 manifest/commit/blob paths are forwarded to the dedicated loopback backend on
+18742, retaining Authorization and streaming uploads up to the backend limits.
+
+`sync-server/ops/install-rog.ps1` is prepare-only unless `-Apply` is explicitly supplied. Actual
+application requires user confirmation for a new startup task and restarting the shared gateway.
+It creates a private token/data directory with restricted ACL, saves the old gateway task XML,
+starts `MojianNativeSync`, then changes only the gateway task action. A gateway-task update
+exception restores its original action. Post-start public TLS/auth/round-trip and unchanged-route
+checks remain separate acceptance requirements. No current library is seeded automatically.
+
+The user explicitly authorized deployment on 2026-10-28. `MojianNativeSync` and the gateway
+wrapper are running on ROG; the Sakura service, publisher task and existing data are unchanged.
+The backend/private configuration lives under the ROG Mojian checkout's `.local/native-sync/`.
+Public verification first used a disposable backend under `%TEMP%/.agents/`, not the production
+data root. All 24 real Windows client scenarios passed through the certificate-verified public
+URL. Eight subscription responses remained byte-identical and invalid Dayweave usage requests
+were rejected identically through the gateway and its loopback service. An opt-in JVM test of
+the actual Android client/HTTP transport also passed upload, receive, return edit and tombstone
+through the public URL. Production was restored to its untouched data root (revision 0/files 0)
+after testing; temporary test backend data was not promoted. Physical Android and live-library
+adoption remain separate from these transport checks.
+
 ## Workspace and credentials
 
 - The existing workspace remains authoritative until the user explicitly creates/selects a

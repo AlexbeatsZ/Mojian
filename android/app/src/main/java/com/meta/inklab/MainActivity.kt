@@ -416,9 +416,14 @@ class MainActivity : Activity() {
         window.statusBarColor = TITLE_PURPLE
         window.navigationBarColor = NAV_BACKGROUND
         loadPreferences()
+        waitingForFolderPermission = savedInstanceState?.getBoolean("waitingForFolderPermission") ?: false
         shortcutDispatcher.handler = StylusShortcutHandler(::handleXiaomiStylusSignal)
         xiaomiGestureInterpreter.waitsForDoubleTap = { key ->
             xiaomiPenShortcutSettings.profile(key).double.type != StylusBindingType.NONE
+        }
+        if (!getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).contains("sharedWorkspaceRoot")) {
+            showWorkspaceSelection()
+            return
         }
         try { initializeWorkspaceRepository() } catch (error: Exception) { showWorkspaceLoadFailure(error); return }
         selectIncomingNote(intent.data)
@@ -483,6 +488,13 @@ class MainActivity : Activity() {
         }
     }
 
+    private var waitingForFolderPermission = false
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("waitingForFolderPermission", waitingForFolderPermission)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun hasSharedStorageAccess() = android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()
 
     private fun openSharedStoragePermission() {
@@ -493,11 +505,10 @@ class MainActivity : Activity() {
 
     private fun initializeWorkspaceRepository() {
         val prefs = getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE)
-        val configured = prefs.getString("sharedWorkspaceRoot",null)
-        val defaultRoot = java.io.File(android.os.Environment.getExternalStorageDirectory(),"Documents/Mojian")
-        val root = if(configured != null) java.io.File(configured) else if(hasSharedStorageAccess() && java.io.File(defaultRoot,"library.json").isFile) defaultRoot else filesDir
+        val configured = requireNotNull(prefs.getString("sharedWorkspaceRoot",null)) { "请先选择笔记文件夹" }
+        val root = File(configured).canonicalFile
         pageContentRepository = PageContentRepository(root)
-        if(root != filesDir) {
+        if(root != filesDir.canonicalFile) {
             check(root.canonicalFile.toPath().startsWith(filesDir.canonicalFile.toPath()) || hasSharedStorageAccess()) {
                 "共享文件夹需要 Android 11 或更高版本，并允许墨笺访问共享笔记文件夹"
             }
@@ -522,6 +533,7 @@ class MainActivity : Activity() {
             orientation=LinearLayout.VERTICAL;setPadding(dp(24),dp(30),dp(24),dp(24));setBackgroundColor(NAV_BACKGROUND)
             addView(TextView(this@MainActivity).apply { text="笔记库暂时无法读取\n${error.message}\n恢复完成前不会打开笔记。原生同步接收日志会在重新加载时离线恢复；共享文件夹请确认传输完整。";setTextColor(TEXT_PRIMARY) })
             addView(android.widget.Button(this@MainActivity).apply { text="重新加载";setOnClickListener { recreate() } })
+            addView(android.widget.Button(this@MainActivity).apply { text="选择其他笔记文件夹";setOnClickListener { openWorkspaceFolderPicker() } })
             addView(android.widget.Button(this@MainActivity).apply { text="共享文件夹权限";setOnClickListener { openSharedStoragePermission() } })
         })
     }
@@ -553,6 +565,11 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         nativeSyncForeground = true
+        if (waitingForFolderPermission) {
+            waitingForFolderPermission = false
+            if (hasSharedStorageAccess()) openWorkspaceFolderPicker()
+            else Toast.makeText(this, "尚未授予文件夹访问权限，原笔记保持不变", Toast.LENGTH_LONG).show()
+        }
         if (workspaceLoaded) nativeSyncController.resume(pageContentRepository.root)
         if(workspaceLoaded) { refreshSharedWorkspace();mainHandler.removeCallbacks(syncRefresh);mainHandler.postDelayed(syncRefresh,3000) }
     }
@@ -567,8 +584,8 @@ class MainActivity : Activity() {
 
     private fun showSyncOptions() {
         AlertDialog.Builder(this).setTitle("笔记同步")
-            .setItems(arrayOf("原生 HTTPS 同步（独立副本）", "现有 Syncthing 共享文件夹")) { _, index ->
-                if (index == 0) showNativeSyncOptions() else showLegacySyncOptions()
+            .setItems(arrayOf("原生 HTTPS 同步（独立副本）", "打开笔记文件夹", "现有 Syncthing 共享文件夹")) { _, index ->
+                when (index) { 0 -> showNativeSyncOptions(); 1 -> openWorkspaceFolderPicker(); else -> showLegacySyncOptions() }
             }.setNegativeButton("取消", null).show()
     }
 
@@ -633,21 +650,79 @@ class MainActivity : Activity() {
     }
 
     private fun showLegacySyncOptions() {
-        val input=EditText(this).apply { setText(if(::pageContentRepository.isInitialized && pageContentRepository.root!=filesDir) pageContentRepository.root.absolutePath else "/storage/emulated/0/Documents/Mojian");setSingleLine(true) }
         AlertDialog.Builder(this).setTitle("Syncthing 共享笔记库")
-            .setMessage("选择 Syncthing 同步的笔记文件夹。首次请先完成 OMEN 笔记传输。同一本笔记请轮流编辑，切换设备前等待同步完成。")
-            .setView(input).setNeutralButton("文件夹权限") { _,_->openSharedStoragePermission() }
+            .setMessage("通过系统文件夹选择器打开 Syncthing 同步的笔记文件夹。同一本笔记请轮流编辑，切换设备前等待同步完成。不要在同一文件夹启用原生同步。")
+            .setNeutralButton("文件夹权限") { _,_->openSharedStoragePermission() }
             .setNegativeButton("重新加载") { _,_->refreshSharedWorkspace(true) }
-            .setPositiveButton("打开") { _,_->
-                try {
-                    check(hasSharedStorageAccess()) { "请先开启共享文件夹权限（需要 Android 11 或更高版本）" }
-                    val target=java.io.File(input.text.toString()).canonicalFile
-                    PageContentRepository(target).loadLibrary()
-                    check(saveBoundPageSession()) { "笔记未保存，无法切换笔记库" }
-                    getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE).edit().putString("sharedWorkspaceRoot",target.path).apply()
-                    recreate()
-                } catch(error: Exception) { Toast.makeText(this,error.message,Toast.LENGTH_LONG).show() }
-            }.show()
+            .setPositiveButton("选择文件夹") { _,_->openWorkspaceFolderPicker() }.show()
+    }
+
+    private fun showWorkspaceSelection() {
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(30), dp(24), dp(24))
+            setBackgroundColor(NAV_BACKGROUND)
+            addView(TextView(this@MainActivity).apply {
+                text = "选择笔记文件夹\n打开已有墨笺笔记库，或选择空文件夹新建。不会自动选择目录，也不会搬动或覆盖原笔记。选择后会记住，下次直接打开。"
+                setTextColor(TEXT_PRIMARY)
+            })
+            addView(android.widget.Button(this@MainActivity).apply { text = "选择文件夹"; setOnClickListener { openWorkspaceFolderPicker() } })
+            if (getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).contains(KEY_NOTEBOOK_LIBRARY)) {
+                addView(android.widget.Button(this@MainActivity).apply {
+                    text = "继续应用内原有笔记"
+                    setOnClickListener { activateWorkspaceFolder(filesDir, legacyPrivate = true) }
+                })
+            }
+        })
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openWorkspaceFolderPicker() {
+        runCatching {
+            check(!workspaceLoaded || saveBoundPageSession()) { "笔记未保存，无法切换笔记库" }
+            if (!hasSharedStorageAccess()) {
+                AlertDialog.Builder(this).setTitle("允许访问笔记文件夹")
+                    .setMessage("墨笺需要 Android 11 或更高版本的所有文件访问权限，以直接编辑所选本地文件夹并安全同步。不会自动选择或移动任何笔记。授权后继续选择文件夹。")
+                    .setNegativeButton("取消", null).setPositiveButton("去授权") { _, _ ->
+                        waitingForFolderPermission = true
+                        openSharedStoragePermission()
+                    }.show()
+                return
+            }
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }, REQUEST_WORKSPACE_FOLDER)
+        }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+    }
+
+    private fun acceptWorkspaceFolder(uri: Uri) {
+        runCatching {
+            require(uri.authority == "com.android.externalstorage.documents") { "请选择本机存储或 SD 卡文件夹，不支持云盘或虚拟目录" }
+            val volumes = mutableMapOf("primary" to android.os.Environment.getExternalStorageDirectory())
+            getExternalFilesDirs(null).filterNotNull().forEach { directory ->
+                directory.parentFile?.parentFile?.parentFile?.parentFile?.let { volume -> volumes[volume.name] = volume }
+            }
+            val target = WorkspaceFolderSelection.resolveLocalTree(android.provider.DocumentsContract.getTreeDocumentId(uri), volumes)
+            require(target.isDirectory && target.canWrite()) { "文件夹不可写，请检查存储权限" }
+            if (File(target, "library.json").isFile) activateWorkspaceFolder(target)
+            else {
+                require(target.list()?.isEmpty() == true) { "此目录不是墨笺笔记库；请选择包含 library.json 的目录，或空文件夹" }
+                AlertDialog.Builder(this).setTitle("在空文件夹新建笔记库？").setMessage(target.path)
+                    .setNegativeButton("取消", null).setPositiveButton("新建并打开") { _, _ -> activateWorkspaceFolder(target, create = true) }.show()
+            }
+        }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
+    }
+
+    private fun activateWorkspaceFolder(target: File, create: Boolean = false, legacyPrivate: Boolean = false) {
+        runCatching {
+            check(!workspaceLoaded || saveBoundPageSession()) { "笔记未保存，无法切换笔记库" }
+            if (create) WorkspaceFolderSelection.createEmptyLibrary(target)
+            if (!legacyPrivate) PageContentRepository(target).loadLibrary()
+            check(getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+                .putString("sharedWorkspaceRoot", target.canonicalPath).commit()) { "无法保存笔记文件夹，原笔记仍在使用" }
+            nativeSyncController.pause()
+            recreate()
+        }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
     }
 
     @Suppress("DEPRECATION")
@@ -661,6 +736,10 @@ class MainActivity : Activity() {
             }
             if (requestCode == REQUEST_PDF_PAGES) pendingPdfPageTarget = null
             if (requestCode == REQUEST_SAVE_IMAGE) pendingImageSaveFile = null
+            return
+        }
+        if (requestCode == REQUEST_WORKSPACE_FOLDER) {
+            data.data?.let(::acceptWorkspaceFolder)
             return
         }
         val uris = selectedUris(data)
@@ -692,6 +771,7 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!workspaceLoaded) return super.dispatchKeyEvent(event)
         if (pageLoadingOverlay != null) return true
         if (::selectionOverlay.isInitialized) {
             val control = when (event.keyCode) {
@@ -1174,7 +1254,7 @@ class MainActivity : Activity() {
                     )
                     addView(backstageNavItem("信息", true) {}, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("新建", false) { showShell("新建笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("打开", false) { showShell("打开笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("打开文件夹", false) { dialog.dismiss(); openWorkspaceFolderPicker() }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(8), dp(4), dp(8)) })
                     addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
                     addView(backstageNavItem("打印", false) { dialog.dismiss(); showExportDialog(printing = true) }, LinearLayout.LayoutParams(MATCH, dp(42)))
@@ -7832,6 +7912,7 @@ class MainActivity : Activity() {
         private const val REQUEST_EXPORT = 4106
         private const val REQUEST_PDF_PAGES = 4107
         private const val REQUEST_SAVE_IMAGE = 4108
+        private const val REQUEST_WORKSPACE_FOLDER = 4109
         private const val PDF_EXPORT_LONGEST_SIDE_PX = 1800f
         private const val SPLIT_FOCUS_PULSE_MILLIS = 500L
         private const val DARK_TOOLTIP_DELAY_MILLIS = 500L

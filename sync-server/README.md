@@ -2,7 +2,30 @@
 
 An independent, dependency-free Node 22+ service for the existing Mojian folder
 format. Exact Android/Windows wire contract and integration requirements are in
-[PROTOCOL.md](PROTOCOL.md). This directory contains no endpoint or credentials.
+[PROTOCOL.md](PROTOCOL.md). No credentials are shipped in source or client binaries.
+
+## Existing Sakura Web endpoint
+
+Windows and Android prefill `https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/`;
+sync is still opt-in and requires a separately provisioned secret and dedicated copy.
+Prefilling this address does not deploy a backend or enable the live notes.
+
+ROG currently shares Web ingress between Dayweave and subscription distribution.
+`gateway-route.mjs` streams only exact Mojian v1 routes to loopback 18742;
+`shared-gateway.mjs` wraps the existing Dayweave gateway without changing other handlers.
+It preserves Authorization, blocks browser-origin requests and enforces backend upload limits.
+
+On the ROG checkout run `powershell -NoProfile -File sync-server/ops/install-rog.ps1`
+to inspect the plan without writing or restarting anything. **Only after user confirmation**,
+add `-Apply` to create the dedicated startup task/private token and restart the shared gateway.
+The gateway task must still match the inspected module or the installer refuses to change it.
+Private config/data and gateway-task recovery XML live in ignored `.local/native-sync/`.
+The token is never printed, passed on a command line or committed. Keep the entire data root
+backed up; clients require the same secret entered in their local sync settings.
+
+Verify real public HTTPS authentication, upload/commit/download between disposable clients,
+and preservation of existing Dayweave/subscription routes before connecting notes. The installer
+does not enable clients or copy/seed the user's library. See `../docs/design/native-sync.md`.
 
 ## Run a separately configured service
 

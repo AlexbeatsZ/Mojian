@@ -8,8 +8,14 @@
 
 # Current State
 
-- Source/build version: Windows and Android **0.7.0**; Android retains
-  `com.meta.inklab.debug`, version code **8**. iOS remains a separate 0.1.0 client.
+- Current source/build version: Windows and Android **0.7.1**; Android retains
+  `com.meta.inklab.debug`, version code **9**. iOS remains a separate 0.1.0 client.
+  Parallel review/export changes are active in this checkout. Release builds for the sync/folder
+  task use a temporary, task-only source snapshot; never stage unrelated changes or clean shared outputs.
+- Android now explicitly opens a local folder using the system picker and remembers the choice.
+  Unconfigured installs do not automatically select Documents/Mojian or private storage. An empty
+  folder requires confirmation to create a canonical library; legacy private notes remain available.
+  Read `docs/design/android-folder-selection.md` before changing these entry/lifecycle paths.
 - The 2026-10-28 review follow-up integrates explicit Android save-failure barriers,
   source-first copying, reference-aware post-commit deletion cleanup, spacing-only rich-text
   persistence, shared scene ordering/revision caches and bounded logical-page export preparation.
@@ -19,15 +25,24 @@
   and Android. V1 includes CAS, stable-ID durable outbox retries, tombstones, retained conflicts,
   offline incoming-journal recovery, foreground scheduling and mutation-epoch snapshot guards.
   Read `docs/design/native-sync.md` and `sync-server/PROTOCOL.md` before sync edits.
-  Never enable native sync on a Syncthing tree. No production endpoint/token is shipped.
+  Never enable native sync on a Syncthing tree. Both clients prefill
+  `https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/`; no token is shipped or sync auto-enabled.
+- User-authorized ROG deployment adds startup task `MojianNativeSync` (loopback 18742) and wraps
+  the existing `DayweaveHttpsGateway` on 18781. Subscription publisher stays on 18782; Dayweave
+  stays on 49732. Do not restart SakuraFrpService or overwrite the original gateway module.
+  ROG private config/data/recovery XML: checkout `.local/native-sync/`; local ignored
+  `.local/native-sync/connection.json` contains connection details and must never enter Git/releases.
+  Public Windows 24-scenario verification used a disposable backend, not production notes.
 - The live Syncthing setup and real notes were not changed by this delivery. The established
   Windows library is `C:\Users\Meta\Documents\Mojian\_migration\native-20261002\workspace`;
   phone/tablet shared storage is `/storage/emulated/0/Documents/Mojian`.
   Five notebooks / 653 pages were the last deployment acceptance count, not a current inventory.
-- Latest automated evidence (2026-10-28): Android **228/228** unit tests; debug APK, instrumentation
-  APK compilation and lint **0 errors / 136 warnings**. Native sync: **11/11 Node tests** including
-  **24/24 Windows client scenarios** against an ephemeral real Node server. Windows focused
-  deletion/epoch/recovery regressions **14/14**, Release self-contained publish succeeds.
+- Latest task-only 0.7.1 evidence (2026-10-28): Android **232/232** unit tests including an opt-in
+  real public HTTPS round trip; debug/test APK builds, lint **0 errors / 137 warnings**. Native sync:
+  **11/11 Node integration tests**, **2/2 gateway tests**, and **24/24 Windows scenarios** on both
+  loopback and actual Sakura HTTPS. Windows focused safety/default-config checks **15/15** and
+  Release self-contained publish succeed. Production was restored to revision 0/files 0 after
+  disposable public tests. Physical Android acceptance remains outstanding.
 - Full Windows Debug run: **180/184**, with four existing UI-test failures. Independent HEAD
   `22126a5` comparison reproduces the caret assertion (195 vs 280.31 in isolated execution;
   same-process runs can produce 56) and the other three order-dependent failures. Individual
@@ -37,7 +52,8 @@
   The older pan-cache pixel baseline is recorded in `docs/log/2026-10.md`.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and
   `android/artifacts/current/Mojian-debug.apk`. Builds are not installation or physical acceptance;
-  this round does not start the real app, install an APK, migrate notes or deploy a service.
+  this round does not start the real app, install an APK or migrate notes. The separate ROG
+  backend/shared-gateway deployment is authorized and complete.
 - Android and Windows use the original desktop background reference before `0033213`:
   spacing 24/32/48, uniform #2D3238, no red margin/major rules, dot radius 1 and A4 gap 32.
   `shared/page-backgrounds.json` is the executable contract. The 2026-10-19 tablet acceptance
@@ -47,8 +63,9 @@
 
 # Active Work
 
-- Configure/accept a dedicated backend and HTTPS ingress using disposable Windows/Android clones
-  before discussing real-library migration. No ROG service or public ingress was deployed.
+- Complete physical Android folder-picker/permission/save/restart and native foreground-sync
+  acceptance before live-library adoption. The ROG HTTPS backend is deployed; real Syncthing
+  libraries remain unchanged and must not be pointed at native sync in place.
 - Native sync v1 conflicts require reviewed manual recovery; there is no automatic resolution UI,
   CRDT merge, end-to-end encryption or blob/tombstone/receipt garbage collection.
 - Physical Android save/recovery/foreground-sync and export/print acceptance remains outstanding.
@@ -125,6 +142,7 @@
 # Docs Index
 
 - `docs/design/native-sync.md`: dedicated clones, foreground lifecycle, recovery/deployment boundaries.
+- `docs/design/android-folder-selection.md`: explicit system picker, new library and legacy-private entry.
 - `sync-server/PROTOCOL.md`: exact shared wire/CAS/idempotency and mutation-epoch contract.
 - `docs/design/android-page-navigation.md`: save barriers, asynchronous binding and viewport memory.
 - `docs/design/live-note-sync.md`: deployed canonical storage and Syncthing acceptance.

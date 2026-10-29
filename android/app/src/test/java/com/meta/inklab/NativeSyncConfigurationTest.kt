@@ -6,6 +6,13 @@ import java.io.File
 import java.nio.file.Files
 
 class NativeSyncConfigurationTest {
+    @Test fun defaultUsesSakuraHttpsButDoesNotEnableSyncOrShipCredentials() {
+        val configuration = NativeSyncConfiguration()
+        assertEquals("https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/", configuration.endpoint)
+        assertFalse(configuration.enabled)
+        assertTrue(configuration.token.isEmpty())
+    }
+
     @Test fun endpointRejectsCredentialsRedirectTargetsAndNonLocalHttp() {
         listOf("http://example.com/mojian-sync/v1", "https://user:pass@example.com/", "https://example.com/?token=x", "https://example.com/#x").forEach { value ->
             assertThrows(IllegalArgumentException::class.java) { NativeSyncFiles.endpoint(value) }

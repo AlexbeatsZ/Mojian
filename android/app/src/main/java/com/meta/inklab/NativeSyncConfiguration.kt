@@ -6,7 +6,7 @@ import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
 
-data class NativeSyncConfiguration(val endpoint: String = "", val token: String = "", val enabled: Boolean = false) {
+data class NativeSyncConfiguration(val endpoint: String = DEFAULT_ENDPOINT, val token: String = "", val enabled: Boolean = false) {
     fun save(context: Context, root: File) = save(context.filesDir, root)
 
     fun save(appPrivateDirectory: File, root: File) {
@@ -18,6 +18,7 @@ data class NativeSyncConfiguration(val endpoint: String = "", val token: String 
     override fun toString() = "NativeSyncConfiguration(endpoint=$endpoint, token=[redacted], enabled=$enabled)"
 
     companion object {
+        const val DEFAULT_ENDPOINT = "https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/"
         fun load(context: Context, root: File) = load(context.filesDir, root)
         fun load(appPrivateDirectory: File, root: File): NativeSyncConfiguration {
             val file = configurationFile(appPrivateDirectory, root)

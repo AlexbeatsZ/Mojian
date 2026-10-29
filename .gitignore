@@ -10,3 +10,4 @@ captures/
 **/artifacts/
 .vs/
 *.user
+.local/

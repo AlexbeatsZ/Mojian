@@ -29,7 +29,8 @@ public sealed class NativeSyncState
 
 public sealed class NativeSyncConfiguration
 {
-    public string Endpoint { get; set; } = "";
+    public const string DefaultEndpoint = "https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/";
+    public string Endpoint { get; set; } = DefaultEndpoint;
     public string Token { get; set; } = "";
     public bool Enabled { get; set; }
     public static string FilePath(string root) => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

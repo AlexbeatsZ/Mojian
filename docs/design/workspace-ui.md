@@ -5,6 +5,8 @@ Last verified: 2026-10-08
 Read this document before changing notebook/section/page navigation, drawing-tool configuration, or
 the dark workspace chrome.
 
+Android explicit folder opening/creation and first-run selection follow `android-folder-selection.md`.
+
 The shared Shapes tool, its seven primitives, and the hold-to-straighten toggle/delay live in the
 drawing-tool flyout. Read `shapes-and-straightening.md` before modifying this tool or its parameters.
 
