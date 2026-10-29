@@ -136,9 +136,11 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   stroked segments. Ordinary wet ink has its own visual, so each sample reuses the completed
   scene; imported layers or tags keep their canonical painter order. Render-performance evidence
   must include rasterization and low-zoom visibility, not only command-recording CPU time.
-- Viewport pan/zoom copies state into the in-memory document but does not schedule a complete page
-  autosave. Navigation and shutdown already flush that state. Viewport-driven A4 sheet growth saves
-  only lightweight library metadata; content mutations retain the debounced atomic page save.
+- Viewport pan/zoom stays local in `settings.json` per notebook/page; it does not rewrite page
+  JSON, increment content revisions or grow A4 sheets. Legacy serialized viewport values remain
+  preserved for compatibility. Navigation and shutdown flush pending content and local settings;
+  clean pages and unchanged libraries are not rewritten. Content mutations retain the debounced
+  atomic page save.
 - Page documents are saved as compact UTF-8 JSON. This preserves the shared schema while avoiding
   indentation overhead on imported pages containing hundreds of thousands of input points.
 
@@ -151,10 +153,10 @@ Windows-specific realization. Pen Hand/Lasso never changes mouse-left or touch-s
   continues to target an active text editor. An external clipboard change invalidates older native
   snapshots. Ordinary Copy/Ctrl+C use native content; the copy dropdown and content menus additionally
   expose SVG and PNG exports with unbound configurable shortcuts. See `insert-and-export.md`.
-- A4 pages are a continuous Word-style stack rather than one fixed rectangle. Completed content and the
-  visible viewport both grow the persisted sheet count before reaching the final sheet bottom, so wheel,
-  middle-drag, and touch navigation can continue downward. Page gaps remain workspace-colored and are
-  never covered by paper patterns; automatic editing or browsing never removes sheets.
+- A4 pages are a continuous stack. Completed content grows the persisted sheet count before
+  reaching the final sheet bottom. Browsing does not append sheets or create sync changes.
+  Page gaps remain workspace-colored and are never covered by paper patterns; deleting content
+  does not automatically remove existing sheets.
 - WPF stylus input uses real `StylusPoint.PressureFactor`; promoted mouse events must not duplicate a
   stylus stroke. Only a real stylus authors/erases ink. Mouse and touch use direct content handling:
   click/tap selects, a second click/tap on selected text edits, dragging selected content transforms

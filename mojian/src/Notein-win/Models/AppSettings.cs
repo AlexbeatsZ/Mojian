@@ -24,6 +24,7 @@ public sealed class WorkspaceSettings
     }
     public PageAppearance LastPageAppearance { get; set; } = new();
     public Dictionary<string, string> ShortcutBindings { get; set; } = ShortcutActionCatalog.DefaultBindings();
+    public Dictionary<string, PageViewport> PageViewports { get; set; } = new();
 }
 
 public sealed class AppPreferences

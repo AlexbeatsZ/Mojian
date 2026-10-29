@@ -94,7 +94,7 @@ object SharedStrokeCodec {
             }
             outline.append("Z ")
         }
-        if (outline.isNotEmpty() && bounds.left.isFinite()) json.put("vectorPath",outline.toString())
+        if (outline.isNotEmpty() && bounds.left.isFinite()) json.put("vectorPath","F1 " + outline)
             .put("vectorBounds",JSONArray(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom)))
             .put("vectorTransform",JSONArray(listOf(1,0,0,1,0,0)))
         records[stroke] = Record(json)
@@ -103,7 +103,7 @@ object SharedStrokeCodec {
 
     fun path(stroke: Stroke): Path? {
         val record = records[stroke] ?: return null
-        val text = record.json.optString("vectorPath")
+        val text = record.json.optString("vectorPath").trimStart()
         if (text.isBlank()) return null
         record.path?.let { return it }
         val path = PathParser.createPathFromPathData(text.removePrefix("F0").removePrefix("F1").trim()) ?: error("Invalid stored outline")

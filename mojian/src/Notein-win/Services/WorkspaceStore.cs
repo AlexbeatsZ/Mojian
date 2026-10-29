@@ -8,6 +8,7 @@ public sealed class WorkspaceStore
 {
     private readonly Dictionary<string, (long Length, long Modified)?> _observedFiles = new();
     private readonly object _sync;
+    private string? _libraryJson;
     private readonly Dictionary<string, HashSet<string?>> _localVersions = new();
     private static string? PageStamp(string path) => Stamp(path) is { } stamp ? $"{stamp.Length}:{stamp.Modified}" : null;
     private static (long Length, long Modified)? Stamp(string path) => File.Exists(path)
@@ -89,18 +90,27 @@ public sealed class WorkspaceStore
             return notebook.FindPage(pageId, out _) != null;
         });
         Observe(LibraryPath);
+        _libraryJson = JsonSerializer.Serialize(library, JsonOptions);
         return library;
     }
 
-    public void SaveLibrary(NotebookLibrary library)
+    public bool SaveLibrary(NotebookLibrary library)
     {
-        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
-        lock (_sync) { GuardExternalWrite(LibraryPath); AtomicWrite(LibraryPath, JsonSerializer.Serialize(library, JsonOptions)); Observe(LibraryPath); }
+        lock (_sync)
+        {
+            GuardExternalWrite(LibraryPath);
+            var json = JsonSerializer.Serialize(library, JsonOptions);
+            if (json == _libraryJson && File.Exists(LibraryPath)) return false;
+            using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
+            AtomicWrite(LibraryPath, json);
+            _libraryJson = json;
+            Observe(LibraryPath);
+            return true;
+        }
     }
 
     public WorkspaceSettings LoadSettings()
     {
-        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
         RestoreMissingCurrent(SettingsPath);
         var settings = File.Exists(SettingsPath) ? ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions) : new WorkspaceSettings();
         settings.UpgradeDarkImageImportPolicy();
@@ -109,7 +119,6 @@ public sealed class WorkspaceStore
 
     public void SaveSettings(WorkspaceSettings settings)
     {
-        using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
         lock (_sync) AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
     }
 
@@ -127,6 +136,7 @@ public sealed class WorkspaceStore
         var document = ReadRecoverable<PageDocument>(path, PageJsonOptions);
         document.NotebookId = notebookId;
         document.PageId = pageId;
+        document.Viewport = new PageViewport { Scale = document.LegacyViewport.Scale, TranslationX = document.LegacyViewport.TranslationX, TranslationY = document.LegacyViewport.TranslationY };
         lock (_sync)
         {
             if (_observedFiles.TryGetValue(path, out var previous) && previous != Stamp(path)) _localVersions.Remove(path);

@@ -78,8 +78,26 @@ class InkColorProbeActivity : Activity() {
                     check(SharedStrokeCodec.encode(stroke).toString()==outline.toString())
                 }
             }
+            val crossing="M10,30 L90,30 90,50 10,50 Z M40,10 L60,10 60,90 40,90 Z"
+            val intersectionCases=JSONArray()
+            for(prefix in listOf("","F1 ","F0 ")) {
+                val source=JSONObject(legacy.toString()).put("vectorPath",prefix+crossing).put("opacityPercent",50)
+                val stroke=SharedStrokeCodec.decode(source,displayColor={it.argb})
+                val image=Bitmap.createBitmap(400,400,Bitmap.Config.ARGB_8888)
+                try {
+                    check(SharedStrokeCodec.draw(Canvas(image),stroke))
+                    val unit=SharedWorkspaceCodec.TO_SHARED.toFloat()
+                    val armAlpha=Color.alpha(image.getPixel((20/unit).toInt(),(40/unit).toInt()))
+                    val crossAlpha=Color.alpha(image.getPixel((50/unit).toInt(),(40/unit).toInt()))
+                    check(armAlpha==127 && crossAlpha==if(prefix=="F0 ") 0 else armAlpha) { "Outline crossing fill/opacity changed" }
+                    check(SharedStrokeCodec.encode(stroke).toString()==source.toString()) { "Display rewrote source outline" }
+                    val svg=SelectionSvg.inkPaths(listOf(stroke))
+                    check(svg.contains("fill-rule=\""+(if(prefix=="F0 ") "evenodd" else "nonzero")+"\""))
+                    intersectionCases.put(JSONObject().put("prefix",prefix).put("armAlpha",armAlpha).put("crossAlpha",crossAlpha))
+                } finally { image.recycle() }
+            }
             result.put("legacyPenPixel",String.format("#%08X",solid)).put("sourceOpacityPreserved",true)
-                .put("outlineOpacityCases",10).put("status","passed")
+                .put("outlineOpacityCases",10).put("outlineIntersections",intersectionCases).put("status","passed")
         } catch (failure: Throwable) {
             result.put("status","failed").put("error",failure.toString())
         }

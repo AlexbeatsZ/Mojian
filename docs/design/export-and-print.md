@@ -137,7 +137,7 @@ desktop screen width. Both pattern palettes currently use the original uniform d
 - Paper choices are Automatic, A4, A3 and Letter; orientation is portrait/landscape and margins are
   0/6/12/20 mm. Automatic means A4 for ordinary notes and the original MediaBox for imported PDF.
   Explicit paper uses uniform scaling, never independent X/Y stretch.
-- A4 continuous notes export each source sheet separately. Editing/viewport-driven spare sheets
+- A4 continuous notes export each source sheet separately. Content-driven or historical spare sheets
   are omitted by default using the current content bottom; disabling that option includes them.
   Internal empty sheets keep their position. Normal workspace gaps are omitted, but content in a
   gap belongs to the preceding physical sheet so gap ink/objects are never silently dropped.

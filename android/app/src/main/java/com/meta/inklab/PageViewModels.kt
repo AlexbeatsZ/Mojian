@@ -44,16 +44,10 @@ object A4PageLayout {
     fun requiredPageCount(
         contentBottom: Float,
         currentPageCount: Int,
-    ): Int = requiredPageCount(contentBottom, 0f, currentPageCount)
-
-    fun requiredPageCount(
-        contentBottom: Float,
-        visibleDocumentBottom: Float,
-        currentPageCount: Int,
         height: Float = pageHeight,
     ): Int {
         var count = currentPageCount.coerceAtLeast(1)
-        val observedBottom = maxOf(contentBottom, visibleDocumentBottom)
+        val observedBottom = contentBottom.takeIf(Float::isFinite) ?: 0f
         while (observedBottom >= pageBottom(count - 1, height) - autoGrowMargin) count++
         return count
     }

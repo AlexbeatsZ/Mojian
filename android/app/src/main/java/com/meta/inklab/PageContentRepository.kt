@@ -27,16 +27,17 @@ class PageContentRepository(val root: File) {
     }
 
     @Synchronized
-    fun saveLibrary(library: NotebookLibrary) {
-        val source = librarySource ?: return
+    fun saveLibrary(library: NotebookLibrary): Boolean {
+        val source = librarySource ?: return false
         val next = SharedWorkspaceCodec.encodeLibrary(library,source)
-        if (next.toString() == source.toString()) return
+        if (next.toString() == source.toString()) return false
         check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
         val text = next.toString()
         atomicWrite(File(root,"library.json"), beforeReplace = {
             check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
         }) { it.write(text) }
         librarySource = next; libraryContent = text
+        return true
     }
 
     fun libraryChanged(): Boolean = libraryContent?.let { File(root,"library.json").readText(Charsets.UTF_8) != it } ?: false

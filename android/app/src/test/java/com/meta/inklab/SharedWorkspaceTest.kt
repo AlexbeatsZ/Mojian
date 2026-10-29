@@ -118,6 +118,34 @@ class SharedWorkspaceTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun browsingDoesNotRewriteCanonicalFilesOrReportALibraryMutation() {
+        val root=Files.createTempDirectory(File(System.getProperty("java.io.tmpdir"),".agents").apply{mkdirs()}.toPath(),"mojian-view-only").toFile()
+        try {
+            val libraryFile=File(root,"library.json").apply { writeText(library().toString()) }
+            val repository=PageContentRepository(root)
+            val loaded=repository.loadLibrary()
+            val pageFile=repository.pageFile("book","page").apply { parentFile!!.mkdirs();writeText(page().toString()) }
+            val beforeLibrary=libraryFile.readText()
+            val beforePage=pageFile.readText()
+            val beforeEpoch=LocalMutationEpoch.forWorkspace(root).capture()
+            val viewport=ViewportState()
+            val memory=PageViewportMemory<String>()
+            repeat(20) {
+                viewport.applyGesture(100f,100f,150f,-500f,1.1f)
+                memory.remember("book/page",viewport.snapshot())
+                assertFalse(repository.saveLibrary(loaded))
+            }
+            assertEquals(viewport.snapshot(),memory.recall("book/page"))
+            assertEquals(beforeLibrary,libraryFile.readText())
+            assertEquals(beforePage,pageFile.readText())
+            assertEquals(beforeEpoch,LocalMutationEpoch.forWorkspace(root).capture())
+            loaded.activeNotebook().title="real rename"
+            assertTrue(repository.saveLibrary(loaded))
+            assertEquals("real rename",PageContentRepository(root).loadLibrary().activeNotebook().title)
+            assertFalse(repository.saveLibrary(loaded))
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun absentDevicePreferencesAndLargeExtentsDoNotCreateLibraryWritesWhenRead() {
         val source=library()
         val notebook=source.getJSONArray("notebooks").getJSONObject(0)

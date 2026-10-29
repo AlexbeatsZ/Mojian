@@ -272,6 +272,7 @@ public partial class NoteCanvas : UserControl
     private static void OnDocumentChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        canvas._saveTimer.Stop();
         canvas.CommitViewport(args.OldValue as PageDocument);
         if (canvas._activeStroke != null && args.OldValue is PageDocument old) old.Strokes.Remove(canvas._activeStroke);
         canvas._undo.Clear();
@@ -3439,8 +3440,6 @@ public partial class NoteCanvas : UserControl
         Document.TextItems = restored.TextItems;
         Document.Objects = restored.Objects;
         Document.Layers = restored.Layers;
-        Document.Viewport = restored.Viewport;
-        _viewport.Restore(Document.Viewport);
         ClearSelection();
         RebuildTextEditors();
         MarkChanged(immediate: true);
@@ -3450,6 +3449,7 @@ public partial class NoteCanvas : UserControl
     private void MarkChanged(bool immediate = false)
     {
         if (Document == null) return;
+        Document.HasPendingContentChanges = true;
         var paperGrew = GrowA4IfNeeded();
         paperGrew |= InfinitePageLayout.EnsureCapacity(Appearance, Document);
         if (paperGrew) PageMetadataChanged?.Invoke(this, EventArgs.Empty);
@@ -3466,8 +3466,7 @@ public partial class NoteCanvas : UserControl
         foreach (var tag in Document.Tags) bottom = Math.Max(bottom, tag.DocumentY + 18 * tag.Scale);
         foreach (var text in Document.TextItems) bottom = Math.Max(bottom, text.Y + text.Height);
         foreach (var item in Document.Objects) bottom = Math.Max(bottom, item.Y + item.Height);
-        var visibleBottom = ActualHeight > 0 ? _viewport.ViewToDocument(0, ActualHeight).Y : 0;
-        var required = A4PageLayout.RequiredSheetCount(bottom, visibleBottom, Appearance.SheetCount, Appearance.Height);
+        var required = A4PageLayout.RequiredSheetCount(bottom, Appearance.SheetCount, Appearance.Height);
         if (required == Appearance.SheetCount) return false;
         Appearance.SheetCount = required;
         return true;
@@ -3480,7 +3479,6 @@ public partial class NoteCanvas : UserControl
         UpdateTextEditorPositions();
         if (Document != null) _viewport.CopyTo(Document.Viewport);
         ViewportChanged?.Invoke(this, EventArgs.Empty);
-        if (GrowA4IfNeeded()) PageMetadataChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
 

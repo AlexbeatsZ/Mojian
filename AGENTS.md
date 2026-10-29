@@ -8,9 +8,9 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.4**; Android retains
-  `com.meta.inklab.debug`, version code **12**. iOS remains a separate 0.1.0 client.
-  `v0.7.4` prerelease is published with both assets; source is pushed to `origin/master`.
+- Current source/build version: Windows and Android **0.7.5**; Android retains
+  `com.meta.inklab.debug`, version code **13**. iOS remains a separate 0.1.0 client.
+  `v0.7.4` is published;0.7.5 packaging/deployment is in progress.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
@@ -18,6 +18,11 @@
   row in options; single-page/one-off creation backgrounds do not change that default. Read
   `docs/design/settings-memory.md` before changing these paths. Theme overrides use display copies;
   Windows paper-growth events copy dimensions back to stored metadata, not the display theme.
+- Sync status is now a compact bottom-right overlay on both clients. A4 grows only for content;
+  pan/zoom does not publish changes. Windows keeps viewport in local settings and preserves old
+  page viewport JSON; clean navigation/close does not increment page revisions or rewrite files.
+  Unprefixed shared outlines render with nonzero winding, fixing transparent intersections;
+  explicit F0/F1 remains authoritative. Read stored-ink-appearance.md before fill-rule changes.
 - Android now explicitly opens a local folder using the system picker and remembers the choice.
   Unconfigured installs do not automatically select Documents/Mojian or private storage. An empty
   folder requires confirmation to create a canonical library; legacy private notes remain available.
@@ -50,17 +55,12 @@
   path during deployment was withdrawn. User-authorized recovery subsequently restored the active
   canonical tree to that former path: 5 notebooks / 659 indexed pages / 1262 referenced assets,
   validator has no errors; its library and all 664 page files match the surviving tablet. This does
-  not restore all deleted source/migration backups. Tablet now selects
-  `/storage/emulated/0/Documents/Mojian-native`; phone still selects its old root pending reconnect.
+  not restore all deleted source/migration backups. Both Android clients now select
+  `/storage/emulated/0/Documents/Mojian-native`.
   In-place installation preserved data. Daily sync uses ordered HTTPS routes; Mojian's Syncthing
   folder is now paused. Production is seeded with the selected 659-page library (revision1/files1818).
-- Latest task-only 0.7.1 evidence (2026-10-28): Android **232/232** unit tests including an opt-in
-  real public HTTPS round trip; debug/test APK builds, lint **0 errors / 137 warnings**. Native sync:
-  **11/11 Node integration tests**, **2/2 gateway tests**, and **24/24 Windows scenarios** on both
-  loopback and actual Sakura HTTPS. Windows focused safety/default-config checks **15/15** and
-  Release self-contained publish succeed. Production was restored to revision 0/files 0 after
-  disposable public tests. Physical Android acceptance remains outstanding.
-- Latest Windows Release suite passes **197/197**, including ordered-address parsing plus menu/settings and print
+- Latest Windows Release suite passes **204/204**, including local-only viewport/clean close,
+  crossing alpha/PNG/SVG/independent PDF reader, menu/settings and print
   restoration after window restart; the previous 0.7.2 Debug suite passed 191/191.
   Tests share a persistent STA/Application/Dispatcher rather than reusing a dead owner; failures
   close leaked windows and restore resources; assembly disposal requests Application shutdown and
@@ -70,7 +70,8 @@
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`.
   All three devices have0.7.4. OMEN actual UI reports synchronized; tablet APK client passed first-route
   and third-route public fallback on the real659-page clone, but lock screen prevents foreground UI
-  acceptance. Phone wireless ADB disconnected after installation; its final root activation is pending.
+  acceptance. Phone USB now connected; root activation and installed0.7.4 strict1/2/3 public
+  fallback passed, checkpoint equals production revision5/files1818 with no pending journals.
   Windows actual client also passed second-route Tailscale and third-route public fallback with0pending.
 - Android and Windows use the original desktop background reference before `0033213`:
   spacing 24/32/48, uniform #2D3238, no red margin/major rules, dot radius 1 and A4 gap 32.
@@ -86,15 +87,17 @@
   unused alternate print/whole-canvas PDF routes are removed. Ink/text/assets cull off-sheet work.
   A 96 MiB PDF stream regression passes in a 64 MiB JVM heap; native output remains compile-only.
 - Android popup tracking is weak and clears/dismisses host anchors on Activity destruction.
-- 0.7.4: Android246passed/1opt-in skipped, APK/test APK/lint0errors/141warnings; Node11/11,
-  gateway2/2, Windows native25/25 scenarios including strict order and cross-route lost-receipt replay.
+- 0.7.5: Android247passed/1opt-in skipped, APK/test APK/lint0errors/144warnings; Node11/11
+  and Windows native25/25 rerun. Android isolated native crossing probe awaits deployment.
 
 # Active Work
 
+- Finish0.7.5 EXE/APK publishing and all-device deployment, native Android crossing probe and
+  foreground UI checks. Do not claim tablet unlocked acceptance while it remains locked.
+
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies match1818 files on
-  all three devices. Finish phone root activation/real acceptance after new ADB endpoint arrives. Syncthing
-  stays paused. Continuation: `~/.agents/mojian--settings-memory`.
+  all three devices. Syncthing stays paused. Continuation: `~/.agents/mojian--settings-memory`.
 - Complete physical Android folder-picker/permission/save/restart and native foreground-sync
   acceptance before live-library adoption. The ROG HTTPS backend is deployed; real Syncthing
   libraries remain unchanged and must not be pointed at native sync in place.

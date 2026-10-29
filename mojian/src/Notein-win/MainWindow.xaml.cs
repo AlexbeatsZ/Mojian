@@ -208,7 +208,11 @@ public partial class MainWindow : Window
             var other = canvas == LeftCanvas ? RightCanvas : LeftCanvas;
             if (ReferenceEquals(other.Document, canvas.Document)) other.InvalidateVisual();
         };
-        canvas.ViewportChanged += (_, _) => { if (canvas == FocusedCanvas) UpdateZoomStatus(); };
+        canvas.ViewportChanged += (_, _) =>
+        {
+            ViewModel.RememberViewport(canvas.Document);
+            if (canvas == FocusedCanvas) UpdateZoomStatus();
+        };
         canvas.PageMetadataChanged += (_, _) =>
         {
             ViewModel.UpdatePageExtent(canvas.Document, canvas.Appearance);

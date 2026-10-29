@@ -5,6 +5,13 @@ Last verified: 2026-10-28
 Read before changing Windows wet/dry rendering, pointer feedback, undo history,
 autosave scheduling, recovery, or same-page split document ownership.
 
+Viewport browsing stays in local settings and cannot mark page content dirty or expand A4
+metadata. Canvas content edits mark a pending-content flag before the save debounce; navigation
+and shutdown flush it, and incoming refresh must not replace such a document. Queue submission
+retains the immutable content snapshot and clears that flag; failed jobs remain in the existing
+retry queue. Clean pages are not rewritten on navigation/close. Legacy on-disk viewport data is
+preserved separately so subsequent content saves do not publish the current device's view.
+
 ## Recoverable deletion and native-sync publication (2026-10-28)
 
 Notebook/section/page deletion now builds a candidate library without mutating the live model.

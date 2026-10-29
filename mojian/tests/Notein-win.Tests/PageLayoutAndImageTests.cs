@@ -6,15 +6,15 @@ namespace Notein_win.Tests;
 public class PageLayoutAndImageTests
 {
     [Fact]
-    public void A4GrowsForContentOrVisibleViewportAndNeverShrinks()
+    public void A4GrowsForContentAndNeverShrinks()
     {
         const double height = 1122.5;
         var firstThreshold = height - A4PageLayout.AutoGrowMargin;
 
-        Assert.Equal(1, A4PageLayout.RequiredSheetCount(firstThreshold - 1, 0, 1, height));
-        Assert.Equal(2, A4PageLayout.RequiredSheetCount(firstThreshold, 0, 1, height));
-        Assert.Equal(2, A4PageLayout.RequiredSheetCount(0, firstThreshold, 1, height));
-        Assert.Equal(4, A4PageLayout.RequiredSheetCount(0, 0, 4, height));
+        Assert.Equal(1, A4PageLayout.RequiredSheetCount(firstThreshold - 1, 1, height));
+        Assert.Equal(2, A4PageLayout.RequiredSheetCount(firstThreshold, 1, height));
+        Assert.Equal(1, A4PageLayout.RequiredSheetCount(double.PositiveInfinity, 1, height));
+        Assert.Equal(4, A4PageLayout.RequiredSheetCount(0, 4, height));
     }
 
     [Theory]

@@ -14,6 +14,77 @@ namespace Notein_win.Tests;
 public class PreferenceMemoryUiTests
 {
     [Fact]
+    public void BrowsingA4DoesNotPublishChangesAndViewportRestoresLocallyAfterClose()
+    {
+        WpfTestExecutor.Run(() =>
+        {
+            foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" })
+                Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(
+                    new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
+            var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-preference-memory", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var preferences = new PreferencesStore(Path.Combine(root, "preferences.json"));
+            MainWindow? window = null;
+            try
+            {
+                var model = new MainViewModel(root, preferences);
+                model.AddPage("A4 browsing", new PageAppearance { PaperKind = PaperKind.A4, SheetCount = 1 });
+                model.SaveAll();
+                window = new MainWindow(model) { Width = 1280, Height = 820 };
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var canvas = (NoteCanvas)window.FindName("LeftCanvas");
+                var document = model.PrimaryDocument!;
+                var path = model.Store.GetPageDocumentPath(document.NotebookId, document.PageId);
+                var pageBytes = File.ReadAllBytes(path);
+                var libraryBytes = File.ReadAllBytes(model.Store.LibraryPath);
+                var published = 0;
+                model.LocalSaveCompleted += () => published++;
+                canvas.Viewport.Pan(-800, -24000);
+                canvas.SetZoom(0.5f);
+                canvas.SetZoom(4f);
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                Assert.Equal(1, canvas.Appearance.SheetCount);
+                Assert.Equal(1, model.ActiveWorkspace.SelectedPage()!.Appearance.SheetCount);
+                Assert.Equal(pageBytes, File.ReadAllBytes(path));
+                Assert.Equal(libraryBytes, File.ReadAllBytes(model.Store.LibraryPath));
+                Assert.Equal(0, published);
+                var expected = new PageViewport();
+                canvas.Viewport.CopyTo(expected);
+                var status = (StackPanel)window.FindName("CanvasStatus");
+                var parent = (FrameworkElement)status.Parent;
+                var position = status.TranslatePoint(new Point(), parent);
+                Assert.InRange(parent.ActualWidth - position.X - status.ActualWidth, 11, 13);
+                Assert.InRange(parent.ActualHeight - position.Y - status.ActualHeight, 9, 11);
+                Capture(window, "local-viewport-status.png");
+                window.Close();
+                window = null;
+                Assert.Equal(pageBytes, File.ReadAllBytes(path));
+                Assert.Equal(libraryBytes, File.ReadAllBytes(model.Store.LibraryPath));
+                Assert.Equal(0, published);
+                var restored = new MainViewModel(root, preferences);
+                Assert.Equal(expected.Scale, restored.PrimaryDocument!.Viewport.Scale);
+                Assert.Equal(expected.TranslationX, restored.PrimaryDocument.Viewport.TranslationX);
+                Assert.Equal(expected.TranslationY, restored.PrimaryDocument.Viewport.TranslationY);
+                window = new MainWindow(restored) { Width = 1280, Height = 820 };
+                window.Show();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                canvas = (NoteCanvas)window.FindName("LeftCanvas");
+                canvas.AddObject(new PageObject { Kind = PageObjectKind.Table, X = 100, Y = 3000, Width = 100, Height = 100 });
+                restored.SaveAll();
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+                var saved = new WorkspaceStore(root).LoadPage(document.NotebookId, document.PageId);
+                Assert.Single(saved.Objects);
+                Assert.True(new WorkspaceStore(root).LoadLibrary().ActiveNotebook.SelectedPage()!.Appearance.SheetCount > 1);
+                Assert.Equal(1f, saved.LegacyViewport.Scale);
+                Assert.Equal(0f, saved.LegacyViewport.TranslationY);
+                Assert.Equal(expected.Scale, restored.PrimaryDocument.Viewport.Scale);
+            }
+            finally { window?.Close(); Directory.Delete(root, true); }
+        });
+    }
+
+    [Fact]
     public void BackgroundMenuNavigatesToDefaultSettingAndPrintPanelRestoresAfterWindowRestart()
     {
         WpfTestExecutor.Run(() =>

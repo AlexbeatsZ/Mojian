@@ -119,6 +119,7 @@ public sealed class MainViewModel : ObservableObject
         get => _primaryDocument;
         private set
         {
+            RestoreLocalViewport(value);
             PrepareInfinitePage(value);
             if (!SetField(ref _primaryDocument, value)) return;
             OnPropertyChanged(nameof(PrimaryPageAppearance));
@@ -131,6 +132,7 @@ public sealed class MainViewModel : ObservableObject
         get => _secondaryDocument;
         private set
         {
+            RestoreLocalViewport(value);
             PrepareInfinitePage(value);
             if (!SetField(ref _secondaryDocument, value)) return;
             OnPropertyChanged(nameof(SecondaryPageAppearance));
@@ -198,7 +200,8 @@ public sealed class MainViewModel : ObservableObject
     public bool HasSaveError => SaveStateText.StartsWith("保存失败", StringComparison.Ordinal) || SaveStateText.StartsWith("删除失败", StringComparison.Ordinal);
     private bool _nativeSyncRecoveryRequired;
     public bool NativeSyncRecoveryRequired { get => _nativeSyncRecoveryRequired; private set => SetField(ref _nativeSyncRecoveryRequired, value); }
-    public bool CanApplyNativeSync => !NativeSyncRecoveryRequired && _pageSaves.IsIdle && !_pageSaves.HasFailures && !HasSaveError && SaveStateText != "正在保存…";
+    private bool HasPendingContentChanges => PrimaryDocument?.HasPendingContentChanges == true || SecondaryDocument?.HasPendingContentChanges == true;
+    public bool CanApplyNativeSync => !NativeSyncRecoveryRequired && !HasPendingContentChanges && _pageSaves.IsIdle && !_pageSaves.HasFailures && !HasSaveError && SaveStateText != "正在保存…";
     public bool TryApplyNativeSync(Action apply, Func<bool> editorIdle) => _workspaceUiGate.TryRun(
         () => CanApplyNativeSync && editorIdle(),
         () =>
@@ -923,6 +926,7 @@ public sealed class MainViewModel : ObservableObject
             throw;
         }
         SaveStateText = "已保存";
+        document.HasPendingContentChanges = false;
         LocalSaveCompleted?.Invoke();
         RefreshPagePaneRows();
     }
@@ -939,6 +943,7 @@ public sealed class MainViewModel : ObservableObject
         var snapshot = document.CopyForSave();
         SaveStateText = "正在保存…";
         _pageSaves.Enqueue(_store, snapshot, _library.CopyForSave());
+        document.HasPendingContentChanges = false;
     }
 
     public void ObserveSaveCompletion(System.Windows.Threading.Dispatcher dispatcher)
@@ -950,9 +955,7 @@ public sealed class MainViewModel : ObservableObject
         });
     }
 
-    // A4 auto-growth is raised at the end of pan, wheel and zoom gestures. A blocked
-    // library write (sync update from another device, file locked, earlier page save
-    // failure) must surface as save state instead of escaping into input handling.
+    // Content-driven paper growth must surface save failures without escaping input handling.
     public void SavePageMetadata()
     {
         try { SaveLibrary(); }
@@ -965,15 +968,23 @@ public sealed class MainViewModel : ObservableObject
     public void SaveAll()
     {
         RequireRecoveredWorkspace();
-        var documents = new[] { PrimaryDocument, SecondaryDocument }
-            .Where(document => document != null)
-            .GroupBy(document => $"{document!.NotebookId}/{document.PageId}")
-            .Select(group => group.First());
-        foreach (var document in documents) SaveDocument(document);
-        SaveSettings();
-        SaveLibrary();
-        _preferences.WorkspaceRoot = _store.RootDirectory;
-        _preferencesStore.Save(_preferences);
+        try
+        {
+            var documents = new[] { PrimaryDocument, SecondaryDocument }
+                .Where(document => document != null)
+                .GroupBy(document => $"{document!.NotebookId}/{document.PageId}")
+                .Select(group => group.First());
+            foreach (var document in documents) SaveDocumentIfChanged(document);
+            SaveSettings();
+            SaveLibrary();
+            _preferences.WorkspaceRoot = _store.RootDirectory;
+            _preferencesStore.Save(_preferences);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            SaveStateText = "保存失败，请重试";
+            throw;
+        }
     }
 
     public void SaveToolSettings()
@@ -1029,7 +1040,7 @@ public sealed class MainViewModel : ObservableObject
     public bool RefreshSharedWorkspace(bool force = false)
     {
         if (NativeSyncRecoveryRequired && !force) return false;
-        if ((!force && !_store.HasExternalChanges) || !_pageSaves.IsIdle || _pageSaves.HasFailures) return false;
+        if ((!force && !_store.HasExternalChanges) || HasPendingContentChanges || !_pageSaves.IsIdle || _pageSaves.HasFailures) return false;
         var notebookId = ActiveWorkspace.Id;
         var primaryId = PrimaryDocument?.PageId;
         var secondaryId = SecondaryDocument?.PageId;
@@ -1385,7 +1396,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (SecondaryDocument != null)
             {
-                SaveDocument(SecondaryDocument);
+                SaveDocumentIfChanged(SecondaryDocument);
                 PrimaryDocument = SecondaryDocument;
                 SelectLibraryLocation(SecondaryDocument.NotebookId, SecondaryDocument.PageId);
             }
@@ -1468,7 +1479,36 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(FocusedDocument));
     }
 
-    private void SaveFocusedDocument() => SaveDocument(FocusedDocument);
+    public void RememberViewport(PageDocument? document)
+    {
+        if (document == null) return;
+        _settings.PageViewports ??= new();
+        _settings.PageViewports[$"{document.NotebookId}/{document.PageId}"] = new PageViewport
+        {
+            Scale = document.Viewport.Scale, TranslationX = document.Viewport.TranslationX, TranslationY = document.Viewport.TranslationY,
+        };
+    }
+
+    private void RestoreLocalViewport(PageDocument? document)
+    {
+        if (document != null && _settings.PageViewports?.TryGetValue($"{document.NotebookId}/{document.PageId}", out var local) == true)
+            document.Viewport = new PageViewport { Scale = local.Scale, TranslationX = local.TranslationX, TranslationY = local.TranslationY };
+    }
+
+    private void SaveDocumentIfChanged(PageDocument? document)
+    {
+        RequireRecoveredWorkspace();
+        _pageSaves.Flush();
+        if (document == null) return;
+        RememberViewport(document);
+        if (document.HasPendingContentChanges || !File.Exists(_store.GetPageDocumentPath(document.NotebookId, document.PageId))) SaveDocument(document);
+    }
+
+    private void SaveFocusedDocument()
+    {
+        SaveDocumentIfChanged(FocusedDocument);
+        SaveSettings();
+    }
 
     private void SelectLibraryLocation(string notebookId, string pageId)
     {
@@ -1624,7 +1664,7 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
-    private void SaveLibrary() { RequireRecoveredWorkspace(); _pageSaves.Flush(); _store.SaveLibrary(_library); LocalSaveCompleted?.Invoke(); }
+    private void SaveLibrary() { RequireRecoveredWorkspace(); _pageSaves.Flush(); if (_store.SaveLibrary(_library)) LocalSaveCompleted?.Invoke(); }
 
     private bool MigrateWorkspaceSettings()
     {

@@ -82,6 +82,15 @@ trust entry; no key, token or user certificate is embedded in source or release 
 
 ## Local-first lifecycle
 
+Viewport browsing is device-local. Pan/zoom never grows persisted A4 sheets, rewrites page
+content, increments content revisions or reports a local upload. Windows keeps per-page views
+in the unsynchronized workspace settings; legacy page `viewport` JSON stays unchanged during
+later content saves. Android keeps its independent page viewport memory. Navigation/shutdown
+flush pending content saves without manufacturing new page revisions for clean documents;
+unchanged library saves do not write or emit local-save notifications. Foreground periodic
+manifest checks still receive changes from other devices even when there are no local edits.
+The compact status is anchored at the canvas bottom-right; save failures appear above it.
+
 Successful page/library persistence precedes synchronization. A disconnected device remains
 editable, and the next foreground pass discovers durable local changes. Windows activation
 and Android resume trigger a check; foreground timers and successful-save notifications request

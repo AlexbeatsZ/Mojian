@@ -73,7 +73,11 @@ public sealed class StrokeRecord
             if (string.IsNullOrEmpty(VectorPath)) return null;
             if (_cachedVectorPath != VectorPath)
             {
-                _vectorGeometry = Geometry.Parse(VectorPath);
+                // The shared outline format follows Android/SVG nonzero winding. WPF defaults
+                // to EvenOdd, which punches holes wherever unprefixed ink outlines overlap.
+                // Explicit F0/F1 remains authoritative for deliberately hollow source geometry.
+                var source = VectorPath.AsSpan().TrimStart();
+                _vectorGeometry = Geometry.Parse(source.StartsWith("F", StringComparison.Ordinal) ? VectorPath : "F1 " + VectorPath);
                 _vectorGeometry.Freeze();
                 _cachedVectorPath = VectorPath;
                 _transformedVectorGeometry = null;
@@ -232,6 +236,8 @@ public sealed class PageViewport
 public sealed class PageDocument
 {
     [JsonIgnore]
+    public bool HasPendingContentChanges { get; set; }
+    [JsonIgnore]
     public string? DiskStamp { get; set; }
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
@@ -240,7 +246,11 @@ public sealed class PageDocument
     public string PageId { get; set; } = string.Empty;
     public long Revision { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [JsonIgnore]
     public PageViewport Viewport { get; set; } = new();
+    // Preserve old on-disk viewport data for compatibility; current browsing is device-local.
+    [JsonPropertyName("viewport")]
+    public PageViewport LegacyViewport { get; set; } = new();
     public List<StrokeRecord> Strokes { get; set; } = new();
     public List<CanvasTag> Tags { get; set; } = new();
     public List<TextItem> TextItems { get; set; } = new();
@@ -254,6 +264,7 @@ public sealed class PageDocument
     {
         Version = Version, Revision = Revision, UpdatedAt = UpdatedAt, AdditionalData = AdditionalData, DiskStamp = DiskStamp,
         Viewport = new PageViewport { Scale = Viewport.Scale, TranslationX = Viewport.TranslationX, TranslationY = Viewport.TranslationY },
+        LegacyViewport = new PageViewport { Scale = LegacyViewport.Scale, TranslationX = LegacyViewport.TranslationX, TranslationY = LegacyViewport.TranslationY },
         Strokes = Strokes.Select(stroke => stroke.CopyForSave()).ToList(),
         Tags = Tags.Select(tag => tag.CopyForSave()).ToList(),
         TextItems = TextItems.Select(text => text.CopyForSave()).ToList(),

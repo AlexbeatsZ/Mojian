@@ -228,7 +228,7 @@ class MainActivity : Activity() {
     private val nativeSyncController by lazy {
         WorkspaceSyncController(this, ::applyNativeSyncIncoming) { status, visible ->
             nativeSyncStatus = status
-            nativeSyncStatusView?.apply { text = status; visibility = if (visible) View.VISIBLE else View.GONE }
+            nativeSyncStatusView?.apply { text = status; tooltipText = status; visibility = if (visible) View.VISIBLE else View.GONE }
         }
     }
     private val workspace: NotebookWorkspace
@@ -1199,13 +1199,15 @@ class MainActivity : Activity() {
         nativeSyncStatusView = TextView(this).apply {
             text = nativeSyncStatus
             textSize = 11f
+            maxLines = 1
+            maxWidth = dp(430)
+            ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(TEXT_SECONDARY)
-            setBackgroundColor(TOOLBAR_BACKGROUND)
-            setPadding(dp(10), dp(2), dp(10), dp(2))
+            background = rounded(0xEE232323.toInt(), dp(3).toFloat(), Color.TRANSPARENT)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
             visibility = View.GONE
             setOnClickListener { showNativeSyncOptions() }
         }
-        rootLayout.addView(nativeSyncStatusView, LinearLayout.LayoutParams(MATCH, WRAP))
 
         val workArea =
             LinearLayout(this).apply {
@@ -1218,7 +1220,15 @@ class MainActivity : Activity() {
         workArea.addView(navigationRail, LinearLayout.LayoutParams(dp(32), MATCH))
         workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(196), MATCH))
         workArea.addView(pagePane, LinearLayout.LayoutParams(dp(196), MATCH))
-        workArea.addView(buildSplitCanvasHost(), LinearLayout.LayoutParams(0, MATCH, 1f))
+        val canvasArea = FrameLayout(this).apply {
+            addView(buildSplitCanvasHost(), FrameLayout.LayoutParams(MATCH, MATCH))
+            addView(nativeSyncStatusView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = dp(12)
+                bottomMargin = dp(10)
+                marginStart = dp(12)
+            })
+        }
+        workArea.addView(canvasArea, LinearLayout.LayoutParams(0, MATCH, 1f))
         rootLayout.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         applyChromeVisibility()
@@ -2113,8 +2123,9 @@ class MainActivity : Activity() {
     }
 
     private fun persistWorkspacePreferences(saveLibrary: Boolean = true): Boolean {
+        var libraryChanged = false
         if(saveLibrary && ::pageContentRepository.isInitialized && pageContentRepository.isShared) {
-            try { pageContentRepository.saveLibrary(notebookLibrary) }
+            try { libraryChanged = pageContentRepository.saveLibrary(notebookLibrary) }
             catch (error: Exception) { Toast.makeText(this,error.message,Toast.LENGTH_LONG).show(); return false }
         }
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
@@ -2136,7 +2147,7 @@ class MainActivity : Activity() {
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
             .putString(KEY_BACKGROUND_FORMAT, dryInkView.backgroundFormat.name)
             .apply()
-        if (saveLibrary) nativeSyncController.localSaved()
+        if (libraryChanged) nativeSyncController.localSaved()
         return true
     }
 
@@ -2166,7 +2177,8 @@ class MainActivity : Activity() {
 
     private fun persistPageViewSettings() {
         if(::pageContentRepository.isInitialized && pageContentRepository.isShared) {
-            runCatching { pageContentRepository.saveLibrary(notebookLibrary) }.onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
+            runCatching { if (pageContentRepository.saveLibrary(notebookLibrary)) nativeSyncController.localSaved() }
+                .onFailure { Toast.makeText(this,it.message,Toast.LENGTH_LONG).show() }
         }
         val root = JSONObject()
         for (notebook in notebookLibrary.notebooks) {
@@ -5884,7 +5896,6 @@ class MainActivity : Activity() {
     }
 
     private fun applyViewportToLayers() {
-        expandA4IfNeeded()
         dryInkView.setViewport(viewport.documentToViewMatrix())
         pageSurfaceBackground.invalidate()
         pageSurfaceForeground.invalidate()
@@ -6087,16 +6098,9 @@ class MainActivity : Activity() {
             } else {
                 0f
             }
-        val visibleDocumentBottom =
-            if (isLivePage && ::paperContainer.isInitialized && paperContainer.height > 0) {
-                viewport.viewToDocument(0f, paperContainer.height.toFloat()).y
-            } else {
-                0f
-            }
         val required =
             A4PageLayout.requiredPageCount(
                 contentBottom,
-                visibleDocumentBottom,
                 targetPage.viewSettings.a4PageCount,
                 targetPage.viewSettings.documentHeight ?: A4PageLayout.pageHeight,
             )
@@ -6127,11 +6131,6 @@ class MainActivity : Activity() {
         canvasBackgroundLayer.updatePage(display)
         pageSurfaceBackground.updatePage(page.title, display)
         pageSurfaceForeground.updatePage(page.title, display)
-    }
-
-    // Browsing may append A4 sheets, but must never grow boundless paper.
-    private fun expandA4IfNeeded() {
-        if (workspace.selectedPage()?.viewSettings?.paperSize == PaperSize.A4) expandPageIfNeeded()
     }
 
     private fun refreshViewRibbonState() {

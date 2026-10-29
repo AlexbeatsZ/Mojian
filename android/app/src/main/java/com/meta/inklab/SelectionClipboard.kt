@@ -54,7 +54,7 @@ object SelectionSvg {
             val color = stroke.brush.colorIntArgb
             val source = SharedStrokeCodec.metadata(stroke)
             if(source?.optString("vectorPath")?.isNotBlank() == true) {
-                val path=source.getString("vectorPath")
+                val path=source.getString("vectorPath").trimStart()
                 val transform=source.optJSONArray("vectorTransform") ?: org.json.JSONArray(listOf(1,0,0,1,0,0))
                 val unit=SharedWorkspaceCodec.TO_SHARED.toFloat()
                 append("<path fill=\"").append(String.format(Locale.ROOT,"#%06X",color and 0xffffff))

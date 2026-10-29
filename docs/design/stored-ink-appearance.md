@@ -4,6 +4,18 @@ Last verified: 2026-10-12
 
 Read before changing Android shared-stroke color, opacity, native proxy brushes or legacy pen loading.
 
+## Filled outline intersections (2026-10-29)
+
+Unprefixed shared `vectorPath` uses nonzero winding, matching Android/SVG. WPF's path parser
+defaults to EvenOdd, which made overlapping parts of one imported/native Android outline turn
+transparent. Windows now supplies `F1` only when a path has no explicit fill prefix; intentional
+`F0` holes and explicit `F1` remain authoritative. Android newly authored outlines include `F1`;
+loading existing records does not rewrite their path, color, opacity, inputs or transform.
+Live rendering, hit testing, PNG/SVG and PDF consume the same effective filled geometry. A
+translucent crossing is filled once at the source alpha, rather than drawing each contour again.
+Desktop regressions sample canvas/PNG pixels and independently rendered PDF pixels for all
+three prefix cases; the isolated Android color probe also samples crossings and source retention.
+
 Windows ordinary fountain pens without a `vectorPath` render with opaque palette/source RGB.
 Older authoring records can still contain `opacityPercent=32`, inherited from the tool preset's
 highlighter-only field. This value is not a transparency instruction for ordinary freehand pens.
