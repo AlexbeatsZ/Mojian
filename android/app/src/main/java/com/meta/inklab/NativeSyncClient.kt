@@ -104,6 +104,7 @@ class NativeSyncClient(
         var lockStream: java.io.RandomAccessFile? = null
         var fileLock: java.nio.channels.FileLock? = null
         try {
+            transport.beginPass()
             NativeSyncConfiguration.requireDedicatedBoundary(root)
             check(directory.isDirectory || directory.mkdirs())
             lockStream = java.io.RandomAccessFile(File(directory, "client.lock"), "rw")
@@ -173,7 +174,7 @@ class NativeSyncClient(
             }
             persistState()
             if (!outboxFile.exists() && !incomingFile.exists()) blobs.listFiles()?.filter { it.isFile }?.forEach { it.delete() }
-            setStatus("本轮已同步，新编辑将在下一轮检查")
+            setStatus("本轮已同步，新编辑将在下一轮检查" + (transport.selectedAddress?.let { " · ${java.net.URI(it).authority}" } ?: ""))
         } catch (_: CancellationException) {
             setStatus("同步已暂停，下次继续")
         } catch (_: NativeSyncVersionConflict) {

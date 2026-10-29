@@ -14,7 +14,7 @@ public partial class MainWindow
     private bool _nativeSyncRunning;
     private bool _nativeSyncPending;
     private NativeSyncClient? _nativeSyncClient;
-    private (WorkspaceStore Store, string Endpoint, string Token)? _nativeSyncClientKey;
+    private (WorkspaceStore Store, string Endpoint, string Token, string Addresses)? _nativeSyncClientKey;
     private CancellationTokenSource? _nativeSyncForeground;
 
     private void InitializeNativeSync()
@@ -64,11 +64,12 @@ public partial class MainWindow
         {
             var configuration = NativeSyncConfiguration.Load(store.RootDirectory);
             if (!configuration.Enabled && !ViewModel.NativeSyncRecoveryRequired) { ResetNativeSyncClient(); ViewModel.NativeSyncStatus = "原生同步未启用"; return; }
-            var key = (store, configuration.Endpoint, configuration.Token);
+            var key = (store, configuration.Endpoint, configuration.Token,
+                System.Text.Json.JsonSerializer.Serialize(new { configuration.Addresses, configuration.CertificatePins }));
             if (_nativeSyncClient == null || _nativeSyncClientKey != key)
             {
                 ResetNativeSyncClient();
-                _nativeSyncClient = await Task.Run(() => new NativeSyncClient(store.RootDirectory, configuration.Endpoint, configuration.Token), foreground.Token);
+                _nativeSyncClient = await Task.Run(() => new NativeSyncClient(store.RootDirectory, configuration), foreground.Token);
                 _nativeSyncClientKey = key;
                 var observedClient = _nativeSyncClient;
                 observedClient.SnapshotChanged += snapshot => Dispatcher.BeginInvoke(() =>
@@ -135,8 +136,9 @@ public partial class MainWindow
         var panel = new StackPanel { Margin = new Thickness(20) };
         panel.Children.Add(new TextBlock { Text = "原生同步仅用于明确创建的独立副本。请选择 Syncthing 文件夹之外的新目录；原笔记库保留。", TextWrapping = TextWrapping.Wrap });
         panel.Children.Add(new TextBlock { Text = root, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) });
-        panel.Children.Add(new TextBlock { Text = "服务器 HTTPS 地址" });
-        var endpoint = new TextBox { Text = configuration.Endpoint, Margin = new Thickness(0, 4, 0, 10) };
+        panel.Children.Add(new TextBlock { Text = "服务器地址（每行一个，严格按顺序尝试）" });
+        var endpoint = new TextBox { Text = string.Join(Environment.NewLine, configuration.ServerAddresses), AcceptsReturn = true,
+            MinHeight = 82, MaxHeight = 180, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 4, 0, 10) };
         panel.Children.Add(endpoint);
         panel.Children.Add(new TextBlock { Text = "访问令牌（仅保存在此电脑）" });
         var token = new PasswordBox { Password = configuration.Token, Margin = new Thickness(0, 4, 0, 10) };
@@ -175,14 +177,14 @@ public partial class MainWindow
             try
             {
                 if (_nativeSyncRunning || saveSettingsInProgress) throw new IOException("操作正在进行，请完成后再修改设置");
+                var addresses = NativeSyncConfiguration.ParseAddresses(endpoint.Text);
                 if (enabled.IsChecked == true)
                 {
                     NativeSyncClient.RequireDedicatedWorkspace(root);
-                    var uri = new Uri(endpoint.Text.Trim());
-                    if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) throw new IOException("服务器地址必须使用 HTTPS");
                     if (string.IsNullOrWhiteSpace(token.Password)) throw new IOException("请输入访问令牌");
                 }
-                new NativeSyncConfiguration { Endpoint = endpoint.Text.Trim(), Token = token.Password, Enabled = enabled.IsChecked == true }.Save(root);
+                new NativeSyncConfiguration { Endpoint = configuration.Endpoint, Addresses = addresses,
+                    CertificatePins = configuration.CertificatePins, Token = token.Password, Enabled = enabled.IsChecked == true }.Save(root);
                 ViewModel.NativeSyncStatus = enabled.IsChecked == true ? "等待前台同步" : "原生同步未启用";
                 window.Close();
             }

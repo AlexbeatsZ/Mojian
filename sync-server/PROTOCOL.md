@@ -6,6 +6,14 @@ enables itself for an existing workspace. No credentials or endpoint are shipped
 
 ## Transport
 
+Clients may configure multiple ordered addresses of this same workspace. A pass always starts
+at the first configured address and falls back in order on transport/service failures. This does
+not change wire requests, CAS, device IDs or stable operation IDs. Before replaying an uncertain
+operation through a new address, verify the workspace identity and nondecreasing revision. A
+different workspace, rollback, content conflict or local recovery error is not a route failure.
+The persisted `endpoint` remains the checkpoint binding; an optional `addresses` list changes
+transport routes only. No address sorting, racing or successful-route promotion is permitted.
+
 The configured base URL ends in `/mojian-sync/v1/`. Clients require HTTPS, except
 HTTP on a loopback host for isolated tests. Disable redirects; never forward the
 Bearer token to another host. Every request requires `Authorization: Bearer TOKEN`.

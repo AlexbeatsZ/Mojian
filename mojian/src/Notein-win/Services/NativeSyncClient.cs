@@ -19,6 +19,7 @@ public sealed class NativeSyncClient : IDisposable
     private readonly ConcurrentDictionary<string, SyncFile> _cache = new(StringComparer.Ordinal);
     private readonly FileSystemWatcher _watcher;
     private readonly NativeSyncState _state;
+    private readonly NativeSyncAddressHandler? _addresses;
     public NativeSyncStatus Snapshot { get; private set; } = new(NativeSyncPhase.Pending, "本地已保存，等待同步");
     public string Status => Snapshot.Message;
     public event Action<string>? StatusChanged;
@@ -36,8 +37,12 @@ public sealed class NativeSyncClient : IDisposable
     }
     public static bool ValidPath(string path) => NativeSyncStorage.ValidPath(path);
 
+    public NativeSyncClient(string root, NativeSyncConfiguration configuration)
+        : this(root, configuration.Endpoint, configuration.Token, new NativeSyncAddressHandler(configuration)) { }
+
     public NativeSyncClient(string root, string endpoint, string token, HttpMessageHandler? handler = null)
     {
+        _addresses = handler as NativeSyncAddressHandler;
         _root = Path.GetFullPath(root);
         _localMutations = NativeSyncMutationEpoch.ForRoot(_root);
         RequireDedicatedWorkspace(_root);
@@ -266,19 +271,33 @@ public sealed class NativeSyncClient : IDisposable
         if (!await _running.WaitAsync(0, cancellation).ConfigureAwait(false)) return;
         try
         {
+            for (var index = 0; index < (_addresses?.Count ?? 1); index++)
+            {
+                _addresses?.Select(index);
+                if (!await SyncAddressAsync(applyOnIdle, cancellation).ConfigureAwait(false)) break;
+            }
+        }
+        finally { _running.Release(); }
+    }
+
+    private async Task<bool> SyncAddressAsync(Func<Action, Task<bool>> applyOnIdle, CancellationToken cancellation)
+    {
+        try
+        {
             RequireDedicatedWorkspace(_root);
-            if (_state.ConflictDirectory != null) { SetStatus(NativeSyncPhase.Conflict, "同步冲突待处理，双方副本已保留"); return; }
-            if (HasPendingIncoming && !await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return;
+            if (_state.ConflictDirectory != null) { SetStatus(NativeSyncPhase.Conflict, "同步冲突待处理，双方副本已保留"); return false; }
+            if (HasPendingIncoming && !await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return false;
             SetStatus(NativeSyncPhase.Checking, "正在检查同步");
             var previous = File.Exists(OutboxPath) ? NativeSyncStorage.Read<NativeSyncOutbox>(OutboxPath) : null;
             if (previous is { Submitted: true })
             {
                 ValidateOutbox(previous);
-                if (!await Commit(previous, cancellation).ConfigureAwait(false)) return;
+                if (_addresses != null) _ = await Manifest(cancellation).ConfigureAwait(false);
+                if (!await Commit(previous, cancellation).ConfigureAwait(false)) return false;
             }
             var prepared = await Task.Run(() => CaptureOutgoing(cancellation), cancellation).ConfigureAwait(false);
             if (prepared == null)
-            { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return; }
+            { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
             var (local, outbox) = prepared.Value;
             var outgoingCount = outbox.Changes.Count;
             SetStatus(NativeSyncPhase.Pending, $"本地已保存，待上传 {outgoingCount} 项", outgoingCount);
@@ -302,13 +321,13 @@ public sealed class NativeSyncClient : IDisposable
                 else if (localHash != baseHash) changes.Add(new(path, remote.Files.GetValueOrDefault(path)?.Version ?? 0, localHash));
                 else if (remote.Files.TryGetValue(path, out var entry)) incoming[path] = new(localHash, entry);
             }
-            if (conflicts.Count > 0) { await PreserveConflicts(conflicts, remote, cancellation).ConfigureAwait(false); return; }
+            if (conflicts.Count > 0) { await PreserveConflicts(conflicts, remote, cancellation).ConfigureAwait(false); return false; }
             outbox.WorkspaceId = remote.WorkspaceId;
             outbox.Changes = changes;
             if (changes.Count > 0)
             {
                 NativeSyncStorage.Save(OutboxPath, outbox);
-                if (!await Commit(outbox, cancellation).ConfigureAwait(false)) return;
+                if (!await Commit(outbox, cancellation).ConfigureAwait(false)) return false;
             }
             else File.Delete(OutboxPath);
             if (incoming.Count > 0)
@@ -316,19 +335,19 @@ public sealed class NativeSyncClient : IDisposable
                 foreach (var entry in incoming.Values.Where(entry => entry.Target.Hash != null))
                     await Download(entry.Target.Hash!, cancellation).ConfigureAwait(false);
                 NativeSyncStorage.Save(IncomingPath, new NativeSyncIncoming(remote.WorkspaceId, remote.Revision, incoming));
-                if (!await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return;
+                if (!await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return false;
             }
             _state.Revision = Math.Max(_state.Revision, remote.Revision);
             _state.LastSuccessUtc = DateTimeOffset.UtcNow;
             PersistState();
             var remaining = await Task.Run(ScanStable, cancellation).ConfigureAwait(false);
             if (remaining == null)
-            { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return; }
+            { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
             var pending = remaining.Keys.Union(_state.Files.Keys).Count(path => remaining.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path));
             SetStatus(pending == 0 ? NativeSyncPhase.Synced : NativeSyncPhase.Pending,
-                pending == 0 ? "已同步" : $"本地已保存，待上传 {pending} 项", pending);
+                pending == 0 ? (_addresses == null ? "已同步" : "已同步 · " + new Uri(_addresses.CurrentAddress).Authority) : $"本地已保存，待上传 {pending} 项", pending);
         }
-        catch (OperationCanceledException) { SetStatus(cancellation.IsCancellationRequested ? NativeSyncPhase.Paused : NativeSyncPhase.Offline, "同步已暂停，待同步内容已保留", Snapshot.PendingFiles); }
+        catch (OperationCanceledException) { SetStatus(cancellation.IsCancellationRequested ? NativeSyncPhase.Paused : NativeSyncPhase.Offline, "同步已暂停，待同步内容已保留", Snapshot.PendingFiles); return !cancellation.IsCancellationRequested; }
         catch (HttpRequestException error)
         {
             var protocolFailure = error.HttpRequestError is HttpRequestError.SecureConnectionError or HttpRequestError.UserAuthenticationError or HttpRequestError.HttpProtocolError or HttpRequestError.InvalidResponse;
@@ -336,10 +355,11 @@ public sealed class NativeSyncClient : IDisposable
             SetStatus(offline ? NativeSyncPhase.Offline : NativeSyncPhase.Error,
                 offline ? "离线或服务暂不可用，本地内容和待同步任务已保留" :
                     protocolFailure ? "HTTPS 安全校验或协议错误，请检查同步配置" : $"同步服务拒绝请求（{(int?)error.StatusCode}），请检查配置", Snapshot.PendingFiles);
+            return true;
         }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { SetStatus(NativeSyncPhase.Error, "同步已暂停，本地内容已保留：" + error.Message, Snapshot.PendingFiles); }
-        finally { _running.Release(); }
+        return false;
     }
 
     private void ValidateOutbox(NativeSyncOutbox outbox)

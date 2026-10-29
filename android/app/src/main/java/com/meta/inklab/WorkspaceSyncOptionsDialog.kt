@@ -36,7 +36,10 @@ internal class WorkspaceSyncOptionsDialog(
                 body.addView(this)
             }
         }
-        val endpoint = field("服务地址（包含 /mojian-sync/v1/）", configuration.endpoint)
+        val endpoint = field("服务器地址（每行一个，严格按顺序尝试）", configuration.serverAddresses.joinToString("\n")).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setSingleLine(false); minLines = 3; maxLines = 6
+        }
         val token = field("访问令牌（只保存在本机应用私有目录）", configuration.token, true)
         val target = if (dedicated) null else field("独立副本目录（必须不存在且位于 Syncthing 目录之外）", File(root.parentFile, "${root.name}-native").path)
         val enabled = CheckBox(context).apply { text = "启用原生同步"; isChecked = configuration.enabled || !dedicated }
@@ -49,8 +52,8 @@ internal class WorkspaceSyncOptionsDialog(
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
-                    val next = NativeSyncConfiguration(endpoint.text.toString().trim(), token.text.toString(), enabled.isChecked)
-                    if (next.enabled) { NativeSyncFiles.endpoint(next.endpoint); require(next.token.isNotBlank()) { "请输入访问令牌" } }
+                    val next = configuration.copy(addresses = NativeSyncConfiguration.parseAddresses(endpoint.text.toString()), token = token.text.toString(), enabled = enabled.isChecked)
+                    if (next.enabled) { next.serverAddresses; require(next.token.isNotBlank()) { "请输入访问令牌" } }
                     require(dedicated || next.enabled) { "尚未创建专用副本，无需停用" }
                     val destination = target?.let { File(it.text.toString()).canonicalFile }
                     configure(next, destination)

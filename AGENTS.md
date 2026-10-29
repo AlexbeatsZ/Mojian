@@ -8,9 +8,9 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.3**; Android retains
-  `com.meta.inklab.debug`, version code **11**. iOS remains a separate 0.1.0 client.
-  `v0.7.3` prerelease is published with EXE/APK assets; source is pushed to `origin/master`.
+- Current source/build version: Windows and Android **0.7.4**; Android retains
+  `com.meta.inklab.debug`, version code **12**. iOS remains a separate 0.1.0 client.
+  Ordered-address delivery is in progress; `v0.7.3` is the last published prerelease.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
@@ -39,6 +39,11 @@
   ROG private config/data/recovery XML: checkout `.local/native-sync/`; local ignored
   `.local/native-sync/connection.json` contains connection details and must never enter Git/releases.
   Public Windows 24-scenario verification used a disposable backend, not production notes.
+- Native sync settings now accept one address per line and try them strictly in input order on
+  every pass. Routes share the stable endpoint/checkpoint and replay uncertain operations with
+  the same ID. ROG optional HTTPS listener 18743 shares the same backend/data as loopback18742
+  and Sakura. App-private exact certificate pins trust its self-signed SAN certificate; no global
+  trust or proxy configuration is changed. Read native-sync.md before altering fallback behavior.
 - Windows now opens `C:\Users\Meta\Documents\Mojian`, explicitly chosen by the user on 2026-10-28.
   The former `_migration\native-20261002\workspace` was deleted in agy's 10:33 cleanup even though
   app preferences and Syncthing still referenced it. The new startup sample created at that missing
@@ -48,7 +53,7 @@
   not restore all deleted source/migration backups. Android retains
   `/storage/emulated/0/Documents/Mojian`; phone/tablet library JSON and navigation were unchanged
   by in-place installation. User clarified that daily sync must use Sakura HTTPS; Mojian's Syncthing
-  folder is now paused. The public native production manifest remains empty (revision 0/files 0).
+  folder is now paused. Production is seeded with the selected 659-page library (revision1/files1818).
 - Latest task-only 0.7.1 evidence (2026-10-28): Android **232/232** unit tests including an opt-in
   real public HTTPS round trip; debug/test APK builds, lint **0 errors / 137 warnings**. Native sync:
   **11/11 Node integration tests**, **2/2 gateway tests**, and **24/24 Windows scenarios** on both
@@ -89,10 +94,10 @@
 
 # Active Work
 
-- User requested comparison before choosing a Sakura seed: Windows root has 1446 indexed pages,
-  restored/tablet 659, phone 654. Do not silently choose/merge these libraries or resume Mojian's
-  paused Syncthing folder. Comparison is complete; await source composition, then use dedicated native
-  clones outside Syncthing; recovery/transport continuation is `~/.agents/mojian--settings-memory`.
+- User selected restored/tablet659 and declined90 old editable pages and the phone's different
+  version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies match1818 files on
+  all three devices. Finish0.7.4 ordered-route deployment and activate these new entries. Syncthing
+  stays paused. Continuation: `~/.agents/mojian--settings-memory`.
 - Complete physical Android folder-picker/permission/save/restart and native foreground-sync
   acceptance before live-library adoption. The ROG HTTPS backend is deployed; real Syncthing
   libraries remain unchanged and must not be pointed at native sync in place.

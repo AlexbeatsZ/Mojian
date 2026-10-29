@@ -33,6 +33,7 @@ await Run("active deletion defers without waiting or publishing a torn snapshot"
 await Run("epoch rejects intervening and nested mutations without locking scan work", MutationEpochBarrier);
 await Run("network allows local edits while immutable outgoing snapshots remain consistent", SnapshotAfterNetworkMutation);
 await Run("unsupported canonical content is refused by scan and clone without a marker", UnsupportedContentPaths);
+await Run("ordered addresses restart from first and replay lost commit receipt across routes", OrderedAddresses);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
 async Task Run(string name, Func<Task> scenario)
@@ -718,6 +719,96 @@ async Task WireFixture()
     await client.SyncAsync(Idle);
     AssertSynced(client);
     Check((await Remote()).Files[page].Hash == null, "Golden deletion fixture not interoperable");
+}
+
+async Task OrderedAddresses()
+{
+    using var root = new TestWorkspace();
+    using (var initial = new HttpClient())
+    {
+        initial.DefaultRequestHeaders.Authorization = new("Bearer", token);
+        var manifest = await Remote();
+        root.Write("library.json", await initial.GetStringAsync(endpoint + "blobs/" + manifest.Files["library.json"].Hash));
+    }
+    var requests = new List<string>();
+    using var first = new AddressForwarder(endpoint, "first", requests) { Unavailable = true };
+    using var second = new AddressForwarder(endpoint, "second", requests);
+    using var unused = new AddressForwarder(endpoint, "unused", requests);
+    var config = new NativeSyncConfiguration { Endpoint = endpoint, Token = token, Addresses = [first.Endpoint, second.Endpoint, unused.Endpoint] };
+    using var client = new NativeSyncClient(root.Root, config);
+    var page = NewPage(); root.Write(page, "ordered-first");
+    await client.SyncAsync(Idle); AssertSynced(client);
+    Check(requests[0] == "first GET" && requests.Any(r => r == "second POST") && !requests.Any(r => r.StartsWith("unused")), "Addresses were reordered or continued after success");
+    requests.Clear(); first.Unavailable = false;
+    root.Write(page, "ordered-prefer-first");
+    await client.SyncAsync(Idle); AssertSynced(client);
+    Check(requests[0] == "first GET" && requests.All(r => r.StartsWith("first")), "A new pass stuck to the previous successful fallback");
+    requests.Clear(); first.DropNextCommitReply = true;
+    root.Write(page, "ordered-lost-receipt");
+    await client.SyncAsync(Idle); AssertSynced(client);
+    Check(first.CommitBodies.Count >= 2 && second.CommitBodies.Count >= 2 && first.CommitBodies.Last() == second.CommitBodies.Last(), "Failover replaced the uncertain operation instead of replaying it");
+    Check((await Remote()).Files[page].Hash == HashText("ordered-lost-receipt"), "Failover lost the saved edit");
+    Check(!File.Exists(root.Private("outbox.json")) && !File.Exists(root.Private("incoming.json")), "Successful failover retained pending work");
+    var serialized = File.ReadAllText(root.Private("state.json"));
+    Check(serialized.Contains(endpoint) && !serialized.Contains(first.Endpoint), "Route address replaced the stable checkpoint binding");
+    requests.Clear(); first.Unavailable = true; second.WrongIdentity = true;
+    root.Write(page, "do-not-publish-to-other-workspace");
+    await client.SyncAsync(Idle);
+    Check(client.Snapshot.Phase == NativeSyncPhase.Error && !requests.Any(r => r == "second POST") && !requests.Any(r => r.StartsWith("unused")), "Different workspace identity was treated as a route failure");
+}
+
+sealed class AddressForwarder : IDisposable
+{
+    private readonly System.Net.HttpListener listener = new();
+    private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+    private readonly string target, name;
+    private readonly List<string> requests;
+    private readonly Task worker;
+    public string Endpoint { get; }
+    public bool Unavailable { get; set; }
+    public bool WrongIdentity { get; set; }
+    public bool DropNextCommitReply { get; set; }
+    public List<string> CommitBodies { get; } = new();
+    public AddressForwarder(string target, string name, List<string> requests)
+    {
+        this.target = target; this.name = name; this.requests = requests;
+        var port = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        port.Start(); var number = ((System.Net.IPEndPoint)port.LocalEndpoint).Port; port.Stop();
+        var origin = $"http://127.0.0.1:{number}/"; Endpoint = origin + "mojian-sync/v1/";
+        listener.Prefixes.Add(origin); listener.Start();
+        worker = Task.Run(async () =>
+        {
+            while (listener.IsListening)
+            {
+                System.Net.HttpListenerContext context;
+                try { context = await listener.GetContextAsync(); } catch (System.Net.HttpListenerException) { break; } catch (ObjectDisposedException) { break; }
+                var incoming = context.Request;
+                requests.Add(name + " " + incoming.HttpMethod);
+                if (Unavailable) { context.Response.StatusCode = 503; context.Response.Close(); continue; }
+                var relative = incoming.Url!.AbsolutePath.Split("/mojian-sync/v1/", 2).Last();
+                using var message = new HttpRequestMessage(new HttpMethod(incoming.HttpMethod), target + relative);
+                if (incoming.Headers["Authorization"] is { } authorization) message.Headers.TryAddWithoutValidation("Authorization", authorization);
+                if (incoming.HasEntityBody)
+                {
+                    using var memory = new MemoryStream(); await incoming.InputStream.CopyToAsync(memory);
+                    var body = memory.ToArray();
+                    if (incoming.HttpMethod == "POST") CommitBodies.Add(Encoding.UTF8.GetString(body));
+                    message.Content = new ByteArrayContent(body);
+                    if (incoming.ContentType != null) message.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(incoming.ContentType);
+                }
+                using var reply = await http.SendAsync(message);
+                var bytes = await reply.Content.ReadAsByteArrayAsync();
+                if (WrongIdentity && relative == "manifest")
+                { var node = JsonNode.Parse(bytes)!; node["workspaceId"] = Guid.NewGuid().ToString("N"); bytes = Encoding.UTF8.GetBytes(node.ToJsonString()); }
+                if (DropNextCommitReply && incoming.HttpMethod == "POST")
+                { DropNextCommitReply = false; context.Response.StatusCode = 503; context.Response.Close(); continue; }
+                context.Response.StatusCode = (int)reply.StatusCode; context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes); context.Response.Close();
+            }
+        });
+    }
+    public void Dispose() { listener.Close(); http.Dispose(); worker.GetAwaiter().GetResult(); }
 }
 
 sealed class TestWorkspace : IDisposable

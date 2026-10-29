@@ -5,9 +5,22 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.Proxy
+import java.net.SocketException
+import java.net.UnknownHostException
+import java.io.InterruptedIOException
+import javax.net.ssl.SSLException
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import java.security.cert.CertificateException
+import java.security.MessageDigest
 import java.util.concurrent.CancellationException
 
 interface NativeSyncTransport {
+    fun beginPass() {}
+    val selectedAddress: String? get() = null
     fun manifest(cancelled: () -> Boolean): NativeSyncManifest
     fun upload(hash: String, source: File, cancelled: () -> Boolean)
     fun download(hash: String, destination: File, cancelled: () -> Boolean)
@@ -15,9 +28,25 @@ interface NativeSyncTransport {
 }
 
 class NativeSyncVersionConflict(val code: String = "version_conflict") : IOException("远端版本已改变，双方修改已保留")
+class NativeSyncNetworkFailure(message: String, cause: Throwable? = null) : IOException(message, cause)
 
-class NativeSyncHttpTransport(endpoint: String, private val token: String) : NativeSyncTransport {
+class NativeSyncHttpTransport @JvmOverloads constructor(endpoint: String, private val token: String, certificatePin: String? = null) : NativeSyncTransport {
     private val base: URI = NativeSyncFiles.endpoint(endpoint)
+    private val pinnedFactory = certificatePin?.let { pin ->
+        require(NativeSyncFiles.validHash(pin)) { "服务器证书指纹无效" }
+        SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) { throw CertificateException("Client certificate is not supported") }
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                    val leaf = chain.firstOrNull() ?: throw CertificateException("Missing server certificate")
+                    leaf.checkValidity()
+                    val expected = pin.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                    if (!MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(leaf.encoded), expected)) throw CertificateException("Server certificate does not match configured trust")
+                }
+            }), null)
+        }.socketFactory
+    }
     init { require(token.isNotBlank() && !token.contains('\r') && !token.contains('\n')) { "无效同步凭据" } }
 
     private fun <T> request(path: String, method: String, cancelled: () -> Boolean, body: File? = null,
@@ -25,10 +54,11 @@ class NativeSyncHttpTransport(endpoint: String, private val token: String) : Nat
         checkCancelled(cancelled)
         val uri = base.resolve(path)
         require(uri.scheme == base.scheme && uri.host == base.host && uri.port == base.port)
-        val connection = uri.toURL().openConnection() as HttpURLConnection
+        val connection = uri.toURL().openConnection(Proxy.NO_PROXY) as HttpURLConnection
+        if (connection is HttpsURLConnection && pinnedFactory != null) connection.sslSocketFactory = pinnedFactory
         try {
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = 15000
+            connection.connectTimeout = 5000
             connection.readTimeout = 30000
             connection.requestMethod = method
             connection.useCaches = false
@@ -55,8 +85,14 @@ class NativeSyncHttpTransport(endpoint: String, private val token: String) : Nat
                 } }.getOrNull()
                 throw NativeSyncVersionConflict(code ?: "unknown_conflict")
             }
-            if (status !in 200..299) throw IOException("同步请求失败 HTTP $status")
+            if (status !in 200..299) throw NativeSyncNetworkFailure("同步请求失败 HTTP $status")
             return read(connection)
+        } catch (error: IOException) {
+            checkCancelled(cancelled)
+            if (error is NativeSyncNetworkFailure) throw error
+            if (error is SocketException || error is UnknownHostException || error is InterruptedIOException || error is SSLException ||
+                error is java.net.ProtocolException || error is java.io.EOFException) throw NativeSyncNetworkFailure("无法连接同步服务：${error.message}", error)
+            throw error
         } finally { connection.disconnect() }
     }
 

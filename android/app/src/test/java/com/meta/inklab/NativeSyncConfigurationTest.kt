@@ -6,6 +6,15 @@ import java.io.File
 import java.nio.file.Files
 
 class NativeSyncConfigurationTest {
+    @Test fun orderedAddressesKeepInputOrderAndStableBinding() {
+        val addresses = NativeSyncConfiguration.parseAddresses("192.168.31.32:18743\n\n100.106.169.46:18743\nhttps://example.com/mojian-sync/v1")
+        assertEquals(listOf("https://192.168.31.32:18743/mojian-sync/v1/", "https://100.106.169.46:18743/mojian-sync/v1/", "https://example.com/mojian-sync/v1/"), addresses)
+        val configuration = NativeSyncConfiguration(addresses = addresses)
+        assertEquals(NativeSyncConfiguration.DEFAULT_ENDPOINT, configuration.endpoint)
+        assertEquals(addresses, configuration.serverAddresses)
+        assertEquals(addresses.reversed(), configuration.copy(addresses = addresses.reversed()).serverAddresses)
+        assertThrows(IllegalArgumentException::class.java) { NativeSyncConfiguration.parseAddresses("\n ") }
+    }
     @Test fun defaultUsesSakuraHttpsButDoesNotEnableSyncOrShipCredentials() {
         val configuration = NativeSyncConfiguration()
         assertEquals("https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/", configuration.endpoint)

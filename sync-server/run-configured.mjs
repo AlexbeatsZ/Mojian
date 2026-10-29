@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createSyncServer } from './server.mjs';
+import { listenDirectTls } from './direct-tls.mjs';
 
 const configPath = process.argv[2];
 if (!configPath) throw new Error('A private configuration file is required');
@@ -14,5 +15,11 @@ await new Promise((resolve, reject) => {
   service.server.once('error', reject);
   service.server.listen(configuration.port, '127.0.0.1', resolve);
 });
+let direct;
+try { direct = await listenDirectTls(service.server, configuration.directTls); }
+catch (error) { await service.close(); throw error; }
 console.log(`Mojian sync ready on loopback:${configuration.port}`);
-for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { void service.close().then(() => process.exit(0)); });
+for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
+  direct?.close(); direct?.closeAllConnections();
+  void service.close().then(() => process.exit(0));
+});

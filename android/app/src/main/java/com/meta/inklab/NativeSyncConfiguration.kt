@@ -2,29 +2,42 @@ package com.meta.inklab
 
 import android.content.Context
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
 
-data class NativeSyncConfiguration(val endpoint: String = DEFAULT_ENDPOINT, val token: String = "", val enabled: Boolean = false) {
+data class NativeSyncConfiguration(val endpoint: String = DEFAULT_ENDPOINT, val token: String = "", val enabled: Boolean = false,
+    val addresses: List<String> = emptyList(), val certificatePins: Map<String, String> = emptyMap()) {
+    val serverAddresses: List<String> get() = (addresses.ifEmpty { listOf(endpoint) }).map(::normalizeAddress)
     fun save(context: Context, root: File) = save(context.filesDir, root)
 
     fun save(appPrivateDirectory: File, root: File) {
-        if (enabled) { NativeSyncFiles.endpoint(endpoint); require(token.isNotBlank() && !token.contains('\r') && !token.contains('\n')) }
+        if (enabled) { serverAddresses; require(token.isNotBlank() && !token.contains('\r') && !token.contains('\n')) }
         NativeSyncFiles.atomicJson(configurationFile(appPrivateDirectory, root), JSONObject()
-            .put("endpoint", endpoint).put("token", token).put("enabled", enabled))
+            .put("endpoint", endpoint).put("token", token).put("enabled", enabled)
+            .put("addresses", JSONArray(addresses)).put("certificatePins", JSONObject(certificatePins)))
     }
 
     override fun toString() = "NativeSyncConfiguration(endpoint=$endpoint, token=[redacted], enabled=$enabled)"
 
     companion object {
         const val DEFAULT_ENDPOINT = "https://cdn.u3146344.nyat.app:63573/mojian-sync/v1/"
+        fun normalizeAddress(value: String): String {
+            val text = value.trim().let { if (it.contains("://")) it else "https://$it" }
+            val uri = NativeSyncFiles.endpoint(text)
+            return (if (uri.path == "/") uri.resolve("mojian-sync/v1/") else uri).toString()
+        }
+        fun parseAddresses(text: String): List<String> = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }
+            .map(::normalizeAddress).toList().also { require(it.isNotEmpty()) { "请至少输入一个同步地址" } }
         fun load(context: Context, root: File) = load(context.filesDir, root)
         fun load(appPrivateDirectory: File, root: File): NativeSyncConfiguration {
             val file = configurationFile(appPrivateDirectory, root)
             if (!file.exists()) return NativeSyncConfiguration()
             val value = NativeSyncFiles.read(file)
-            return NativeSyncConfiguration(value.getString("endpoint"), value.getString("token"), value.getBoolean("enabled"))
+            val addresses = value.optJSONArray("addresses")?.let { array -> (0 until array.length()).map { array.getString(it) } }.orEmpty()
+            val pins = value.optJSONObject("certificatePins")?.let { pins -> pins.keys().asSequence().associateWith { pins.getString(it) } }.orEmpty()
+            return NativeSyncConfiguration(value.getString("endpoint"), value.getString("token"), value.getBoolean("enabled"), addresses, pins)
         }
 
         private fun configurationFile(appPrivateDirectory: File, root: File): File {

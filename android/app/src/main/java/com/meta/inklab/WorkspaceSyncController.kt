@@ -21,6 +21,7 @@ internal class WorkspaceSyncController(
     private val queued = AtomicBoolean()
     private var root: File? = null
     private var client: NativeSyncClient? = null
+    private var activeConfiguration: NativeSyncConfiguration? = null
     @Volatile private var foreground = false
     @Volatile private var closed = false
     @Volatile private var enabled = false
@@ -38,6 +39,7 @@ internal class WorkspaceSyncController(
             generation.incrementAndGet()
             root = workspace.canonicalFile
             client = null
+            activeConfiguration = null
         }
         handler.removeCallbacks(tick)
         handler.post(tick)
@@ -72,8 +74,9 @@ internal class WorkspaceSyncController(
                 enabled = configuration.enabled
                 if (!enabled) { publish("原生同步已暂停", false, request); return@execute }
                 statusGeneration.set(request)
-                val sync = client ?: NativeSyncClient(workspace, configuration.endpoint, configuration.token,
-                    { value -> publish(value, true, statusGeneration.get()) }).also { client = it }
+                val sync = client?.takeIf { activeConfiguration == configuration } ?: NativeSyncClient(workspace, configuration.endpoint, configuration.token,
+                    { value -> publish(value, true, statusGeneration.get()) }, NativeSyncAddressTransport(configuration,
+                        { value -> publish(value, true, statusGeneration.get()) })).also { client = it; activeConfiguration = configuration }
                 sync.sync({ action ->
                     if (cancelled()) false else {
                         val task = FutureTask { if (cancelled()) false else applyIncoming(action) }

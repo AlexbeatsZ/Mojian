@@ -40,6 +40,33 @@ adoption remain separate from these transport checks.
 
 ## Workspace and credentials
 
+### Ordered server addresses
+
+Windows and Android settings accept one HTTPS address per line. Bare `IP:port` entries gain
+`https://` and `/mojian-sync/v1/`. Preserve the user's exact order, including repeated addresses;
+do not classify, race, rank or remember a preferred route. Each foreground pass starts at the
+first address and advances after a connection/timeout/TLS/HTTP service failure. A successful route
+handles the rest of that pass. Cancellation stops immediately. Conflicts, malformed content,
+different workspace identity, revision rollback and local storage errors stop the pass rather
+than looking for another server which might accept an unsafe write.
+
+Addresses are routes to one backend, not independently writable replicas. The existing `endpoint`
+remains the stable checkpoint binding for compatibility; optional `addresses` selects the routes.
+Missing `addresses` means the original single endpoint. Reordering/editing the list does not reset
+device ID, checkpoint, incoming journal or outbox. Before an uncertain commit is replayed through
+another route, validate that route's manifest identity/revision. Retain the original operation ID
+and body so a lost receipt cannot become a second mutation. Each connection has a five-second
+connect budget; Windows manifest headers have an eight-second probe budget. No global proxy
+settings are modified; these explicit server requests connect to their configured destinations.
+
+An optional `directTls` listener in the ROG backend serves the same request handler and data root
+on port 18743. The existing loopback 18742 and Sakura gateway remain unchanged. User-specific
+self-signed listener certificates can be trusted by an exact SHA-256 leaf fingerprint stored in
+private `certificatePins` for that address; validity and hostname checks remain mandatory. No
+global trust-store installation or accept-all verifier is used. Ordinary public HTTPS retains
+system certificate trust. Changing/renewing a pinned certificate requires updating that private
+trust entry; no key, token or user certificate is embedded in source or release artifacts.
+
 - The existing workspace remains authoritative until the user explicitly creates/selects a
   dedicated clone. A new `.mojian-native-workspace` marker identifies the clone. Reject existing
   destinations, source descendants, links/junctions and detected Syncthing folder boundaries.
