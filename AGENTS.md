@@ -8,11 +8,13 @@
 
 # Current State
 
-- Current source version: Windows and Android **0.7.7**; Android retains
+- Current source/build version: Windows and Android **0.7.7**; Android retains
   `com.meta.inklab.debug`, version code **15**. iOS remains a separate 0.1.0 client.
   Windows still runs 0.7.6 on `Documents/Mojian-native`; Android devices remain installed at
-  0.7.5. Do not confuse a built APK with device deployment. The 0.7.7 APK is built; Windows
-  publication and release upload are pending. `v0.7.6` remains the previous published release.
+  0.7.5. Do not confuse a built APK with device deployment. `v0.7.7` prerelease is published
+  with verified EXE/APK assets at source 2956480; source is pushed to `origin/master`.
+  The new Windows EXE is in `%TEMP%/.agents/mojian-notebook-navigation-20261029/release/`, not
+  copied over the running 0.7.6 EXE. Close the old window before replacing the current release.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - 0.7.7 fixes Windows inactive-notebook expansion: every expanded notebook shows its sections,
@@ -20,7 +22,8 @@
   resolve the owning notebook. Expanding a branch does not switch or reload the focused page.
   Android already implements this contract. Windows 216/216 tests (including native WPF fixture)
   and Android 251 passed/1 opt-in skipped, APK/test APK/lint0errors/145warnings pass. Evidence:
-  `%TEMP%/.agents/mojian-notebook-navigation-20261029`; live notes and app processes untouched.
+  `%TEMP%/.agents/mojian-notebook-navigation-20261029`; this repair did not change live notes
+  or close/restart app processes. The native fixture is not a live-library EXE acceptance.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
   background, and the last reusable print choices. Background menus link directly to the default
   row in options; single-page/one-off creation backgrounds do not change that default. Read
@@ -124,7 +127,7 @@
 
 # Active Work
 
-- Android installation and real-device acceptance for 0.7.6 have not been requested/performed.
+- Installation and live-library acceptance for 0.7.7 have not been requested/performed.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
