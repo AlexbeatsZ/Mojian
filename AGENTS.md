@@ -29,10 +29,11 @@
 - The user explicitly discarded standalone original-PDF migration backups on 2026-10-29.
   Removed all 38 generated `page-notein-summary-*` pages and their active page-owned attachments
   with the native deletion transaction; retained actual annotated PDF backgrounds and all other
-  content. The migration tool no longer generates summary/backup pages or archives unannotated
+  content. The 0.1.1 migration tool no longer generates summary/backup pages or archives unannotated
   PDFs. Do not reintroduce these pages when rebuilding or recovering an older baseline.
   Windows published deletion revision32 and now has 613 indexed pages; its outbox/incoming/conflict
   are empty. Android receipt/foreground acceptance of this deletion is not yet verified.
+  `migration-v0.1.1` is published separately with its source-tool ZIP; the product EXE/APK stay 0.7.6.
 - Sync status is now a compact bottom-right overlay on both clients. A4 grows only for content;
   pan/zoom does not publish changes. Windows keeps viewport in local settings and preserves old
   page viewport JSON; clean navigation/close does not increment page revisions or rewrite files.
