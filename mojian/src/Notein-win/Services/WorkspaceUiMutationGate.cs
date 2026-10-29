@@ -8,9 +8,9 @@ public sealed class WorkspaceUiMutationGate
     public bool TryRun(Func<bool> eligible, Action operation)
     {
         VerifyThread();
-        if (_active || !eligible()) return false;
+        if (_active) return false;
         _active = true;
-        try { operation(); return true; }
+        try { if (!eligible()) return false; operation(); return true; }
         finally { _active = false; }
     }
 

@@ -26,7 +26,21 @@ the host's UI gate executes the short publication and checks repository reload s
 apply or reload refusal locks editing/saving until full local recovery and reload succeed.
 See `native-sync.md` and `sync-server/PROTOCOL.md` for the transport/recovery contract.
 
-Focused deletion/epoch/gate/recovery regressions pass 14/14. Full Windows test execution still
+Failed save retries retain their original submission sequence. Once a newer queued job has
+published a library for the same workspace, an older retry may still persist its page but must
+not publish its older library snapshot. The UI mutation gate is held while evaluating eligibility
+as well as during the operation; reentrant predicates must not sneak in a second mutation.
+
+The first focused deletion/epoch/gate/recovery regressions passed 14/14; the follow-up adds save
+retry and reentrancy coverage (18/18 focused). Debug and Release now each pass the full 191/191
+tests, including caret and screenshots. All WPF test execution shares one live STA, Application
+and Dispatcher; each invocation restores resources and closes leaked windows even on failure.
+The assembly framework synchronously shuts down Application and joins its owner at disposal;
+otherwise a passing suite can leave an orphan testhost locking product/test DLLs. Non-WPF
+test-only runs do not create a Dispatcher just to dispose it.
+The caret fixture clears the default sample content before testing a blank click, and asserts
+that the temporary editor exists instead of accidentally reading an old insertion anchor.
+Full Windows test execution still
 has pre-existing UI-harness lifecycle and caret failures; this record is not a green full-suite
 claim. The 2026-10-28 log records independent HEAD comparisons and the Release FailFast boundary.
 

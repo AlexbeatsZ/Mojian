@@ -12,22 +12,25 @@ data class VectorPdfPage(val sheet: ExportSheet, val backgroundArgb: Int = andro
 
 object VectorPdfExporter {
     fun capturePages(plan: ExportPlan, provider: ExportPageProvider, options: ExportOptions,
-        indices: List<Int> = plan.pages.indices.toList(), cancelled: () -> Boolean = { false },
-        ui: ExportUiDispatcher = ExportUiDispatcher()): PdfDocument {
+        indices: List<Int> = plan.pages.indices.toList(), cancelled: () -> Boolean = { false }): DiskBackedPdfDocument {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { "逐页导出必须在工作线程启动" }
         require(indices.isNotEmpty()) { "当前范围没有页面" }
-        val document = PdfDocument()
-        var outputIndex = 0
+        require(indices.all { it in plan.pages.indices }) { "输出页码越界" }
+        val document = DiskBackedPdfDocument(provider.cacheDirectory, cancelled)
         try {
             forEachPage(plan, provider, options, indices, cancelled) { _, item ->
-                ui.call {
+                val singlePage = PdfDocument()
+                try {
                     if (cancelled()) throw java.util.concurrent.CancellationException()
                     val sheet = item.sheet
-                    val page = document.startPage(PdfDocument.PageInfo.Builder(
+                    val page = singlePage.startPage(PdfDocument.PageInfo.Builder(
                         sheet.widthPoints.roundToInt().coerceAtLeast(1),
-                        sheet.heightPoints.roundToInt().coerceAtLeast(1), ++outputIndex).create())
-                    try { renderPage(page.canvas, item) } finally { document.finishPage(page) }
-                }
+                        sheet.heightPoints.roundToInt().coerceAtLeast(1), 1).create())
+                    try { renderPage(page.canvas, item) } finally { singlePage.finishPage(page) }
+                    if (cancelled()) throw java.util.concurrent.CancellationException()
+                    document.pageFile.outputStream().use(singlePage::writeTo)
+                } finally { singlePage.close() }
+                document.appendPage()
             }
             return document
         } catch (error: Throwable) {
@@ -40,6 +43,7 @@ object VectorPdfExporter {
         indices: List<Int> = plan.pages.indices.toList(), cancelled: () -> Boolean = { false },
         render: (Int, VectorPdfPage) -> Unit) {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { "逐页准备必须在工作线程启动" }
+        require(indices.all { it in plan.pages.indices }) { "输出页码越界" }
         ExportPageTraversal.visit(indices, { plan.pages[it].sourceIndex }, provider::acquire, cancelled) { index, lease ->
             val page = plan.pages[index]
             render(index, VectorPdfPage(page.sheet, page.backgroundArgb) { canvas, matrix ->

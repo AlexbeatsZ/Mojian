@@ -11,8 +11,7 @@ public sealed class InsertSpaceTests
     private static void RunSta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception e) { failure = e; } });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+        WpfTestExecutor.Run(() => { try { action(); } catch (Exception e) { failure = e; } });
         if (failure != null) throw failure;
     }
 

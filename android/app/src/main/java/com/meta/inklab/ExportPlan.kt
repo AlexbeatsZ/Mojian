@@ -23,6 +23,7 @@ interface ExportPageLease : AutoCloseable {
 }
 
 interface ExportPageProvider {
+    val cacheDirectory: java.io.File
     fun plan(options: ExportOptions, outputSize: PdfOutputPageSize? = null): ExportPlan
     fun acquire(sourceIndex: Int): ExportPageLease
 }

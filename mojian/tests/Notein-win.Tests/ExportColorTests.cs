@@ -13,7 +13,7 @@ public class ExportColorTests
     public void DarkPagePrintHasWhitePaperBlackInkAndOriginalColoredInk()
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -49,9 +49,6 @@ public class ExportColorTests
             }
             catch (Exception error) { failure = error; }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
         Assert.Null(failure);
     }
 

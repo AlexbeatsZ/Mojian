@@ -441,6 +441,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        MojianCommandMenu.dismissActive()
         nativeSyncController.close()
         richExportSessions.forEach { it.cancel() }
         richExportSessions.clear()
@@ -7477,7 +7478,7 @@ class MainActivity : Activity() {
                             ExportFormat.PNG_ZIP -> java.util.zip.ZipOutputStream(output).use { zip ->
                                 val provider=requireNotNull(session)
                                 VectorPdfExporter.forEachPage(requireNotNull(plan),provider,resolved,cancelled={ provider.isCancelled }) { index,page ->
-                                    val bitmap=ExportUiDispatcher().call {
+                                    val bitmap=run {
                                         val scale=200f/72
                                         val width=kotlin.math.ceil(page.sheet.widthPoints*scale).toInt()
                                         val height=kotlin.math.ceil(page.sheet.heightPoints*scale).toInt()
@@ -7591,25 +7592,11 @@ class MainActivity : Activity() {
             return
         }
         if (type == PendingExport.PDF) {
-            val pdf = runCatching { captureVectorPdf() }.getOrElse {
-                reportBackgroundFailure("导出失败", it)
-                return
-            } ?: return
-            Toast.makeText(this, "正在导出…", Toast.LENGTH_SHORT).show()
-            ioExecutor.execute {
-                try {
-                    contentResolver.openOutputStream(uri, "w").use { output ->
-                        pdf.writeTo(requireNotNull(output) { "无法写入目标文件" })
-                    }
-                    runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() }
-                } catch (error: Exception) { reportBackgroundFailure("导出失败", error) }
-                finally { pdf.close() }
-            }
+            reportBackgroundFailure("导出失败", IllegalStateException("导出任务已失效，请重新导出"))
             return
         }
         val sectionExportTarget = pendingSectionExport
         val snapshot = captureExportLayers()
-        if (type == PendingExport.PDF && snapshot == null) return
         val layers = snapshot?.layers ?: linkedMapOf()
         val pageId = workspace.selectedPageId
         val notebook = workspace
@@ -7641,30 +7628,6 @@ class MainActivity : Activity() {
             }.onSuccess { runOnUiThread { Toast.makeText(this, "导出完成", Toast.LENGTH_LONG).show() } }
                 .onFailure { reportBackgroundFailure("导出失败", it) }
             layers.values.forEach(Bitmap::recycle)
-        }
-    }
-
-    private fun captureVectorPdf(): android.graphics.pdf.PdfDocument? {
-        val page = workspace.selectedPage() ?: return null
-        val settings = page.viewSettings
-        val bounds = if (settings.paperSize == PaperSize.BOUNDLESS) {
-            val crop = BoundlessPageLayout.exportBounds(documentContentBounds())
-            android.graphics.RectF(crop.left, crop.top, crop.right, crop.bottom)
-        } else {
-            val width = settings.documentWidth ?: A4PageLayout.pageWidth
-            val height = settings.documentHeight ?: A4PageLayout.pageHeight
-            val totalHeight = if (settings.paperSize == PaperSize.A4)
-                settings.a4PageCount.coerceAtLeast(1) * height + (settings.a4PageCount - 1).coerceAtLeast(0) * A4PageLayout.pageGap else height
-            android.graphics.RectF(0f, 0f, width, totalHeight).apply {
-                if (settings.paperSize != PaperSize.PDF) documentContentBounds().forEach { union(it.left, it.top, it.right, it.bottom) }
-            }
-        }
-        return VectorPdfExporter.capture(bounds, page.pdfPage?.let { PdfOutputPageSize(it.widthPoints, it.heightPoints) }) { canvas, matrix ->
-            dryInkView.renderBackgroundForExport(canvas, matrix)
-            insertContentLayer.renderForExport(canvas, matrix)
-            dryInkView.renderVectorInkForExport(canvas, matrix)
-            tagLayer.renderForExport(canvas, matrix)
-            textInputLayer.renderForExport(canvas, matrix)
         }
     }
 

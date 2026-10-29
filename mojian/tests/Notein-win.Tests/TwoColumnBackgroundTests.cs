@@ -146,12 +146,11 @@ public class TwoColumnBackgroundTests
     private static void OnSta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try { _ = Application.Current ?? new Application(); action(); }
             catch (Exception error) { failure = error; }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         Assert.Null(failure);
     }
 

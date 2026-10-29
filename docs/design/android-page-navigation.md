@@ -12,6 +12,11 @@ PDF) are checked before copying any target file, and duplicate references copy o
 an empty target still waits for the worker save barrier; it must not clear the outgoing layers
 while an asynchronous save can fail.
 
+Copy preflight must derive required names from attachment, spreadsheet and image objects,
+including an image's original source asset. Enumerating files already present in the source
+folder cannot detect a referenced file that has not arrived yet. Refuse the copy before creating
+target content when any of these referenced names is missing.
+
 `NavigationMutation` publishes the library before physical deletion cleanup. Until publication
 succeeds, the previous library and clipboard state can be restored and source files remain.
 Cleanup rechecks references/generation and skips files still owned by surviving pages. A cleanup

@@ -38,7 +38,7 @@ public sealed class PressureEraseTravelTests
     public void RealCanvasLongWritingCannotTurnIntoEraserAndLiftRearmsIt()
     {
         Exception? failure = null;
-        var thread = new Thread(() => {
+        WpfTestExecutor.Run(() => {
             try {
                 var canvas = new NoteCanvas { Document=new PageDocument("n","p"), SelectedTool=new ToolPreset("pen",DrawingToolKind.Pen) };
                 canvas.ResolvePressureEraserTool = () => new ToolPreset("eraser",DrawingToolKind.Eraser) { PressureEraseEnabled=true, PressureEraseTravelLimitMm=1f };
@@ -59,7 +59,6 @@ public sealed class PressureEraseTravelTests
                 Call("EndPointer",true); Assert.False(State("_temporaryPressureEraser"));
             } catch(Exception ex) { failure=ex; }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         if(failure!=null) throw failure;
     }
 }

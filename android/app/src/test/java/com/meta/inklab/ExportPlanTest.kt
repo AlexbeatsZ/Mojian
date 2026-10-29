@@ -4,6 +4,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ExportPlanTest {
+    @Test(expected = IllegalArgumentException::class)
+    fun rangeBeyondCombinedPagesIsRejected() {
+        ExportPlan.create(1, ExportOptions(pageRange="2")) {
+            listOf(ExportSheet(StrokeViewportBounds(0f, 0f, 100f, 200f), 300f, 400f, 1f, 0f) to 0)
+        }
+    }
+
+    @Test fun emptyScopeHasNoPhantomPage() {
+        assertEquals(emptyList<ExportPlannedPage>(), ExportPlan.create(0, ExportOptions()) {
+            error("Empty scope must not acquire a source")
+        }.pages)
+    }
+
     @Test fun pageRangeUsesCombinedPhysicalOrderAndPreservesSourceIndex() {
         val sheet = ExportSheet(StrokeViewportBounds(0f, 0f, 100f, 200f), 300f, 400f, 1f, 0f)
         val visited = mutableListOf<Int>()

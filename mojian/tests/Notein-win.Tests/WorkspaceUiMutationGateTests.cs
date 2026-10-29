@@ -6,6 +6,19 @@ namespace Notein_win.Tests;
 public class WorkspaceUiMutationGateTests
 {
     [Fact]
+    public void EligibilityExcludesReentryAndFailureReopensGate()
+    {
+        var gate = new WorkspaceUiMutationGate();
+        Assert.Throws<IOException>(() => gate.TryRun(() =>
+        {
+            Assert.False(gate.TryRun(() => true, () => Assert.Fail("reentered")));
+            throw new IOException("eligibility failed");
+        }, () => Assert.Fail("ineligible operation")));
+        Assert.False(gate.TryRun(() => false, () => Assert.Fail("ineligible operation")));
+        Assert.True(gate.TryRun(() => true, () => { }));
+    }
+
+    [Fact]
     public void DeletionExcludesIncomingAndGateReopensAfterFailure()
     {
         var gate = new WorkspaceUiMutationGate();

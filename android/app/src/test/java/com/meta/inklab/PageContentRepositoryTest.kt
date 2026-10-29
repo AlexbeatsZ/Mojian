@@ -9,6 +9,50 @@ import org.junit.Test
 
 class PageContentRepositoryTest {
     @Test
+    fun copyingRefusesMissingReferencedAttachmentsBeforePublishingTarget() {
+        val parent = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
+        val root = Files.createTempDirectory(parent.toPath(), "mojian-copy-missing-attachment").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            val source = PageInsertDocument("book", "source")
+            source.objects += InsertObject.Attachment("file", 0f, 0f, 100f, 40f,
+                "missing.bin", "missing.bin", "application/octet-stream", 3)
+            repository.save(source)
+
+            assertThrows(IllegalStateException::class.java) {
+                repository.copyPageData("book", "source", "book", "copy")
+            }
+
+            assertFalse(repository.pageFile("book", "copy").exists())
+            assertTrue(repository.pageFile("book", "source").isFile)
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun copiedPdfImageRequiresOriginalSourceAssetAsWellAsPreview() {
+        val parent = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
+        val root = Files.createTempDirectory(parent.toPath(), "mojian-copy-missing-original").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            val source = PageInsertDocument("book", "source")
+            source.objects += InsertObject.Image("image", 0f, 0f, 100f, 100f,
+                "preview.png", "PDF", "image/png", ImageSourceKind.PDF_PAGE, sourceAssetName = "original.pdf")
+            repository.save(source)
+            val assets = repository.assetDirectory("book", "source")
+            assets.resolve("preview.png").writeText("preview")
+
+            assertThrows(IllegalStateException::class.java) {
+                repository.copyPageData("book", "source", "book", "copy")
+            }
+            assertFalse(repository.pageFile("book", "copy").exists())
+
+            assets.resolve("original.pdf").writeText("pdf")
+            repository.copyPageData("book", "source", "book", "copy")
+            assertEquals("pdf", repository.assetDirectory("book", "copy").resolve("original.pdf").readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun emptySelectionCannotReleaseOutgoingContentUntilFailedQueuedSaveIsRetried() {
         val parent = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
         val root = Files.createTempDirectory(parent.toPath(), "mojian-empty-selection-barrier").toFile()

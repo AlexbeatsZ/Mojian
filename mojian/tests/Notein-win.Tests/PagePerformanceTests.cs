@@ -29,7 +29,7 @@ public sealed class PagePerformanceTests
     public void ViewportChanges_DoNotScheduleWholePageAutosave()
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -57,9 +57,6 @@ public sealed class PagePerformanceTests
                 failure = ex;
             }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
         Assert.Null(failure);
     }
 

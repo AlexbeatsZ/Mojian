@@ -21,8 +21,7 @@ public class SelectionMoveCopyTests
     private static void Sta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception error) { failure = error; } });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+        WpfTestExecutor.Run(() => { try { action(); } catch (Exception error) { failure = error; } });
         if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
@@ -103,11 +102,18 @@ public class SelectionMoveCopyTests
             var vm = new MainViewModel(root, new PreferencesStore(Path.Combine(root, "preferences.json")));
             window = new MainWindow(vm) { Width = 1100, Height = 780 }; window.Show();
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert.True(window.IsLoaded);
             var canvas = (NoteCanvas)window.FindName("LeftCanvas");
+            canvas.ClearPage();
             canvas.Document!.Objects.Add(new PageObject { X = 30, Y = 30, Width = 90, Height = 60 });
             canvas.SelectAllContent(); Assert.True(canvas.CopySelection());
+            canvas.Focus();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             canvas.Viewport.SetScale(2, 0, 0); canvas.Viewport.Pan(-40, -70);
+            window.UpdateLayout();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             Call(canvas, "HandleDirectTap", new Point(350, 310));
+            Assert.NotNull(Field<TextItem?>(canvas, "_temporaryTextItem"));
             var anchor = canvas.PasteInsertionPoint;
             // MainWindow may restore its focused slot's viewport when the canvas takes focus.
             var actualViewportPoint = canvas.Viewport.ViewToDocument(350, 310);

@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import java.lang.ref.WeakReference
 
 /** App-owned command surface shared by ribbon drop-downs and context menus. */
 class MojianCommandMenu private constructor(
@@ -46,7 +47,7 @@ class MojianCommandMenu private constructor(
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
         hostAnchor = anchor
-        activeMenu = this
+        activeMenu = WeakReference(this)
         val location = IntArray(2)
         anchor.getLocationOnScreen(location)
         val metrics = context.resources.displayMetrics
@@ -62,7 +63,7 @@ class MojianCommandMenu private constructor(
         val popup = createPopup(items, isRoot = true)
         rootPopup = popup
         hostAnchor = anchor
-        activeMenu = this
+        activeMenu = WeakReference(this)
         val metrics = context.resources.displayMetrics
         val expectedHeight = menuHeight(items)
         val x = screenX.coerceIn(dp(8), (metrics.widthPixels - width - dp(8)).coerceAtLeast(dp(8)))
@@ -75,7 +76,8 @@ class MojianCommandMenu private constructor(
         childPopup = null
         rootPopup?.dismiss()
         rootPopup = null
-        if (activeMenu === this) activeMenu = null
+        hostAnchor = null
+        if (activeMenu?.get() === this) activeMenu = null
     }
 
     private fun createPopup(menuItems: List<Item>, isRoot: Boolean): PopupWindow {
@@ -95,7 +97,8 @@ class MojianCommandMenu private constructor(
                     childPopup?.dismiss()
                     childPopup = null
                     rootPopup = null
-                    if (activeMenu === this@MojianCommandMenu) activeMenu = null
+                    hostAnchor = null
+                    if (activeMenu?.get() === this@MojianCommandMenu) activeMenu = null
                 }
             }
         }
@@ -291,10 +294,10 @@ class MojianCommandMenu private constructor(
         private val ACCENT = Color.rgb(218, 178, 233)
         private val DESTRUCTIVE = Color.rgb(238, 92, 92)
 
-        private var activeMenu: MojianCommandMenu? = null
+        private var activeMenu: WeakReference<MojianCommandMenu>? = null
 
         fun dismissActive(): Boolean {
-            val menu = activeMenu ?: return false
+            val menu = activeMenu?.get() ?: return false
             menu.dismiss()
             return true
         }

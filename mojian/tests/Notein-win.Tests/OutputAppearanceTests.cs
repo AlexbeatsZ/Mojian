@@ -43,7 +43,7 @@ public class OutputAppearanceTests
     public void RealCanvasSeparatesDisplayedExportFromPrintAndHidesOnlyPrintedPatterns()
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             var temp = Path.Combine(Path.GetTempPath(), ".agents", "mojian-output-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -94,7 +94,6 @@ public class OutputAppearanceTests
             catch (Exception error) { failure = error; }
             finally { Directory.Delete(temp, true); }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         Assert.Null(failure);
     }
 

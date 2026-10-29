@@ -390,10 +390,7 @@ class InsertContentLayer(
             if (selectedOnly && item !in selectedItems()) return@forEach
             // The composed imported scene visits objects in source order. Reject offscreen
             // assets before decoding their bitmaps, including per-sheet export clips.
-            @Suppress("DEPRECATION")
-            val outside=if(android.os.Build.VERSION.SDK_INT>=30) canvas.quickReject(bounds(item))
-                else canvas.quickReject(bounds(item),Canvas.EdgeType.AA)
-            if(outside) return@forEach
+            if(canvas.rejects(bounds(item))) return@forEach
             when (item) {
                 is InsertObject.Table -> drawTable(canvas, item, forExport)
                 is InsertObject.Attachment -> drawAttachment(canvas, item)

@@ -14,6 +14,39 @@ public class WorkspaceDeletionTransactionTests
     }
 
     [Fact]
+    public void RollbackAndRestartPreserveFileCreatedAfterStaging()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = Path.Combine(temp.Path, "page.json");
+        File.WriteAllText(path, "old");
+        Assert.Throws<IOException>(() => WorkspaceDeletionTransaction.Execute(temp.Path, new[] { path }, () =>
+        {
+            File.WriteAllText(path, "new edit");
+            throw new IOException("index refused");
+        }));
+        Assert.Equal("new edit", File.ReadAllText(path));
+        WorkspaceDeletionTransaction.Recover(temp.Path, _ => true);
+        Assert.Equal("new edit", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void LateAutosaveOfDeletedDocumentDoesNotResurrectPage()
+    {
+        using var temp = new TemporaryDirectory();
+        var vm = new MainViewModel(Path.Combine(temp.Path, "workspace"), new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
+        var deleted = vm.PrimaryDocument!;
+        var notebook = vm.ActiveWorkspace;
+        var path = vm.Store.GetPageDocumentPath(notebook.Id, deleted.PageId);
+        Assert.True(vm.DeletePage(notebook.FocusedSectionId!, deleted.PageId));
+        vm.QueueSaveDocument(deleted);
+        vm.SaveAll();
+        Assert.False(File.Exists(path));
+        var reloaded = new WorkspaceStore(vm.Store.RootDirectory).LoadLibrary();
+        Assert.Null(reloaded.Notebooks.First(item => item.Id == notebook.Id).FindPage(deleted.PageId, out _));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void FailedIndexCommitRestoresPageAssetsAndPreviousRevision()
     {
         using var temp = new TemporaryDirectory();

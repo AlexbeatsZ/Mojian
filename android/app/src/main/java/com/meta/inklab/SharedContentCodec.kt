@@ -15,14 +15,13 @@ import kotlin.math.roundToInt
 
 object SharedContentCodec {
     private val unit = SharedWorkspaceCodec.TO_SHARED
-    private val restoredText = mutableMapOf<String,Map<String,CanvasTextSnapshot>>()
-    private fun textKey(document: PageInsertDocument) = "${document.notebookId}/${document.pageId}"
+    private val restoredText = WeakIdentityCache<PageInsertDocument,Map<String,CanvasTextSnapshot>>()
     fun tags(document: PageInsertDocument): List<CanvasTagSnapshot> = SharedWorkspaceCodec.items(document.sharedSource.optJSONArray("tags")).map { value ->
         CanvasTagSnapshot(CanvasTagKind.entries[value.optInt("kind").coerceIn(0,1)],(value.getDouble("documentX")/unit).toFloat(),
             (value.getDouble("documentY")/unit).toFloat(),value.getString("id"))
     }
     fun text(document: PageInsertDocument): List<CanvasTextSnapshot> = readText(document).also {
-        restoredText[textKey(document)] = it.associateBy { item -> item.id }
+        restoredText[document] = it.associateBy { item -> item.id }
     }
     fun readText(document: PageInsertDocument): List<CanvasTextSnapshot> = SharedWorkspaceCodec.items(document.sharedSource.optJSONArray("textItems")).map { value ->
         val mobileText=value.optString("androidRichText").takeIf(String::isNotBlank)?.let { Html.fromHtml(it,Html.FROM_HTML_MODE_COMPACT) }
@@ -45,17 +44,25 @@ object SharedContentCodec {
     }
     fun save(document: PageInsertDocument,tags: List<CanvasTagSnapshot>,text: List<CanvasTextSnapshot>,density: Float = 1f) {
         val source = document.sharedSource
-        fun previous(key: String,id: String) = SharedWorkspaceCodec.items(source.optJSONArray(key)).firstOrNull { it.optString("id")==id }?.let(SharedWorkspaceCodec::copy) ?: JSONObject()
+        fun indexed(key: String): Map<String,JSONObject> = buildMap {
+            SharedWorkspaceCodec.items(source.optJSONArray(key)).forEach { value ->
+                val id = value.optString("id")
+                if (!containsKey(id)) put(id,value)
+            }
+        }
+        val previousTags = indexed("tags")
+        val previousText = indexed("textItems")
+        val restoredItems = restoredText[document]
         source.put("tags",JSONArray().apply { tags.forEach { tag ->
-            val old=previous("tags",tag.id)
+            val old=previousTags[tag.id]?.let(SharedWorkspaceCodec::copy) ?: JSONObject()
             val x=tag.documentX*unit; val y=tag.documentY*unit
             if(!old.has("documentX") || kotlin.math.abs(old.getDouble("documentX")-x)>.001) old.put("documentX",x)
             if(!old.has("documentY") || kotlin.math.abs(old.getDouble("documentY")-y)>.001) old.put("documentY",y)
             put(old.put("id",tag.id).put("kind",tag.kind.ordinal).apply { if(!has("scale")) put("scale",1) })
         } })
         source.put("textItems",JSONArray().apply { text.forEach { item ->
-            val prior = previous("textItems",item.id)
-            val restored = restoredText[textKey(document)]?.get(item.id)
+            val prior = previousText[item.id]?.let(SharedWorkspaceCodec::copy) ?: JSONObject()
+            val restored = restoredItems?.get(item.id)
             fun html(value: CharSequence) = Html.toHtml(SpannableString(value),Html.TO_HTML_PARAGRAPH_LINES_INDIVIDUAL)
             val itemHtml = html(item.text)
             val richTextChanged = restored==null || restored.contentScale!=item.contentScale || html(restored.text)!=itemHtml
@@ -84,6 +91,6 @@ object SharedContentCodec {
             }
             put(value)
         } })
-        restoredText[textKey(document)]=text.associateBy { it.id }
+        restoredText[document]=text.associateBy { it.id }
     }
 }

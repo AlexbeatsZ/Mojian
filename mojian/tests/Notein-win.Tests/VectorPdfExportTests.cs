@@ -86,7 +86,7 @@ public class VectorPdfExportTests
     private static void Sta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception error) { failure = error; } });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join(); Assert.Null(failure);
+        WpfTestExecutor.Run(() => { try { action(); } catch (Exception error) { failure = error; } });
+        Assert.Null(failure);
     }
 }

@@ -77,6 +77,21 @@ class SharedContentCodecIntegrationTest {
         assertEquals(original, storedText(document).toString())
     }
 
+    @Test
+    fun editableDocumentsWithSameIdsDoNotReplaceEachOthersBaseline() {
+        val first = document()
+        val restored = SharedContentCodec.text(first)
+        val original = storedText(first).toString()
+        val second = PageInsertDocument(first.notebookId, first.pageId,
+            sharedSource = JSONObject(first.sharedSource.toString()))
+        storedText(second).put("text", "Other workspace").put("fontSize", 42)
+
+        SharedContentCodec.text(second)
+        SharedContentCodec.save(first, emptyList(), restored)
+
+        assertEquals(original, storedText(first).toString())
+    }
+
     private fun document(): PageInsertDocument {
         val text = JSONObject().put("id", "text").put("text", "Hello")
             .put("x", 24.0).put("y", 48.0).put("width", 300.0).put("height", 50.0)

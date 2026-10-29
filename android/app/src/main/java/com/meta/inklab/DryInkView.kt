@@ -530,6 +530,8 @@ class DryInkView(context: Context) : View(context) {
         canvas.concat(documentMatrix)
         (onlyStroke?.let(::listOf) ?: strokes).forEach { stroke ->
             if (selectedOnly && stroke !in selectedStrokes) return@forEach
+            val bounds = boundsFor(stroke)
+            if (canvas.rejects(RectF(bounds.left, bounds.top, bounds.right, bounds.bottom))) return@forEach
             if (SharedStrokeCodec.draw(canvas,stroke,output.printsDark(outputPageSettings.darkBackground))) return@forEach
             val shape = stroke.shape
             paint.color = if (output.printsDark(outputPageSettings.darkBackground)) OutputAppearance.printInk(stroke.brush.colorIntArgb) else stroke.brush.colorIntArgb

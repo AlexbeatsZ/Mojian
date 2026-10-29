@@ -19,8 +19,7 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
     private static void Sta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception ex) { failure = ex; } });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+        WpfTestExecutor.Run(() => { try { action(); } catch (Exception ex) { failure = ex; } });
         Assert.Null(failure);
     }
     private sealed class TemporaryDirectory : IDisposable
@@ -402,7 +401,7 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         var path = Environment.GetEnvironmentVariable("MOJIAN_WRITING_PAGE_JSON");
         if (string.IsNullOrEmpty(path)) return;
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -493,7 +492,6 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
             }
             catch (Exception ex) { failure = ex; }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         Assert.Null(failure);
     }
 }

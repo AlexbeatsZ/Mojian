@@ -202,7 +202,7 @@ public class ExportPaginationTests
     }
     private static void Sta(Action action)
     {
-        Exception? error = null; var thread = new Thread(() => { try { action(); } catch (Exception e) { error = e; } });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join(); Assert.Null(error);
+        Exception? error = null; WpfTestExecutor.Run(() => { try { action(); } catch (Exception e) { error = e; } });
+        Assert.Null(error);
     }
 }

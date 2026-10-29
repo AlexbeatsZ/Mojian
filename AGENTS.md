@@ -8,10 +8,10 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.1**; Android retains
-  `com.meta.inklab.debug`, version code **9**. iOS remains a separate 0.1.0 client.
-  Parallel review/export changes are active in this checkout. Release builds for the sync/folder
-  task use a temporary, task-only source snapshot; never stage unrelated changes or clean shared outputs.
+- Current source/build version: Windows and Android **0.7.2**; Android retains
+  `com.meta.inklab.debug`, version code **10**. iOS remains a separate 0.1.0 client.
+  The 0.7.1 sync/folder task is committed independently; this review integrates on top without
+  changing its deployed backend, gateway, credentials or real notes.
 - Android now explicitly opens a local folder using the system picker and remembers the choice.
   Unconfigured installs do not automatically select Documents/Mojian or private storage. An empty
   folder requires confirmation to create a canonical library; legacy private notes remain available.
@@ -43,13 +43,12 @@
   loopback and actual Sakura HTTPS. Windows focused safety/default-config checks **15/15** and
   Release self-contained publish succeed. Production was restored to revision 0/files 0 after
   disposable public tests. Physical Android acceptance remains outstanding.
-- Full Windows Debug run: **180/184**, with four existing UI-test failures. Independent HEAD
-  `22126a5` comparison reproduces the caret assertion (195 vs 280.31 in isolated execution;
-  same-process runs can produce 56) and the other three order-dependent failures. Individual
-  background, clipboard-menu and export UI tests pass on both HEAD and current code. The harness
-  reuses `Application.Current` after its owning STA thread exits, so later windows may never load.
-  Release full run also hit a WPF `UiRenderTests` invariant FailFast; it is not a passing suite.
-  The older pan-cache pixel baseline is recorded in `docs/log/2026-10.md`.
+- Full Windows Debug and Release suites now pass **191/191** including caret and screenshots.
+  Tests share a persistent STA/Application/Dispatcher rather than reusing a dead owner; failures
+  close leaked windows and restore resources; assembly disposal shuts down Application and joins
+  the STA so testhost exits and releases DLLs. The caret fixture clears default sample content
+  before its blank click and asserts that a temporary caret was actually established.
+  Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and
   `android/artifacts/current/Mojian-debug.apk`. Builds are not installation or physical acceptance;
   this round does not start the real app, install an APK or migrate notes. The separate ROG
@@ -60,6 +59,16 @@
   covered 59.6/60.2 MB page switching and 400% view retention, not physical erasing.
 - Earlier implementation and device evidence has moved to `docs/log/2026-10.md` under the
   dated history archive. Do not treat historical counts, ports or test results as current state.
+- The Zed review continuation fixes old save-retry library rollback, reentrant UI eligibility,
+  overlapping export leases/repeated print layout, missing referenced copy assets and weak
+  document-identity text baselines with one-pass preservation indexes. Android exports now bind,
+  measure and draw offscreen layers on an exclusive Looper worker. PDF/print records one physical
+  sheet at a time, closes native records immediately and assembles streams in disk-backed PDFBox;
+  unused alternate print/whole-canvas PDF routes are removed. Ink/text/assets cull off-sheet work.
+  A 96 MiB PDF stream regression passes in a 64 MiB JVM heap; native output remains compile-only.
+- Combined Android 0.7.2: **239 passed / 1 opt-in public-HTTPS test skipped / 0 failed**;
+  debug/test APK compilation and lint **0 errors / 137 warnings**. Popup tracking is weak, clears
+  its host anchor and dismisses on Activity destruction instead of statically retaining Context.
 
 # Active Work
 
@@ -70,11 +79,9 @@
   CRDT merge, end-to-end encryption or blob/tombstone/receipt garbage collection.
 - Physical Android save/recovery/foreground-sync and export/print acceptance remains outstanding.
   Instrumentation tests (including spacing/export) are compiled, **not installed or executed**.
-- Android export bounds simultaneously loaded logical pages, but `PdfDocument` retains the full
-  PDF's native records; arbitrary-size PDFs may still OOM. Single-page native binding/drawing is
-  still UI-thread work. Do not claim whole-library atomic export or measured pen-latency gains.
-- Keep existing Windows UI-harness lifecycle/caret failures separate from this task. A future
-  harness repair needs one persistent STA/Dispatcher/Application, not merely disabled parallelism.
+- Android export retains at most one decoded logical page and one native physical sheet; output
+  streams use private cache storage, while page/resource metadata grows with output size. Do not
+  claim whole-library atomic export, physical OEM acceptance or measured pen-latency gains.
 - Collect physical eraser-after-contact/pen-key/direct-selection/input acceptance. Navigation
   continuation evidence: `C:\Users\Meta\.agents\mojian--android-navigation\AGENTS.md`.
 - iOS still needs an Apple development Team, physical iPad/Pencil acceptance and the parity work
@@ -85,7 +92,7 @@
 # Build / Run / Test
 
 - Windows: `dotnet build mojian/Notein-win.slnx`; `dotnet test mojian/Notein-win.slnx`.
-  UI tests use isolated workspaces but the full-suite lifecycle failures above are unresolved.
+  UI tests use isolated workspaces and the shared WPF executor, not per-test STA threads.
 - Focused Windows safety checks:
   `dotnet test mojian/tests/Notein-win.Tests/Notein-win.Tests.csproj -c Release --filter "FullyQualifiedName~WorkspaceDeletionTransactionTests|FullyQualifiedName~WorkspaceUiMutationGateTests|FullyQualifiedName~DeleteNotebook_RemovesNestedPagesAndAssetsAndSurvivesRestart|FullyQualifiedName~DeleteInactiveNotebook_PreservesFocusedPageAndOtherSplitSlot"`.
 - Publish: `dotnet publish mojian/src/Notein-win/Notein-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o mojian/artifacts/release`.

@@ -16,9 +16,7 @@ public class ImportedVectorTests
     private static void Sta(Action action)
     {
         Exception? failure = null;
-        var thread = new Thread(() => { try { action(); } catch (Exception ex) { failure = ex; } });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start(); thread.Join();
+        WpfTestExecutor.Run(() => { try { action(); } catch (Exception ex) { failure = ex; } });
         Assert.Null(failure);
     }
 

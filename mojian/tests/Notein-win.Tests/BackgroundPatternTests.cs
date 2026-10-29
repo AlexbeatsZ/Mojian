@@ -36,7 +36,7 @@ public class BackgroundPatternTests
     public void NativeRulesGridDotsAndThemesKeepDocumentGeometryThroughZoomCropAndPrint()
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -78,7 +78,6 @@ public class BackgroundPatternTests
             }
             catch (Exception error) { failure = error; }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         Assert.Null(failure);
     }
 

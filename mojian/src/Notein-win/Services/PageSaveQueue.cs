@@ -13,6 +13,7 @@ public sealed class PageSaveQueue
     private Task _worker = Task.CompletedTask;
     private bool _running;
     private long _sequence;
+    private readonly Dictionary<object, long> _savedLibrarySequences = new();
     public event Action<Exception?>? Completed;
     public bool IsIdle { get { lock (_gate) return !_running && _pending.Count == 0; } }
     public bool HasFailures { get { lock (_gate) return _failed.Count != 0; } }
@@ -52,7 +53,12 @@ public sealed class PageSaveQueue
                 lock (WorkspaceFileGate.ForRoot(job.Store.RootDirectory))
                 {
                     job.Store.WritePageSnapshot(job.Page);
-                    if (job.Library != null) job.Store.SaveLibrary(job.Library);
+                    var rootGate = WorkspaceFileGate.ForRoot(job.Store.RootDirectory);
+                    if (job.Library != null && (!_savedLibrarySequences.TryGetValue(rootGate, out var savedSequence) || job.Sequence > savedSequence))
+                    {
+                        job.Store.SaveLibrary(job.Library);
+                        _savedLibrarySequences[rootGate] = job.Sequence;
+                    }
                 }
                 lock (_gate) _failed.Remove(key);
             }
@@ -70,8 +76,16 @@ public sealed class PageSaveQueue
         lock (_gate) worker = _worker;
         worker.GetAwaiter().GetResult();
         Job[] retries;
-        lock (_gate) retries = _failed.Values.Select(value => value.Job).ToArray();
-        foreach (var retry in retries) Enqueue(retry.Store, retry.Page, retry.Library);
+        lock (_gate)
+        {
+            retries = _failed.Values.Select(value => value.Job).ToArray();
+            foreach (var retry in retries)
+            {
+                var key = retry.Store.RootDirectory + "/" + retry.Page.NotebookId + "/" + retry.Page.PageId;
+                if (!_pending.TryGetValue(key, out var pending) || pending.Sequence < retry.Sequence) _pending[key] = retry;
+            }
+            if (!_running && _pending.Count != 0) { _running = true; _worker = Task.Run(WritePending); }
+        }
         lock (_gate) worker = _worker;
         worker.GetAwaiter().GetResult();
         lock (_gate)

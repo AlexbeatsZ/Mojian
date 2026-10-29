@@ -149,11 +149,22 @@ class PageContentRepository(val root: File) {
         localMutations.begin().use {
             val sourceDocument = load(sourceNotebookId, sourcePageId)
             check(!pageFile(targetNotebookId, targetPageId).exists()) { "Target page already exists" }
-            val destination = assetDirectory(targetNotebookId, targetPageId)
             val sourceDirectory = assetDirectory(sourceNotebookId, sourcePageId)
             val assets = (sourceDirectory.listFiles()?.filter(File::isFile).orEmpty() + extraAssets)
                 .distinctBy { it.canonicalFile }
             assets.forEach { source -> check(source.isFile) { "Source asset has not synchronized: ${source.name}" } }
+            val required = sourceDocument.objects.flatMap { item -> when(item) {
+                is InsertObject.Attachment -> listOf(item.assetName)
+                is InsertObject.Spreadsheet -> listOf(item.assetName)
+                is InsertObject.Image -> listOfNotNull(item.assetName, item.sourceAssetName)
+                else -> emptyList()
+            } }.toSet()
+            val available = assets.map { it.name }.toSet()
+            required.forEach { name ->
+                safeId(name)
+                check(name in available) { "Source asset has not synchronized: $name" }
+            }
+            val destination = assetDirectory(targetNotebookId, targetPageId)
             assets.forEach { source -> source.copyTo(File(destination, source.name), overwrite = false) }
             if (sourceDocument.objects.isNotEmpty() || pageFile(sourceNotebookId, sourcePageId).isFile) {
                 save(

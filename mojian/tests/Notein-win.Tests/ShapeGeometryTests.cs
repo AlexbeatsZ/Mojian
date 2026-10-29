@@ -70,7 +70,7 @@ public sealed class ShapeGeometryTests
     [Fact] public void RealCanvasShapeCreationUndoPersistenceAndCancellation()
     {
         Exception? failure=null;
-        var thread=new Thread(()=> {
+        WpfTestExecutor.Run(()=> {
             try {
                 var canvas=new NoteCanvas { Document=new PageDocument("n","p"), SelectedTool=new ToolPreset("shape-default",DrawingToolKind.Shape) { ShapeKind=ShapeKind.Rectangle } };
                 void Call(string name, params object[] args) => typeof(NoteCanvas).GetMethod(name,BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(canvas,args);
@@ -96,7 +96,6 @@ public sealed class ShapeGeometryTests
                 Assert.Equal(2,canvas.Document.Strokes[^1].Points.Count); Assert.Equal("shape-v1",canvas.Document.Strokes[^1].BrushProfile);
             } catch (Exception e) { failure=e; }
         });
-        thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         if (failure!=null) throw failure;
     }
 }

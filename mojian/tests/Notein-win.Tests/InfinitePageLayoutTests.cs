@@ -84,7 +84,7 @@ public class InfinitePageLayoutTests
     public void RealCanvasNavigationDoesNotGrowAndExportIsIndependentOfViewport()
     {
         Exception? failure = null;
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -128,9 +128,6 @@ public class InfinitePageLayoutTests
             }
             catch (Exception ex) { failure = ex; }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
         Assert.Null(failure);
     }
 

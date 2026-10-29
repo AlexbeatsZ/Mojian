@@ -23,7 +23,7 @@ public class UiRenderTests
     {
         string errorFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Temp", ".agents", "ui_compare", "render_error.txt");
         if (File.Exists(errorFile)) File.Delete(errorFile);
-        var thread = new Thread(() =>
+        WpfTestExecutor.Run(() =>
         {
             try
             {
@@ -249,9 +249,6 @@ public class UiRenderTests
             }
         });
 
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
 
         if (File.Exists(errorFile))
         {

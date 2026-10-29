@@ -338,6 +338,11 @@ class CanvasTextInputLayer(
             if (selectedOnly && editor !in selectedEditors) return@forEachEditor
             if (editor.text.isBlank()) return@forEachEditor
             val originalLayout = editor.layout ?: return@forEachEditor
+            val extent = documentBounds(editor).apply {
+                bottom = maxOf(bottom, top + (originalLayout.height + editor.compoundPaddingTop +
+                    editor.compoundPaddingBottom) * state(editor).contentScale)
+            }
+            if (canvas.rejects(extent)) return@forEachEditor
             val exportText = SpannableString(editor.text)
             exportText.getSpans(0, exportText.length, ForegroundColorSpan::class.java).forEach { span ->
                 val color = if (output.printsDark(darkBackground)) OutputAppearance.printInk(span.foregroundColor) else span.foregroundColor
