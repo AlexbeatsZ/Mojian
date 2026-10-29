@@ -54,8 +54,8 @@ public class PreferenceMemoryUiTests
                 var status = (StackPanel)window.FindName("CanvasStatus");
                 var parent = (FrameworkElement)status.Parent;
                 var position = status.TranslatePoint(new Point(), parent);
-                Assert.InRange(parent.ActualWidth - position.X - status.ActualWidth, 11, 13);
-                Assert.InRange(parent.ActualHeight - position.Y - status.ActualHeight, 9, 11);
+                Assert.InRange(parent.ActualWidth - position.X - status.ActualWidth, -0.1, 0.1);
+                Assert.InRange(parent.ActualHeight - position.Y - status.ActualHeight, -0.1, 0.1);
                 Capture(window, "local-viewport-status.png");
                 window.Close();
                 window = null;

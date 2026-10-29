@@ -105,10 +105,10 @@ class PageSurfaceView(
             output.set(0f, A4PageLayout.pageTop(index, height), width, A4PageLayout.pageBottom(index, height))
         } else {
             output.set(
-                0f,
-                0f,
-                settings.documentWidth?.coerceAtLeast(1f) ?: A4PageLayout.pageWidth,
-                settings.documentHeight?.coerceAtLeast(1f) ?: A4PageLayout.pageHeight,
+                settings.paperOriginX,
+                settings.paperOriginY,
+                settings.paperOriginX + (settings.documentWidth?.coerceAtLeast(1f) ?: A4PageLayout.pageWidth),
+                settings.paperOriginY + (settings.documentHeight?.coerceAtLeast(1f) ?: A4PageLayout.pageHeight),
             )
         }
     }

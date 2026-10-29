@@ -23,6 +23,11 @@ public static class ExportLayout
         var content = Rect.Empty;
         foreach (var bounds in InfinitePageLayout.ContentBounds(document)) content.Union(bounds);
         var appearance = page.Appearance;
+        if (ImportedPagePresentation.Applies(document.PageId) && appearance.PaperKind != PaperKind.Pdf)
+        {
+            appearance = appearance.Clone();
+            appearance.PaperKind = PaperKind.Infinite;
+        }
         if (appearance.PaperKind == PaperKind.Pdf && options.Paper == ExportPaper.Auto)
         {
             var source = new Rect(0, 0, appearance.Width, appearance.Height);

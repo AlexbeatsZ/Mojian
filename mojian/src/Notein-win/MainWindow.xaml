@@ -559,12 +559,12 @@
                         </DockPanel>
                     </Border>
 
-                    <StackPanel x:Name="CanvasStatus" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,10" IsHitTestVisible="False">
+                    <StackPanel x:Name="CanvasStatus" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0" IsHitTestVisible="False">
                         <Border HorizontalAlignment="Right" Margin="0,0,0,4" Padding="8,4" CornerRadius="3" Background="#EE232323">
                             <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding HasSaveError}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Border.Style>
                             <TextBlock Text="{Binding SaveStateText}" Foreground="#FFB4AB" FontSize="11" MaxWidth="430" TextWrapping="Wrap" />
                         </Border>
-                        <Border HorizontalAlignment="Right" Padding="8,4" CornerRadius="3" Background="#EE232323">
+                        <Border HorizontalAlignment="Right" Padding="8,4" CornerRadius="0" Background="#EE232323">
                             <TextBlock Text="{Binding NativeSyncStatus}" Foreground="{StaticResource TextSecondary}" FontSize="11" MaxWidth="430" TextTrimming="CharacterEllipsis" />
                         </Border>
                     </StackPanel>

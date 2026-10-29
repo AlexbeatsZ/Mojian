@@ -82,6 +82,8 @@ object SharedWorkspaceCodec {
         return PageViewSettings(paperSize = PaperSize.entries[json.optInt("paperKind").coerceIn(0,2)], pageColor = palette,
             backgroundFormat = backgrounds[json.optInt("background").coerceIn(0,backgrounds.lastIndex)], pageTitleVisible = json.optBoolean("showTitle", true),
             darkBackground = dark, a4PageCount = json.optInt("sheetCount",1).coerceAtLeast(1),
+            sourcePageColor = color.removePrefix("#").takeIf { it.length == 6 || it.length == 8 }?.toLongOrNull(16)?.toInt()
+                ?.let { if (color.length == 7) it or -0x1000000 else it },
             customDocumentWidth = (json.optDouble("width",793.7)/TO_SHARED).toFloat(),
             customDocumentHeight = (json.optDouble("height",1122.5)/TO_SHARED).toFloat(),
             boundlessDocumentWidth = (json.optDouble("infiniteWidth",793.7)/TO_SHARED).toFloat(),

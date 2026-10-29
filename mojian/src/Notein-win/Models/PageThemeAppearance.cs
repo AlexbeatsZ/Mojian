@@ -4,7 +4,9 @@ public static class PageThemeAppearance
 {
     private static readonly (string Light, string Dark)[] Colors =
     [
-        ("#FAFAFA", "#1B1B1B"), ("#FFFFFF", "#1B1B1B"), ("#F3E9D2", "#302A21"), ("#E2EDF8", "#1D2B38"),
+        ("#FAFAFA", "#1B1B1B"), ("#FFFFFF", "#1B1B1B"), ("#FFFFEABD", "#1B1B1B"),
+        ("#FFFCF9F4", "#1B1B1B"), ("#FFFFFFFF", "#1B1B1B"), ("#FF292829", "#1B1B1B"),
+        ("#F3E9D2", "#302A21"), ("#E2EDF8", "#1D2B38"),
         ("#E0F1E7", "#1E3028"), ("#F4E2E8", "#352329"),
         // Earlier creation dialogs used these dark variants.
         ("#F3E9D2", "#2D2820"), ("#E2EDF8", "#1B2735"),
@@ -14,6 +16,7 @@ public static class PageThemeAppearance
     public static PageAppearance Apply(PageAppearance source, PageTheme theme)
     {
         var result = source.Clone();
+        result.SourcePageColor = source.SourcePageColor ?? source.PageColor;
         result.Theme = theme;
         foreach (var pair in Colors)
         {

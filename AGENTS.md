@@ -8,9 +8,10 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.5**; Android retains
-  `com.meta.inklab.debug`, version code **13**. iOS remains a separate 0.1.0 client.
-  `v0.7.5` prerelease is published with EXE/APK assets; source is pushed to `origin/master`.
+- Current source/build version: Windows and Android **0.7.6**; Android retains
+  `com.meta.inklab.debug`, version code **14**. iOS remains a separate 0.1.0 client.
+  Windows is updated in place to 0.7.6 and reopened on `Documents/Mojian-native`; Android devices
+  remain installed at 0.7.5. Do not confuse a built APK with device deployment.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
@@ -18,6 +19,12 @@
   row in options; single-page/one-off creation backgrounds do not change that default. Read
   `docs/design/settings-memory.md` before changing these paths. Theme overrides use display copies;
   Windows paper-growth events copy dimensions back to stored metadata, not the display theme.
+- Old imported Notein/OneNote pages now use display-only continuous paper covering negative
+  coordinates, default gray paper, and coordinated source ink/text/screenshot adaptation.
+  Dominant screenshot backgrounds are recolored rather than blindly RGB-inverted, preserving
+  black formulas and white text on colored backgrounds. Original coordinates, JSON and assets
+  are retained; fixed PDFs stay fixed. Read `docs/design/imported-page-presentation.md` first.
+  Sync overlays now have zero right/bottom outer margin on both clients.
 - Sync status is now a compact bottom-right overlay on both clients. A4 grows only for content;
   pan/zoom does not publish changes. Windows keeps viewport in local settings and preserves old
   page viewport JSON; clean navigation/close does not increment page revisions or rewrite files.
@@ -60,7 +67,8 @@
   In-place installation preserved data. Daily sync uses ordered HTTPS routes; Mojian's Syncthing
   folder is now paused. The selected659-page seed was revision1/files1818. Latest live state is
   revision15,1818 manifest records/1803 live files/651 indexed pages; all three checkpoints match.
-- Latest Windows Release suite passes **204/204**, including local-only viewport/clean close,
+- Latest Windows Release suite passes **212/212**, including imported-page native pixels,
+  original-data preservation, zero-margin status placement, local-only viewport/clean close,
   crossing alpha/PNG/SVG/independent PDF reader, menu/settings and print
   restoration after window restart; the previous 0.7.2 Debug suite passed 191/191.
   Tests share a persistent STA/Application/Dispatcher rather than reusing a dead owner; failures
@@ -69,7 +77,9 @@
   before its blank click and asserts that a temporary caret was actually established.
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`.
-  All three devices have0.7.5. OMEN and phone actual UI report synchronized at the bottom-right.
+  Windows is 0.7.6; Android APK is 0.7.6/code14, not yet installed. The following live-device
+  sync/input evidence is the previously recorded 0.7.5 baseline, not a new 0.7.6 acceptance:
+  OMEN and phone actual UI report synchronized at the bottom-right.
   Tablet installed APK client catches up to revision15; lock screen prevents foreground UI
   acceptance. Phone strict1/2/3 public fallback passed; Windows previously passed first/second/third.
   Three checkpoints equal production, no pending outbox/incoming/conflict. Native pixel probes
@@ -91,8 +101,13 @@
 - Android popup tracking is weak and clears/dismisses host anchors on Activity destruction.
 - 0.7.5: Android247passed/1opt-in skipped, APK/test APK/lint0errors/144warnings; Node11/11
   and Windows native25/25 rerun. Both Android in-place installs retain preferences and library bytes.
+- 0.7.6: Android251passed/1opt-in skipped, APK/test APK compiled, lint0errors/145warnings.
+  A real 59 MB imported page was rendered read-only with gray paper and coordinated images/ink;
+  Android native bitmap/text tests are compile-only, not installed or executed.
 
 # Active Work
+
+- Android installation and real-device acceptance for 0.7.6 have not been requested/performed.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
@@ -178,6 +193,8 @@
   compilation do not establish editability, interoperability, native output or physical latency.
 
 # Docs Index
+
+- `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
 
 - `docs/design/native-sync.md`: dedicated clones, foreground lifecycle, recovery/deployment boundaries.
 - `docs/design/android-folder-selection.md`: explicit system picker, new library and legacy-private entry.

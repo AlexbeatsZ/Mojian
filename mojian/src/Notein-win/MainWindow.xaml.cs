@@ -298,9 +298,11 @@ public partial class MainWindow : Window
 
         if (item.IsImageLike)
         {
-            var invert = AddMenuItem(menu, "反色", () => canvas.ToggleImageInversion(item));
+            var preserveOriginal = ImportedPagePresentation.IsImportedItem(item.Id) &&
+                ImportedPagePresentation.InvertImages(canvas.Document?.PageId, canvas.Appearance);
+            var invert = AddMenuItem(menu, preserveOriginal ? "保留原图" : "反色", () => canvas.ToggleImageInversion(item));
             invert.IsCheckable = true;
-            invert.IsChecked = item.ViewInverted;
+            invert.IsChecked = preserveOriginal ? item.ViewInverted : canvas.DisplayImageInverted(item);
             var rotate = new MenuItem { Header = "旋转" };
             AddMenuItem(rotate, "顺时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: true));
             AddMenuItem(rotate, "逆时针旋转 90°", () => canvas.RotateImageObject(item, clockwise: false));

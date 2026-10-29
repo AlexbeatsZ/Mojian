@@ -114,11 +114,15 @@ object SharedStrokeCodec {
         path.transform(matrix); record.path=path
         return path
     }
-    fun draw(canvas: Canvas,stroke: Stroke,printing: Boolean = false): Boolean {
+    fun draw(canvas: Canvas,stroke: Stroke,printing: Boolean = false, printingPaperColor: Int? = null): Boolean {
         if(!visible(stroke)) return true
         val path = path(stroke) ?: return false
         val color = stroke.brush.colorIntArgb
-        canvas.drawPath(path,Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color=if(printing) OutputAppearance.printInk(color) else color;style=Paint.Style.FILL })
+        canvas.drawPath(path,Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = if (!printing) color else if (printingPaperColor != null && (color and 0xffffff) == (printingPaperColor and 0xffffff))
+                OutputAppearance.printPaper(color) else OutputAppearance.printInk(color)
+            style=Paint.Style.FILL
+        })
         return true
     }
     fun bounds(stroke: Stroke): StrokeViewportBounds? = path(stroke)?.let { p ->

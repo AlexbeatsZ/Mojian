@@ -81,6 +81,31 @@ class CanvasTextInputLayer(
     private var pageGestureActive = false
     private var capturedFormat: CapturedTextFormat? = null
     private var darkBackground = true
+    private class ImportedForegroundSpan(color: Int, var dark: Boolean, var inverted: Boolean) : ForegroundColorSpan(color) {
+        fun displayColor() = ImportedPagePresentation.ink(foregroundColor, dark, inverted)
+        override fun updateDrawState(paint: TextPaint) { paint.color = displayColor() }
+    }
+
+    fun configurePage(settings: PageViewSettings) {
+        forEachEditor { editor ->
+            if (settings.importedPresentation && ImportedPagePresentation.importedItem(state(editor).id)) {
+                val text = editor.text
+                text.getSpans(0, text.length, ForegroundColorSpan::class.java).forEach { span ->
+                    if (span is ImportedForegroundSpan) {
+                        span.dark = settings.darkBackground
+                        span.inverted = settings.invertImportedImages
+                    } else {
+                        val start = text.getSpanStart(span)
+                        val end = text.getSpanEnd(span)
+                        val flags = text.getSpanFlags(span)
+                        text.removeSpan(span)
+                        text.setSpan(ImportedForegroundSpan(span.foregroundColor, settings.darkBackground, settings.invertImportedImages), start, end, flags)
+                    }
+                }
+            }
+            editor.invalidate()
+        }
+    }
     private var restoringEditors = false
     private val selectedEditors = linkedSetOf<EditText>()
     private val temporaryEditors = linkedSetOf<EditText>()
@@ -345,8 +370,12 @@ class CanvasTextInputLayer(
             if (canvas.rejects(extent)) return@forEachEditor
             val exportText = SpannableString(editor.text)
             exportText.getSpans(0, exportText.length, ForegroundColorSpan::class.java).forEach { span ->
-                val color = if (output.printsDark(darkBackground)) OutputAppearance.printInk(span.foregroundColor) else span.foregroundColor
-                if (color != span.foregroundColor) {
+                val displayed = if (span is ImportedForegroundSpan) span.displayColor() else span.foregroundColor
+                val color = if (output.printsDark(darkBackground)) {
+                    if (span is ImportedForegroundSpan && displayed == PageColor.WHITE.displayArgb(true)) OutputAppearance.printPaper(displayed)
+                    else OutputAppearance.printInk(displayed)
+                } else displayed
+                if (color != span.foregroundColor || span is ImportedForegroundSpan) {
                     val start = exportText.getSpanStart(span)
                     val end = exportText.getSpanEnd(span)
                     val flags = exportText.getSpanFlags(span)

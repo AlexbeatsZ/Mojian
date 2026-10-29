@@ -2,6 +2,10 @@
 
 Last verified: 2026-10-28
 
+Old migrated non-PDF pages use continuous content pagination, including negative-coordinate
+content, instead of clipping imported layouts to an A4 origin. Paper, image and ink display
+compatibility is specified in `imported-page-presentation.md`; real PDF MediaBoxes stay fixed.
+
 ## Android preparation and memory boundary (2026-10-28)
 
 The product export/print entries capture page identities, not a map of fully decoded page views.

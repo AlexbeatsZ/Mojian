@@ -33,7 +33,8 @@ class CanvasBackgroundLayer(
         when (pageSettings.paperSize) {
             PaperSize.BOUNDLESS -> inkView.renderBackground(
                 canvas,
-                listOf(RectF(0f, 0f, pageSettings.boundlessDocumentWidth, pageSettings.boundlessDocumentHeight)),
+                listOf(RectF(pageSettings.paperOriginX, pageSettings.paperOriginY,
+                    pageSettings.paperOriginX + pageSettings.boundlessDocumentWidth, pageSettings.paperOriginY + pageSettings.boundlessDocumentHeight)),
             )
             PaperSize.A4 -> {
                 val width = pageSettings.documentWidth ?: A4PageLayout.pageWidth

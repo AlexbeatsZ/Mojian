@@ -367,6 +367,10 @@ class InsertContentLayer(
 
     private var darkBackground = true
 
+    private var pagePresentation = PageViewSettings()
+    fun configurePage(settings: PageViewSettings) { pagePresentation = settings }
+    fun displayImageInverted(image: InsertObject.Image) = ImportedPagePresentation.imageInverted(pagePresentation, image.id, image.viewInverted)
+    fun usesImportedImagePresentation(image: InsertObject.Image) = pagePresentation.invertImportedImages && ImportedPagePresentation.importedItem(image.id)
     fun setDarkBackground(enabled: Boolean) { darkBackground = enabled }
 
     fun renderForExport(canvas: Canvas, documentMatrix: android.graphics.Matrix = viewport.documentToViewMatrix(), selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance()) {
@@ -447,10 +451,12 @@ class InsertContentLayer(
 
     private fun drawImage(canvas: Canvas, document: PageInsertDocument, image: InsertObject.Image, output: OutputAppearance) {
         val file = FileFor(document, image.assetName)
-        val bitmap = bitmap(file)
+        val inverted = output.imageInverted(image.id, displayImageInverted(image), darkBackground)
+        val adapt = inverted && pagePresentation.invertImportedImages && ImportedPagePresentation.importedItem(image.id)
+        val bitmap = bitmap(file, adapt)
         val destination = bounds(image)
         if (bitmap != null) {
-            val paint = if (output.imageInverted(image.id, image.viewInverted, darkBackground)) invertedImagePaint else bitmapPaint
+            val paint = if (inverted && !adapt) invertedImagePaint else bitmapPaint
             val quarterTurns = image.rotationQuarterTurns.mod(4)
             canvas.save()
             canvas.translate(destination.centerX(), destination.centerY())
@@ -592,16 +598,19 @@ class InsertContentLayer(
     private fun FileFor(document: PageInsertDocument, assetName: String) =
         File(repository.assetDirectory(document.notebookId, document.pageId), PageContentRepository.safeId(assetName))
 
-    private fun bitmap(file: java.io.File): Bitmap? {
-        bitmapCache.get(file.absolutePath)?.let { return it }
+    private fun bitmap(file: java.io.File, adapt: Boolean = false): Bitmap? {
+        val key = "${file.absolutePath}|$adapt|$darkBackground"
+        bitmapCache.get(key)?.let { return it }
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, options)
         if (options.outWidth <= 0 || options.outHeight <= 0) return null
         var sample = 1
         while (options.outWidth / sample > 1800 || options.outHeight / sample > 1800) sample *= 2
         val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
-        bitmapCache.put(file.absolutePath, decoded)
-        return decoded
+        val displayed = if (adapt) ImportedImageAppearance.adapt(decoded, darkBackground) else decoded
+        if (displayed !== decoded) decoded.recycle()
+        bitmapCache.put(key, displayed)
+        return displayed
     }
 
     private fun drawPaperclip(canvas: Canvas, centerX: Float, centerY: Float) {

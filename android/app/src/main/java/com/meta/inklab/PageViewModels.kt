@@ -85,6 +85,11 @@ data class PageViewSettings(
     var customDocumentHeight: Float? = null,
     var boundlessDocumentWidth: Float = BoundlessPageLayout.initialWidth,
     var boundlessDocumentHeight: Float = BoundlessPageLayout.initialHeight,
+    var sourcePageColor: Int? = null,
+    var paperOriginX: Float = 0f,
+    var paperOriginY: Float = 0f,
+    var importedPresentation: Boolean = false,
+    var invertImportedImages: Boolean = false,
 ) {
     val documentWidth: Float?
         get() = if (paperSize == PaperSize.BOUNDLESS) boundlessDocumentWidth else customDocumentWidth ?: paperSize.documentWidth
@@ -95,6 +100,7 @@ data class PageViewSettings(
     fun toJson(): JSONObject =
         JSONObject().apply {
             put("paperSize", paperSize.name)
+            sourcePageColor?.let { put("sourcePageColor", it) }
             put("pageColor", pageColor.name)
             put("backgroundFormat", backgroundFormat.name)
             put("pageTitleVisible", pageTitleVisible)
@@ -121,6 +127,7 @@ data class PageViewSettings(
                     }.getOrDefault(CanvasBackgroundFormat.GRID_STANDARD),
                 pageTitleVisible = json.optBoolean("pageTitleVisible", true),
                 darkBackground = json.optBoolean("darkBackground", true),
+                sourcePageColor = if (json.has("sourcePageColor")) json.getInt("sourcePageColor") else null,
                 a4PageCount = json.optInt("a4PageCount", 1).coerceAtLeast(1),
                 customDocumentWidth = json.optDouble("customDocumentWidth", Double.NaN).takeIf(Double::isFinite)?.toFloat(),
                 customDocumentHeight = json.optDouble("customDocumentHeight", Double.NaN).takeIf(Double::isFinite)?.toFloat(),

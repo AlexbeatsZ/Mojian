@@ -181,6 +181,7 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun replaceStrokes(replacement: List<Stroke>) {
+        appliedPresentation = null
         strokes.clear()
         strokes.addAll(replacement)
         rebuildStrokeMetrics()
@@ -208,12 +209,31 @@ class DryInkView(context: Context) : View(context) {
         invalidator()
     }
 
+    private var appliedPresentation: Triple<Boolean, Boolean, Boolean>? = null
+
     fun setDarkBackground(enabled: Boolean) {
         outputPageSettings.darkBackground = enabled
         invalidateBackground()
+        val presentation = Triple(enabled, outputPageSettings.importedPresentation, outputPageSettings.invertImportedImages)
+        if (appliedPresentation == presentation) return
+        appliedPresentation = presentation
         val replacements = LinkedHashMap<Stroke, Stroke>()
+        val colors = mutableMapOf<String, Int>()
         for (stroke in strokes) {
             val color = stroke.brush.colorIntArgb
+            val metadata = SharedStrokeCodec.metadata(stroke)
+            val source = metadata?.optString("colorHex")?.takeIf(String::isNotBlank)
+            if (outputPageSettings.importedPresentation && metadata != null && source != null &&
+                ImportedPagePresentation.importedItem(metadata.optString("id"))) {
+                val adapted = colors[source] ?: runCatching {
+                    ImportedPagePresentation.ink(Color.parseColor(source), enabled, outputPageSettings.invertImportedImages)
+                }.getOrNull()?.also { colors[source] = it }
+                if (adapted != null) {
+                    val mapped = (adapted and 0xffffff) or (color and -0x1000000)
+                    if (mapped != color) replacements[stroke] = Stroke(stroke.brush.copyWithColorIntArgb(mapped), stroke.inputs).also { SharedStrokeCodec.recolored(stroke, it) }
+                    continue
+                }
+            }
             val red = Color.red(color)
             val green = Color.green(color)
             val blue = Color.blue(color)
@@ -460,8 +480,8 @@ class DryInkView(context: Context) : View(context) {
         canvas.save()
         canvas.concat(documentMatrix)
         for (index in first..last) {
-            val top = if (settings.paperSize == PaperSize.A4) index * stride else 0f
-            val pageRect = RectF(0f, top, pageWidth, top + pageHeight)
+            val top = if (settings.paperSize == PaperSize.A4) index * stride else settings.paperOriginY
+            val pageRect = RectF(settings.paperOriginX, top, settings.paperOriginX + pageWidth, top + pageHeight)
             val clip = RectF(pageRect)
             if (!clip.intersect(visible)) continue
             canvas.drawRect(pageRect, Paint().apply { color = paperColor })
@@ -532,9 +552,13 @@ class DryInkView(context: Context) : View(context) {
             if (selectedOnly && stroke !in selectedStrokes) return@forEach
             val bounds = boundsFor(stroke)
             if (canvas.rejects(RectF(bounds.left, bounds.top, bounds.right, bounds.bottom))) return@forEach
-            if (SharedStrokeCodec.draw(canvas,stroke,output.printsDark(outputPageSettings.darkBackground))) return@forEach
+            val printingPaper = if (outputPageSettings.importedPresentation) PageColor.WHITE.displayArgb(true) else null
+            if (SharedStrokeCodec.draw(canvas,stroke,output.printsDark(outputPageSettings.darkBackground),printingPaper)) return@forEach
             val shape = stroke.shape
-            paint.color = if (output.printsDark(outputPageSettings.darkBackground)) OutputAppearance.printInk(stroke.brush.colorIntArgb) else stroke.brush.colorIntArgb
+            val displayed = stroke.brush.colorIntArgb
+            paint.color = if (!output.printsDark(outputPageSettings.darkBackground)) displayed
+                else if (printingPaper != null && (displayed and 0xffffff) == (printingPaper and 0xffffff)) OutputAppearance.printPaper(displayed)
+                else OutputAppearance.printInk(displayed)
             for (group in 0 until shape.getRenderGroupCount()) {
                 val path = Path().apply { fillType = Path.FillType.WINDING }
                 for (outline in 0 until shape.getOutlineCount(group)) {

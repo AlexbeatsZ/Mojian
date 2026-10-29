@@ -57,6 +57,7 @@ public partial class NoteCanvas : UserControl
     private static extern bool IsClipboardFormatAvailable(uint format);
 
     private readonly ViewportState _viewport = new();
+    private Rect? _importedPaperBounds;
     private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null)
     {
         public static implicit operator UndoEntry(string json) => new(Json: json);
@@ -285,6 +286,7 @@ public partial class NoteCanvas : UserControl
         canvas._pdfRenderGeneration++;
         if (args.NewValue is PageDocument doc) canvas._viewport.Restore(doc.Viewport);
         else canvas._viewport.Reset();
+        canvas._importedPaperBounds = ImportedPagePresentation.PaperBounds(canvas.Appearance, canvas.Document);
         canvas.RebuildTextEditors();
         canvas.InvalidateVisual();
     }
@@ -292,6 +294,7 @@ public partial class NoteCanvas : UserControl
     private static void OnAppearanceChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
+        canvas._importedPaperBounds = ImportedPagePresentation.PaperBounds(canvas.Appearance, canvas.Document);
         canvas.UpdateTextEditorAppearance();
         canvas.InvalidateVisual();
     }
@@ -2880,7 +2883,13 @@ public partial class NoteCanvas : UserControl
     private void DrawPaper(DrawingContext dc, bool lightExport, Rect extent)
     {
         var paper = OutputPaperBrush();
-        if (Appearance.PaperKind == PaperKind.Infinite)
+        if (_importedPaperBounds is { } importedPaper)
+        {
+            dc.DrawRectangle(paper, null, importedPaper);
+            var visiblePaper = Rect.Intersect(importedPaper, extent);
+            if (!visiblePaper.IsEmpty) DrawPattern(dc, visiblePaper, lightExport);
+        }
+        else if (Appearance.PaperKind == PaperKind.Infinite)
         {
             var rect = new Rect(0, 0, Appearance.InfiniteWidth, Appearance.InfiniteHeight);
             dc.DrawRectangle(paper, _outputAppearance != null ? null : new Pen(new SolidColorBrush(Color.FromRgb(61, 61, 61)), 1 / Math.Max(0.1, _viewport.Scale)), rect);
@@ -2956,7 +2965,9 @@ public partial class NoteCanvas : UserControl
             {
                 case PageObjectKind.Image:
                 case PageObjectKind.Sticker:
-                    var bitmap = LoadBitmap(item.AssetName, OutputImageInverted(item));
+                    var inverted = OutputImageInverted(item);
+                    var bitmap = LoadBitmap(item.AssetName, inverted, inverted && ImportedPagePresentation.IsImportedItem(item.Id) &&
+                        ImportedPagePresentation.InvertImages(Document.PageId, Appearance));
                     if (bitmap != null) DrawTransformedImage(dc, bitmap, rect, item);
                     else { dc.DrawRectangle(lightExport ? Brushes.WhiteSmoke : new SolidColorBrush(Color.FromRgb(31, 31, 31)), border, rect); DrawText(dc, $"图片不可用 · {item.DisplayName}", new Point(rect.X + 12, rect.Y + 12), 12, lightExport ? Brushes.Black : Brushes.White); }
                     break;
@@ -3056,7 +3067,14 @@ public partial class NoteCanvas : UserControl
                 var sourceColor = (Color)ColorConverter.ConvertFromString(stroke.ColorHex);
                 // Only logical black adapts to dark paper. Whites and arbitrary
                 // source colors remain source colors, including white cover ink.
-                if (sourceColor.R != 0 || sourceColor.G != 0 || sourceColor.B != 0 || lightExport || Appearance.Theme != PageTheme.Dark)
+                if (ImportedPagePresentation.Applies(Document?.PageId) && ImportedPagePresentation.IsImportedItem(stroke.Id))
+                {
+                    var adapted = ImportedPagePresentation.Ink(sourceColor, Appearance.Theme == PageTheme.Dark,
+                        ImportedPagePresentation.InvertImages(Document?.PageId, Appearance));
+                    brush = new SolidColorBrush(lightExport ? adapted == ImportedPagePresentation.PaperColor(true)
+                        ? OutputAppearance.PrintPaper(adapted) : OutputAppearance.PrintInk(adapted) : adapted);
+                }
+                else if (sourceColor.R != 0 || sourceColor.G != 0 || sourceColor.B != 0 || lightExport || Appearance.Theme != PageTheme.Dark)
                     brush = new SolidColorBrush(lightExport ? OutputAppearance.PrintInk(Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B)) : Color.FromRgb(sourceColor.R, sourceColor.G, sourceColor.B));
             }
             if (stroke.VectorGeometry is { } vector)
@@ -3208,17 +3226,17 @@ public partial class NoteCanvas : UserControl
     private CanvasPointerCursorMode CurrentPointerCursorMode() =>
         CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, _stylusInRange, SelectedTool?.Kind);
 
-    private BitmapSource? LoadBitmap(string assetName, bool inverted)
+    private BitmapSource? LoadBitmap(string assetName, bool inverted, bool adaptImported = false)
     {
         var path = ResolveAssetPath?.Invoke(assetName);
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
-        var key = $"{path}|{inverted}|{File.GetLastWriteTimeUtc(path).Ticks}";
+        var key = $"{path}|{inverted}|{adaptImported}|{Appearance.Theme}|{File.GetLastWriteTimeUtc(path).Ticks}";
         if (_bitmapCache.TryGetValue(key, out var cached)) return cached;
         try
         {
             var source = new BitmapImage();
             source.BeginInit(); source.CacheOption = BitmapCacheOption.OnLoad; source.UriSource = new Uri(path); source.EndInit(); source.Freeze();
-            var result = ApplyImageInversion(source, inverted);
+            var result = adaptImported ? ImportedImageAppearance.Adapt(source, Appearance.Theme == PageTheme.Dark) : ApplyImageInversion(source, inverted);
             _bitmapCache[key] = result;
             return result;
         }
@@ -3386,7 +3404,7 @@ public partial class NoteCanvas : UserControl
 
     private Rect CalculateDocumentExtent()
     {
-        if (Document != null && Appearance.PaperKind == PaperKind.Infinite)
+        if (Document != null && (Appearance.PaperKind == PaperKind.Infinite || _importedPaperBounds != null))
             return InfinitePageLayout.ExportBounds(Document);
         var extent = Appearance.PaperKind != PaperKind.Infinite
             ? new Rect(0, 0, Appearance.Width, Math.Max(1, Appearance.SheetCount) * Appearance.Height + Math.Max(0, Appearance.SheetCount - 1) * A4PageLayout.PageGap)
@@ -3452,6 +3470,7 @@ public partial class NoteCanvas : UserControl
         Document.HasPendingContentChanges = true;
         var paperGrew = GrowA4IfNeeded();
         paperGrew |= InfinitePageLayout.EnsureCapacity(Appearance, Document);
+        _importedPaperBounds = ImportedPagePresentation.PaperBounds(Appearance, Document);
         if (paperGrew) PageMetadataChanged?.Invoke(this, EventArgs.Empty);
         _viewport.CopyTo(Document.Viewport);
         if (immediate) { _saveTimer.Stop(); RaiseDocumentChanged(); }
@@ -3682,12 +3701,19 @@ public partial class NoteCanvas : UserControl
     {
         var brush = (SolidColorBrush)ParseBrush(Appearance.PageColor,
             Appearance.Theme == PageTheme.Dark ? Color.FromRgb(27, 27, 27) : Color.FromRgb(250, 250, 250));
+        if (ImportedPagePresentation.Applies(Document?.PageId))
+            brush = new SolidColorBrush(ImportedPagePresentation.PaperColor(Appearance.Theme == PageTheme.Dark));
         return output.PrintsDark(Appearance.Theme)
             ? new SolidColorBrush(OutputAppearance.PrintPaper(brush.Color)) : brush;
     }
 
-    private bool OutputImageInverted(PageObject item) =>
-        _outputAppearance?.ImageInverted(item.Id, item.ViewInverted, Appearance.Theme) ?? item.ViewInverted;
+    public bool DisplayImageInverted(PageObject item) => ImportedPagePresentation.ImageInverted(Document?.PageId, Appearance, item);
+
+    private bool OutputImageInverted(PageObject item)
+    {
+        var displayed = DisplayImageInverted(item);
+        return _outputAppearance?.ImageInverted(item.Id, displayed, Appearance.Theme) ?? displayed;
+    }
 
     private static SolidColorBrush TextBrush(InkPalette palette, bool darkPage, bool lightExport)
     {
@@ -3700,13 +3726,17 @@ public partial class NoteCanvas : UserControl
         return new SolidColorBrush(color);
     }
 
-    private static Brush TextItemBrush(TextItem item, bool darkPage, bool lightExport)
+    private Brush TextItemBrush(TextItem item, bool darkPage, bool lightExport)
     {
         if (!string.IsNullOrWhiteSpace(item.ForegroundHex))
         {
             var brush = ParseBrush(item.ForegroundHex, TextBrush(item.Color, darkPage, lightExport));
+            if (brush is SolidColorBrush original && ImportedPagePresentation.Applies(Document?.PageId) && ImportedPagePresentation.IsImportedItem(item.Id))
+                brush = new SolidColorBrush(ImportedPagePresentation.Ink(original.Color, darkPage,
+                    ImportedPagePresentation.InvertImages(Document?.PageId, Appearance)));
             return lightExport && brush is SolidColorBrush solid
-                ? new SolidColorBrush(OutputAppearance.PrintInk(solid.Color)) : brush;
+                ? new SolidColorBrush(ImportedPagePresentation.Applies(Document?.PageId) && solid.Color == ImportedPagePresentation.PaperColor(true)
+                    ? OutputAppearance.PrintPaper(solid.Color) : OutputAppearance.PrintInk(solid.Color)) : brush;
         }
         return TextBrush(item.Color, darkPage, lightExport);
     }

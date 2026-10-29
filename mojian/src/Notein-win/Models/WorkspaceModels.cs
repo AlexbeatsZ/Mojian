@@ -37,6 +37,8 @@ public static class CanvasBackgroundFormatExtensions
 
 public sealed class PageAppearance
 {
+    [JsonIgnore]
+    public string? SourcePageColor { get; set; }
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public PaperKind PaperKind { get; set; } = PaperKind.Infinite;
@@ -52,6 +54,7 @@ public sealed class PageAppearance
 
     public PageAppearance Clone() => new()
     {
+        SourcePageColor = SourcePageColor,
         AdditionalData = AdditionalData,
         PaperKind = PaperKind,
         Theme = Theme,

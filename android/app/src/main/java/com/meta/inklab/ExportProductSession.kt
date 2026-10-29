@@ -81,10 +81,12 @@ class ExportProductSession(private val context: Context, private val repository:
             val text = textLayer(identity.settings, snapshots)
             try { text.contentBounds().toList() } finally { text.replaceEditors(emptyList()) }
         }
+        val display = ImportedPagePresentation.display(identity.settings, identity.id, bounds.asSequence())
         val images=document.objects.filterIsInstance<InsertObject.Image>().mapIndexed { imageIndex,image ->
-            ExportImageChoice(image.id,"${identity.title} · 图片 ${imageIndex+1} · ${image.displayName}",image.viewInverted)
+            ExportImageChoice(image.id,"${identity.title} · 图片 ${imageIndex+1} · ${image.displayName}",
+                ImportedPagePresentation.imageInverted(display, image.id, image.viewInverted))
         }
-        val result=ExportSourceSummary(identity.settings.copy(),bounds,identity.originalSize,images)
+        val result=ExportSourceSummary(display,bounds,identity.originalSize,images)
         check(version == (file.lastModified() to file.length())) { "页面正在更新，请重新打开导出" }
         synchronized(summaries) { checkActive(); summaries[index]=result; versions[index]=version }
         return result
@@ -109,8 +111,9 @@ class ExportProductSession(private val context: Context, private val repository:
         checkActive()
         check(leased.compareAndSet(false, true)) { "导出页面尚未释放" }
         try {
-            val identity=pages[sourceIndex]
-            val content=summary(sourceIndex).content
+            val summary=summary(sourceIndex)
+            val identity=pages[sourceIndex].copy(settings=summary.settings)
+            val content=summary.content
             val file=repository.pageFile(notebookId,identity.id)
             val version=synchronized(summaries) { versions[sourceIndex] }
             check(version == (file.lastModified() to file.length())) { "页面已更新，请重新打开导出" }
@@ -162,14 +165,15 @@ class ExportProductSession(private val context: Context, private val repository:
                     text=CanvasTextInputLayer(renderContext,viewport)
                     checkNotNull(ink).apply {
                         configureOutputPage(identity.settings,identity.title)
-                        setDarkBackground(identity.settings.darkBackground)
                         replaceStrokes(strokes)
+                        setDarkBackground(identity.settings.darkBackground)
                     }
-                    checkNotNull(inserts).apply { setDarkBackground(identity.settings.darkBackground); bind(document) }
+                    checkNotNull(inserts).apply { setDarkBackground(identity.settings.darkBackground); configurePage(identity.settings); bind(document) }
                     checkNotNull(tagLayer).replaceTags(tags)
                     checkNotNull(text).apply {
                         setDarkBackground(identity.settings.darkBackground)
                         replaceEditors(snapshots)
+                        configurePage(identity.settings)
                         val density=context.resources.displayMetrics.density
                         measure(View.MeasureSpec.makeMeasureSpec((900*density).toInt(),View.MeasureSpec.EXACTLY),
                             View.MeasureSpec.makeMeasureSpec((1200*density).toInt(),View.MeasureSpec.EXACTLY))

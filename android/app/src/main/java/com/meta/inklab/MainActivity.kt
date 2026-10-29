@@ -1203,7 +1203,7 @@ class MainActivity : Activity() {
             maxWidth = dp(430)
             ellipsize = android.text.TextUtils.TruncateAt.END
             setTextColor(TEXT_SECONDARY)
-            background = rounded(0xEE232323.toInt(), dp(3).toFloat(), Color.TRANSPARENT)
+            background = rounded(0xEE232323.toInt(), 0f, Color.TRANSPARENT)
             setPadding(dp(8), dp(4), dp(8), dp(4))
             visibility = View.GONE
             setOnClickListener { showNativeSyncOptions() }
@@ -1223,9 +1223,7 @@ class MainActivity : Activity() {
         val canvasArea = FrameLayout(this).apply {
             addView(buildSplitCanvasHost(), FrameLayout.LayoutParams(MATCH, MATCH))
             addView(nativeSyncStatusView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
-                marginEnd = dp(12)
-                bottomMargin = dp(10)
-                marginStart = dp(12)
+                marginStart = 0
             })
         }
         workArea.addView(canvasArea, LinearLayout.LayoutParams(0, MATCH, 1f))
@@ -6056,14 +6054,17 @@ class MainActivity : Activity() {
         if (pageLoadingOverlay != null) return
         if (!::pageSurfaceBackground.isInitialized) return
         val page = workspace.selectedPage()
-        val settings = appearancePreferences.display(page?.viewSettings ?: PageViewSettings())
+        val settings = ImportedPagePresentation.display(appearancePreferences.display(page?.viewSettings ?: PageViewSettings()),
+            page?.id, if (insertContentLayer.currentDocument()?.pageId == page?.id) documentContentBounds() else emptySequence())
         val nextDark = settings.darkBackground
         darkCanvasActive = nextDark
         dryInkView.backgroundFormat = settings.backgroundFormat
         dryInkView.configureOutputPage(settings, page?.title.orEmpty())
         dryInkView.setDarkBackground(nextDark)
         textInputLayer.setDarkBackground(nextDark)
+        textInputLayer.configurePage(settings)
         insertContentLayer.setDarkBackground(nextDark)
+        insertContentLayer.configurePage(settings)
         canvasBackgroundLayer.updatePage(settings)
         pageSurfaceBackground.updatePage(page?.title.orEmpty(), settings)
         pageSurfaceForeground.updatePage(page?.title.orEmpty(), settings)
@@ -6125,8 +6126,13 @@ class MainActivity : Activity() {
 
     private fun expandPageIfNeeded() {
         val page = workspace.selectedPage() ?: return
-        if (!ensureA4Capacity(page) && !ensureBoundlessCapacity(page)) return
-        persistPageViewSettings()
+        val grew = ensureA4Capacity(page) || ensureBoundlessCapacity(page)
+        if (grew) persistPageViewSettings()
+        if (ImportedPagePresentation.applies(page.id)) {
+            applySelectedPageAppearance()
+            return
+        }
+        if (!grew) return
         val display = appearancePreferences.display(page.viewSettings)
         canvasBackgroundLayer.updatePage(display)
         pageSurfaceBackground.updatePage(page.title, display)
@@ -7392,7 +7398,9 @@ class MainActivity : Activity() {
             ),
             MojianCommandMenu.Item("顺序", "navigation", dividerBefore = true, submenu = orderMenu),
             MojianCommandMenu.Item("旋转", "arrow_redo", submenu = rotateMenu),
-            MojianCommandMenu.Item("反色", "image", checked = image.viewInverted, action = { insertContentLayer.toggleImageInversion(image) }),
+            MojianCommandMenu.Item(if (insertContentLayer.usesImportedImagePresentation(image)) "保留原图" else "反色", "image",
+                checked = if (insertContentLayer.usesImportedImagePresentation(image)) image.viewInverted else insertContentLayer.displayImageInverted(image),
+                action = { insertContentLayer.toggleImageInversion(image) }),
             MojianCommandMenu.Item("移动", "hand_left", enabled = false, dividerBefore = true),
             MojianCommandMenu.Item("裁剪", "crop", enabled = false),
             MojianCommandMenu.Item("还原为原始尺寸", "full_screen_maximize", dividerBefore = true, action = { insertContentLayer.restoreSelectedImageSize() }),

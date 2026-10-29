@@ -4,6 +4,14 @@ Last verified: 2026-10-12
 
 Read before changing Android shared-stroke color, opacity, native proxy brushes or legacy pen loading.
 
+## Imported page contrast (2026-10-29)
+
+Read `imported-page-presentation.md` before changing source-color display. Old migrated pages now
+adapt paper, neutral source ink, explicit rich-text colors and page-like screenshots together,
+without changing stored colors/alpha/geometry or the original image bytes. Colorful backgrounds
+must not be handled by blindly inverting every RGB channel. Non-imported authoring retains its
+existing palette behavior. Display cover ink follows paper conversion during printing.
+
 ## Filled outline intersections (2026-10-29)
 
 Unprefixed shared `vectorPath` uses nonzero winding, matching Android/SVG. WPF's path parser

@@ -24,7 +24,8 @@ public partial class MainWindow
             var pages = ExportPages(options.Scope).Where(p => ViewModel.DisplayAppearance(p.Appearance).Theme == PageTheme.Dark).ToArray();
             return (pages.Length > 0, pages.SelectMany(page => ExportDocument(page).Objects
                 .Where(o => o.Kind is PageObjectKind.Image or PageObjectKind.Sticker or PageObjectKind.PdfPrintout)
-                .Select((o, i) => new ExportImageChoice(o.Id, $"{page.Title} · 图片 {i + 1} · {o.DisplayName}", o.ViewInverted))).ToArray());
+                .Select((o, i) => new ExportImageChoice(o.Id, $"{page.Title} · 图片 {i + 1} · {o.DisplayName}",
+                    ImportedPagePresentation.ImageInverted(page.Id, ViewModel.DisplayAppearance(page.Appearance), o)))).ToArray());
         };
         Backstage.ExportSettings.Requested += RunExport;
         Backstage.PrintSettings.Requested += RunExport;

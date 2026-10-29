@@ -2,6 +2,10 @@
 
 Last verified: 2026-10-08
 
+Old Notein/OneNote pages additionally use the read-only paper/image/ink contrast compatibility
+in `imported-page-presentation.md`. Original files and persisted inversion flags remain unchanged;
+output/print image choices must use the effective display state rather than the flag alone.
+
 Read this document before changing insert commands, embedded assets, note links, sticker presets,
 spreadsheet/PDF previews, or export formats.
 
