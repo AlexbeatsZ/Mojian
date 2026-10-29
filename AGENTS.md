@@ -12,6 +12,7 @@
   `com.meta.inklab.debug`, version code **14**. iOS remains a separate 0.1.0 client.
   Windows is updated in place to 0.7.6 and reopened on `Documents/Mojian-native`; Android devices
   remain installed at 0.7.5. Do not confuse a built APK with device deployment.
+  `v0.7.6` prerelease is published with EXE/APK assets; source is pushed to `origin/master`.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
