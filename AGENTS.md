@@ -42,9 +42,13 @@
 - Windows now opens `C:\Users\Meta\Documents\Mojian`, explicitly chosen by the user on 2026-10-28.
   The former `_migration\native-20261002\workspace` was deleted in agy's 10:33 cleanup even though
   app preferences and Syncthing still referenced it. The new startup sample created at that missing
-  path during deployment was withdrawn; no library merge/recovery was performed. Android retains
+  path during deployment was withdrawn. User-authorized recovery subsequently restored the active
+  canonical tree to that former path: 5 notebooks / 659 indexed pages / 1262 referenced assets,
+  validator has no errors; its library and all 664 page files match the surviving tablet. This does
+  not restore all deleted source/migration backups. Android retains
   `/storage/emulated/0/Documents/Mojian`; phone/tablet library JSON and navigation were unchanged
-  by in-place installation. The existing Windows Syncthing folder still targets the missing old path.
+  by in-place installation. User clarified that daily sync must use Sakura HTTPS; Mojian's Syncthing
+  folder is now paused. The public native production manifest remains empty (revision 0/files 0).
 - Latest task-only 0.7.1 evidence (2026-10-28): Android **232/232** unit tests including an opt-in
   real public HTTPS round trip; debug/test APK builds, lint **0 errors / 137 warnings**. Native sync:
   **11/11 Node integration tests**, **2/2 gateway tests**, and **24/24 Windows scenarios** on both
@@ -85,8 +89,10 @@
 
 # Active Work
 
-- Windows Syncthing's old folder path is missing and its status is `error`. Do not silently seed,
-  merge or repoint different device libraries; the user only authorized the Windows app entry change.
+- User requested comparison before choosing a Sakura seed: Windows root has 1446 indexed pages,
+  restored/tablet 659, phone 654. Do not silently choose/merge these libraries or resume Mojian's
+  paused Syncthing folder. Comparison is complete; await source composition, then use dedicated native
+  clones outside Syncthing; recovery/transport continuation is `~/.agents/mojian--settings-memory`.
 - Complete physical Android folder-picker/permission/save/restart and native foreground-sync
   acceptance before live-library adoption. The ROG HTTPS backend is deployed; real Syncthing
   libraries remain unchanged and must not be pointed at native sync in place.
