@@ -95,8 +95,8 @@
 # Active Work
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
-  version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies match1818 files on
-  all three devices. Syncthing stays paused. Continuation: `~/.agents/mojian--settings-memory`.
+  version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
+  manifest on all three devices. Syncthing stays paused. Continuation: `~/.agents/mojian--settings-memory`.
 - Dedicated native copies are adopted. Physical Android folder-picker/permission/save-failure
   and tablet unlocked foreground acceptance remain separate; original Syncthing trees stay intact.
 - Native sync v1 conflicts require reviewed manual recovery; there is no automatic resolution UI,
