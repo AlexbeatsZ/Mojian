@@ -283,7 +283,9 @@ class WorkspaceTests(unittest.TestCase):
             library = json.loads((workspace / "library.json").read_text(encoding="utf-8"))
             section = library["notebooks"][0]["sections"][0]
             self.assertIn("可编辑批注", section["pages"][0]["title"])
-            self.assertEqual("原始 PDF 备份与迁移说明", section["pages"][-1]["title"])
+            self.assertEqual(1, len(section["pages"]))
+            self.assertFalse(any(workspace.rglob("page-notein-summary-*.json")))
+            self.assertEqual(1, report["stats"]["pdf-background-sources"])
             self.assertEqual(section["pages"][0]["id"], library["notebooks"][0]["selectedPageId"])
             self.assertTrue(section["pages"][0]["isPdfPage"])
             editable_document = json.loads(
@@ -291,11 +293,33 @@ class WorkspaceTests(unittest.TestCase):
             )
             self.assertEqual(3, editable_document["objects"][0]["kind"])
             self.assertTrue(editable_document["objects"][0]["sourceAssetName"])
+            background_asset = workspace / "notebooks" / "notebook-notein-import" / "assets" / section["pages"][0]["id"] / editable_document["objects"][0]["sourceAssetName"]
+            self.assertEqual(source_pdf_bytes, background_asset.read_bytes())
             self.assertEqual('lower', editable_document['strokes'][0]['layerId'])
             layers = {layer['id']: layer for layer in editable_document['layers']}
             self.assertEqual(0, layers['lower']['order'])
             self.assertEqual(1, layers['upper']['order'])
             self.assertFalse(layers['upper']['visible'])
+            connection = sqlite3.connect(database_path)
+            connection.execute("delete from StrokeEntity")
+            connection.commit()
+            connection.close()
+            unannotated_backup = root / "unannotated.zip"
+            with zipfile.ZipFile(unannotated_backup, "w") as outer:
+                unannotated_inner = io.BytesIO()
+                with zipfile.ZipFile(unannotated_inner, "w") as inner:
+                    inner.writestr("note_database_source_db", database_path.read_bytes())
+                    inner.writestr("source.pdf", source_pdf_bytes)
+                    inner.writestr("note_meta.json", json.dumps({"id": note_id, "title": "Unannotated"}))
+                outer.writestr("n_note-source/Unannotated.in", unannotated_inner.getvalue())
+            unannotated_workspace = root / "unannotated-workspace"
+            unannotated_writer = WorkspaceWriter(unannotated_workspace)
+            unannotated_report = NoteinImporter(unannotated_backup, None, unannotated_writer, root / "unannotated-work").import_all()
+            unannotated_writer.finish()
+            self.assertFalse(unannotated_report["errors"])
+            self.assertTrue(validate_workspace(unannotated_workspace)["ok"])
+            self.assertFalse(any(unannotated_workspace.rglob("*.pdf")))
+            self.assertFalse(any(unannotated_workspace.rglob("page-notein-summary-*.json")))
             without_pdf=io.BytesIO()
             with zipfile.ZipFile(inner_buffer) as original, zipfile.ZipFile(without_pdf,'w') as filtered:
                 for name in original.namelist():

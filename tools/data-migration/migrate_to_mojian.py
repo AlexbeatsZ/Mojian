@@ -563,16 +563,12 @@ class NoteinImporter:
                     self.stats['source-notes'] += 1
                     connection.close()
                     return None
-                summary: dict[str, Any] | None = None
                 source_pdf_path: Path | None = None
                 self.stats["source-active-pages"] += len(active_ids)
                 if has_pdf_model:
                     self.stats["source-pdf-notes"] += 1
                     selected_ids = [page_id for page_id in active_ids if page_id in content_pages]
                     self.stats["skipped-unannotated-pdf-pages"] += len(active_ids) - len(selected_ids)
-                    summary, source_pdf_path = self._pdf_summary_page(
-                        notebook_id, source, len(active_ids), pdf_name, pdf_bytes
-                    )
                 else:
                     self.stats["source-plain-notes"] += 1
                     selected_ids = list(active_ids)
@@ -594,6 +590,11 @@ class NoteinImporter:
                             )
                             section["pages"].append(placeholder)
                             continue
+                        if has_pdf_model and source_pdf_path is None and pdf_document is not None and page_index < pdf_document.page_count:
+                            target_page_id = stable_id("page-notein", f"{source.note_id}:{page_id}")
+                            asset = self.writer.write_asset(notebook_id, target_page_id, pdf_name or "source.pdf", pdf_bytes)
+                            source_pdf_path = self.writer.asset_directory(notebook_id, target_page_id) / asset
+                            self.stats["pdf-background-sources"] += 1
                         page, document = self._editable_page(
                             connection,
                             inner,
@@ -616,8 +617,6 @@ class NoteinImporter:
                     if pdf_document:
                         pdf_document.close()
                     connection.close()
-                if summary is not None:
-                    section["pages"].append(summary)
             finally:
                 db_path.unlink(missing_ok=True)
         if preview_section["pages"]:
@@ -685,90 +684,6 @@ class NoteinImporter:
         for table in ("StrokeEntity", "TextBoxEntity", "ImageEntity", "ShapeEntity", "QuoteEntity"):
             result.update(row[0] for row in connection.execute(f"select distinct page_id from {table}"))
         return result
-
-    def _pdf_summary_page(
-        self,
-        notebook_id: str,
-        source: NoteinSource,
-        page_count: int,
-        pdf_name: str | None,
-        pdf_bytes: bytes | None,
-    ) -> tuple[dict[str, Any], Path | None]:
-        page_id = stable_id("page-notein-summary", source.note_id)
-        page = note_page(
-            page_id,
-            "原始 PDF 备份与迁移说明",
-            created_at=source.created_at,
-            updated_at=source.updated_at,
-            appearance=page_appearance(show_title=True),
-        )
-        document = page_document(notebook_id, page_id)
-        source_pdf_path: Path | None = None
-        if pdf_bytes:
-            asset = self.writer.write_asset(notebook_id, page_id, pdf_name or "source.pdf", pdf_bytes)
-            source_pdf_path = self.writer.asset_directory(notebook_id, page_id) / asset
-            document["objects"].append(
-                {
-                    "id": stable_id("object-notein-pdf", source.note_id),
-                    "kind": 1,
-                    "x": 72.0,
-                    "y": 130.0,
-                    "width": 360.0,
-                    "height": 64.0,
-                    "displayName": safe_name(pdf_name or f"{source.title}.pdf"),
-                    "assetName": asset,
-                    "mimeType": "application/pdf",
-                    "sizeBytes": len(pdf_bytes),
-                    "viewInverted": False,
-                    "rows": 0,
-                    "columns": 0,
-                    "cells": [],
-                    "previewRows": [],
-                    "targetNotebookId": "",
-                    "targetSectionId": "",
-                    "targetPageId": "",
-                    "sourceAssetName": "",
-                    "sourcePageNumber": None,
-                    "isPageBackground": False,
-                    "rotationQuarterTurns": 0,
-                    "flipHorizontal": False,
-                    "flipVertical": False,
-                }
-            )
-            message = f"原始 PDF 已完整嵌入（{page_count} 页），仅作源文件备份；有批注的页面位于本分区前部，笔迹可编辑。"
-            self.stats["embedded-source-pdfs"] += 1
-        else:
-            message = (
-                f"Notein 本地备份未包含这份原始 PDF（记录页数 {page_count}）。"
-                "已导入可编辑批注，并在可用时保留原貌预览。"
-            )
-            self.stats["missing-source-pdfs"] += 1
-        document["textItems"].append(
-            {
-                "id": stable_id("text-notein-summary", source.note_id),
-                "x": 72.0,
-                "y": 72.0,
-                "width": 620.0,
-                "height": 80.0,
-                "text": message,
-                "fontFamily": "Segoe UI Variable, Microsoft YaHei UI",
-                "fontSize": 16.0,
-                "bold": False,
-                "italic": False,
-                "underline": False,
-                "strikethrough": False,
-                "subscript": False,
-                "color": 0,
-                "foregroundHex": "",
-                "backgroundHex": "Transparent",
-                "indentLevel": 0,
-                "alignment": "Left",
-                "lineSpacing": 1.0,
-                "styleName": "正文",
-            }
-        )
-        self.writer.write_page(notebook_id, page_id, document)
-        return page, source_pdf_path
 
     def _editable_page(
         self,

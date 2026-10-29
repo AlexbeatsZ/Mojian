@@ -26,6 +26,13 @@
   black formulas and white text on colored backgrounds. Original coordinates, JSON and assets
   are retained; fixed PDFs stay fixed. Read `docs/design/imported-page-presentation.md` first.
   Sync overlays now have zero right/bottom outer margin on both clients.
+- The user explicitly discarded standalone original-PDF migration backups on 2026-10-29.
+  Removed all 38 generated `page-notein-summary-*` pages and their active page-owned attachments
+  with the native deletion transaction; retained actual annotated PDF backgrounds and all other
+  content. The migration tool no longer generates summary/backup pages or archives unannotated
+  PDFs. Do not reintroduce these pages when rebuilding or recovering an older baseline.
+  Windows published deletion revision32 and now has 613 indexed pages; its outbox/incoming/conflict
+  are empty. Android receipt/foreground acceptance of this deletion is not yet verified.
 - Sync status is now a compact bottom-right overlay on both clients. A4 grows only for content;
   pan/zoom does not publish changes. Windows keeps viewport in local settings and preserves old
   page viewport JSON; clean navigation/close does not increment page revisions or rewrite files.
@@ -67,7 +74,9 @@
   `/storage/emulated/0/Documents/Mojian-native`.
   In-place installation preserved data. Daily sync uses ordered HTTPS routes; Mojian's Syncthing
   folder is now paused. The selected659-page seed was revision1/files1818. Latest live state is
-  revision15,1818 manifest records/1803 live files/651 indexed pages; all three checkpoints match.
+  revision15,1818 manifest records/1803 live files/651 indexed pages; all three checkpoints matched
+  at that earlier check. The later user-authorized backup cleanup is revision32/613 indexed pages;
+  only Windows receipt is freshly verified, not a new three-device convergence claim.
 - Latest Windows Release suite passes **212/212**, including imported-page native pixels,
   original-data preservation, zero-margin status placement, local-only viewport/clean close,
   crossing alpha/PNG/SVG/independent PDF reader, menu/settings and print

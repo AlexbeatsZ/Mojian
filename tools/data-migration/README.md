@@ -39,9 +39,9 @@ image objects, not reconstructed handwriting. This import route currently
 targets the Windows native scene; Android does not yet render these imports.
 
 The converter intentionally does not expand every unannotated page of a large
-source PDF into the page list. It embeds the complete original PDF once and
-creates native pages for annotated pages. This preserves the source while
-keeping a notebook with thousands of PDF pages usable.
+source PDF into the page list. It creates native pages for annotated pages and
+retains their required vector PDF backgrounds, without standalone original-PDF
+backup attachments or migration-summary pages. Unannotated source PDFs are not archived.
 
 ## Commands
 

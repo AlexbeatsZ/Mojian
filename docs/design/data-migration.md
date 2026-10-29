@@ -1,6 +1,6 @@
 # Notein and OneNote data migration
 
-Last verified: 2026-10-02
+Last verified: 2026-10-29
 
 Read this document before changing `tools/data-migration`, imported notebook
 layout, Notein backup parsing, OneNote COM export, or migrated PDF behavior.
@@ -36,8 +36,9 @@ validated in a staging workspace before it can replace live Mojian data.
   Existing cache copies may be read-only; resume without overwriting them.
 - Notein legacy and current stroke records become native strokes. Plain-note
   pages are editable. For PDF notes, only pages carrying user content become
-  editable annotation pages; the complete source PDF is embedded once as a
-  backup, after those editable pages.
+  editable annotation pages. Do not create standalone source-PDF attachments or
+  migration-summary pages. PDF files still required by real annotation backgrounds
+  live under those content pages; unannotated source PDFs are not archived.
 - External Notein preview PNGs live in `原貌图片`; they never share the editable
   canvas, because deleting an editable stroke must also remove its visual
   appearance.
@@ -105,9 +106,9 @@ still flush the latest viewport, while content mutations retain ordinary atomic 
 - The 2026-08-22 Notein backup contains only 43 of 112 original source PDFs.
   Missing PDFs cannot be reconstructed as vector documents. Available external
   PNG previews are retained separately.
-- Expanding every unannotated page would add 12,663 navigation rows. Complete
-  source PDFs are retained instead; only annotated pages become native Mojian
-  pages.
+- Expanding every unannotated page would add 12,663 navigation rows. Only annotated
+  pages become native Mojian pages; source PDFs are retained only as dependencies of
+  those backgrounds, not as separate backup pages (user request, 2026-10-29).
 - Two very large OneNote pages exceeded the exact-PDF helper timeout. Their
   editable COM/ISF content remains imported, without a visual fallback.
 - The three-color authoring shelf does not constrain imports. Imported ink
