@@ -10,7 +10,7 @@
 
 - Current source/build version: Windows and Android **0.7.3**; Android retains
   `com.meta.inklab.debug`, version code **11**. iOS remains a separate 0.1.0 client.
-  The release target is `v0.7.3`, with current EXE/APK artifacts at the paths below.
+  `v0.7.3` prerelease is published with EXE/APK assets; source is pushed to `origin/master`.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
@@ -39,10 +39,12 @@
   ROG private config/data/recovery XML: checkout `.local/native-sync/`; local ignored
   `.local/native-sync/connection.json` contains connection details and must never enter Git/releases.
   Public Windows 24-scenario verification used a disposable backend, not production notes.
-- The live Syncthing setup and real notes were not changed by this delivery. The established
-  Windows library is `C:\Users\Meta\Documents\Mojian\_migration\native-20261002\workspace`;
-  phone/tablet shared storage is `/storage/emulated/0/Documents/Mojian`.
-  Five notebooks / 653 pages were the last deployment acceptance count, not a current inventory.
+- Windows now opens `C:\Users\Meta\Documents\Mojian`, explicitly chosen by the user on 2026-10-28.
+  The former `_migration\native-20261002\workspace` was deleted in agy's 10:33 cleanup even though
+  app preferences and Syncthing still referenced it. The new startup sample created at that missing
+  path during deployment was withdrawn; no library merge/recovery was performed. Android retains
+  `/storage/emulated/0/Documents/Mojian`; phone/tablet library JSON and navigation were unchanged
+  by in-place installation. The existing Windows Syncthing folder still targets the missing old path.
 - Latest task-only 0.7.1 evidence (2026-10-28): Android **232/232** unit tests including an opt-in
   real public HTTPS round trip; debug/test APK builds, lint **0 errors / 137 warnings**. Native sync:
   **11/11 Node integration tests**, **2/2 gateway tests**, and **24/24 Windows scenarios** on both
@@ -57,9 +59,10 @@
   before its blank click and asserts that a temporary caret was actually established.
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and
-  `android/artifacts/current/Mojian-debug.apk`. Builds are not installation or physical acceptance;
-  this round does not start the real app, install an APK or migrate notes. The separate ROG
-  backend/shared-gateway deployment is authorized and complete.
+  `android/artifacts/current/Mojian-debug.apk`. User-authorized 0.7.3 deployment is complete on
+  OMEN, Redmi K70 and Xiaomi Pad 6 Pro. Phone's original handwriting visibly loads; tablet was
+  asleep, so only package/process/preferences were checked there. No actual print/pen acceptance
+  or restored three-device sync is claimed. The ROG backend/gateway was not changed for 0.7.3.
 - Android and Windows use the original desktop background reference before `0033213`:
   spacing 24/32/48, uniform #2D3238, no red margin/major rules, dot radius 1 and A4 gap 32.
   `shared/page-backgrounds.json` is the executable contract. The 2026-10-19 tablet acceptance
@@ -82,6 +85,8 @@
 
 # Active Work
 
+- Windows Syncthing's old folder path is missing and its status is `error`. Do not silently seed,
+  merge or repoint different device libraries; the user only authorized the Windows app entry change.
 - Complete physical Android folder-picker/permission/save/restart and native foreground-sync
   acceptance before live-library adoption. The ROG HTTPS backend is deployed; real Syncthing
   libraries remain unchanged and must not be pointed at native sync in place.
@@ -133,6 +138,8 @@
 
 # Durable Lessons
 
+- Directory names such as `_migration` do not imply disposable backups: check app preferences and
+  sync configuration references before cleanup or writable startup against a remembered path.
 - Shared product concepts require Windows/Android trace, tests and refreshed outputs together;
   native input/render adapters should remain platform-specific. Read the relevant design first.
 - A save attempt is not a successful save. Preserve dirty state, propagate failure and block
