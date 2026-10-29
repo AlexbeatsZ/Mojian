@@ -10,6 +10,7 @@
 
 - Current source/build version: Windows and Android **0.7.2**; Android retains
   `com.meta.inklab.debug`, version code **10**. iOS remains a separate 0.1.0 client.
+  `v0.7.2` prerelease is published with EXE/APK assets uploaded; source is pushed to `origin/master`.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
 - Android now explicitly opens a local folder using the system picker and remembers the choice.
@@ -93,6 +94,9 @@
 
 - Windows: `dotnet build mojian/Notein-win.slnx`; `dotnet test mojian/Notein-win.slnx`.
   UI tests use isolated workspaces and the shared WPF executor, not per-test STA threads.
+  Pre-fix orphan testhosts (last observed 37056/36176/59300) may still lock old outputs. This
+  round's process/recursive-build cleanup was policy-blocked; no retry through another shell or
+  forced product closure was attempted. Final fixed Release/Debug runs exited with no new hosts.
 - Focused Windows safety checks:
   `dotnet test mojian/tests/Notein-win.Tests/Notein-win.Tests.csproj -c Release --filter "FullyQualifiedName~WorkspaceDeletionTransactionTests|FullyQualifiedName~WorkspaceUiMutationGateTests|FullyQualifiedName~DeleteNotebook_RemovesNestedPagesAndAssetsAndSurvivesRestart|FullyQualifiedName~DeleteInactiveNotebook_PreservesFocusedPageAndOtherSplitSlot"`.
 - Publish: `dotnet publish mojian/src/Notein-win/Notein-win.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o mojian/artifacts/release`.
