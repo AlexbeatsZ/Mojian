@@ -752,8 +752,9 @@ public sealed class MainViewModel : ObservableObject
 
     public bool RenameSection(string sectionId, string title)
     {
-        if (!ActiveWorkspace.RenameSection(sectionId, title)) return false;
-        FinishNavigationMutation();
+        var notebook = _library.FindNotebookForSection(sectionId);
+        if (notebook == null || !notebook.RenameSection(sectionId, title)) return false;
+        FinishNavigationMutation(notebook);
         return true;
     }
 
@@ -763,21 +764,24 @@ public sealed class MainViewModel : ObservableObject
     private bool DeleteSectionCore(string sectionId)
     {
         SaveAll();
-        var section = ActiveWorkspace.FindSection(sectionId);
+        var notebook = _library.FindNotebookForSection(sectionId);
+        if (notebook == null) return false;
+        var section = notebook.FindSection(sectionId);
         if (section == null) return false;
         var pageIds = PagesInTree(section).Select(page => page.Id).ToList();
         var candidate = _library.CopyForSave();
-        if (candidate.ActiveNotebook.DeleteSection(sectionId) == null) return false;
-        CommitDeletion(candidate, ActiveWorkspace.Id, pageIds);
-        FinishDeletionMutation();
+        if (candidate.FindNotebookForSection(sectionId)?.DeleteSection(sectionId) == null) return false;
+        CommitDeletion(candidate, notebook.Id, pageIds);
+        FinishDeletionMutation(notebook.Id);
         return true;
     }
 
     public bool MoveSection(string sectionId, string? targetParentId)
     {
         SaveFocusedDocument();
-        if (!ActiveWorkspace.MoveSectionToParent(sectionId, targetParentId)) return false;
-        FinishNavigationMutation();
+        var notebook = _library.FindNotebookForSection(sectionId);
+        if (notebook == null || !notebook.MoveSectionToParent(sectionId, targetParentId)) return false;
+        FinishNavigationMutation(notebook);
         return true;
     }
 
@@ -785,26 +789,30 @@ public sealed class MainViewModel : ObservableObject
     {
         SaveFocusedDocument();
         using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
-        if (ActiveWorkspace.CopySectionToParent(sectionId, targetParentId, out var pageIds) == null) return false;
+        var notebook = _library.FindNotebookForSection(sectionId);
+        if (notebook == null || notebook.CopySectionToParent(sectionId, targetParentId, out var pageIds) == null) return false;
         foreach (var (sourcePageId, targetPageId) in pageIds)
-            _store.CopyPageData(ActiveWorkspace.Id, sourcePageId, ActiveWorkspace.Id, targetPageId);
-        FinishNavigationMutation();
+            _store.CopyPageData(notebook.Id, sourcePageId, notebook.Id, targetPageId);
+        FinishNavigationMutation(notebook);
         return true;
     }
 
     public bool MergeSection(string sectionId, string targetSectionId)
     {
         SaveFocusedDocument();
-        if (!ActiveWorkspace.MergeSectionInto(sectionId, targetSectionId)) return false;
-        FinishNavigationMutation();
+        var notebook = _library.FindNotebookForSection(sectionId);
+        if (notebook == null || !notebook.MergeSectionInto(sectionId, targetSectionId)) return false;
+        FinishNavigationMutation(notebook);
         return true;
     }
 
     public void AddChildSection(string parentSectionId, string title)
     {
+        var notebook = _library.FindNotebookForSection(parentSectionId);
+        if (notebook == null) return;
         SaveFocusedDocument();
-        ActiveWorkspace.AddSection(title, parentSectionId);
-        FinishNavigationMutation();
+        notebook.AddSection(title, parentSectionId);
+        FinishNavigationMutation(notebook);
     }
 
     public bool RenamePage(string sectionId, string pageId, string title)
@@ -865,10 +873,10 @@ public sealed class MainViewModel : ObservableObject
         RefreshPageAppearance();
     }
 
-    private void FinishNavigationMutation()
+    private void FinishNavigationMutation(NotebookWorkspace? notebook = null)
     {
         SaveLibrary();
-        LoadSelectedIntoFocusedSlot();
+        if (notebook == null || notebook.Id == ActiveWorkspace.Id) LoadSelectedIntoFocusedSlot();
         RefreshNavigation();
         NotifyAllWorkspaceProperties();
     }
@@ -883,10 +891,10 @@ public sealed class MainViewModel : ObservableObject
         LocalSaveCompleted?.Invoke();
     }
 
-    private void FinishDeletionMutation()
+    private void FinishDeletionMutation(string? notebookId = null)
     {
         if (FocusedSlot == CanvasSlot.Right && SecondaryDocument == null) FocusedSlot = CanvasSlot.Left;
-        LoadSelectedIntoFocusedSlot();
+        if (notebookId == null || notebookId == ActiveWorkspace.Id) LoadSelectedIntoFocusedSlot();
         _store.ForgetInactivePages(PrimaryDocument, SecondaryDocument);
         RefreshNavigation();
         NotifyAllWorkspaceProperties();
@@ -1170,11 +1178,15 @@ public sealed class MainViewModel : ObservableObject
     private void SelectSection(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return;
+        var notebook = _library.FindNotebookForSection(id);
+        if (notebook == null) return;
         SaveFocusedDocument();
-        if (!ActiveWorkspace.SelectSection(id, PagePaneMode)) return;
+        if (!notebook.SelectSection(id, PagePaneMode)) return;
+        _library.SelectNotebook(notebook.Id);
         LoadSelectedIntoFocusedSlot();
         SaveLibrary();
         RefreshNavigation();
+        NotifyAllWorkspaceProperties();
     }
 
     private void FocusNotebookRoot()
@@ -1188,7 +1200,9 @@ public sealed class MainViewModel : ObservableObject
 
     private void ToggleSectionExpanded(string? id)
     {
-        if (string.IsNullOrWhiteSpace(id) || !ActiveWorkspace.ToggleExpanded(id)) return;
+        if (string.IsNullOrWhiteSpace(id)) return;
+        var notebook = _library.FindNotebookForSection(id);
+        if (notebook == null || !notebook.ToggleExpanded(id)) return;
         SaveLibrary();
         RefreshSectionRows();
     }
@@ -1555,8 +1569,8 @@ public sealed class MainViewModel : ObservableObject
             var notebook = _library.Notebooks[index];
             var isActive = notebook.Id == _library.ActiveNotebookId;
             NotebookTreeRows.Add(new NotebookPaneRow(notebook, index, isActive));
-            if (isActive && notebook.Expanded)
-                foreach (var row in notebook.FlattenSections()) NotebookTreeRows.Add(row);
+            if (notebook.Expanded)
+                foreach (var row in notebook.FlattenSections(isActive)) NotebookTreeRows.Add(row);
         }
     }
 

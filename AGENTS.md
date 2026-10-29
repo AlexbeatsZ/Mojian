@@ -8,13 +8,19 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.6**; Android retains
-  `com.meta.inklab.debug`, version code **14**. iOS remains a separate 0.1.0 client.
-  Windows is updated in place to 0.7.6 and reopened on `Documents/Mojian-native`; Android devices
-  remain installed at 0.7.5. Do not confuse a built APK with device deployment.
-  `v0.7.6` prerelease is published with EXE/APK assets; source is pushed to `origin/master`.
+- Current source version: Windows and Android **0.7.7**; Android retains
+  `com.meta.inklab.debug`, version code **15**. iOS remains a separate 0.1.0 client.
+  Windows still runs 0.7.6 on `Documents/Mojian-native`; Android devices remain installed at
+  0.7.5. Do not confuse a built APK with device deployment. The 0.7.7 APK is built; Windows
+  publication and release upload are pending. `v0.7.6` remains the previous published release.
   The 0.7.1 sync/folder task is committed independently; this review integrates on top without
   changing its deployed backend, gateway, credentials or real notes.
+- 0.7.7 fixes Windows inactive-notebook expansion: every expanded notebook shows its sections,
+  only the active notebook has a selected-section highlight, and section commands/menus/export
+  resolve the owning notebook. Expanding a branch does not switch or reload the focused page.
+  Android already implements this contract. Windows 216/216 tests (including native WPF fixture)
+  and Android 251 passed/1 opt-in skipped, APK/test APK/lint0errors/145warnings pass. Evidence:
+  `%TEMP%/.agents/mojian-notebook-navigation-20261029`; live notes and app processes untouched.
 - Device-local preferences now own one global light/dark mode, an independent new-page default
   background, and the last reusable print choices. Background menus link directly to the default
   row in options; single-page/one-off creation backgrounds do not change that default. Read
@@ -88,7 +94,7 @@
   before its blank click and asserts that a temporary caret was actually established.
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`.
-  Windows is 0.7.6; Android APK is 0.7.6/code14, not yet installed. The following live-device
+  Windows is 0.7.6 (running, do not overwrite); Android APK is 0.7.7/code15, not installed. The following live-device
   sync/input evidence is the previously recorded 0.7.5 baseline, not a new 0.7.6 acceptance:
   OMEN and phone actual UI report synchronized at the bottom-right.
   Tablet installed APK client catches up to revision15; lock screen prevents foreground UI

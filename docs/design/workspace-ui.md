@@ -74,6 +74,14 @@ arrows use the same `chevron_right` source; Windows resources are generated from
 - Recursively display sections nested inside sections with no fixed depth.
 - Never display a page, even when pages and child sections share the same parent section.
 - Expanding/collapsing a branch changes only section visibility in this pane.
+- Expansion is independent of the active notebook: every expanded notebook renders its own
+  section tree, while only the active notebook's focused section is highlighted. Selecting a
+  section switches to its owning notebook; its disclosure arrow does not switch notebooks or
+  reload the current page. Section menus, export and mutations resolve the section's actual
+  notebook rather than assuming the active notebook, and opening a menu does not change focus.
+- Windows regression coverage lives in `NotebookNavigationUiTests` and `MainViewModelTests`.
+  The 2026-10-29 repair is Windows-specific: Android `renderSections` already follows this
+  owner/expansion contract and requires no second navigation implementation.
 - Selecting a section establishes the root for the gray page pane.
 - The black-pane header has one `+` control, aligned with the gray pane's add-page control. It opens
   a compact menu with exactly `新建笔记本` and `新建分区`. A notebook is always created at library

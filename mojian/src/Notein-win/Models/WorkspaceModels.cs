@@ -251,14 +251,14 @@ public sealed class NotebookWorkspace
         }
     }
 
-    public List<SectionRow> FlattenSections()
+    public List<SectionRow> FlattenSections(bool isActive = true)
     {
         var result = new List<SectionRow>();
         void Visit(IEnumerable<SectionNode> nodes, int depth)
         {
             foreach (var node in nodes)
             {
-                result.Add(new SectionRow(node, depth, node.Id == FocusedSectionId));
+                result.Add(new SectionRow(node, depth, isActive && node.Id == FocusedSectionId));
                 if (node.Expanded) Visit(node.Children, depth + 1);
             }
         }
@@ -666,6 +666,9 @@ public sealed class NotebookLibrary
 
     [JsonIgnore]
     public NotebookWorkspace ActiveNotebook => Notebooks.FirstOrDefault(notebook => notebook.Id == ActiveNotebookId) ?? Notebooks[0];
+
+    public NotebookWorkspace? FindNotebookForSection(string? sectionId) =>
+        Notebooks.FirstOrDefault(notebook => notebook.FindSection(sectionId) != null);
 
     public bool SelectNotebook(string id)
     {

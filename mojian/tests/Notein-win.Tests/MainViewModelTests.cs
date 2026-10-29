@@ -58,7 +58,7 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public void ActiveNotebookSectionsAreInsertedImmediatelyBelowTheirNotebookRow()
+    public void ExpandedNotebookSectionsAreInsertedImmediatelyBelowTheirNotebookRow()
     {
         using var temp = new TemporaryDirectory();
         var workspace = Path.Combine(temp.Path, "workspace");
@@ -78,6 +78,105 @@ public class MainViewModelTests
         Assert.True(middleIndex >= 0);
         Assert.Equal(middleSectionId, Assert.IsType<SectionRow>(rows[middleIndex + 1]).Section.Id);
         Assert.Equal(lastId, Assert.IsType<NotebookPaneRow>(rows[middleIndex + 2]).Id);
+        Assert.IsType<SectionRow>(rows[middleIndex + 3]);
+        Assert.Single(rows.OfType<NotebookPaneRow>(), row => row.IsActive);
+        Assert.All(rows.OfType<SectionRow>(), row => Assert.False(row.IsSelected));
+    }
+
+    [Fact]
+    public void ExpandingInactiveNotebookAndNestedSectionsPreservesFocusedPage()
+    {
+        using var temp = new TemporaryDirectory();
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(Path.Combine(temp.Path, "workspace"), preferences);
+        var inactive = viewModel.ActiveWorkspace;
+        var section = inactive.Sections[0];
+        var child = inactive.AddSection("Nested", section.Id);
+        viewModel.AddChildSection(child.Id, "Grandchild");
+        viewModel.SelectSectionCommand.Execute(section.Id);
+        viewModel.AddNotebook("Focused");
+        var activeId = viewModel.ActiveWorkspace.Id;
+        var document = viewModel.FocusedDocument;
+        var pageRows = viewModel.PagePaneRows.ToArray();
+
+        viewModel.ToggleNotebookExpandCommand.Execute(inactive.Id);
+        Assert.DoesNotContain(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.Section.Id == section.Id);
+        viewModel.ToggleNotebookExpandCommand.Execute(inactive.Id);
+        Assert.Contains(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.Section.Id == section.Id);
+        viewModel.ToggleSectionExpandCommand.Execute(section.Id);
+        Assert.DoesNotContain(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.Section.Id == child.Id);
+        viewModel.ToggleSectionExpandCommand.Execute(section.Id);
+        Assert.Contains(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.Section.Id == child.Id);
+
+        Assert.Equal(activeId, viewModel.ActiveWorkspace.Id);
+        Assert.Same(document, viewModel.FocusedDocument);
+        Assert.Equal(pageRows, viewModel.PagePaneRows.ToArray());
+        Assert.Equal(viewModel.ActiveWorkspace.FocusedSectionId,
+            Assert.Single(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.IsSelected).Section.Id);
+    }
+
+    [Fact]
+    public void SelectingInactiveSectionActivatesItsNotebookAndLoadsItsPage()
+    {
+        using var temp = new TemporaryDirectory();
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(Path.Combine(temp.Path, "workspace"), preferences);
+        var inactive = viewModel.ActiveWorkspace;
+        var section = inactive.Sections[0];
+        var pageId = section.Pages[0].Id;
+        viewModel.AddNotebook("Focused");
+        var changedProperties = new List<string?>();
+        viewModel.PropertyChanged += (_, change) => changedProperties.Add(change.PropertyName);
+
+        viewModel.SelectSectionCommand.Execute(section.Id);
+
+        Assert.Equal(inactive.Id, viewModel.ActiveWorkspace.Id);
+        Assert.Equal(section.Id, viewModel.ActiveWorkspace.FocusedSectionId);
+        Assert.Equal(pageId, viewModel.FocusedDocument!.PageId);
+        Assert.Equal(inactive.Id, viewModel.FocusedDocument.NotebookId);
+        Assert.Equal(section.Id, Assert.Single(viewModel.NotebookTreeRows.OfType<SectionRow>(), row => row.IsSelected).Section.Id);
+        Assert.Contains(nameof(MainViewModel.ActiveNotebookTitle), changedProperties);
+    }
+
+    [Fact]
+    public void InactiveSectionMutationsUseOwningNotebookWithoutChangingFocus()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+        var inactive = viewModel.ActiveWorkspace;
+        var source = inactive.Sections[0];
+        var sourcePage = source.Pages[0];
+        var asset = viewModel.Store.WriteAsset(inactive.Id, sourcePage.Id, ".txt", "section asset"u8);
+        viewModel.AddNotebook("Focused");
+        var activeId = viewModel.ActiveWorkspace.Id;
+        var document = viewModel.FocusedDocument;
+
+        var foreignSectionId = viewModel.ActiveWorkspace.Sections[0].Id;
+        Assert.False(viewModel.MoveSection(source.Id, foreignSectionId));
+        Assert.False(viewModel.CopySection(source.Id, foreignSectionId));
+        Assert.False(viewModel.MergeSection(source.Id, foreignSectionId));
+        Assert.True(viewModel.RenameSection(source.Id, "Renamed"));
+        viewModel.AddChildSection(source.Id, "Child");
+        var child = Assert.Single(source.Children);
+        Assert.True(viewModel.MoveSection(child.Id, null));
+        Assert.True(viewModel.CopySection(source.Id, child.Id));
+        var copy = Assert.Single(child.Children);
+        var copiedPage = Assert.Single(copy.Pages);
+        Assert.Equal("section asset", File.ReadAllText(viewModel.Store.ResolveAsset(inactive.Id, copiedPage.Id, asset)));
+        Assert.True(viewModel.MergeSection(copy.Id, child.Id));
+        Assert.True(viewModel.DeleteSection(child.Id));
+
+        Assert.Equal(activeId, viewModel.ActiveWorkspace.Id);
+        Assert.Same(document, viewModel.FocusedDocument);
+        Assert.Equal("Renamed", inactive.FindSection(source.Id)!.Title);
+        var saved = new WorkspaceStore(workspace).LoadLibrary();
+        var savedInactive = saved.Notebooks.Single(notebook => notebook.Id == inactive.Id);
+        Assert.Null(savedInactive.FindSection(child.Id));
+        Assert.Equal("Renamed", savedInactive.FindSection(source.Id)!.Title);
+        Assert.True(File.Exists(viewModel.Store.GetPageDocumentPath(inactive.Id, sourcePage.Id)));
+        Assert.False(File.Exists(viewModel.Store.GetPageDocumentPath(inactive.Id, copiedPage.Id)));
     }
 
     [Fact]

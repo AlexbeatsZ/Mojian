@@ -401,7 +401,8 @@ public partial class MainWindow : Window
     {
         if (sender is not FrameworkElement anchor || anchor.DataContext is not SectionRow row) return;
         var section = row.Section;
-        var notebook = ViewModel.ActiveWorkspace;
+        var notebook = ViewModel.Library.FindNotebookForSection(section.Id);
+        if (notebook == null) return;
         var menu = new ContextMenu();
 
         AddMenuItem(menu, "重命名", () =>
@@ -409,7 +410,7 @@ public partial class MainWindow : Window
             var title = Prompt("重命名分区", "分区名称", section.Title);
             if (title != null) ViewModel.RenameSection(section.Id, title);
         });
-        AddMenuItem(menu, "导出…", () => ExportSection(section));
+        AddMenuItem(menu, "导出…", () => ExportSection(notebook, section));
         AddMenuItem(menu, "删除", () =>
         {
             var pages = PagesInSectionTree(section).Count();
@@ -511,7 +512,7 @@ public partial class MainWindow : Window
         if (targetIndex >= 0) ViewModel.CopyPage(sourceOwner.Id, clip.PageId, targetSectionId, targetIndex + 1);
     }
 
-    private void ExportSection(SectionNode section)
+    private void ExportSection(NotebookWorkspace notebook, SectionNode section)
     {
         var dialog = new SaveFileDialog { Title = "导出墨笺分区", Filter = "墨笺分区 (*.mjn)|*.mjn", FileName = $"{section.Title}.mjn", AddExtension = true, DefaultExt = ".mjn" };
         if (dialog.ShowDialog(this) != true) return;
@@ -521,7 +522,7 @@ public partial class MainWindow : Window
             var currentPageId = ViewModel.FocusedDocument?.PageId;
             if (currentPageId != null && PagesInSectionTree(section).All(page => page.Id != currentPageId)) currentPageId = null;
             var layers = currentPageId == null ? null : CaptureCurrentLayers();
-            NotebookPackageService.ExportSection(dialog.FileName, ViewModel.ActiveWorkspace, section, ViewModel.Store, currentPageId, layers);
+            NotebookPackageService.ExportSection(dialog.FileName, notebook, section, ViewModel.Store, currentPageId, layers);
             MessageBox.Show(this, "分区包已导出。", "墨笺", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex) { MessageBox.Show(this, $"分区导出失败：{ex.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error); }
