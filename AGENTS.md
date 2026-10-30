@@ -17,8 +17,17 @@
   Xcode builds pass. `v0.7.8` prerelease is published at source 396e78e with all four
   EXE/APK/iOS ZIP assets uploaded. Source is pushed to `origin/master`. Evidence:
   `%TEMP%/.agents/mojian-brand-icons-20261030`.
-  No Mojian process was running at the 2026-10-30 pre-publish check. No application was
-  started, stopped or installed for this icon change; real notes and sync services are untouched.
+  User-authorized follow-up deployed 0.7.8 to OMEN and ROG, and 0.7.8-debug/code16 in place
+  to Redmi K70 and Xiaomi Pad 6 Pro. Android signer/first-install times/private preferences,
+  native-sync state and the canonical library index are preserved. ROG previously had only
+  the sync service; the desktop client and per-user Start shortcut are now available.
+  ROG sync PID49068/start time/listeners18742+18743 are unchanged; no client was launched
+  on either Windows host. Phone's actual system app-details shows the new feather/version.
+  Tablet is locked/asleep; Windows shell resolves the new icons, but desktop/taskbar UI is
+  unverified because computer-use initialization failed. Private deployment evidence/backups:
+  ignored `.local/icon-deployment-20261030`; do not publish them.
+  The user deferred Mac deployment and explicitly started separate chat
+  `01a18ccf-8616-7ff1-aa48-9654cd0930ae` for native macOS development on its own branch.
   Cleanup of this task's completed testhost (last PID43348) and temporary .NET outputs was
   policy-blocked as one unexecuted command; do not infer those temporary files were removed.
 - 0.7.7 fixes Windows inactive-notebook expansion: every expanded notebook shows its sections,
@@ -102,7 +111,8 @@
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`;
   iOS simulator/unsigned-device ZIPs are in `ios/artifacts/current`.
-  Windows EXE is 0.7.8; Android APK is 0.7.8/code16, not installed. The following live-device
+  Windows EXE is 0.7.8 on OMEN/ROG; Android 0.7.8/code16 is installed on phone/tablet.
+  The following live-device
   sync/input evidence is the previously recorded 0.7.5 baseline, not a new 0.7.6 acceptance:
   OMEN and phone actual UI report synchronized at the bottom-right.
   Tablet installed APK client catches up to revision15; lock screen prevents foreground UI
@@ -132,9 +142,10 @@
 
 # Active Work
 
-- Installed 0.7.8 launcher, Explorer/taskbar cache and physical device icon acceptance
-  have not been performed. Xcode 27.1 compiles both targets, but the
-  Mac's older CoreSimulator service prevents claiming simulator runtime acceptance.
+- 0.7.8 actual phone app-details icon/version is verified; tablet locked-screen and
+  Windows Explorer/taskbar visual acceptance remain unverified. Do not refresh system
+  caches or force-close products to obtain screenshots. Mac deployment was deferred;
+  native macOS implementation is active in the separate chat identified above.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
