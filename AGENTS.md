@@ -13,11 +13,14 @@
   Supplied feather artwork is preserved in `shared/branding`; Windows uses the original
   ICO/PNG, Android uses density-correct adaptive/legacy variants, and iOS uses an opaque
   Apple variant. There is no native macOS app target. Read `docs/design/app-branding.md`.
-  Source/resource checks, Android APK/lint and both Xcode builds pass; Windows publish
-  and the new GitHub prerelease are being finalized. Evidence:
+  Source/resource checks, Android APK/lint, Windows self-contained publish and both
+  Xcode builds pass. `v0.7.8` prerelease is published at source 396e78e with all four
+  EXE/APK/iOS ZIP assets uploaded. Source is pushed to `origin/master`. Evidence:
   `%TEMP%/.agents/mojian-brand-icons-20261030`.
   No Mojian process was running at the 2026-10-30 pre-publish check. No application was
   started, stopped or installed for this icon change; real notes and sync services are untouched.
+  Cleanup of this task's completed testhost (last PID43348) and temporary .NET outputs was
+  policy-blocked as one unexecuted command; do not infer those temporary files were removed.
 - 0.7.7 fixes Windows inactive-notebook expansion: every expanded notebook shows its sections,
   only the active notebook has a selected-section highlight, and section commands/menus/export
   resolve the owning notebook. Expanding a branch does not switch or reload the focused page.
@@ -99,7 +102,7 @@
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
 - Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`;
   iOS simulator/unsigned-device ZIPs are in `ios/artifacts/current`.
-  Windows 0.7.8 publish is pending; Android APK is 0.7.8/code16, not installed. The following live-device
+  Windows EXE is 0.7.8; Android APK is 0.7.8/code16, not installed. The following live-device
   sync/input evidence is the previously recorded 0.7.5 baseline, not a new 0.7.6 acceptance:
   OMEN and phone actual UI report synchronized at the bottom-right.
   Tablet installed APK client catches up to revision15; lock screen prevents foreground UI
@@ -129,8 +132,8 @@
 
 # Active Work
 
-- Finalize the 0.7.8 publish/release. Installed launcher, Explorer/taskbar cache and physical
-  device icon acceptance have not been performed. Xcode 27.1 compiles both targets, but the
+- Installed 0.7.8 launcher, Explorer/taskbar cache and physical device icon acceptance
+  have not been performed. Xcode 27.1 compiles both targets, but the
   Mac's older CoreSimulator service prevents claiming simulator runtime acceptance.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
