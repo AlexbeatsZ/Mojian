@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>Mojian — Windows flat app icon</title>
+<desc>Original, flat vector logo with a transparent background.</desc>
+
+<g transform="translate(512 512) scale(1.18) translate(-512 -512)">
+<g stroke="none" stroke-linejoin="round">
+  <!-- entire feather silhouette -->
+  <path d="M246 792 C255 720 283 582 350 453 C430 303 572 237 773 170 C761 292 739 376 677 446 C629 504 558 539 464 568 L509 562 C485 601 441 627 381 637 C327 676 276 749 246 792Z" fill="#6575EF"/>
+  <!-- cooler left feather plane -->
+  <path d="M246 792 C266 650 313 510 388 400 C466 281 588 229 773 170 C659 269 570 337 496 419 C382 544 317 680 246 792Z" fill="#8998FF"/>
+  <!-- pearl upper-left plane -->
+  <path d="M366 548 C410 383 555 262 773 170 C688 259 581 345 497 426 C445 479 398 520 366 548Z" fill="#DDE2FF"/>
+  <!-- mauve upturned tip -->
+  <path d="M614 329 C671 260 726 211 773 170 C765 259 749 320 724 374 C691 402 653 428 611 449 C635 409 640 376 614 329Z" fill="#B8A9FF"/>
+  <!-- lively blue right wing -->
+  <path d="M366 548 C457 461 579 404 724 374 C686 463 605 514 468 568 L509 562 C479 604 438 627 381 637 C359 664 327 693 300 722 C321 649 346 587 366 548Z" fill="#516BEE"/>
+  <!-- a single subtle angular light facet -->
+  <path d="M366 548 C453 462 544 393 614 329 C598 409 545 480 468 568 C425 578 389 604 381 637 C376 602 372 565 366 548Z" fill="#A0A8FF"/>
+  <!-- long quill and handwritten flourish -->
+  <path d="M246 792 C332 804 418 743 522 715 C622 687 714 674 752 705 C783 734 750 758 708 766" fill="none" stroke="#9DAAFF" stroke-width="17" stroke-linecap="round"/>
+  <path d="M246 792 C314 657 364 576 468 499" fill="none" stroke="#DCE1FF" stroke-width="8" stroke-linecap="round"/>
+</g></g>
+</svg>

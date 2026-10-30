@@ -1,0 +1,2 @@
+ios/tools/*.sh text eol=lf
+shared/branding/* -text

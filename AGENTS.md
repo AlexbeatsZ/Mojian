@@ -8,15 +8,16 @@
 
 # Current State
 
-- Current source/build version: Windows and Android **0.7.7**; Android retains
-  `com.meta.inklab.debug`, version code **15**. iOS remains a separate 0.1.0 client.
-  Windows still runs 0.7.6 on `Documents/Mojian-native`; Android devices remain installed at
-  0.7.5. Do not confuse a built APK with device deployment. `v0.7.7` prerelease is published
-  with verified EXE/APK assets at source 2956480; source is pushed to `origin/master`.
-  The new Windows EXE is in `%TEMP%/.agents/mojian-notebook-navigation-20261029/release/`, not
-  copied over the running 0.7.6 EXE. Close the old window before replacing the current release.
-  The 0.7.1 sync/folder task is committed independently; this review integrates on top without
-  changing its deployed backend, gateway, credentials or real notes.
+- Current source version: Windows and Android **0.7.8**; Android retains
+  `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
+  Supplied feather artwork is preserved in `shared/branding`; Windows uses the original
+  ICO/PNG, Android uses density-correct adaptive/legacy variants, and iOS uses an opaque
+  Apple variant. There is no native macOS app target. Read `docs/design/app-branding.md`.
+  Source/resource checks, Android APK/lint and both Xcode builds pass; Windows publish
+  and the new GitHub prerelease are being finalized. Evidence:
+  `%TEMP%/.agents/mojian-brand-icons-20261030`.
+  No Mojian process was running at the 2026-10-30 pre-publish check. No application was
+  started, stopped or installed for this icon change; real notes and sync services are untouched.
 - 0.7.7 fixes Windows inactive-notebook expansion: every expanded notebook shows its sections,
   only the active notebook has a selected-section highlight, and section commands/menus/export
   resolve the owning notebook. Expanding a branch does not switch or reload the focused page.
@@ -87,7 +88,7 @@
   revision15,1818 manifest records/1803 live files/651 indexed pages; all three checkpoints matched
   at that earlier check. The later user-authorized backup cleanup is revision32/613 indexed pages;
   only Windows receipt is freshly verified, not a new three-device convergence claim.
-- Latest Windows Release suite passes **212/212**, including imported-page native pixels,
+- The 0.7.6 Windows Release suite passed **212/212**, including imported-page native pixels,
   original-data preservation, zero-margin status placement, local-only viewport/clean close,
   crossing alpha/PNG/SVG/independent PDF reader, menu/settings and print
   restoration after window restart; the previous 0.7.2 Debug suite passed 191/191.
@@ -96,8 +97,9 @@
   joins the STA. The caret fixture clears default sample content
   before its blank click and asserts that a temporary caret was actually established.
   Earlier failures and the older pan-cache pixel baseline remain historical log evidence.
-- Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`.
-  Windows is 0.7.6 (running, do not overwrite); Android APK is 0.7.7/code15, not installed. The following live-device
+- Current deliverables: `mojian/artifacts/release/Mojian.exe` and `android/artifacts/current/Mojian-debug.apk`;
+  iOS simulator/unsigned-device ZIPs are in `ios/artifacts/current`.
+  Windows 0.7.8 publish is pending; Android APK is 0.7.8/code16, not installed. The following live-device
   sync/input evidence is the previously recorded 0.7.5 baseline, not a new 0.7.6 acceptance:
   OMEN and phone actual UI report synchronized at the bottom-right.
   Tablet installed APK client catches up to revision15; lock screen prevents foreground UI
@@ -127,7 +129,9 @@
 
 # Active Work
 
-- Installation and live-library acceptance for 0.7.7 have not been requested/performed.
+- Finalize the 0.7.8 publish/release. Installed launcher, Explorer/taskbar cache and physical
+  device icon acceptance have not been performed. Xcode 27.1 compiles both targets, but the
+  Mac's older CoreSimulator service prevents claiming simulator runtime acceptance.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
@@ -214,6 +218,7 @@
 
 # Docs Index
 
+- `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
 
 - `docs/design/native-sync.md`: dedicated clones, foreground lifecycle, recovery/deployment boundaries.

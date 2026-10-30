@@ -14,7 +14,7 @@ def add(key, value):
     return ident(key)
 files, builds = [], []
 for path in sorted((root / "App").glob("*.swift")):
-    rel = path.relative_to(root)
+    rel = path.relative_to(root).as_posix()
     f = add(f"file:{rel}", f"isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {q(rel)}; sourceTree = SOURCE_ROOT;")
     files.append(f)
     builds.append(add(f"build:{rel}", f"isa = PBXBuildFile; fileRef = {f};"))
@@ -37,7 +37,7 @@ for name in ("Debug","Release"):
         "IPHONEOS_DEPLOYMENT_TARGET":"17.0", "SDKROOT":"iphoneos", "TARGETED_DEVICE_FAMILY":"1,2",
         "SUPPORTED_PLATFORMS":"iphoneos iphonesimulator", "SUPPORTS_MACCATALYST":"NO", "SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD":"NO",
         "INFOPLIST_FILE":"App/Info.plist", "GENERATE_INFOPLIST_FILE":"NO", "CODE_SIGN_STYLE":"Automatic",
-        "ASSETCATALOG_COMPILER_APPICON_NAME":"AppIcon", "MARKETING_VERSION":"0.1.0", "CURRENT_PROJECT_VERSION":"1",
+        "ASSETCATALOG_COMPILER_APPICON_NAME":"AppIcon", "MARKETING_VERSION":"0.1.1", "CURRENT_PROJECT_VERSION":"2",
         "SWIFT_OPTIMIZATION_LEVEL":"-Onone" if name=="Debug" else "-O", "DEBUG_INFORMATION_FORMAT":"dwarf" if name=="Debug" else "dwarf-with-dsym",
         "SWIFT_ACTIVE_COMPILATION_CONDITIONS":"DEBUG" if name=="Debug" else "", "CLANG_ENABLE_MODULES":"YES"
     }
