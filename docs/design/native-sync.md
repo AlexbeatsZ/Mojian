@@ -138,6 +138,16 @@ or journal files to clear a warning is not a supported recovery procedure.
 
 ## Server and verification boundaries
 
+The independent `sync-server-v*` server release bundles a pinned version of
+`@alexbeatsz/file-sync-core`. Mojian retains `validPath`, manifest policy, namespace,
+token validation, configured HTTP/TLS listeners and gateway adapters. The shared core
+owns persistence, blobs, CAS and durable replay; it does not merge product identities,
+processes or data roots. The old manifest/state/receipt layout and v1 wire contract are
+unchanged. `BUILD-INFO.json` records the source commit and locked core dependency.
+Unpacked server ZIPs run with existing Node 22+ and include their core runtime, without
+npm install or the desktop/mobile projects. `run-configured.mjs` remains compatible
+with the existing ROG configuration and drains its TLS listener before closing the core.
+
 The independent Node service binds loopback. Persistent blobs, manifest, tombstones and
 operation receipts belong in a dedicated data root, backed up together. HTTPS ingress,
 SakuraFRP/reverse proxy, credentials, service installation and ROG deployment remain separate

@@ -1,8 +1,54 @@
 # Mojian native HTTPS sync
 
-An independent, dependency-free Node 22+ service for the existing Mojian folder
+An independent Node 22+ service for the existing Mojian folder
 format. Exact Android/Windows wire contract and integration requirements are in
 [PROTOCOL.md](PROTOCOL.md). No credentials are shipped in source or client binaries.
+
+## Standalone server release
+
+The `sync-server-v*` release line is independent of the Windows/Android/iOS applications.
+Download `Mojian-Sync-Server-<server-version>.zip` and extract it into the server's own
+program directory. The ZIP includes its pinned `@alexbeatsz/file-sync-core` dependency,
+licenses, operator examples and `BUILD-INFO.json`; only an existing Node 22+ runtime is
+required. No npm install, .NET SDK, desktop app, Android project or build step is needed.
+
+Keep the private configuration and data root outside the extracted program directory.
+Use absolute paths in production. Copy `server.example.json` to that private location,
+set a private token of at least 32 bytes, then run:
+
+```text
+node run-configured.mjs C:/private/MojianSync/server.json
+node run-configured.mjs --version
+```
+
+Existing configurations using `port`, `dataRoot`, `token` and optional `directTls`
+continue to work. A `directTls` object accepts `port`, optional `host`, `keyFile` and
+`certificateFile`; it forwards to the same backend and data root. Preserve the existing
+certificate and client pins during upgrades. SIGINT/SIGTERM drain the listeners and
+pending operations before releasing the writer lock. A Windows scheduled-task stop can
+terminate Node abruptly; do not treat it as proof of graceful shutdown.
+
+Upgrade one writer at a time: retain the private config/data, stop the old instance,
+take a consistent backup, switch the task's program/working directory, start the new
+package and check the existing workspace identity/revision and authenticated routes.
+Do not start a second instance against the same root. Keep the shared gateway's route
+module references valid if relocating code; its other application routes are independent.
+`ops/install-rog.ps1` describes the original checkout-based installation and must not be
+blindly rerun against a newer composed gateway.
+
+### Source development and reproducible packaging
+
+From `sync-server`, run `npm ci`, `npm test`, `npm run test:integration`, then
+`npm run package:server`. The lockfile pins the exact public core release with integrity;
+the resulting ZIP carries that tested core, with no cross-checkout imports. Packaging a
+release requires committed server source. `--allow-dirty` is for isolated package tests.
+Artifacts stay under the ignored `sync-server/artifacts` directory. The packaging-only
+`fflate` dependency is excluded from the runtime.
+
+Mojian owns allowed notebook paths, its URL namespace and credential/config rules.
+The shared core owns blobs, atomic persistence, CAS and durable operation replay.
+Neither service shares its process, token, storage root or workspace identity with
+WebObsidian. Updating the public core does not silently change an installed package.
 
 ## Existing Sakura Web endpoint
 

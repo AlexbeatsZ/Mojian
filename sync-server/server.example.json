@@ -1,0 +1,5 @@
+{
+  "port": 18742,
+  "dataRoot": "C:/Users/Meta/AppData/Local/MojianSync/data",
+  "token": "replace-with-a-private-secret-of-at-least-32-bytes"
+}

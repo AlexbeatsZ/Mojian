@@ -8,6 +8,18 @@
 
 # Current State
 
+- Independent sync-server version **0.1.0** uses pinned
+  `@alexbeatsz/file-sync-core@0.1.0` (exact GitHub Release TGZ + package-lock integrity).
+  Product namespace/path/token policy and configured HTTP/TLS adapters stay in this repo;
+  shared storage/blob/CAS/receipt implementation is no longer duplicated. Server artifacts
+  have separate `sync-server-v*` tags and never replace the desktop/mobile latest release.
+  `npm ci && npm test && npm run test:integration && npm run package:server` from
+  `sync-server` produces a standalone ZIP including the core, requiring Node22+ only.
+  Old-server state bytes/receipt replay, out-of-checkout unpacked startup, Node14passed/
+  1optional skipped and the actual .NET harness25 scenarios/Node11of11 passed.
+  Production ROG cutover is pending; preserve current private config/data and composed
+  gateway module paths. Read sync-server/README.md and docs/design/native-sync.md.
+
 - Current source version: Windows and Android **0.7.8**; Android retains
   `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
   Supplied feather artwork is preserved in `shared/branding`; Windows uses the original

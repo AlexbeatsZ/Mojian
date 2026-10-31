@@ -1,0 +1,63 @@
+name: Mojian Sync Server
+
+on:
+  push:
+    paths:
+      - 'sync-server/**'
+      - '.github/workflows/sync-server.yml'
+    tags:
+      - 'sync-server-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: sync-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: sync-server/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:integration
+      - run: npm run package:server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mojian-Sync-Server
+          path: sync-server/artifacts/*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/sync-server-v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mojian-Sync-Server
+          path: artifacts
+      - name: Publish server release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists; preserving its published assets."
+          else
+            gh release create "$RELEASE_TAG" artifacts/*.zip \
+              --verify-tag --latest=false --title "Mojian Sync Server ${RELEASE_TAG#sync-server-v}" \
+              --notes "Standalone Node server. Includes the pinned file-sync-core runtime. Existing v1 clients and data directories remain compatible; desktop and mobile releases are independent."
+          fi
