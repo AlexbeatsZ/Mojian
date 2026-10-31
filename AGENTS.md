@@ -18,7 +18,8 @@
   Packaged app native NSEvent ink/menu Undo/Redo, view-only byte invariance, PDF and fresh-process
   reopening passed against disposable data only. Independent PDF reader reports A4/zero images.
   Current output: `macos/artifacts/current/Mojian.app` and its arm64 ZIP; ad-hoc signed, not notarized.
-  Run `bash macos/tools/build.sh test|build`. Evidence: `/tmp/.agents/mojian-macos-client/native-final-2`.
+  `macos-v0.1.0` is published as an independent prerelease with the 677475-byte ZIP uploaded.
+  Run `bash macos/tools/build.sh test|build`. Evidence: `/tmp/.agents/mojian-macos-client/native-delivery`.
   Source/task continuation: `/Users/meta/.agents/mojian--macos-client/AGENTS.md`.
 
 - Current source version: Windows and Android **0.7.8**; Android retains
