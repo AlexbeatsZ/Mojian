@@ -42,7 +42,11 @@ public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 
 public partial class NoteCanvas : UserControl
 {
-    private enum DirectGestureMode { None, Move, Resize, Marquee }
+    private enum DirectGestureMode { None, Move, Resize, Marquee, Crop }
+    private PageObject? _cropImage;
+    private Rect? _cropPreviewBounds;
+    private bool _cropStylusGesture;
+    private bool _drawingScreen;
     private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private const double UnitsPerMillimeter = 96d / 25.4d;
 
@@ -319,6 +323,7 @@ public partial class NoteCanvas : UserControl
 
     public void Undo()
     {
+        ExitImageCrop();
         if (Document == null || _undo.Count == 0) return;
         _redo.Push(Snapshot(Document));
         RestoreSnapshot(_undo.Pop());
@@ -326,6 +331,7 @@ public partial class NoteCanvas : UserControl
 
     public void Redo()
     {
+        ExitImageCrop();
         if (Document == null || _redo.Count == 0) return;
         _undo.Push(Snapshot(Document));
         RestoreSnapshot(_redo.Pop());
@@ -673,10 +679,41 @@ public partial class NoteCanvas : UserControl
         PushUndo();
         var centerX = item.X + item.Width / 2;
         var centerY = item.Y + item.Height / 2;
-        item.Width = item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelWidth : bitmap.PixelHeight;
-        item.Height = item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelHeight : bitmap.PixelWidth;
+        var crop = ImageCrop.Source(item);
+        item.Width = (float)(item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelWidth * crop.Width : bitmap.PixelHeight * crop.Height);
+        item.Height = (float)(item.RotationQuarterTurns % 2 == 0 ? bitmap.PixelHeight * crop.Height : bitmap.PixelWidth * crop.Width);
         item.X = centerX - item.Width / 2;
         item.Y = centerY - item.Height / 2;
+        FinishObjectMutation(item);
+        return true;
+    }
+
+    public bool BeginImageCrop(PageObject item)
+    {
+        if (!CanMutateImage(item) || LoadBitmap(item.AssetName, false) == null) return false;
+        SelectOnlyObject(item);
+        _cropImage = item;
+        Focus(); InvalidateVisual();
+        return true;
+    }
+
+    public bool ExitImageCrop()
+    {
+        if (_cropImage == null) return false;
+        if (_directGestureMode == DirectGestureMode.Crop) CancelDirectPointer();
+        _cropPreviewBounds = null; _cropImage = null;
+        RecomputeSelectionBounds(); InvalidateVisual();
+        return true;
+    }
+
+    public bool CropImageObject(PageObject item, Rect displayCrop)
+    {
+        if (!CanMutateImage(item) || LoadBitmap(item.AssetName, false) == null) return false;
+        // Validate on a copy before adding an undo entry; accepting an unchanged crop is a no-op.
+        var copy = item.CopyForSave();
+        if (!ImageCrop.Apply(copy, displayCrop)) return false;
+        PushUndo();
+        ImageCrop.Apply(item, displayCrop);
         FinishObjectMutation(item);
         return true;
     }
@@ -937,7 +974,7 @@ public partial class NoteCanvas : UserControl
         Focus();
         var point = e.GetPosition(this);
         var forcePan = Keyboard.IsKeyDown(Key.Space);
-        if (!forcePan && !PendingTagKind.HasValue && InsertSpaceModeEnabled &&
+        if (_cropImage == null && !forcePan && !PendingTagKind.HasValue && InsertSpaceModeEnabled &&
             DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Mouse) &&
             !(e.OriginalSource is TextBox focusedEditor && focusedEditor.IsKeyboardFocusWithin))
             BeginMouseInsertSpace(point);
@@ -1031,6 +1068,7 @@ public partial class NoteCanvas : UserControl
     protected override void OnLostStylusCapture(StylusEventArgs e)
     {
         base.OnLostStylusCapture(e);
+        if (_cropStylusGesture) { _cropStylusGesture = false; _stylusActive = false; CancelDirectPointer(); }
         if (!_finishingPointer && (_activeStroke != null || _stylusSelectionTransformActive || _stylusDeselectOnly)) CancelStylusToolActionForNavigation();
         if (_rightLassoArmed && _rightLassoUsesStylus) CancelRightButtonLasso();
     }
@@ -1112,6 +1150,11 @@ public partial class NoteCanvas : UserControl
             e.Handled = true;
             return;
         }
+        if (TryBeginImageCropPointer(point.ToPoint(), fromTouch: false))
+        {
+            _cropStylusGesture = true;
+            CaptureStylus(); e.Handled = true; return;
+        }
         BeginPointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true, forcePan: false, forceErase: _stylusEraserActive);
         e.Handled = true;
     }
@@ -1125,6 +1168,11 @@ public partial class NoteCanvas : UserControl
         {
             _hoverViewPoint = points[^1].ToPoint();
             UpdatePointerCursor();
+        }
+        if (_cropStylusGesture)
+        {
+            if (points.Count > 0) ContinueDirectPointer(points[^1].ToPoint());
+            e.Handled = true; return;
         }
         if (_rightLassoArmed && _rightLassoUsesStylus)
         {
@@ -1214,6 +1262,13 @@ public partial class NoteCanvas : UserControl
 
     private void HandleStylusUp(object sender, StylusEventArgs e)
     {
+        if (_cropStylusGesture)
+        {
+            EndDirectPointer(e.GetPosition(this));
+            _cropStylusGesture = false; _stylusActive = false;
+            ReleaseStylusCapture(); _ignoreMouseUntil = Environment.TickCount64 + 250;
+            e.Handled = true; return;
+        }
         var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
         if (CanvasPointerFeedback.StylusUpEndsRightButtonGesture(
                 _rightLassoArmed,
@@ -1280,7 +1335,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeTouchDevices.Count != 1) return;
         var touchPoint = e.GetTouchPoint(this).Position;
-        if (InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger))
+        if (_cropImage == null && InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger))
         {
             BeginInsertSpace(touchPoint);
             _touchInsertSpaceActive = true;
@@ -1364,6 +1419,11 @@ public partial class NoteCanvas : UserControl
     private void BeginDirectPointer(Point viewPoint, bool fromTouch)
     {
         if (Document == null) return;
+        if (TryBeginImageCropPointer(viewPoint, fromTouch))
+        {
+            if (!fromTouch) CaptureMouse();
+            return;
+        }
         if (SelectedTool?.Kind == DrawingToolKind.Shape && !SingleFingerPanEnabled && !InsertSpaceModeEnabled) { BeginPointer(viewPoint, .5f, 0, 0, isStylus: false, forcePan: false, forceErase: false); return; }
         var editingEditor = EditorAt(viewPoint);
         var editingHit = editingEditor is { IsKeyboardFocusWithin: true, IsHitTestVisible: true };
@@ -1405,6 +1465,14 @@ public partial class NoteCanvas : UserControl
     private void ContinueDirectPointer(Point viewPoint)
     {
         if (_directGestureMode == DirectGestureMode.None || Document == null) return;
+        if (_directGestureMode == DirectGestureMode.Crop)
+        {
+            var point = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+            _cropPreviewBounds = ImageCrop.ResizeBounds(_resizeStartBounds, _resizeHandle, point - _resizeDownPoint, 12 / Math.Max(.01, _viewport.Scale));
+            _directGestureCommitted = _cropPreviewBounds != _resizeStartBounds;
+            _selectionBounds = _cropPreviewBounds;
+            InvalidateVisual(); return;
+        }
         var distance = Distance(viewPoint, _directDownView);
         if (!_directGestureCommitted)
         {
@@ -1451,6 +1519,20 @@ public partial class NoteCanvas : UserControl
     private void EndDirectPointer(Point viewPoint)
     {
         _directLongPressTimer.Stop();
+        if (_directGestureMode == DirectGestureMode.Crop)
+        {
+            ContinueDirectPointer(viewPoint);
+            var item = _cropImage; var bounds = _cropPreviewBounds;
+            _cropPreviewBounds = null;
+            ResetDirectPointer();
+            if (item != null && bounds.HasValue)
+            {
+                CropImageObject(item, ImageCrop.FromDocumentBounds(item, bounds.Value));
+                if (CanMutateImage(item)) _cropImage = item;
+            }
+            RecomputeSelectionBounds(); InvalidateVisual();
+            return;
+        }
         if (_directGestureCommitted) ContinueDirectPointer(viewPoint);
         if (_directLongPressTriggered)
         {
@@ -1488,6 +1570,18 @@ public partial class NoteCanvas : UserControl
 
     private void CancelDirectPointer()
     {
+        if (_directGestureMode == DirectGestureMode.Crop)
+        {
+            _cropPreviewBounds = null;
+            if (_cropStylusGesture)
+            {
+                _cropStylusGesture = false; _stylusActive = false;
+                _ignoreMouseUntil = Environment.TickCount64 + 250;
+                ReleaseStylusCapture();
+            }
+            RecomputeSelectionBounds(); ResetDirectPointer();
+            return;
+        }
         FinishSelectionMove(commit: false);
         _directLongPressTimer.Stop();
         if (_isInsertingSpace) CancelInsertSpace();
@@ -1515,6 +1609,21 @@ public partial class NoteCanvas : UserControl
         _resizeHandle = -1;
         if (IsMouseCaptured) ReleaseMouseCapture();
         InvalidateVisual();
+    }
+
+    private bool TryBeginImageCropPointer(Point viewPoint, bool fromTouch)
+    {
+        if (_cropImage is not { } item || !CanMutateImage(item)) { _cropImage = null; return false; }
+        var bounds = new Rect(item.X, item.Y, item.Width, item.Height);
+        var handle = ImageCrop.HitHandle(viewPoint, _viewport.DocumentToView(bounds), fromTouch ? 24 : 12);
+        if (handle < 0) { ExitImageCrop(); return false; }
+        _directGestureMode = DirectGestureMode.Crop;
+        _directGestureCommitted = false; _directUndoPushed = false;
+        _directGestureFromTouch = fromTouch; _directLongPressTriggered = false;
+        _resizeHandle = handle; _resizeStartBounds = bounds;
+        _resizeDownPoint = _viewport.ViewToDocument(viewPoint.X, viewPoint.Y);
+        _cropPreviewBounds = bounds;
+        return true;
     }
 
     private void CancelInsertSpace()
@@ -2780,6 +2889,7 @@ public partial class NoteCanvas : UserControl
         if (Document == null) return;
         SceneRenderCount++;
         _drawingDryScene = SeparateWetInk;
+        _drawingScreen = true;
         try
         {
             var matrix = _viewport.DocumentToViewMatrix();
@@ -2800,7 +2910,7 @@ public partial class NoteCanvas : UserControl
             dc.Pop();
             if (_panCacheActive) dc.Pop();
         }
-        finally { _drawingDryScene = false; }
+        finally { _drawingDryScene = false; _drawingScreen = false; }
     }
 
     // Panning used to re-rasterize every visible stroke for each pointer sample (about
@@ -2961,6 +3071,8 @@ public partial class NoteCanvas : UserControl
             var rect = new Rect(item.X, item.Y, item.Width, item.Height);
             if (!rect.IntersectsWith(extent)) continue;
             var border = new Pen(new SolidColorBrush(lightExport ? Color.FromRgb(180, 180, 180) : Color.FromRgb(87, 87, 87)), 1);
+            var cropPreview = _drawingScreen && ReferenceEquals(item, _cropImage) && _cropPreviewBounds.HasValue;
+            if (cropPreview) dc.PushClip(new RectangleGeometry(_cropPreviewBounds!.Value));
             switch (item.Kind)
             {
                 case PageObjectKind.Image:
@@ -2992,11 +3104,22 @@ public partial class NoteCanvas : UserControl
                     DrawText(dc, $"↗ {item.DisplayName}", new Point(rect.X, rect.Y), 14, new SolidColorBrush(Color.FromRgb(86, 156, 214)), underline: true);
                     break;
             }
+            if (cropPreview) dc.Pop();
         }
     }
 
     private static void DrawTransformedImage(DrawingContext dc, BitmapSource bitmap, Rect destination, PageObject item)
     {
+        var crop = ImageCrop.Source(item);
+        if (crop != ImageCrop.Full)
+        {
+            var left = Math.Clamp((int)Math.Floor(crop.Left * bitmap.PixelWidth), 0, bitmap.PixelWidth - 1);
+            var top = Math.Clamp((int)Math.Floor(crop.Top * bitmap.PixelHeight), 0, bitmap.PixelHeight - 1);
+            var right = Math.Clamp((int)Math.Ceiling(crop.Right * bitmap.PixelWidth), left + 1, bitmap.PixelWidth);
+            var bottom = Math.Clamp((int)Math.Ceiling(crop.Bottom * bitmap.PixelHeight), top + 1, bitmap.PixelHeight);
+            bitmap = new CroppedBitmap(bitmap, new Int32Rect(left, top, right - left, bottom - top));
+            bitmap.Freeze();
+        }
         var turns = ((item.RotationQuarterTurns % 4) + 4) % 4;
         var center = new Point(destination.Left + destination.Width / 2, destination.Top + destination.Height / 2);
         var local = turns % 2 == 0
@@ -3250,7 +3373,9 @@ public partial class NoteCanvas : UserControl
         var sourcePath = ResolveAssetPath?.Invoke(item.SourceAssetName);
         if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath)) return preview;
 
-        var targetWidth = PdfRenderSizing.ForDisplay(item.Width, _viewport.Scale, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        var sourceCrop = ImageCrop.Source(item);
+        var sourceWidth = item.RotationQuarterTurns % 2 == 0 ? item.Width / sourceCrop.Width : item.Height / sourceCrop.Width;
+        var targetWidth = PdfRenderSizing.ForDisplay(sourceWidth, _viewport.Scale, VisualTreeHelper.GetDpi(this).DpiScaleX);
         var prefix = $"{sourcePath}|{Math.Max(1, item.SourcePageNumber ?? 1)}|{inverted}|{File.GetLastWriteTimeUtc(sourcePath).Ticks}|";
         var key = $"{prefix}{targetWidth}";
         if (_pdfBitmapCache.TryGetValue(key, out var exact)) return exact;
@@ -3508,6 +3633,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        _cropStylusGesture = false;
         _stylusDeselectOnly = false;
         FinishSelectionMove(commit: false);
         _pasteAnchor = null;
@@ -3535,6 +3661,7 @@ public partial class NoteCanvas : UserControl
 
     private void ClearSelection(bool keepLasso = false)
     {
+        _cropImage = null; _cropPreviewBounds = null;
         _selectedStrokes.Clear(); _selectedTags.Clear(); _selectedTextItems.Clear(); _selectedObjects.Clear(); _selectionBounds = null;
         if (!keepLasso) _lasso.Clear();
         UpdateTextEditorInteraction();

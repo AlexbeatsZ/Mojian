@@ -51,7 +51,7 @@ class DryInkView(context: Context) : View(context) {
         private set
     private val strokeBounds = IdentityHashMap<Stroke, StrokeViewportBounds>()
     private var cachedContentBottom = 0f
-    private val redoStrokes = ArrayDeque<Stroke>()
+    private val editHistory = ReversibleEditHistory()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
     private var lassoShape = LassoShape.FREEFORM
@@ -130,29 +130,37 @@ class DryInkView(context: Context) : View(context) {
 
     fun addStrokes(newStrokes: Collection<Stroke>) {
         selectedStrokes.clear()
-        redoStrokes.clear()
         strokes.addAll(newStrokes)
+        newStrokes.forEach { stroke ->
+            editHistory.record(ReversibleEditHistory.Edit({ strokes.remove(stroke) }, { strokes.add(stroke) }))
+        }
         invalidate()
         newStrokes.forEach(::registerStroke)
         onContentChanged?.invoke()
     }
 
     fun undo(): Boolean {
-        if (strokes.isEmpty()) return false
-        redoStrokes.addLast(strokes.removeAt(strokes.lastIndex))
+        if (!editHistory.undo {
+            strokes.lastOrNull()?.let { stroke ->
+                ReversibleEditHistory.Edit({ strokes.remove(stroke) }, { strokes.add(stroke) })
+            }
+        }) return false
         rebuildStrokeMetrics()
+        onContentChanged?.invoke()
         invalidate()
         return true
     }
 
     fun redo(): Boolean {
-        if (redoStrokes.isEmpty()) return false
-        val restored = redoStrokes.removeLast()
-        strokes.add(restored)
-        registerStroke(restored)
+        if (!editHistory.redo()) return false
+        rebuildStrokeMetrics()
         onContentChanged?.invoke()
         invalidate()
         return true
+    }
+
+    fun recordExternalEdit(undo: () -> Unit, redo: () -> Unit) {
+        editHistory.record(ReversibleEditHistory.Edit(undo, redo))
     }
 
     fun clear() {
@@ -160,7 +168,7 @@ class DryInkView(context: Context) : View(context) {
         strokes.clear()
         strokeBounds.clear()
         cachedContentBottom = 0f
-        redoStrokes.clear()
+        editHistory.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
         lassoStartPoint = null
@@ -185,7 +193,7 @@ class DryInkView(context: Context) : View(context) {
         strokes.clear()
         strokes.addAll(replacement)
         rebuildStrokeMetrics()
-        redoStrokes.clear()
+        editHistory.clear()
         selectedStrokes.clear()
         lassoPoints.clear()
         lassoStartPoint = null
@@ -363,7 +371,7 @@ class DryInkView(context: Context) : View(context) {
     fun deleteSelection(): Int {
         val count = selectedStrokes.size
         if (count == 0) return 0
-        redoStrokes.clear()
+        editHistory.clear()
         strokes.removeAll(selectedStrokes)
         selectedStrokes.clear()
         rebuildStrokeMetrics()
@@ -412,7 +420,7 @@ class DryInkView(context: Context) : View(context) {
             rebuildStrokeMetrics()
             invalidate()
         }
-        if (removed > 0) redoStrokes.clear()
+        if (removed > 0) editHistory.clear()
         return removed
     }
 

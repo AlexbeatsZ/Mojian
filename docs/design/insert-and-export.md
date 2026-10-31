@@ -1,6 +1,6 @@
 # Insert Objects and Export Containers
 
-Last verified: 2026-10-08
+Last verified: 2026-10-31
 
 Old Notein/OneNote pages additionally use the read-only paper/image/ink contrast compatibility
 in `imported-page-presentation.md`. Original files and persisted inversion flags remain unchanged;
@@ -128,7 +128,7 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
 - Image context commands are app-owned and include cut/copy/paste, save-as, a page-link action,
   four stacking operations (`上移一层`, `置于顶层`, `下移一层`, `置于底层`), clockwise/counterclockwise
   90-degree rotation, horizontal/vertical flip, restore original pixel size, and set-as-background.
-  Order and rotation are right-side submenus; unavailable link/move/crop commands remain visibly
+  Order and rotation are right-side submenus; unavailable link/move commands remain visibly
   disabled instead of silently disappearing. Rotation quarter-turns, both flip flags, size, position,
   and background state are persisted in page JSON with backward-compatible defaults.
 - Windows mirrors this object contract with ordinary-click selection, the same dotted eight-handle
@@ -139,6 +139,37 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   source asset/document, page number/count, source point dimensions, and custom document dimensions
   in the manifest, and writes image objects with Android's `PDF_PAGE`, background, rotation, and flip
   fields. Do not substitute the desktop-only `PdfPrintout` enum name into the shared container.
+
+## Direct image cropping
+
+- On both clients, `裁剪` enters a canvas mode for one editable image, PDF printout or sticker.
+  The existing eight-handle frame initially encloses the whole currently visible image, without
+  Android's normal selection padding. There is no crop dialog, confirm/reset button or toolbar.
+- Drag any edge or corner inward to trim that part of the image. Corners change both axes freely;
+  they do not perform aspect-preserving object scaling. Dragging outward clamps at the starting
+  bounds. The retained image pixels keep their document position and scale.
+- A drag clips only the screen preview. The canonical object, exports and outgoing save snapshots
+  retain the last committed crop until normal pointer release. One release commits one edit,
+  saves through the existing page owner and adds one Ctrl+Z undo step. Unchanged drags add none.
+  Mouse, single-finger and pen use the same crop geometry; pan/pinch takeover or capture loss
+  discards the pending preview. Click away or press Escape to leave crop mode.
+- `cropLeft`, `cropTop`, `cropRight`, `cropBottom` are normalized original-source bounds before
+  clockwise quarter-turn rotation and display-axis flips. Missing/invalid bounds mean the full
+  source. Windows canonical JSON, Android shared/private JSON, native clipboard and `.mjn` retain
+  the same fields. Neither client rewrites or replaces the original image/PDF asset.
+- Screen, PNG/SVG copies and PDF/print all crop through the existing image renderer, before image
+  rotation/flipping. `还原原始大小` uses the cropped source's pixel dimensions; it does not undo the
+  crop. `另存为` continues to save the original embedded file. Immutable page backgrounds and
+  non-image objects remain ineligible.
+- Windows uses its existing page snapshot undo. Android's ink undo owner keeps one chronological
+  reversible stream for authored strokes and crop edits, including Ctrl+Z/redo and pen bindings.
+  Crop restoration finds the current stable image identity and retains later non-crop properties;
+  page rebind clears history, as it already did for ink.
+- Windows native tests exercise the real direct-pointer crop path, cancellation, one-step undo/
+  redo, canonical save/reload, 16 rotation/flip combinations, actual PNG/SVG pixels and a PDF
+  rendered by the independent Windows PDF reader. Android JVM tests cover metadata/geometry/
+  history; native gesture/pixel/reload instrumentation is compiled separately. Compilation does
+  not establish physical Android gesture acceptance.
 
 ## Placement and persistence
 

@@ -8,6 +8,15 @@
 
 # Current State
 
+- Windows/Android source **0.7.9** (Android code **17**) adds direct image cropping.
+  Image menu `裁剪` activates the existing canvas frame; dragging edges/corners inward previews
+  a trim, pointer release commits once, Ctrl+Z undoes once. No dialog or extra action buttons.
+  Crop metadata uses normalized original-image bounds, shared by JSON/.mjn/clipboard/output;
+  original assets are retained. Read `docs/design/insert-and-export.md` and `input-gestures.md`.
+  Windows Release220/220 passed; Android JVM255 passed/1 opt-in skipped. Native Android crop
+  instrumentation is compile-only. Build/release staging and active0.7.8 replacement continuation:
+  `C:\Users\Meta\.agents\mojian--image-cropping\AGENTS.md`.
+
 - Independent sync-server version **0.1.0** uses pinned
   `@alexbeatsz/file-sync-core@0.1.0` (exact GitHub Release TGZ + package-lock integrity).
   Product namespace/path/token policy and configured HTTP/TLS adapters stay in this repo;
@@ -20,7 +29,7 @@
   Production ROG cutover is pending; preserve current private config/data and composed
   gateway module paths. Read sync-server/README.md and docs/design/native-sync.md.
 
-- Current source version: Windows and Android **0.7.8**; Android retains
+- Last installed delivery: Windows and Android **0.7.8**; Android retains
   `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
   Supplied feather artwork is preserved in `shared/branding`; Windows uses the original
   ICO/PNG, Android uses density-correct adaptive/legacy variants, and iOS uses an opaque

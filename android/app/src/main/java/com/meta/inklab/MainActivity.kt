@@ -784,7 +784,10 @@ class MainActivity : Activity() {
             }
             selectionOverlay.updateControlKey(control)
             if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.action == KeyEvent.ACTION_DOWN)
+            {
                 selectionOverlay.cancelDirectGesture()
+                if (insertContentLayer.endImageCrop()) return true
+            }
         }
         if (shortcutDispatcher.dispatch(event)) return true
         val keyIdentity = event.deviceId to event.keyCode
@@ -3239,6 +3242,10 @@ class MainActivity : Activity() {
         selectionOverlay =
             SelectionOverlayView(this, viewport).apply {
                 selectionBoundsProvider = ::combinedSelectionBounds
+                cropBoundsProvider = insertContentLayer::imageCropBounds
+                onPreviewCrop = { bounds -> insertContentLayer.previewImageCrop(bounds); dryInkView.invalidate() }
+                onCommitCrop = insertContentLayer::commitImageCrop
+                onExitCrop = { insertContentLayer.endImageCrop(); dryInkView.invalidate() }
                 onBeginMove = ::beginSelectionMove
                 onFinishMove = ::finishSelectionMove
                 blankContentHitTest = { x, y ->
@@ -3305,6 +3312,7 @@ class MainActivity : Activity() {
             expandPageIfNeeded()
         }
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
+        insertContentLayer.onReversibleEdit = { undo, redo -> dryInkView.recordExternalEdit(undo, redo) }
         insertContentLayer.onSelectionChanged = { selected ->
             if (selected != null) {
                 dryInkView.clearSelection()
@@ -4544,7 +4552,7 @@ class MainActivity : Activity() {
             visibleStrokes.addAll(strokes)
             ordered.forEach { item ->
                 when(item) {
-                    is InsertObject -> insertContentLayer.renderSceneObject(canvas,item)
+                    is InsertObject -> insertContentLayer.renderSceneObject(canvas,item, includeCropPreview = true)
                     is androidx.ink.strokes.Stroke -> if (item in visibleStrokes) draw(item)
                     is String -> textInputLayer.renderForExport(canvas,android.graphics.Matrix(),onlyId=item)
                 }
@@ -5693,6 +5701,8 @@ class MainActivity : Activity() {
         val penCanMoveSelection = !overChrome && !singleFingerPanEnabled && !insertSpaceModeEnabled &&
             (toolShelf.selected.kind == DrawingToolKind.PEN || toolShelf.selected.kind == DrawingToolKind.HIGHLIGHTER)
         if (selectionOverlay.handleStylusSelection(event, penCanMoveSelection)) return true
+        if (!overChrome && insertContentLayer.imageCropBounds() != null && (fingerCount == 1 || mouseIndex != null))
+            return selectionOverlay.onTouchEvent(event)
         if (toolShelf.selected.kind == DrawingToolKind.SHAPE && !singleFingerPanEnabled && !insertSpaceModeEnabled) {
             if (!overChrome && handleShapePointer(event)) return true
         }
@@ -7402,7 +7412,10 @@ class MainActivity : Activity() {
                 checked = if (insertContentLayer.usesImportedImagePresentation(image)) image.viewInverted else insertContentLayer.displayImageInverted(image),
                 action = { insertContentLayer.toggleImageInversion(image) }),
             MojianCommandMenu.Item("移动", "hand_left", enabled = false, dividerBefore = true),
-            MojianCommandMenu.Item("裁剪", "crop", enabled = false),
+            MojianCommandMenu.Item("裁剪", "crop", enabled = !image.pageBackground, action = {
+                if (!insertContentLayer.beginImageCrop(image)) Toast.makeText(this, "无法读取图片文件", Toast.LENGTH_SHORT).show()
+                selectionOverlay.invalidate()
+            }),
             MojianCommandMenu.Item("还原为原始尺寸", "full_screen_maximize", dividerBefore = true, action = { insertContentLayer.restoreSelectedImageSize() }),
             MojianCommandMenu.Item("将图片设置为背景", "image", action = { insertContentLayer.setSelectedImageAsBackground() }),
         )

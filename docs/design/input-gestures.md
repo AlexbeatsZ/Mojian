@@ -1,9 +1,20 @@
 # 墨笺输入设备与交互契约
 
-Last updated: 2026-10-19 (implementation only; testing/acceptance stopped at the user's request)
+Last updated: 2026-10-31 (direct crop native Windows tests; Android physical crop acceptance pending)
 
 修改 Android / Windows 的指针分发、对象选择、文本框、画布变换、触控笔工具、快捷键或压力橡皮前，必须先读本文。
 本文是输入行为的唯一设计来源；`workspace-ui.md` 与 `windows-desktop.md` 只能引用，不能另行定义冲突手势。
+
+## 图片直接裁剪
+
+Windows / Android 图片右键或长按菜单的「裁剪」进入画布模式，沿用八控制点框，初始贴住当前整张图片。
+不弹对话框，不出现完成、取消或恢复按钮。向内拖动任一边或角实时预览对应裁剪；内容不缩放、不移动，
+角点不锁比例，向外拖动不超过本次开始时的边界。每次松手自动提交一次，Ctrl+Z 撤销一次。
+下一次拖动从上次裁剪后的可见边界开始，点击别处或 Esc 退出裁剪模式。
+
+鼠标、单指、笔走同一裁剪几何；笔接触裁剪控制点优先于 Ink/Hand/Shape 工具。双指/捕获丢失/页面切换
+取消尚未松手的预览，不写笔记或额外撤销记录。预览不进入保存、同步或导出；原图资产保持不变。
+固定 PDF 页背景不可裁剪。持久化、旋转/翻转与输出契约见 `insert-and-export.md` 的 Direct image cropping。
 
 ## 1. 不可破坏的总原则
 

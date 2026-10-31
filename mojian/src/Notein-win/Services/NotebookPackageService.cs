@@ -200,6 +200,10 @@ public static class NotebookPackageService
                 result["rotationQuarterTurns"] = ((item.RotationQuarterTurns % 4) + 4) % 4;
                 result["flipHorizontal"] = item.FlipHorizontal;
                 result["flipVertical"] = item.FlipVertical;
+                result["cropLeft"] = item.CropLeft;
+                result["cropTop"] = item.CropTop;
+                result["cropRight"] = item.CropRight;
+                result["cropBottom"] = item.CropBottom;
             }
         }
         return result;

@@ -24,6 +24,7 @@ class SelectionOverlayView(
         MOVE,
         SCALE,
         MARQUEE,
+        CROP,
     }
 
     var selectionEnabled = true
@@ -41,6 +42,10 @@ class SelectionOverlayView(
         }
     var fingerDirectInputEnabled = true
     var selectionBoundsProvider: (() -> RectF?)? = null
+    var cropBoundsProvider: (() -> RectF?)? = null
+    var onPreviewCrop: ((RectF?) -> Unit)? = null
+    var onCommitCrop: ((RectF) -> Unit)? = null
+    var onExitCrop: (() -> Unit)? = null
     var onTranslateSelection: ((Float, Float) -> Unit)? = null
     var onScaleSelection: ((Float, Float, Float, Float) -> Unit)? = null
     var onTransformFinished: (() -> Unit)? = null
@@ -57,11 +62,12 @@ class SelectionOverlayView(
     /** The host claims pen selection moves before an editor or wet-ink child consumes DOWN. */
     fun handleStylusSelection(event: MotionEvent, canStart: Boolean): Boolean {
         if (stylusMovePointerId == null) {
-            if (!canStart || !selectionEnabled || event.actionMasked != MotionEvent.ACTION_DOWN ||
+            if ((!canStart && cropBoundsProvider?.invoke() == null) || !selectionEnabled || event.actionMasked != MotionEvent.ACTION_DOWN ||
                 event.getToolType(event.actionIndex) != MotionEvent.TOOL_TYPE_STYLUS) return false
             val point = viewport.viewToDocument(event.x, event.y)
             val bounds = selectionBoundsProvider?.invoke()?.let { RectF(it).apply {
-                inset(-dp(8f) / viewport.scale, -dp(8f) / viewport.scale)
+                val radius = if (cropBoundsProvider?.invoke() != null) 24f else 8f
+                inset(-dp(radius) / viewport.scale, -dp(radius) / viewport.scale)
             } } ?: return false
             if (!bounds.contains(point.x, point.y)) {
                 if (blankContentHitTest?.invoke(event.x, event.y) != true) return false
@@ -116,6 +122,7 @@ class SelectionOverlayView(
     private var resizeStartBounds = DocumentRect(0f, 0f, 0f, 0f)
     private var resizeAppliedBounds = resizeStartBounds
     private var longPressTriggered = false
+    private var cropDismissOnly = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val longPressDetector =
         GestureDetector(
@@ -172,17 +179,25 @@ class SelectionOverlayView(
             stylusMovePointerId == event.getPointerId(event.actionIndex)
         if (!isFinger && !isMouse && !isPenMove) return false
         if (isMouse || isPenMove) updateControlKey(event.metaState and android.view.KeyEvent.META_CTRL_ON != 0)
-        if (isFinger && !fingerDirectInputEnabled) return false
+        if (isFinger && !fingerDirectInputEnabled && cropBoundsProvider?.invoke() == null) return false
         if (isMouse && event.actionMasked == MotionEvent.ACTION_DOWN && event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
             if (editingTextHitTest?.invoke(event.x, event.y) == true) return false
             return onDirectLongPress?.invoke(event.x, event.y) == true
         }
         val primaryPointer = isFinger || isPenMove || event.buttonState and MotionEvent.BUTTON_PRIMARY != 0 || gestureMode != GestureMode.NONE
         if (!primaryPointer) return false
-        if (!isPenMove) longPressDetector.onTouchEvent(event)
+        if (!isPenMove && cropBoundsProvider?.invoke() == null) longPressDetector.onTouchEvent(event)
         val point = viewport.viewToDocument(event.x, event.y).let { DocumentPoint(it.x, it.y) }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                cropBoundsProvider?.invoke()?.let { bounds ->
+                    val handle = ImageCrop.hitHandle(point, bounds.documentRect(), dp(if (isFinger) 24f else 12f) / viewport.scale)
+                    gestureMode = GestureMode.CROP; resizeHandle = handle; cropDismissOnly = handle < 0
+                    resizeStartBounds = bounds.documentRect(); resizeAppliedBounds = resizeStartBounds
+                    downPoint = point; downViewX = event.x; downViewY = event.y
+                    gestureCommitted = false; longPressTriggered = false
+                    return true
+                }
                 val bounds = selectionBoundsProvider?.invoke()
                 val displayBounds = bounds?.let { RectF(it).apply { inset(-dp(8f) / viewport.scale, -dp(8f) / viewport.scale) } }
                 val handleIndex = if (!isPenMove && bounds != null && displayBounds != null) {
@@ -221,6 +236,7 @@ class SelectionOverlayView(
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (cropDismissOnly) return true
                 if (!gestureCommitted) {
                     val viewDistance = hypot(point.x - downPoint.x, point.y - downPoint.y) * viewport.scale
                     if (viewDistance < touchSlop) return true
@@ -248,12 +264,23 @@ class SelectionOverlayView(
                         lastPoint = point
                     }
                     GestureMode.MARQUEE -> onExtendMarquee?.invoke(event.x, event.y)
+                    GestureMode.CROP -> updateCrop(point)
                     GestureMode.NONE -> return false
                 }
                 invalidate()
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                if (gestureMode == GestureMode.CROP) {
+                    if (cropDismissOnly) onExitCrop?.invoke()
+                    else if (gestureCommitted) {
+                        updateCrop(point)
+                        onCommitCrop?.invoke(RectF(resizeAppliedBounds.left, resizeAppliedBounds.top, resizeAppliedBounds.right, resizeAppliedBounds.bottom))
+                    } else onPreviewCrop?.invoke(null)
+                    gestureMode = GestureMode.NONE; gestureCommitted = false; stylusMovePointerId = null; cropDismissOnly = false
+                    parent?.requestDisallowInterceptTouchEvent(false); invalidate()
+                    return true
+                }
                 if (longPressTriggered) {
                     longPressTriggered = false
                     gestureMode = GestureMode.NONE
@@ -291,13 +318,14 @@ class SelectionOverlayView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!selectionVisible) return
-        val bounds = selectionBoundsProvider?.invoke() ?: return
+        val crop = cropBoundsProvider?.invoke()
+        val bounds = crop ?: selectionBoundsProvider?.invoke() ?: return
         canvas.save()
         canvas.concat(viewport.documentToViewMatrix())
         if (moveCopy.preview) drawMoveOriginal?.invoke(canvas)
         selectionPaint.strokeWidth = dp(1.5f) / viewport.scale
         handleStrokePaint.strokeWidth = dp(1.5f) / viewport.scale
-        val padding = dp(8f) / viewport.scale
+        val padding = if (crop != null) 0f else dp(8f) / viewport.scale
         val displayBounds = RectF(bounds).apply { inset(-padding, -padding) }
         canvas.drawRect(displayBounds, selectionPaint)
         val handleHalf = dp(4.5f) / viewport.scale
@@ -317,14 +345,22 @@ class SelectionOverlayView(
         val mode = gestureMode
         if (moveCopy.active) onFinishMove?.invoke(moveCopy.finish(commit = false))
         // A selection already moved/resized by one finger is kept and saved, not left half-applied.
-        if (mode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
+        if (mode == GestureMode.CROP) onPreviewCrop?.invoke(null)
+        else if (mode == GestureMode.MARQUEE) onCancelMarquee?.invoke()
         else if (mode != GestureMode.NONE && gestureCommitted) onTransformFinished?.invoke()
         gestureMode = GestureMode.NONE
         gestureCommitted = false
         stylusMovePointerId = null
         stylusDeselectOnly = false
         longPressTriggered = false
+        cropDismissOnly = false
         parent?.requestDisallowInterceptTouchEvent(false)
+        invalidate()
+    }
+
+    private fun updateCrop(point: DocumentPoint) {
+        resizeAppliedBounds = ImageCrop.resizeBounds(resizeStartBounds, resizeHandle, DocumentPoint(point.x - downPoint.x, point.y - downPoint.y), dp(12f) / viewport.scale)
+        onPreviewCrop?.invoke(RectF(resizeAppliedBounds.left, resizeAppliedBounds.top, resizeAppliedBounds.right, resizeAppliedBounds.bottom))
     }
 
     private fun handles(bounds: RectF): List<DocumentPoint> = SelectionGeometry.selectionHandles(bounds.documentRect())

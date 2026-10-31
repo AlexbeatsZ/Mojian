@@ -316,9 +316,13 @@ public partial class MainWindow : Window
             AddMenuItem(menu, "设为背景", () => canvas.SetImageObjectAsBackground(item));
         }
 
-        var crop = new MenuItem { Header = "裁剪", IsEnabled = false };
+        var crop = AddMenuItem(menu, "裁剪", () =>
+        {
+            if (!canvas.BeginImageCrop(item))
+                MessageBox.Show(this, "无法读取图片文件。", "裁剪", MessageBoxButton.OK, MessageBoxImage.Information);
+        });
+        crop.IsEnabled = item.IsImageLike && !item.IsPageBackground;
         var move = new MenuItem { Header = "移动到其他页面", IsEnabled = false };
-        menu.Items.Add(crop);
         menu.Items.Add(move);
         menu.Items.Add(new Separator());
         AddMenuItem(menu, "删除", () => canvas.RemoveObject(item));
@@ -1248,6 +1252,7 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && FocusedCanvas.ExitImageCrop()) { e.Handled = true; return; }
         if (FocusedTextBox() == null && DirectInputPolicy.IsSelectionDeleteKey(e.Key, Keyboard.Modifiers) && FocusedCanvas.DeleteSelection())
         {
             e.Handled = true;

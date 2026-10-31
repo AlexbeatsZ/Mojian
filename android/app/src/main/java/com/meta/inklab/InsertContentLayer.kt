@@ -10,6 +10,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.util.LruCache
 import android.util.TypedValue
@@ -26,6 +27,8 @@ class InsertContentLayer(
     private var selectedObject: InsertObject? = null
     private val lassoSelectedObjects = linkedSetOf<InsertObject>()
     private var selectionTransformMutated = false
+    private var cropImageId: String? = null
+    private var cropPreviewBounds: RectF? = null
     private val bitmapCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -60,6 +63,7 @@ class InsertContentLayer(
     var onObjectContextMenuRequested: ((InsertObject, Float, Float) -> Unit)? = null
     var onSelectionChanged: ((InsertObject?) -> Unit)? = null
     var onDocumentChanged: ((PageInsertDocument) -> Unit)? = null
+    var onReversibleEdit: (((() -> Unit), (() -> Unit)) -> Unit)? = null
     init {
         setBackgroundColor(Color.TRANSPARENT)
         isClickable = false
@@ -81,8 +85,8 @@ class InsertContentLayer(
         try { drawObjects(canvas,output.printsDark(darkBackground),matrix,output=output) } finally { sceneObjectId=null }
     }
 
-    fun renderSceneObject(canvas: Canvas, item: InsertObject, matrix: android.graphics.Matrix = android.graphics.Matrix(), output: OutputAppearance = OutputAppearance()) {
-        drawObjects(canvas, output.printsDark(darkBackground), matrix, output = output, sceneItem = item)
+    fun renderSceneObject(canvas: Canvas, item: InsertObject, matrix: android.graphics.Matrix = android.graphics.Matrix(), output: OutputAppearance = OutputAppearance(), includeCropPreview: Boolean = false) {
+        drawObjects(canvas, output.printsDark(darkBackground), matrix, output = output, sceneItem = item, includeCropPreview = includeCropPreview)
     }
 
     fun contentBottom(): Float = document?.objects?.maxOfOrNull { it.documentY + it.height } ?: 0f
@@ -278,11 +282,68 @@ class InsertContentLayer(
         if (options.outWidth <= 0 || options.outHeight <= 0) return false
         val centerX = image.documentX + image.width * 0.5f
         val centerY = image.documentY + image.height * 0.5f
-        image.width = (if (image.rotationQuarterTurns.mod(2) == 0) options.outWidth else options.outHeight).toFloat()
-        image.height = (if (image.rotationQuarterTurns.mod(2) == 0) options.outHeight else options.outWidth).toFloat()
+        val crop = ImageCrop.source(image)
+        val width = options.outWidth * crop.width; val height = options.outHeight * crop.height
+        image.width = (if (image.rotationQuarterTurns.mod(2) == 0) width else height).toFloat()
+        image.height = (if (image.rotationQuarterTurns.mod(2) == 0) height else width).toFloat()
         image.documentX = centerX - image.width * 0.5f
         image.documentY = centerY - image.height * 0.5f
         changed(target)
+        return true
+    }
+
+    fun beginImageCrop(image: InsertObject.Image): Boolean {
+        val target = document ?: return false
+        if (image.pageBackground || target.objects.none { it === image } || bitmap(FileFor(target, image.assetName)) == null) return false
+        select(image); cropImageId = image.id; cropPreviewBounds = null; invalidate()
+        return true
+    }
+
+    fun imageCropBounds(): RectF? {
+        val image = selectedImage()?.takeIf { it.id == cropImageId } ?: return null
+        return cropPreviewBounds ?: bounds(image)
+    }
+
+    fun previewImageCrop(bounds: RectF?) {
+        cropPreviewBounds = bounds?.let(::RectF); invalidate()
+    }
+
+    fun endImageCrop(): Boolean {
+        val active = cropImageId != null
+        cropImageId = null; cropPreviewBounds = null; invalidate()
+        return active
+    }
+
+    fun commitImageCrop(bounds: RectF) {
+        val image = selectedImage()?.takeIf { it.id == cropImageId } ?: return
+        cropPreviewBounds = null
+        cropImage(image, ImageCrop.fromDocumentBounds(image, DocumentRect(bounds.left, bounds.top, bounds.right, bounds.bottom)))
+        invalidate()
+    }
+
+    fun cropImage(image: InsertObject.Image, crop: ImageCrop): Boolean {
+        val target = document ?: return false
+        if (image.pageBackground || target.objects.none { it === image }) return false
+        val replacement = image.copy()
+        if (!ImageCrop.apply(replacement, crop)) return false
+        fun replace(from: InsertObject.Image, to: InsertObject.Image) {
+            if (document !== target) return
+            val index = target.objects.indexOfFirst { it === from }
+            if (index < 0) return
+            target.objects[index] = to
+            select(to)
+            changed(target)
+        }
+        val before = ImageCrop.source(image)
+        val after = ImageCrop.source(replacement)
+        fun restoreCrop(source: ImageCrop) {
+            if (document !== target) return
+            val current = target.objects.filterIsInstance<InsertObject.Image>().firstOrNull { it.id == image.id && it.assetName == image.assetName } ?: return
+            val restored = current.copy()
+            if (ImageCrop.apply(restored, source.transformed(current))) replace(current, restored)
+        }
+        replace(image, replacement)
+        onReversibleEdit?.invoke({ restoreCrop(before) }, { restoreCrop(after) })
         return true
     }
 
@@ -379,10 +440,10 @@ class InsertContentLayer(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if(!sceneComposed) drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix())
+        if(!sceneComposed) drawObjects(canvas, forExport = false, documentMatrix = viewport.documentToViewMatrix(), includeCropPreview = true)
     }
 
-    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance(), sceneItem: InsertObject? = null) {
+    private fun drawObjects(canvas: Canvas, forExport: Boolean, documentMatrix: android.graphics.Matrix, selectedOnly: Boolean = false, output: OutputAppearance = OutputAppearance(), sceneItem: InsertObject? = null, includeCropPreview: Boolean = false) {
         val target = document ?: return
         val metadataById = if (sceneItem == null) SharedWorkspaceCodec.items(target.sharedSource.optJSONArray("objects")).associateBy { it.optString("id") } else emptyMap()
         canvas.save()
@@ -395,6 +456,8 @@ class InsertContentLayer(
             // The composed imported scene visits objects in source order. Reject offscreen
             // assets before decoding their bitmaps, including per-sheet export clips.
             if(canvas.rejects(bounds(item))) return@forEach
+            val preview = cropPreviewBounds?.takeIf { includeCropPreview && item.id == cropImageId }
+            if (preview != null) { canvas.save(); canvas.clipRect(preview) }
             when (item) {
                 is InsertObject.Table -> drawTable(canvas, item, forExport)
                 is InsertObject.Attachment -> drawAttachment(canvas, item)
@@ -402,6 +465,7 @@ class InsertContentLayer(
                 is InsertObject.Spreadsheet -> drawSpreadsheet(canvas, item, forExport)
                 is InsertObject.NoteLink -> drawLink(canvas, item)
             }
+            if (preview != null) canvas.restore()
         }
         canvas.restore()
     }
@@ -457,19 +521,7 @@ class InsertContentLayer(
         val destination = bounds(image)
         if (bitmap != null) {
             val paint = if (inverted && !adapt) invertedImagePaint else bitmapPaint
-            val quarterTurns = image.rotationQuarterTurns.mod(4)
-            canvas.save()
-            canvas.translate(destination.centerX(), destination.centerY())
-            canvas.scale(if (image.flipHorizontal) -1f else 1f, if (image.flipVertical) -1f else 1f)
-            canvas.rotate(quarterTurns * 90f)
-            val localDestination =
-                if (quarterTurns.mod(2) == 0) {
-                    RectF(-destination.width() * 0.5f, -destination.height() * 0.5f, destination.width() * 0.5f, destination.height() * 0.5f)
-                } else {
-                    RectF(-destination.height() * 0.5f, -destination.width() * 0.5f, destination.height() * 0.5f, destination.width() * 0.5f)
-                }
-            canvas.drawBitmap(bitmap, null, localDestination, paint)
-            canvas.restore()
+            drawImagePixels(canvas, bitmap, image, destination, paint, ImageCrop.source(image))
         } else {
             fillPaint.color = Color.rgb(43, 43, 43)
             canvas.drawRect(destination, fillPaint)
@@ -485,6 +537,22 @@ class InsertContentLayer(
             canvas.drawRoundRect(labelBounds, dp(2f), dp(2f), fillPaint)
             canvas.drawText("PDF · ${image.sourcePageNumber ?: 1}", labelBounds.left + dp(7f), labelBounds.top + dp(15f), smallTextPaint)
         }
+    }
+
+    private fun drawImagePixels(canvas: Canvas, bitmap: Bitmap, image: InsertObject.Image, destination: RectF, paint: Paint, crop: ImageCrop) {
+        val turns = image.rotationQuarterTurns.mod(4)
+        canvas.save()
+        canvas.translate(destination.centerX(), destination.centerY())
+        canvas.scale(if (image.flipHorizontal) -1f else 1f, if (image.flipVertical) -1f else 1f)
+        canvas.rotate(turns * 90f)
+        val w = if (turns.mod(2) == 0) destination.width() else destination.height()
+        val h = if (turns.mod(2) == 0) destination.height() else destination.width()
+        val left = kotlin.math.floor(crop.left * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+        val top = kotlin.math.floor(crop.top * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+        val right = kotlin.math.ceil(crop.right * bitmap.width).toInt().coerceIn(left + 1, bitmap.width)
+        val bottom = kotlin.math.ceil(crop.bottom * bitmap.height).toInt().coerceIn(top + 1, bitmap.height)
+        canvas.drawBitmap(bitmap, Rect(left, top, right, bottom), RectF(-w / 2, -h / 2, w / 2, h / 2), paint)
+        canvas.restore()
     }
 
     private fun drawSpreadsheet(canvas: Canvas, sheet: InsertObject.Spreadsheet, forExport: Boolean) {
@@ -582,6 +650,7 @@ class InsertContentLayer(
     }
 
     private fun select(item: InsertObject?) {
+        if (item?.id != cropImageId) endImageCrop()
         if (selectedObject === item && lassoSelectedObjects.isEmpty()) return
         lassoSelectedObjects.clear()
         selectedObject = item

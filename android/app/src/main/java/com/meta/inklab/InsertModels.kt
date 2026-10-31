@@ -76,6 +76,10 @@ sealed class InsertObject(
         var rotationQuarterTurns: Int = 0,
         var flipHorizontal: Boolean = false,
         var flipVertical: Boolean = false,
+        var cropLeft: Double = 0.0,
+        var cropTop: Double = 0.0,
+        var cropRight: Double = 1.0,
+        var cropBottom: Double = 1.0,
     ) : InsertObject(id, documentX, documentY, width, height) {
         override val type = InsertObjectType.IMAGE
     }
@@ -140,6 +144,10 @@ sealed class InsertObject(
                     put("rotationQuarterTurns", rotationQuarterTurns.mod(4))
                     put("flipHorizontal", flipHorizontal)
                     put("flipVertical", flipVertical)
+                    put("cropLeft", cropLeft)
+                    put("cropTop", cropTop)
+                    put("cropRight", cropRight)
+                    put("cropBottom", cropBottom)
                 }
                 is Spreadsheet -> {
                     put("assetName", assetName)
@@ -194,6 +202,10 @@ sealed class InsertObject(
                         json.optInt("rotationQuarterTurns", 0).mod(4),
                         json.optBoolean("flipHorizontal", false),
                         json.optBoolean("flipVertical", false),
+                        json.optDouble("cropLeft", 0.0),
+                        json.optDouble("cropTop", 0.0),
+                        json.optDouble("cropRight", 1.0),
+                        json.optDouble("cropBottom", 1.0),
                     )
                 InsertObjectType.SPREADSHEET -> {
                     val rows = mutableListOf<MutableList<String>>()

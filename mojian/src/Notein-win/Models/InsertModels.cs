@@ -68,6 +68,10 @@ public sealed class PageObject
     public int RotationQuarterTurns { get; set; }
     public bool FlipHorizontal { get; set; }
     public bool FlipVertical { get; set; }
+    public double CropLeft { get; set; }
+    public double CropTop { get; set; }
+    public double CropRight { get; set; } = 1;
+    public double CropBottom { get; set; } = 1;
 
     [JsonIgnore]
     public bool IsImageLike => Kind is PageObjectKind.Image or PageObjectKind.PdfPrintout or PageObjectKind.Sticker;
@@ -100,6 +104,10 @@ public sealed class PageObject
         RotationQuarterTurns = ((RotationQuarterTurns % 4) + 4) % 4,
         FlipHorizontal = FlipHorizontal,
         FlipVertical = FlipVertical,
+        CropLeft = CropLeft,
+        CropTop = CropTop,
+        CropRight = CropRight,
+        CropBottom = CropBottom,
     };
 
     public static PageObject Table(float x, float y, int rows = 3, int columns = 3) => new()
