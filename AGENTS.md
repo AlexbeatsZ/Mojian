@@ -2,17 +2,31 @@
 
 - Build 墨笺 (Mojian) as a persistent native Windows/Android note application with editable
   handwriting, one canonical folder format, and safe local-first synchronization.
+- Deliver the native macOS AppKit baseline on its independent branch, with safe canonical local storage.
 - Bring the native iOS/iPadOS client to feature parity, including configurable Pencil gestures.
 - Preserve existing Notein/OneNote data. Reverse engineering is clean-room interoperability with
   the user's notes; do not publish proprietary code, models or keys.
 
 # Current State
 
+- Native macOS 0.1.0 baseline lives in `macos/` on independent `codex/macos-client`.
+  It reuses MojianCore with AppKit windows/menus, canonical v2 local folders, hierarchy/search,
+  editable ink/shapes/text/images, selection/clipboard, Undo/Redo, .mjn exchange, vector PDF and print.
+  Existing external libraries open read-only; only explicitly created Mac-local libraries are writable.
+  HTTPS sync/adoption, full lifecycle/split/rich-text/output parity and physical stylus acceptance remain.
+  Swift 6.4 / Xcode 27.2 (27B52), macOS 26.6.2 arm64: 19 core and 13 desktop tests pass.
+  Packaged app native NSEvent ink/menu Undo/Redo, view-only byte invariance, PDF and fresh-process
+  reopening passed against disposable data only. Independent PDF reader reports A4/zero images.
+  Current output: `macos/artifacts/current/Mojian.app` and its arm64 ZIP; ad-hoc signed, not notarized.
+  Run `bash macos/tools/build.sh test|build`. Evidence: `/tmp/.agents/mojian-macos-client/native-final-2`.
+  Source/task continuation: `/Users/meta/.agents/mojian--macos-client/AGENTS.md`.
+
 - Current source version: Windows and Android **0.7.8**; Android retains
   `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
   Supplied feather artwork is preserved in `shared/branding`; Windows uses the original
   ICO/PNG, Android uses density-correct adaptive/legacy variants, and iOS uses an opaque
-  Apple variant. There is no native macOS app target. Read `docs/design/app-branding.md`.
+  Apple variant. The native macOS AppKit baseline is 0.1.0 on `codex/macos-client`;
+  read `docs/design/macos-client.md` and `docs/design/app-branding.md`.
   Source/resource checks, Android APK/lint, Windows self-contained publish and both
   Xcode builds pass. `v0.7.8` prerelease is published at source 396e78e with all four
   EXE/APK/iOS ZIP assets uploaded. Source is pushed to `origin/master`. Evidence:
@@ -145,7 +159,7 @@
 - 0.7.8 actual phone app-details icon/version is verified; tablet locked-screen and
   Windows Explorer/taskbar visual acceptance remain unverified. Do not refresh system
   caches or force-close products to obtain screenshots. Mac deployment was deferred;
-  native macOS implementation is active in the separate chat identified above.
+  native macOS 0.1.0 baseline is implemented on the separate branch identified above.
 
 - User selected restored/tablet659 and declined90 old editable pages and the phone's different
   version. Do not reintroduce these. Dedicated `Documents/Mojian-native` copies share the current
@@ -231,6 +245,8 @@
   compilation do not establish editability, interoperability, native output or physical latency.
 
 # Docs Index
+
+- `docs/design/macos-client.md`: native AppKit baseline, canonical read-only boundary, local saves and parity gaps.
 
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.

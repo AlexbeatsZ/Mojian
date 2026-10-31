@@ -4,13 +4,13 @@ public struct OutputSheet: Equatable {
     public var source:CGRect, widthPoints:Double, heightPoints:Double, scale:Double
 }
 public enum ExportPlan {
-    public static func sheets(page:Page,document:PageDocument) -> [OutputSheet] {
+    public static func sheets(page:Page,document:PageDocument, a4Gap: Double = 12*unitsPerMM) -> [OutputSheet] {
         let width=210*unitsPerMM,height=297*unitsPerMM,b=document.contentBounds
         if page.paper=="PDF" {
             return [OutputSheet(source:CGRect(x:0,y:0,width:page.width,height:page.height),widthPoints:page.width*72/96,heightPoints:page.height*72/96,scale:72/96)]
         }
         if page.paper=="A4" {
-            let gap=12*unitsPerMM,stride=page.height+gap
+            let gap=a4Gap,stride=page.height+gap
             let last=b.isNull ? 0 : min(10000,max(0,Int(b.maxY/stride)))
             return (0...last).map { i in
                 let top=Double(i)*stride, gapRect=CGRect(x:0,y:top+page.height,width:page.width,height:gap)

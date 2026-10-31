@@ -194,21 +194,31 @@ public final class Page {
     }
 }
 public final class Section {
+    private var sourceJSON: JSON = .object([:])
     public var id: String, title: String, expanded: Bool, pages: [Page], children: [Section]
     public init(id: String = JSON.id("section"), title: String = "新分区", pages: [Page] = [], children: [Section] = [], expanded: Bool = true) {
         self.id = id; self.title = title; self.pages = pages; self.children = children; self.expanded = expanded
     }
     public convenience init(_ j: JSON) {
         self.init(id: j["id"].string, title: j["title"].string, pages: j["pages"].array.map(Page.init), children: j["children"].array.map(Section.init), expanded: j["expanded"].bool(true))
+        sourceJSON = j
     }
-    public var json: JSON { .object(["id": .string(id), "title": .string(title), "expanded": .bool(expanded), "pages": .array(pages.map(\.json)), "children": .array(children.map(\.json))]) }
+    public var json: JSON {
+        var result = sourceJSON
+        result["id"] = .string(id); result["title"] = .string(title); result["expanded"] = .bool(expanded)
+        result["pages"] = .array(pages.map(\.json)); result["children"] = .array(children.map(\.json)); return result
+    }
     public var all: [Section] { [self] + children.flatMap(\.all) }
 }
 public final class Notebook {
+    private var sourceJSON: JSON = .object([:])
     public var id: String, title: String, sections: [Section]
     public init(id: String = JSON.id("notebook"), title: String = "我的笔记本", sections: [Section] = []) { self.id = id; self.title = title; self.sections = sections }
-    public convenience init(_ j: JSON) { self.init(id: j["id"].string, title: j["title"].string, sections: j["sections"].array.map(Section.init)) }
+    public convenience init(_ j: JSON) { self.init(id: j["id"].string, title: j["title"].string, sections: j["sections"].array.map(Section.init)); sourceJSON = j }
     public var allSections: [Section] { sections.flatMap(\.all) }
     public var pages: [Page] { allSections.flatMap(\.pages) }
-    public var json: JSON { .object(["id": .string(id), "title": .string(title), "sections": .array(sections.map(\.json))]) }
+    public var json: JSON {
+        var result = sourceJSON
+        result["id"] = .string(id); result["title"] = .string(title); result["sections"] = .array(sections.map(\.json)); return result
+    }
 }

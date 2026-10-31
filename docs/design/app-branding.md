@@ -3,7 +3,7 @@
 The 2026-10-30 supplied `Mojian_*` feather artwork is the source of truth in
 `shared/branding`. Keep the original SVG, PNG, ICO and ICNS files intact. The other
 application's assets from the supplied archive are outside this repository's scope.
-There is no native macOS target; the ICNS remains source artwork for a future target.
+The native macOS target in `macos/` copies the supplied ICNS unchanged into its application bundle; see `macos-client.md`.
 
 `tools/build_icons.py` packages the artwork using Pillow. It does not draw a logo:
 
