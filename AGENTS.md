@@ -21,6 +21,14 @@
   `macos-v0.1.0` is published as an independent prerelease with the 677475-byte ZIP uploaded.
   Run `bash macos/tools/build.sh test|build`. Evidence: `/tmp/.agents/mojian-macos-client/native-delivery`.
   Source/task continuation: `/Users/meta/.agents/mojian--macos-client/AGENTS.md`.
+  User-authorized 2026-10-31 install: `/Applications/Mojian.app` 0.1.0 is signed with the existing
+  Local Development Code Signing identity; its stable certificate requirement and strict verification pass.
+  Current Windows `Documents/Mojian-native` content was copied to Mac `Documents/Mojian`:
+  4 notebooks / 104 sections / 615 indexed pages / 1132 referenced assets / 1787 files.
+  Windows sync identity/settings/recovery files were excluded; Mac copy opens read-only, no sync.
+  LaunchServices installed-app startup, actual note window/hierarchy/page list/status and screenshot pass;
+  all copied file stats and index bytes remain unchanged after viewing. The required Documents prompt
+  was allowed through its observed app-specific system dialog. Evidence: `/tmp/.agents/mojian-macos-install-20261031`.
 
 - Current source version: Windows and Android **0.7.8**; Android retains
   `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
