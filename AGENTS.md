@@ -26,8 +26,12 @@
   `sync-server` produces a standalone ZIP including the core, requiring Node22+ only.
   Old-server state bytes/receipt replay, out-of-checkout unpacked startup, Node14passed/
   1optional skipped and the actual .NET harness25 scenarios/Node11of11 passed.
-  Production ROG cutover is pending; preserve current private config/data and composed
-  gateway module paths. Read sync-server/README.md and docs/design/native-sync.md.
+  ROG task MojianNativeSync now runs Programs/MojianSyncServer from the published
+  sync-server-v0.1.0 ZIP with the original .local/native-sync/server.json/data. Cutover
+  preserved state bytes/workspace/revision32; later authenticated loopback/public/TLS18743
+  checks passed at revision182/1878 entries. Gateway PID/start remained unchanged.
+  Preserve original private config/data and composed gateway source module paths.
+  Read sync-server/README.md and docs/design/native-sync.md.
 
 - Last installed delivery: Windows and Android **0.7.8**; Android retains
   `com.meta.inklab.debug`, version code **16**. iOS is **0.1.1**, build **2**.
