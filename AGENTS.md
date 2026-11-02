@@ -8,7 +8,11 @@
 
 # Current State
 
-- Windows/Android source **0.7.9** (Android code **17**) adds direct image cropping.
+- Windows/Android source **0.7.10** (Android code **18**) = 0.7.9 image cropping + the
+  2026-11-02 Windows storage fixes below; `v0.7.10` prerelease carries EXE/APK. `v0.7.9`
+  (05ef468, cropping only) was already published 2026-10-31 and is left unchanged.
+  Neither 0.7.9 nor 0.7.10 has been installed on any device; OMEN still runs 0.7.8.
+- 0.7.9 adds direct image cropping.
   Image menu `裁剪` activates the existing canvas frame; dragging edges/corners inward previews
   a trim, pointer release commits once, Ctrl+Z undoes once. No dialog or extra action buttons.
   Crop metadata uses normalized original-image bounds, shared by JSON/.mjn/clipboard/output;
@@ -17,7 +21,7 @@
   instrumentation is compile-only. Build/release staging and active0.7.8 replacement continuation:
   `C:\Users\Meta\.agents\mojian--image-cropping\AGENTS.md`.
 
-- 2026-11-02 Windows storage fixes (in source 0.7.9, not yet released/deployed): clean native
+- 2026-11-02 Windows storage fixes (released in 0.7.10, not yet deployed): clean native
   sync passes prune `.mojian-sync/blobs`; corrupt workspace JSON copies go to
   `.mojian-corrupt.previous/` (never inside `notebooks/`, which halts sync); `library.json` is
   seeded only in a new empty folder and a missing remembered folder is refused, not recreated.
