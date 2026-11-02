@@ -106,6 +106,7 @@ async Task OfflineOutbox()
     AssertSynced(restarted);
     Check((await Remote()).Files[page].Hash == HashText("offline"), "Restart lost offline edit");
     Check(root.Read(page) == "offline", "Local file changed");
+    Check(!Directory.EnumerateFileSystemEntries(root.Private("blobs")).Any(), "Acknowledged transfer blobs were retained after a clean pass");
 }
 
 async Task LostReceipt()
@@ -692,7 +693,8 @@ async Task UnsupportedContentPaths()
     using var ignored = new TestWorkspace();
     var page = NewPage();
     ignored.Write(page, "canonical");
-    foreach (var path in new[] { page + ".previous", page + ".tmp", "notebooks/book/pages/page-sync-conflict-device.json", ".mojian-deletions.previous/archive/notebooks/book/pages/中文.json" })
+    foreach (var path in new[] { page + ".previous", page + ".tmp", "notebooks/book/pages/page-sync-conflict-device.json", ".mojian-deletions.previous/archive/notebooks/book/pages/中文.json",
+        ".mojian-corrupt.previous/notebooks/book/pages/page.json.corrupt-20261102-000000-0123456789abcdef0123456789abcdef" })
         ignored.Write(path, "local-only recovery");
     using var safe = new NativeSyncClient(ignored.Root, endpoint, token, new TransportFault { Offline = true });
     Check(safe.Scan().Keys.ToHashSet().SetEquals(new[] { "library.json", page }), "Explicit local recovery exclusions were rejected or uploaded");

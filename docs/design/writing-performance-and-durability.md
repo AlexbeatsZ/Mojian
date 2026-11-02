@@ -210,9 +210,12 @@ https://github.com/dotnet/wpf/blob/main/src/Microsoft.DotNet.Wpf/src/Presentatio
   its peer after content changes. A second desktop process activates the existing
   window instead of opening an independent writer.
 - Atomic writes flush the temporary file to disk before `File.Replace`, retaining
-  one `.previous` revision beside each written JSON. Corrupt JSON is copied aside
-  and recovers from a valid previous revision; absent/unusable recovery stops
-  loading. IO/permission errors propagate without renaming data or returning empty
+  one `.previous` revision beside each written JSON. Corrupt workspace JSON is copied to
+  `.mojian-corrupt.previous/<relative path>.corrupt-*` (never beside pages/assets, where an
+  unsupported name halts native sync) and recovers from a valid previous revision;
+  absent/unusable recovery stops loading. A missing `library.json` is seeded with the sample
+  only in a new empty folder; existing notebooks, a native clone marker or `.mojian-sync`
+  stop loading, and a remembered workspace folder that no longer exists is never recreated. IO/permission errors propagate without renaming data or returning empty
   models. Explicit page deletion also deletes its previous revision.
 - The schema and `.mjn` exchange format do not change.
 

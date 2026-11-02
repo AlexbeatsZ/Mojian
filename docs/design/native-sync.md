@@ -116,6 +116,12 @@ original immutable receipt, even after later commits; clients acknowledge only a
 after validating that receipt. Never discard an uncertain outbox or manufacture a new ID to
 turn a rejected request into an overwrite.
 
+Staged transfer blobs only back the outbox, incoming journal and conflict capture. After a
+pass with no remaining outbox, incoming journal or conflict, Windows deletes
+`.mojian-sync/blobs` contents (best effort) and Android clears `.mojian-sync/transfer`; the
+next pass stages new snapshots again. Before this rule Windows retained every snapshot
+(5.3 GB / 2200 files on OMEN by 2026-11-02).
+
 ## Incoming publication and recovery
 
 Download/verify blobs and persist an incoming journal before changing formal files. Preparation

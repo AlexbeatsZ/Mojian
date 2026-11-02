@@ -22,6 +22,40 @@ public class WorkspaceStoreTests
     }
 
     [Fact]
+    public void LoadLibrary_RefusesToSeedSampleBesideExistingNotes()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new WorkspaceStore(temp.Path);
+        store.SavePage(new PageDocument("notebook-one", "page-one"));
+
+        Assert.Throws<WorkspaceLibraryMissingException>(() => store.LoadLibrary());
+        Assert.False(File.Exists(store.LibraryPath));
+        Assert.True(File.Exists(store.GetPageDocumentPath("notebook-one", "page-one")));
+    }
+
+    [Fact]
+    public void LoadLibrary_RefusesToSeedEmptyNativeSyncClone()
+    {
+        using var temp = new TemporaryDirectory();
+        File.WriteAllText(System.IO.Path.Combine(temp.Path, ".mojian-native-workspace"), "clone");
+
+        Assert.Throws<WorkspaceLibraryMissingException>(() => new WorkspaceStore(temp.Path).LoadLibrary());
+        Assert.False(File.Exists(System.IO.Path.Combine(temp.Path, "library.json")));
+    }
+
+    [Fact]
+    public void LoadLibrary_SeedsOnlyNewEmptyWorkspace()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new WorkspaceStore(temp.Path);
+
+        Assert.True(WorkspaceStore.IsNewWorkspace(temp.Path));
+        Assert.NotEmpty(store.LoadLibrary().Notebooks);
+        Assert.True(File.Exists(store.LibraryPath));
+        Assert.False(WorkspaceStore.IsNewWorkspace(temp.Path));
+    }
+
+    [Fact]
     public async Task SaveLibrary_WaitsForSyncScannerToReleaseFile()
     {
         using var temp = new TemporaryDirectory();

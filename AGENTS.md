@@ -17,6 +17,13 @@
   instrumentation is compile-only. Build/release staging and active0.7.8 replacement continuation:
   `C:\Users\Meta\.agents\mojian--image-cropping\AGENTS.md`.
 
+- 2026-11-02 Windows storage fixes (in source 0.7.9, not yet released/deployed): clean native
+  sync passes prune `.mojian-sync/blobs`; corrupt workspace JSON copies go to
+  `.mojian-corrupt.previous/` (never inside `notebooks/`, which halts sync); `library.json` is
+  seeded only in a new empty folder and a missing remembered folder is refused, not recreated.
+  Open follow-ups from the same review: `.mojian-deletions.previous` retention, Windows 409
+  handling diverging from Android, server-side refusal of a `library.json` tombstone.
+
 - Independent sync-server version **0.1.0** uses pinned
   `@alexbeatsz/file-sync-core@0.1.0` (exact GitHub Release TGZ + package-lock integrity).
   Product namespace/path/token policy and configured HTTP/TLS adapters stay in this repo;
@@ -282,3 +289,4 @@
 - `docs/design/sync-architecture.md`: original interoperability/storage investigation.
 - `docs/design/ios-client.md`: native UIKit/Pencil and parity gaps.
 - `docs/log/2026-10.md`: completed work, validation and historical entry-state archive.
+- `docs/log/2026-11.md`: November completed work.

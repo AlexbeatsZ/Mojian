@@ -577,6 +577,9 @@ public sealed class MainViewModel : ObservableObject
         _preferencesStore = preferencesStore ?? new PreferencesStore();
         _preferences = _preferencesStore.Load();
         var root = workspaceRoot ?? (string.IsNullOrWhiteSpace(_preferences.WorkspaceRoot) ? WorkspaceStore.DefaultRoot : _preferences.WorkspaceRoot);
+        // WorkspaceStore creates its root; a remembered folder that disappeared must not come back as a sample.
+        if (workspaceRoot == null && !string.IsNullOrWhiteSpace(_preferences.WorkspaceRoot) && !Directory.Exists(root))
+            throw new WorkspaceLibraryMissingException(root, $"上次使用的笔记目录已不存在，已停止加载，不会在原路径新建笔记库：{root}");
         _store = new WorkspaceStore(root);
         RecoverNativeSyncBeforeOpen(_store.RootDirectory);
         _library = _store.LoadLibrary();

@@ -37,6 +37,20 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void RememberedMissingWorkspace_IsNotRecreatedAsSampleLibrary()
+    {
+        using var temp = new TemporaryDirectory();
+        var missing = Path.Combine(temp.Path, "deleted-workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        preferences.Save(new AppPreferences { WorkspaceRoot = missing });
+
+        var error = Assert.Throws<WorkspaceLibraryMissingException>(() => new MainViewModel(null, preferences));
+        Assert.Equal(missing, error.Root);
+        Assert.False(Directory.Exists(missing));
+        Assert.Equal(missing, preferences.Load().WorkspaceRoot);
+    }
+
+    [Fact]
     public void NotebookPaneRow_UsesAndroidExpansionAndRootFocusContract()
     {
         using var temp = new TemporaryDirectory();

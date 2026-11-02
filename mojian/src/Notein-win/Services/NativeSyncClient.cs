@@ -340,6 +340,7 @@ public sealed class NativeSyncClient : IDisposable
             _state.Revision = Math.Max(_state.Revision, remote.Revision);
             _state.LastSuccessUtc = DateTimeOffset.UtcNow;
             PersistState();
+            PruneTransferBlobs();
             var remaining = await Task.Run(ScanStable, cancellation).ConfigureAwait(false);
             if (remaining == null)
             { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
@@ -360,6 +361,19 @@ public sealed class NativeSyncClient : IDisposable
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { SetStatus(NativeSyncPhase.Error, "同步已暂停，本地内容已保留：" + error.Message, Snapshot.PendingFiles); }
         return false;
+    }
+
+    // Staged blobs only back the outbox, incoming journal and conflict capture; once none remain
+    // they duplicate acknowledged content (Android clears its transfer directory at this point).
+    private void PruneTransferBlobs()
+    {
+        if (File.Exists(OutboxPath) || HasPendingIncoming || _state.ConflictDirectory != null) return;
+        foreach (var blob in Directory.EnumerateFiles(Path.Combine(_directory, "blobs")))
+        {
+            try { File.Delete(blob); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private void ValidateOutbox(NativeSyncOutbox outbox)

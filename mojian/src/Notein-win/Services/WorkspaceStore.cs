@@ -68,13 +68,16 @@ public sealed class WorkspaceStore
         RestoreMissingCurrent(LibraryPath);
         if (!File.Exists(LibraryPath))
         {
+            // A missing index beside existing notes is an accident, not a new library: a sample
+            // would hide those pages locally and be published over the shared index by sync.
+            if (!IsNewWorkspace(RootDirectory)) throw new WorkspaceLibraryMissingException(RootDirectory);
             var created = NotebookLibrary.Sample();
             SaveLibrary(created);
             SaveWelcomePage(created.ActiveNotebook);
             return created;
         }
 
-        var library = ReadRecoverable<NotebookLibrary>(LibraryPath, JsonOptions, value => value.Notebooks.Count > 0);
+        var library = ReadRecoverable<NotebookLibrary>(LibraryPath, JsonOptions, value => value.Notebooks.Count > 0, RootDirectory);
         if (library.Notebooks.All(notebook => notebook.Id != library.ActiveNotebookId))
         {
             library.ActiveNotebookId = library.Notebooks[0].Id;
@@ -112,7 +115,7 @@ public sealed class WorkspaceStore
     public WorkspaceSettings LoadSettings()
     {
         RestoreMissingCurrent(SettingsPath);
-        var settings = File.Exists(SettingsPath) ? ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions) : new WorkspaceSettings();
+        var settings = File.Exists(SettingsPath) ? ReadRecoverable<WorkspaceSettings>(SettingsPath, JsonOptions, recoveryRoot: RootDirectory) : new WorkspaceSettings();
         settings.UpgradeDarkImageImportPolicy();
         return settings;
     }
@@ -133,7 +136,7 @@ public sealed class WorkspaceStore
         var path = GetPageDocumentPath(notebookId, pageId);
         RestoreMissingCurrent(path);
         if (!File.Exists(path)) { Observe(path); return new PageDocument(notebookId, pageId); }
-        var document = ReadRecoverable<PageDocument>(path, PageJsonOptions);
+        var document = ReadRecoverable<PageDocument>(path, PageJsonOptions, recoveryRoot: RootDirectory);
         document.NotebookId = notebookId;
         document.PageId = pageId;
         document.Viewport = new PageViewport { Scale = document.LegacyViewport.Scale, TranslationX = document.LegacyViewport.TranslationX, TranslationY = document.LegacyViewport.TranslationY };
@@ -418,7 +421,17 @@ public sealed class WorkspaceStore
         if (!File.Exists(path) && File.Exists(path + ".previous")) File.Copy(path + ".previous", path);
     }
 
-    internal static T ReadRecoverable<T>(string path, JsonSerializerOptions options, Func<T, bool>? valid = null) where T : class
+    // Only a never-used folder may be seeded. Notes, a native clone marker or sync state mean
+    // the index was lost and loading must stop instead of creating a replacement.
+    public static bool IsNewWorkspace(string root)
+    {
+        var notebooks = Path.Combine(root, "notebooks");
+        return !File.Exists(Path.Combine(root, "library.json")) && !File.Exists(Path.Combine(root, "library.json.previous")) &&
+            !File.Exists(Path.Combine(root, ".mojian-native-workspace")) && !Directory.Exists(Path.Combine(root, ".mojian-sync")) &&
+            (!Directory.Exists(notebooks) || !Directory.EnumerateFileSystemEntries(notebooks).Any());
+    }
+
+    internal static T ReadRecoverable<T>(string path, JsonSerializerOptions options, Func<T, bool>? valid = null, string? recoveryRoot = null) where T : class
     {
         T Read(string source)
         {
@@ -430,7 +443,7 @@ public sealed class WorkspaceStore
         try { return Read(path); }
         catch (JsonException error)
         {
-            PreserveCorruptFile(path);
+            PreserveCorruptFile(path, recoveryRoot);
             if (!File.Exists(path + ".previous"))
                 throw new InvalidDataException($"无法读取笔记数据，原文件已保留：{path}", error);
             T recovered;
@@ -444,12 +457,25 @@ public sealed class WorkspaceStore
         }
     }
 
-    private static void PreserveCorruptFile(string path)
+    // Workspace copies mirror their relative path under a `.previous` directory: a name such as
+    // pages/p.json.corrupt-* inside notebooks/ is an unsupported content path that halts native sync.
+    public const string CorruptRecoveryDirectory = ".mojian-corrupt.previous";
+
+    private static void PreserveCorruptFile(string path, string? recoveryRoot)
     {
         if (!File.Exists(path)) return;
-        var backup = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
-        File.Copy(path, backup, overwrite: false);
+        var name = $"{Path.GetFileName(path)}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
+        var directory = recoveryRoot == null ? Path.GetDirectoryName(path)!
+            : Path.Combine(recoveryRoot, CorruptRecoveryDirectory, Path.GetDirectoryName(Path.GetRelativePath(recoveryRoot, path)) ?? "");
+        Directory.CreateDirectory(directory);
+        File.Copy(path, Path.Combine(directory, name), overwrite: false);
     }
+}
+
+public sealed class WorkspaceLibraryMissingException(string root, string? detail = null)
+    : IOException(detail ?? $"笔记目录索引 library.json 缺失，但该位置不是新的空笔记库，已停止加载以免覆盖：{root}")
+{
+    public string Root { get; } = root;
 }
 
 public sealed class PreferencesStore

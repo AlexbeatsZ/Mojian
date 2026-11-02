@@ -1386,7 +1386,12 @@ public partial class MainWindow : Window
     {
         var dialog = new OpenFolderDialog { Title = "选择墨笺工作区", Multiselect = false };
         if (dialog.ShowDialog(this) != true) return;
-        ViewModel.SwitchWorkspace(dialog.FolderName);
+        try { ViewModel.SwitchWorkspace(dialog.FolderName); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            MessageBox.Show(this, $"无法安全打开所选笔记目录，当前笔记库保持不变。\n{error.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
         ViewModel.CloseBackstageCommand.Execute(null);
     }
 

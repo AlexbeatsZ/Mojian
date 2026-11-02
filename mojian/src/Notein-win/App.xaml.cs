@@ -5,6 +5,9 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
+using Microsoft.Win32;
+using Notein_win.Services;
+using Notein_win.ViewModels;
 
 namespace Notein_win;
 
@@ -41,10 +44,32 @@ public partial class App : Application
         }
         base.OnStartup(e);
         try { new MainWindow().Show(); }
+        catch (WorkspaceLibraryMissingException missing)
+        {
+            if (!OpenChosenWorkspace(missing)) Shutdown(-1);
+        }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {
-            MessageBox.Show($"无法安全打开笔记，已停止加载。\n{error.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+            ShowLoadFailure(error);
             Shutdown(-1);
+        }
+    }
+
+    private static void ShowLoadFailure(Exception error) =>
+        MessageBox.Show($"无法安全打开笔记，已停止加载。\n{error.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+
+    // The remembered workspace stays untouched; only an explicitly chosen folder may be opened or seeded.
+    private static bool OpenChosenWorkspace(WorkspaceLibraryMissingException missing)
+    {
+        if (MessageBox.Show($"{missing.Message}\n\n是否选择其他笔记目录？", "墨笺", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return false;
+        var dialog = new OpenFolderDialog { Title = "选择墨笺工作区", Multiselect = false };
+        if (dialog.ShowDialog() != true) return false;
+        try { new MainWindow(new MainViewModel(dialog.FolderName, null)).Show(); return true; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            ShowLoadFailure(error);
+            return false;
         }
     }
 

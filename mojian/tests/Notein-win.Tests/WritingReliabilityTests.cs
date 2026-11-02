@@ -53,6 +53,10 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         store.SavePage(doc);
         File.WriteAllText(store.GetPageDocumentPath("n", "p"), "{damaged");
         Assert.Single(store.LoadPage("n", "p").Strokes);
+        // Unsupported names under notebooks/ halt native sync, so the damaged copy lives outside it.
+        Assert.Empty(Directory.GetFiles(Path.Combine(temp.Path, "notebooks"), "*.corrupt-*", SearchOption.AllDirectories));
+        var preserved = Assert.Single(Directory.GetFiles(Path.Combine(temp.Path, WorkspaceStore.CorruptRecoveryDirectory, "notebooks", "n", "pages"), "p.json.corrupt-*"));
+        Assert.Equal("{damaged", File.ReadAllText(preserved));
     }
 
     [Fact]
