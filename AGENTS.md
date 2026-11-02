@@ -11,10 +11,10 @@
 - Windows/Android source **0.7.10** (Android code **18**) = 0.7.9 image cropping + the
   2026-11-02 Windows storage fixes below; `v0.7.10` prerelease carries EXE/APK. `v0.7.9`
   (05ef468, cropping only) was already published 2026-10-31 and is left unchanged.
-  Neither 0.7.9 nor 0.7.10 has been installed on any device; OMEN still runs 0.7.8 from
-  `mojian/artifacts/release/Mojian.exe` (PIDs 52164/39076), so that local file was not replaced.
-  Staged 0.7.10 EXE: `%TEMP%/.agents/mojian-release-0.7.10/win/Mojian.exe`; copy it over the
-  sole current release only after the product exits naturally. Android current APK is 0.7.10.
+  With user approval the local `mojian/artifacts/release/Mojian.exe` is now 0.7.10: the locked
+  running file was renamed to `Mojian.exe.previous-running.old` (on-disk 0.7.9) and still backs
+  running PIDs 52164/39076, which were not stopped. Delete that `.old` file after they exit;
+  the next launch uses 0.7.10. No other device has 0.7.9/0.7.10. Android current APK is 0.7.10.
   Review-fix testhost PID49364 (in `%TEMP%/.agents/mojian-review-fixes-20261102`) could not be
   stopped (taskkill: no running instance) and still locks that temp dir.
 - 0.7.9 adds direct image cropping.
