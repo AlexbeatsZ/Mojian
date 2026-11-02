@@ -56,6 +56,18 @@ class DirectInputPolicyTest {
     }
 
     @Test
+    fun readingViewPansFingerPenAndPrimaryMouseButNeverOpensSelectingMenus() {
+        fun intent(device: DirectInputDevice, primary: Boolean = false, middle: Boolean = false, secondary: Boolean = false) =
+            DirectInputPolicy.readingViewPointerIntent(device, primary, middle, secondary)
+        assertEquals(ReadingViewPointerIntent.PAN, intent(DirectInputDevice.FINGER))
+        assertEquals(ReadingViewPointerIntent.PAN, intent(DirectInputDevice.PEN))
+        assertEquals(ReadingViewPointerIntent.PAN, intent(DirectInputDevice.PEN, secondary = true))
+        assertEquals(ReadingViewPointerIntent.PAN, intent(DirectInputDevice.MOUSE, primary = true))
+        assertEquals(ReadingViewPointerIntent.PASS_THROUGH, intent(DirectInputDevice.MOUSE, middle = true))
+        assertEquals(ReadingViewPointerIntent.BLOCK, intent(DirectInputDevice.MOUSE, secondary = true))
+    }
+
+    @Test
     fun backspaceAndDeleteAreReservedForCanvasSelectionWithoutModifiers() {
         assertEquals(true, DirectInputPolicy.isSelectionDeleteKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0, false))
         assertEquals(true, DirectInputPolicy.isSelectionDeleteKey(KeyEvent.KEYCODE_FORWARD_DEL, KeyEvent.ACTION_DOWN, 0, false))

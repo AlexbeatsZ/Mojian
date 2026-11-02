@@ -690,6 +690,7 @@ public partial class MainWindow : Window
             case "draw:redo": FocusedCanvas.Redo(); break;
             case "draw:add": OnAddToolMenuClick(button, e); break;
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; break;
+            case "draw:reading": ViewModel.ReadingViewEnabled = !ViewModel.ReadingViewEnabled; break;
             case "draw:insert_space": ViewModel.InsertSpaceModeEnabled = !ViewModel.InsertSpaceModeEnabled; break;
             case "draw:rule_lines": OnBackgroundFormatClick(button, e); break;
             case "draw:clear": OnClearPageClick(button, e); break;
@@ -1338,6 +1339,7 @@ public partial class MainWindow : Window
             case "draw:previous-tool": return ViewModel.CycleDrawingTool(-1);
             case "draw:next-tool": return ViewModel.CycleDrawingTool(1);
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; return true;
+            case "draw:reading-view": ViewModel.ReadingViewEnabled = !ViewModel.ReadingViewEnabled; return true;
             case "draw:insert-space": ViewModel.InsertSpaceModeEnabled = !ViewModel.InsertSpaceModeEnabled; return true;
             case "draw:delete-selection": if (FocusedTextBox() != null) return false; FocusedCanvas.DeleteSelection(); return true;
             case "draw:clear": OnClearPageClick(this, new RoutedEventArgs()); return true;

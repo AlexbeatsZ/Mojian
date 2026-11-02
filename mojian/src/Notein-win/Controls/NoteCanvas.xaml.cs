@@ -151,6 +151,8 @@ public partial class NoteCanvas : UserControl
     private bool _panoramaSpringLoaded;
     private TouchDevice? _directTouchDevice;
     private bool _touchInsertSpaceActive;
+    private bool _touchReadingPanActive;
+    private bool _readingPanActive;
     private bool _mouseInsertSpaceActive;
     private bool _mouseInsertSpaceDragged;
     private Point _mouseInsertSpaceDown;
@@ -190,6 +192,8 @@ public partial class NoteCanvas : UserControl
         nameof(SingleFingerPanEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnPointerModeChanged));
     public static readonly DependencyProperty InsertSpaceModeEnabledProperty = DependencyProperty.Register(
         nameof(InsertSpaceModeEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false));
+    public static readonly DependencyProperty ReadingViewEnabledProperty = DependencyProperty.Register(
+        nameof(ReadingViewEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(false, OnReadingViewChanged));
     public static readonly DependencyProperty PendingTagKindProperty = DependencyProperty.Register(
         nameof(PendingTagKind), typeof(CanvasTagKind?), typeof(NoteCanvas), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
     public static readonly DependencyProperty ZoomLockedProperty = DependencyProperty.Register(
@@ -205,6 +209,7 @@ public partial class NoteCanvas : UserControl
     public ToolPreset? SelectedTool { get => (ToolPreset?)GetValue(SelectedToolProperty); set => SetValue(SelectedToolProperty, value); }
     public bool SingleFingerPanEnabled { get => (bool)GetValue(SingleFingerPanEnabledProperty); set => SetValue(SingleFingerPanEnabledProperty, value); }
     public bool InsertSpaceModeEnabled { get => (bool)GetValue(InsertSpaceModeEnabledProperty); set => SetValue(InsertSpaceModeEnabledProperty, value); }
+    public bool ReadingViewEnabled { get => (bool)GetValue(ReadingViewEnabledProperty); set => SetValue(ReadingViewEnabledProperty, value); }
     public CanvasTagKind? PendingTagKind { get => (CanvasTagKind?)GetValue(PendingTagKindProperty); set => SetValue(PendingTagKindProperty, value); }
     public bool ZoomLocked { get => (bool)GetValue(ZoomLockedProperty); set => SetValue(ZoomLockedProperty, value); }
     public bool PredictionEnabled { get => (bool)GetValue(PredictionEnabledProperty); set => SetValue(PredictionEnabledProperty, value); }
@@ -308,6 +313,20 @@ public partial class NoteCanvas : UserControl
         var canvas = (NoteCanvas)source;
         if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
+        canvas.UpdatePointerCursor();
+        canvas.InvalidateVisual();
+    }
+
+    private static void OnReadingViewChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
+    {
+        var canvas = (NoteCanvas)source;
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
+        canvas.CancelRightButtonLasso();
+        canvas.CancelDirectPointer();
+        canvas.AbandonTemporaryText();
+        // Moving keyboard focus off an open editor ends text editing before selection is cleared.
+        if (canvas.EditorLayer.IsKeyboardFocusWithin) canvas.Focus();
+        canvas.ClearSelection();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
     }
@@ -525,7 +544,7 @@ public partial class NoteCanvas : UserControl
 
     public bool SelectAllContent()
     {
-        if (Document == null) return false;
+        if (Document == null || ReadingViewEnabled) return false;
         ClearSelection();
         _selectedStrokes.AddRange(Document.Strokes.Where(item => PageScene.IsVisible(Document, item.LayerId)));
         _selectedTags.AddRange(Document.Tags);
@@ -945,6 +964,11 @@ public partial class NoteCanvas : UserControl
             e.Handled = true;
             return;
         }
+        if (ReadingViewEnabled && DirectInputPolicy.ReadingViewPointerIntent(DirectInputDevice.Mouse, e.ChangedButton) == ReadingViewPointerIntent.Block)
+        {
+            e.Handled = true;
+            return;
+        }
         if (e.ChangedButton == MouseButton.Right)
         {
             if (e.OriginalSource is TextBox editor && editor.IsKeyboardFocusWithin) return;
@@ -973,6 +997,12 @@ public partial class NoteCanvas : UserControl
         if (e.ChangedButton != MouseButton.Left) return;
         Focus();
         var point = e.GetPosition(this);
+        if (ReadingViewEnabled)
+        {
+            BeginReadingPan(point, isStylus: false);
+            e.Handled = true;
+            return;
+        }
         var forcePan = Keyboard.IsKeyDown(Key.Space);
         if (_cropImage == null && !forcePan && !PendingTagKind.HasValue && InsertSpaceModeEnabled &&
             DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Mouse) &&
@@ -1128,7 +1158,7 @@ public partial class NoteCanvas : UserControl
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
         var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
-        var rightGestureIntent = CanvasPointerFeedback.RightButtonGestureIntent(
+        var rightGestureIntent = !ReadingViewEnabled && CanvasPointerFeedback.RightButtonGestureIntent(
             _rightLassoArmed,
             _stylusBarrelButtonDown,
             barrelButtonPressedInSnapshot);
@@ -1147,6 +1177,13 @@ public partial class NoteCanvas : UserControl
         _ignoreMouseUntil = Environment.TickCount64 + 250;
         if (_middleNavigationActive && _middleNavigationUsesStylus)
         {
+            e.Handled = true;
+            return;
+        }
+        if (ReadingViewEnabled)
+        {
+            _stylusEraserActive = false;
+            BeginReadingPan(point.ToPoint(), isStylus: true);
             e.Handled = true;
             return;
         }
@@ -1219,7 +1256,7 @@ public partial class NoteCanvas : UserControl
     {
         if (!IsBarrelButton(e.StylusButton)) return;
         _stylusBarrelButtonDown = true;
-        if (Document == null || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
+        if (Document == null || ReadingViewEnabled || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
         Focus();
         if (_stylusActive) CancelStylusToolActionForNavigation();
         BeginRightButtonLasso(
@@ -1335,7 +1372,12 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeTouchDevices.Count != 1) return;
         var touchPoint = e.GetTouchPoint(this).Position;
-        if (_cropImage == null && InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger))
+        if (ReadingViewEnabled)
+        {
+            BeginReadingPan(touchPoint, isStylus: false);
+            _touchReadingPanActive = true;
+        }
+        else if (_cropImage == null && InsertSpaceModeEnabled && DirectInputPolicy.CanDragInsertSpace(DirectInputDevice.Finger))
         {
             BeginInsertSpace(touchPoint);
             _touchInsertSpaceActive = true;
@@ -1355,7 +1397,7 @@ public partial class NoteCanvas : UserControl
         base.OnTouchMove(e);
         if (_directTouchDevice?.Id != e.TouchDevice.Id || _activeTouchDevices.Count != 1) return;
         var point = e.GetTouchPoint(this).Position;
-        if (_touchInsertSpaceActive) ContinuePointer(point, 0.65f, 0, 0, isStylus: false);
+        if (_touchInsertSpaceActive || _touchReadingPanActive) ContinuePointer(point, 0.65f, 0, 0, isStylus: false);
         else if (_explicitShape) ContinuePointer(point, .5f, 0, 0, isStylus: false);
         else ContinueDirectPointer(point);
         e.Handled = true;
@@ -1367,10 +1409,11 @@ public partial class NoteCanvas : UserControl
         _activeTouchDevices.Remove(e.TouchDevice.Id);
         if (finishingDirect)
         {
-            if (_touchInsertSpaceActive) EndPointer(isStylus: false);
+            if (_touchInsertSpaceActive || _touchReadingPanActive) EndPointer(isStylus: false);
             else if (_explicitShape) EndPointer(isStylus: false);
             else EndDirectPointer(e.GetTouchPoint(this).Position);
             _touchInsertSpaceActive = false;
+            _touchReadingPanActive = false;
             _directTouchDevice = null;
             ReleaseTouchCapture(e.TouchDevice);
             e.Handled = true;
@@ -1844,6 +1887,18 @@ public partial class NoteCanvas : UserControl
         return menu;
     }
 
+    /// <summary>Reading view is direct 1:1 page dragging; Hand sensitivity only scales pen/middle pans.</summary>
+    private void BeginReadingPan(Point viewPoint, bool isStylus)
+    {
+        if (Document == null) return;
+        _lastPointer = viewPoint;
+        _readingPanActive = true;
+        _isDragZooming = false;
+        _isPanning = true;
+        _dragZoomAnchor = viewPoint;
+        CaptureInput(isStylus);
+    }
+
     private void BeginPointer(Point viewPoint, float pressure, float tiltX, float tiltY, bool isStylus, bool forcePan, bool forceErase)
     {
         if (Document == null) return;
@@ -1852,6 +1907,7 @@ public partial class NoteCanvas : UserControl
 
         if (forcePan || (isStylus && SingleFingerPanEnabled))
         {
+            _readingPanActive = false;
             _isDragZooming = CanvasPointerFeedback.NavigationUsesRadialZoom(
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
                 ZoomLocked);
@@ -2042,7 +2098,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_isPanning)
         {
-            var sensitivity = Math.Clamp(PanoramaSensitivity, 0.25d, 3d);
+            var sensitivity = _readingPanActive ? 1d : Math.Clamp(PanoramaSensitivity, 0.25d, 3d);
             PanScene((viewPoint.X - _lastPointer.X) * sensitivity, (viewPoint.Y - _lastPointer.Y) * sensitivity);
             _lastPointer = viewPoint;
             return;
@@ -3347,6 +3403,7 @@ public partial class NoteCanvas : UserControl
     }
 
     private CanvasPointerCursorMode CurrentPointerCursorMode() =>
+        ReadingViewEnabled ? CanvasPointerCursorMode.Hand :
         CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, _stylusInRange, SelectedTool?.Kind);
 
     private BitmapSource? LoadBitmap(string assetName, bool inverted, bool adaptImported = false)

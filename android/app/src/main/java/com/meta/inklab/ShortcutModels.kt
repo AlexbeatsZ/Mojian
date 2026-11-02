@@ -75,6 +75,7 @@ object ShortcutActionCatalog {
             add(ShortcutCategory.DRAW, "draw:previous-tool", "切换到上一个工具")
             add(ShortcutCategory.DRAW, "draw:next-tool", "切换到下一个工具")
             add(ShortcutCategory.DRAW, "draw:pan", "切换全景手柄")
+            add(ShortcutCategory.DRAW, "draw:reading-view", "切换阅读视图")
             add(ShortcutCategory.DRAW, "draw:insert-space", "切换插入空间")
             add(ShortcutCategory.DRAW, "draw:delete-selection", "删除所选内容")
             add(ShortcutCategory.DRAW, "draw:clear", "清纸")

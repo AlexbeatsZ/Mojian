@@ -116,6 +116,7 @@ public static class ShortcutActionCatalog
             new("draw:previous-tool", "上一个绘图工具", ShortcutCategory.Draw),
             new("draw:next-tool", "下一个绘图工具", ShortcutCategory.Draw),
             new("draw:pan", "全景手柄", ShortcutCategory.Draw),
+            new("draw:reading-view", "阅读视图", ShortcutCategory.Draw),
             new("draw:insert-space", "插入空白空间", ShortcutCategory.Draw),
             new("draw:delete-selection", "删除选中内容", ShortcutCategory.Draw),
             new("draw:clear", "清空页面", ShortcutCategory.Draw),

@@ -260,6 +260,36 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void ReadingViewIsExclusiveWithPenModesAndExitsOnToolOrTagSelection()
+    {
+        using var temp = new TemporaryDirectory();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(workspace, preferences);
+        var tool = viewModel.SelectedTool;
+
+        viewModel.InsertSpaceModeEnabled = true;
+        viewModel.ReadingViewEnabled = true;
+        Assert.False(viewModel.InsertSpaceModeEnabled);
+        Assert.False(viewModel.SingleFingerPanEnabled);
+        Assert.DoesNotContain(viewModel.Tools, item => item.IsSelected);
+        Assert.Contains(viewModel.FullPageToolbarAvailableItems.Concat(viewModel.FullPageToolbarItems), item => item.Id == "draw:reading" && item.IsSelected);
+
+        viewModel.SingleFingerPanEnabled = true;
+        Assert.False(viewModel.ReadingViewEnabled);
+
+        viewModel.ReadingViewEnabled = true;
+        viewModel.SelectToolFromToolbar(tool.Id, flyoutWasOpenAtPointerDown: false);
+        Assert.False(viewModel.ReadingViewEnabled);
+        Assert.False(viewModel.IsToolFlyoutOpen);
+        Assert.True(tool.IsSelected);
+
+        viewModel.ReadingViewEnabled = true;
+        viewModel.PendingTagKind = CanvasTagKind.Important;
+        Assert.False(viewModel.ReadingViewEnabled);
+    }
+
+    [Fact]
     public void ToolFlyoutRequiresASecondClickAndAnOpenFlyoutConsumesTheNextToolClick()
     {
         using var temp = new TemporaryDirectory();

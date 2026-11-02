@@ -315,6 +315,9 @@ class MainActivity : Activity() {
     private var insertSpaceMouseDragged = false
     private var insertSpaceDownX = 0f
     private var insertSpaceDownY = 0f
+    private var readingViewEnabled = false
+    private var readingPanPointerId: Int? = null
+    private var readingPassThrough = false
     private val twoFingerNavigation = CanvasNavigationGuard()
     private var mouseCanvasGesture = CanvasDragIntent.NONE
     private var lastMouseGestureY = 0f
@@ -883,6 +886,8 @@ class MainActivity : Activity() {
         pressurePointerId = null
         activeDirectTool = null
         panoramaPointerId = null
+        readingPanPointerId = null
+        readingPassThrough = false
         twoFingerNavigation.cancel()
         mouseCanvasGesture = CanvasDragIntent.NONE
         resetMouseSecondaryGesture(cancelPreview = true)
@@ -914,7 +919,8 @@ class MainActivity : Activity() {
         xiaomiPenShortcutSettings.profile(key).single.type == StylusBindingType.LASSO_CONTEXT
 
     private fun handleXiaomiSecondarySignal(signal: StylusShortcutSignal): Boolean {
-        if (pageNavigationBlocksSecondary()) {
+        // Reading view never opens the menu or a lasso: both select content.
+        if (readingViewEnabled || pageNavigationBlocksSecondary()) {
             resetXiaomiSecondaryGesture(cancelPreview = true)
             return true
         }
@@ -1066,6 +1072,7 @@ class MainActivity : Activity() {
         tagLayer.cancelPlacement()
         singleFingerPanEnabled = !singleFingerPanEnabled
         insertSpaceModeEnabled = false
+        readingViewEnabled = false
         insertSpaceActive = false
         insertSpacePointerId = null
         panoramaPointerId = null
@@ -1074,6 +1081,7 @@ class MainActivity : Activity() {
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
+        updateSelectionInteraction()
         renderToolShelf()
     }
 
@@ -1149,6 +1157,7 @@ class MainActivity : Activity() {
             "draw:previous-tool" -> { cycleDrawingTool(-1); true }
             "draw:next-tool" -> { cycleDrawingTool(1); true }
             "draw:pan" -> { togglePanoramaMode(); true }
+            "draw:reading-view" -> { toggleReadingView(); true }
             "draw:insert-space" -> { handleInsertSpace(drawingRibbon); true }
             "draw:delete-selection" -> { deleteContentSelection(); true }
             "draw:clear" -> { confirmClearPage(); true }
@@ -2211,7 +2220,7 @@ class MainActivity : Activity() {
 
     private fun isKnownFullPageToolId(id: String): Boolean =
         when {
-            id in setOf("draw:undo", "draw:redo", "draw:add", "draw:pan", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
+            id in setOf("draw:undo", "draw:redo", "draw:add", "draw:pan", "draw:reading", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
             id.startsWith("home:") -> HomeCommand.fromId(id.removePrefix("home:")) != null
             id.startsWith("tool:") -> toolShelf.tools.any { it.id == id.removePrefix("tool:") }
             else -> false
@@ -2678,6 +2687,10 @@ class MainActivity : Activity() {
         textInputLayer.abandonTemporaryEditors()
         textInputLayer.endEditing()
         singleFingerPanEnabled = false
+        if (readingViewEnabled) {
+            readingViewEnabled = false
+            renderToolShelf()
+        }
         transformGestureActive = false
         tagLayer.beginPlacement(kind)
         selectionOverlay.selectionEnabled = false
@@ -2712,6 +2725,7 @@ class MainActivity : Activity() {
         textInputLayer.endEditing()
         tagLayer.cancelPlacement()
         singleFingerPanEnabled = false
+        readingViewEnabled = false
         transformGestureActive = false
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
@@ -2727,6 +2741,101 @@ class MainActivity : Activity() {
             if (insertSpaceModeEnabled) "已开启插入空白空间：笔尖悬浮可预览基准线，按下并向下拖动可推移下方内容" else "已退出插入空白空间",
             Toast.LENGTH_SHORT,
         ).show()
+    }
+
+    private fun toggleReadingView() {
+        cancelStylusAction()
+        cancelShapeGesture()
+        tagLayer.cancelPlacement()
+        selectionOverlay.cancelDirectGesture()
+        textInputLayer.abandonTemporaryEditors()
+        textInputLayer.endEditing()
+        clearContentSelection()
+        readingViewEnabled = !readingViewEnabled
+        singleFingerPanEnabled = false
+        insertSpaceModeEnabled = false
+        cancelInsertSpaceGesture()
+        dryInkView.setInsertSpaceHoverY(null)
+        readingPanPointerId = null
+        readingPassThrough = false
+        panoramaPointerId = null
+        transformGestureActive = false
+        toolDetailPopup?.dismiss()
+        toolDetailPopup = null
+        updateSelectionInteraction()
+        renderToolShelf()
+        Toast.makeText(
+            this,
+            if (readingViewEnabled) "已开启阅读视图：单指、触控笔和鼠标拖动都平移页面，不会选中内容" else "已退出阅读视图",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /** Reading view: single finger, pen and primary-mouse drags pan; nothing reaches content layers. */
+    private fun handleReadingViewGesture(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (readingPassThrough || readingPanPointerId != null) return !readingPassThrough
+                val index = event.actionIndex
+                val toolType = event.getToolType(index)
+                val device = if (toolType == MotionEvent.TOOL_TYPE_FINGER) DirectInputDevice.FINGER else if (isStylus(toolType)) DirectInputDevice.PEN else DirectInputDevice.MOUSE
+                val buttons = event.buttonState
+                when (
+                    DirectInputPolicy.readingViewPointerIntent(
+                        device = device,
+                        primaryButton = buttons and MotionEvent.BUTTON_PRIMARY != 0,
+                        middleButton = buttons and MotionEvent.BUTTON_TERTIARY != 0,
+                        secondaryButton = buttons and MotionEvent.BUTTON_SECONDARY != 0,
+                    )
+                ) {
+                    ReadingViewPointerIntent.PAN -> {
+                        MojianCommandMenu.dismissActive()
+                        readingPanPointerId = event.getPointerId(index)
+                        beginSingleFingerPan(event, index)
+                    }
+                    // Middle-button pan / Ctrl+middle zoom keep the ordinary mouse navigation path.
+                    ReadingViewPointerIntent.PASS_THROUGH -> {
+                        readingPassThrough = true
+                        return false
+                    }
+                    ReadingViewPointerIntent.BLOCK -> Unit
+                }
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (readingPassThrough) return false
+                val index = readingPanPointerId?.let(event::findPointerIndex) ?: -1
+                if (index >= 0) applySingleFingerPan(event.getX(index), event.getY(index), sensitivity = 1f)
+                return true
+            }
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (readingPassThrough) {
+                    if (event.actionMasked == MotionEvent.ACTION_UP) readingPassThrough = false
+                    return false
+                }
+                if (event.getPointerId(event.actionIndex) == readingPanPointerId) {
+                    readingPanPointerId = null
+                    endTransformGesture()
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (readingPassThrough) {
+                    readingPassThrough = false
+                    return false
+                }
+                if (readingPanPointerId != null) {
+                    readingPanPointerId = null
+                    endTransformGesture()
+                }
+                return true
+            }
+            MotionEvent.ACTION_BUTTON_PRESS,
+            MotionEvent.ACTION_BUTTON_RELEASE -> return !readingPassThrough
+        }
+        return false
     }
 
     private fun handleInsertSpaceGesture(event: MotionEvent): Boolean {
@@ -4590,6 +4699,7 @@ class MainActivity : Activity() {
             }
             add(FullPageToolDescriptor("draw:add", "添加绘图工具", "add"))
             add(FullPageToolDescriptor("draw:pan", "触控笔抓手", "hand_left"))
+            add(FullPageToolDescriptor("draw:reading", "阅读视图", "book_open"))
             add(FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space"))
             add(FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines"))
             add(FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"))
@@ -4630,6 +4740,7 @@ class MainActivity : Activity() {
             "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
             "draw:pan" ->
                 commandButton("hand_left", "触控笔抓手", singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) }
+            "draw:reading" -> commandButton("book_open", "阅读视图", readingViewEnabled) { toggleReadingView() }
             "draw:insert_space" ->
                 commandButton("insert_space", "插入空白空间", insertSpaceModeEnabled, preserveColors = true) { anchor ->
                     handleInsertSpace(anchor)
@@ -4674,6 +4785,10 @@ class MainActivity : Activity() {
         row.addView(verticalDivider())
         row.addView(
             commandButton("hand_left", "触控笔抓手", selected = singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        row.addView(
+            commandButton("book_open", "阅读视图", selected = readingViewEnabled) { toggleReadingView() },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
         row.addView(verticalDivider())
@@ -5307,6 +5422,7 @@ class MainActivity : Activity() {
         textInputLayer.abandonTemporaryEditors()
         singleFingerPanEnabled = false
         insertSpaceModeEnabled = false
+        readingViewEnabled = false
         insertSpaceActive = false
         insertSpacePointerId = null
         dryInkView.setInsertSpaceHoverY(null)
@@ -5682,6 +5798,7 @@ class MainActivity : Activity() {
                 cancelShapeGesture()
                 selectionOverlay.cancelDirectGesture()
                 cancelInsertSpaceGesture()
+                readingPanPointerId = null
                 textInputLayer.abandonTemporaryEditors()
                 textInputLayer.endEditing()
             }
@@ -5689,6 +5806,7 @@ class MainActivity : Activity() {
             if (fingerCount > 0 || endsTouchSequence) handleFingerGesture(event)
             return true
         }
+        if (readingViewEnabled && handleReadingViewGesture(event)) return true
         if (handleXiaomiSecondaryStylusEvent(event)) return true
         val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
         if (mouseIndex != null && handleCanvasMousePointerEvent(event, event.getX(mouseIndex), event.getY(mouseIndex))) return true
@@ -5870,6 +5988,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectAllContent() {
+        if (readingViewEnabled) return
         textInputLayer.abandonTemporaryEditors()
         textInputLayer.endEditing()
         dryInkView.selectAll()
@@ -5889,8 +6008,8 @@ class MainActivity : Activity() {
         lastGestureFocusY = event.getY(fingerIndex)
     }
 
-    private fun applySingleFingerPan(focusX: Float, focusY: Float) {
-        val adjusted = CanvasInputRouting.scaledPanFocus(lastGestureFocusX, lastGestureFocusY, focusX, focusY, panoramaSensitivity)
+    private fun applySingleFingerPan(focusX: Float, focusY: Float, sensitivity: Float = panoramaSensitivity) {
+        val adjusted = CanvasInputRouting.scaledPanFocus(lastGestureFocusX, lastGestureFocusY, focusX, focusY, sensitivity)
         viewport.applyGesture(
             previousFocusX = lastGestureFocusX,
             previousFocusY = lastGestureFocusY,
@@ -6001,7 +6120,7 @@ class MainActivity : Activity() {
 
     private fun updateSelectionInteraction() {
         if (!::selectionOverlay.isInitialized) return
-        selectionOverlay.selectionEnabled = !tagLayer.isPlacementPending()
+        selectionOverlay.selectionEnabled = !tagLayer.isPlacementPending() && !readingViewEnabled
         selectionOverlay.fingerDirectInputEnabled = !insertSpaceModeEnabled
         selectionOverlay.invalidate()
     }
@@ -6429,7 +6548,7 @@ class MainActivity : Activity() {
         }
 
     private fun toolButton(tool: ToolPreset): View {
-        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && tool.id == effectiveDrawingTool().id
+        val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && !readingViewEnabled && tool.id == effectiveDrawingTool().id
         return FrameLayout(this).apply {
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)

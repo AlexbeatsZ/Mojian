@@ -8,6 +8,10 @@
 
 # Current State
 
+- 2026-11-02 source (unreleased): drawing-toolbar 阅读视图 (book icon after Hand) on Windows/Android.
+  Finger/pen/left-mouse drags pan 1:1 and nothing can be selected/edited; two-finger/wheel/middle
+  navigation unchanged; exclusive with Hand/insert-space/tool selection; not persisted. Contract in
+  `input-gestures.md`. Windows Release 228/228; no physical device acceptance; iOS not implemented.
 - Windows/Android source **0.7.10** (Android code **18**) = 0.7.9 image cropping + the
   2026-11-02 Windows storage fixes below; `v0.7.10` prerelease carries EXE/APK. `v0.7.9`
   (05ef468, cropping only) was already published 2026-10-31 and is left unchanged.

@@ -17,6 +17,13 @@ enum class DirectInputDevice {
     PEN,
 }
 
+/** Reading view owns the single-pointer stream before content layers can select or edit. */
+enum class ReadingViewPointerIntent {
+    PAN,
+    PASS_THROUGH,
+    BLOCK,
+}
+
 object DirectInputPolicy {
     fun isSelectionDeleteKey(
         keyCode: Int,
@@ -34,6 +41,24 @@ object DirectInputPolicy {
 
     fun showsInsertSpaceHover(device: DirectInputDevice): Boolean =
         device == DirectInputDevice.MOUSE || device == DirectInputDevice.PEN
+
+    /**
+     * Finger, pen and primary-mouse drags pan the page; middle-button navigation keeps its
+     * own pan/zoom path; right-button menus and lassos are suppressed because they select.
+     */
+    fun readingViewPointerIntent(
+        device: DirectInputDevice,
+        primaryButton: Boolean,
+        middleButton: Boolean,
+        secondaryButton: Boolean,
+    ): ReadingViewPointerIntent =
+        when {
+            device != DirectInputDevice.MOUSE -> ReadingViewPointerIntent.PAN
+            primaryButton -> ReadingViewPointerIntent.PAN
+            middleButton -> ReadingViewPointerIntent.PASS_THROUGH
+            secondaryButton -> ReadingViewPointerIntent.BLOCK
+            else -> ReadingViewPointerIntent.PAN
+        }
 
     fun pointerDownIntent(
         pointerCount: Int,

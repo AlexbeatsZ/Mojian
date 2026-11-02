@@ -19,6 +19,14 @@ public enum DirectInputDevice
     Pen,
 }
 
+/// <summary>Reading view owns the single-pointer stream before content can be selected or edited.</summary>
+public enum ReadingViewPointerIntent
+{
+    Pan,
+    PassThrough,
+    Block,
+}
+
 public static class DirectInputPolicy
 {
     public static bool IsSelectionDeleteKey(Key key, ModifierKeys modifiers) =>
@@ -29,6 +37,20 @@ public static class DirectInputPolicy
 
     public static bool ShowsInsertSpaceHover(DirectInputDevice device) =>
         device is DirectInputDevice.Mouse or DirectInputDevice.Pen;
+
+    /// <summary>
+    /// Finger, pen and left-mouse drags pan; middle-button navigation keeps its own pan/zoom
+    /// path; right-button menus and lassos are suppressed because both select content.
+    /// </summary>
+    public static ReadingViewPointerIntent ReadingViewPointerIntent(DirectInputDevice device, MouseButton? mouseButton) =>
+        device != DirectInputDevice.Mouse ? Services.ReadingViewPointerIntent.Pan :
+        mouseButton switch
+        {
+            MouseButton.Middle => Services.ReadingViewPointerIntent.PassThrough,
+            MouseButton.Right => Services.ReadingViewPointerIntent.Block,
+            MouseButton.Left => Services.ReadingViewPointerIntent.Pan,
+            _ => Services.ReadingViewPointerIntent.Block,
+        };
 
     public static bool PenContactTransformsSelection(
         DrawingToolKind toolKind,

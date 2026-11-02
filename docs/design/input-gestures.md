@@ -1,6 +1,6 @@
 # 墨笺输入设备与交互契约
 
-Last updated: 2026-10-31 (direct crop native Windows tests; Android physical crop acceptance pending)
+Last updated: 2026-11-02 (reading view; physical Android/Windows acceptance pending)
 
 修改 Android / Windows 的指针分发、对象选择、文本框、画布变换、触控笔工具、快捷键或压力橡皮前，必须先读本文。
 本文是输入行为的唯一设计来源；`workspace-ui.md` 与 `windows-desktop.md` 只能引用，不能另行定义冲突手势。
@@ -15,6 +15,24 @@ Windows / Android 图片右键或长按菜单的「裁剪」进入画布模式�
 鼠标、单指、笔走同一裁剪几何；笔接触裁剪控制点优先于 Ink/Hand/Shape 工具。双指/捕获丢失/页面切换
 取消尚未松手的预览，不写笔记或额外撤销记录。预览不进入保存、同步或导出；原图资产保持不变。
 固定 PDF 页背景不可裁剪。持久化、旋转/翻转与输出契约见 `insert-and-export.md` 的 Direct image cropping。
+
+## 阅读视图
+
+绘图栏「触控笔抓手」右侧的「阅读视图」（书本图标）是用户 2026-11-02 明确要求的跨设备开关，与「插入空白空间」
+同属例外，不是第四种笔工具。开启后：
+
+- 单指、触控笔（含硬件反转橡皮端）、鼠标左键拖动全部按 1:1 平移页面；不使用 Hand 灵敏度，不出墨、不擦除。
+- 任何单指/笔/左键点击、长按都不选中、不进入文本编辑、不创建临时文本、不放置标签或裁剪；右键、笔侧键与小米
+  “套索/菜单”实体键不打开菜单也不启动套索；全选命令无效。
+- 开启时清空现有选区、结束文本编辑、丢弃临时文本并取消裁剪/插入空间/未完成笔画。
+- 双指平移/捏合缩放、滚轮、中键平移与 `Ctrl + 中键` 缩放照常可用；第二指加入时单指平移交给双指导航。
+- 与触控笔抓手、插入空白空间互斥；选择任一绘图工具、抓手、插入空间或开始放置标签都会退出。
+- 状态只保存在当前运行会话，不写入设置、笔记或同步数据；全页工具栏 ID `draw:reading`，快捷动作 `draw:reading-view`。
+
+Android 由 `CanvasInputHost` 在双指导航判定之后、笔侧键/鼠标右键/选择层之前接管整个单指针序列
+（`handleReadingViewGesture`），子层收不到 `DOWN`，因而不会启动长按计时。Windows 的 `NoteCanvas` 在鼠标、
+触摸与 `StylusDown` 入口分别进入 `BeginReadingPan`，并在 `OnMouseDown` 拦截右键。设备判定表见两端
+`DirectInputPolicy.readingViewPointerIntent` / `ReadingViewPointerIntent`。
 
 ## 1. 不可破坏的总原则
 
@@ -189,6 +207,14 @@ Left Click             -> Select / Edit Selected Text / Create Temporary Text
 ```
 
 ```text
+Reading View (any device, before tools)
+Second finger          -> Viewport Pan / Zoom
+Middle / Wheel         -> ordinary mouse navigation
+Right / Barrel Button  -> ignored (no menu, no lasso)
+Finger / Pen / Left    -> Viewport Pan (1:1)
+```
+
+```text
 Pen
 Pen Tool = Ink         -> Stroke / Highlighter / Eraser
 Pen Tool = Lasso       -> Pen Lasso Selection
@@ -265,5 +291,6 @@ Notein 资源只证明默认开启 hold-to-erase 和可见默认灵敏度 20%，
 - 触控笔 Lasso/Ink/Hand 不改变手指和鼠标语义；
 - 插入空白空间允许单指/笔/鼠标左键拖动、笔/鼠标悬浮预览，鼠标原地单击仍是直接内容操作；
 - 双指变换 slop、pan-to-pinch promotion、缩放锁和指针重排无跳变。
+- 阅读视图：开启清空选区；从笔迹/文本起拖只按 1:1 平移且不产生 Undo；右键/笔侧键不弹菜单不套索；与抓手/插入空间/工具选择互斥。
 
 真实设备验收仍需覆盖 Android 软键盘首次不弹、第二次点击弹出、编辑态系统长按、在大型图片表面框选小对象、第二指中断单指框选，以及触控笔 Ink/Lasso/Hand 与手指/鼠标并行互不串模式。

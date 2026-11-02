@@ -36,6 +36,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _isToolFlyoutOpen;
     private bool _singleFingerPanEnabled;
     private bool _insertSpaceModeEnabled;
+    private bool _readingViewEnabled;
     private SpringLoadedToolKind? _springLoadedToolKind;
     private ToolPreset? _springLoadedEraserTool;
     private bool _springLoadedRestorePan;
@@ -451,7 +452,11 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!SetField(ref _singleFingerPanEnabled, value)) return;
-            if (value) InsertSpaceModeEnabled = false;
+            if (value)
+            {
+                InsertSpaceModeEnabled = false;
+                ReadingViewEnabled = false;
+            }
             RefreshTools();
         }
     }
@@ -462,7 +467,29 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!SetField(ref _insertSpaceModeEnabled, value)) return;
-            if (value) SingleFingerPanEnabled = false;
+            if (value)
+            {
+                SingleFingerPanEnabled = false;
+                ReadingViewEnabled = false;
+            }
+            RefreshTools();
+        }
+    }
+
+    /// <summary>Reading view: finger, pen and left-mouse drags only pan, so no content can be selected.</summary>
+    public bool ReadingViewEnabled
+    {
+        get => _readingViewEnabled;
+        set
+        {
+            if (!SetField(ref _readingViewEnabled, value)) return;
+            if (value)
+            {
+                CancelSpringLoadedTool();
+                IsToolFlyoutOpen = false;
+                SingleFingerPanEnabled = false;
+                InsertSpaceModeEnabled = false;
+            }
             RefreshTools();
         }
     }
@@ -480,7 +507,16 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public CanvasTagKind? PendingTagKind { get => _pendingTagKind; set => SetField(ref _pendingTagKind, value); }
+    public CanvasTagKind? PendingTagKind
+    {
+        get => _pendingTagKind;
+        set
+        {
+            if (!SetField(ref _pendingTagKind, value)) return;
+            // Placing a tag is a content edit; reading view would swallow the placement tap.
+            if (value.HasValue) ReadingViewEnabled = false;
+        }
+    }
     public bool IsBackstageOpen { get => _isBackstageOpen; set => SetField(ref _isBackstageOpen, value); }
 
     public string BackstageTab
@@ -1238,7 +1274,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(id)) return;
         CancelSpringLoadedTool();
-        var wasActiveSelection = _toolShelf.SelectedId == id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled;
+        var wasActiveSelection = _toolShelf.SelectedId == id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled && !ReadingViewEnabled;
         if (!wasActiveSelection && _toolShelf.Select(id))
         {
             if (_toolShelf.Selected.Kind == DrawingToolKind.Eraser)
@@ -1246,6 +1282,7 @@ public sealed class MainViewModel : ObservableObject
             IsToolFlyoutOpen = false;
             SingleFingerPanEnabled = false;
             InsertSpaceModeEnabled = false;
+            ReadingViewEnabled = false;
             OnPropertyChanged(nameof(SelectedTool));
             NotifySelectedToolProperties();
             SaveSettings();
@@ -1266,6 +1303,7 @@ public sealed class MainViewModel : ObservableObject
         IsToolFlyoutOpen = false;
         SingleFingerPanEnabled = false;
         InsertSpaceModeEnabled = false;
+        ReadingViewEnabled = false;
         RefreshTools();
         SaveSettings();
         return true;
@@ -1593,7 +1631,7 @@ public sealed class MainViewModel : ObservableObject
         ShapeTools.Clear();
         foreach (var tool in _toolShelf.Tools)
         {
-            tool.IsSelected = tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled;
+            tool.IsSelected = tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled && !ReadingViewEnabled;
             switch (tool.Kind)
             {
                 case DrawingToolKind.Lasso: LassoTools.Add(tool); break;
@@ -1647,11 +1685,12 @@ public sealed class MainViewModel : ObservableObject
             $"tool:{tool.Id}", tool.DisplayName,
             tool.Kind switch { DrawingToolKind.Pen => "pen", DrawingToolKind.Highlighter => "highlight", DrawingToolKind.Eraser => "eraser", DrawingToolKind.Shape => "shapes", _ => "lasso" },
             tool.Kind is DrawingToolKind.Pen or DrawingToolKind.Highlighter ? tool.DisplayColorHex : "#F4F4F4",
-            IsSelected: tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled)));
+            IsSelected: tool.Id == SelectedTool.Id && !SingleFingerPanEnabled && !InsertSpaceModeEnabled && !ReadingViewEnabled)));
         catalog.AddRange(new[]
         {
             new FullPageToolDescriptor("draw:add", "添加绘图工具", "add"),
             new FullPageToolDescriptor("draw:pan", "触控笔抓手", "hand_left", IsSelected: SingleFingerPanEnabled),
+            new FullPageToolDescriptor("draw:reading", "阅读视图", "book_open", IsSelected: ReadingViewEnabled),
             new FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space", PreserveColors: true, IsSelected: InsertSpaceModeEnabled),
             new FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines", PreserveColors: true),
             new FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"),

@@ -62,7 +62,8 @@ slices tall content. PNG uses 288 DPI. Print output converts dark paper/white in
 The Apple client uses native command sheets and SF Symbols. Independent navigation of split slots,
 the full desktop scope/range/export and per-image print conversion panels, first-sheet XLSX preview,
 source-layer management, the full rich-text/style/shortcut/preset catalogs and section/page
-move/copy/merge/manual-order menus remain parity work. Attachments are embedded and previewed through
+move/copy/merge/manual-order menus and the 2026-11-02 drawing-toolbar reading view (input-gestures.md)
+remain parity work. Attachments are embedded and previewed through
 Quick Look; a first-sheet spreadsheet preview is not yet claimed. Continuous Syncthing is not embedded.
 Do not describe this first native client as complete Android/Windows feature parity.
 
