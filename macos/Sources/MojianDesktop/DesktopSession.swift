@@ -16,6 +16,15 @@ import MojianCore
     var settings = Settings()
     var dark = true
     var defaultBackground = "GRID_STANDARD"
+    var presets = ToolPreset.defaults
+    private(set) var activePreset = "pen-black"
+    /// macOS adaptation: mouse/trackpad either selects content or uses the active tool (OneNote for Mac).
+    var mouseWriting = false
+    var showSectionPane = true
+    var showPagePane = true
+    var lastPaper = "BOUNDLESS"
+    /// Expansion is local viewing state, so browsing never rewrites the shared index.
+    private var collapsed = Set<String>()
     var changed: (() -> Void)?
     var onError: ((Error) -> Void)?
     private(set) var dirty = false
@@ -39,6 +48,16 @@ import MojianCore
         if let data = preferences.data(forKey: "drawing"), let value = try? JSONDecoder().decode(Settings.self, from: data) { settings = value }
         dark = preferences.object(forKey: "darkPages") as? Bool ?? true
         defaultBackground = preferences.string(forKey: "defaultBackground") ?? "GRID_STANDARD"
+        if let data = preferences.data(forKey: "toolPresets"), let value = try? JSONDecoder().decode([ToolPreset].self, from: data), !value.isEmpty { presets = value }
+        let presetList = presets, tool = settings.tool
+        activePreset = preferences.string(forKey: "activePreset").flatMap { id in presetList.first { $0.id == id }?.id }
+            ?? presetList.first { $0.tool == tool }?.id ?? presetList[0].id
+        mouseWriting = preferences.bool(forKey: "mouseWriting")
+        showSectionPane = preferences.object(forKey: "showSectionPane") as? Bool ?? true
+        showPagePane = preferences.object(forKey: "showPagePane") as? Bool ?? true
+        lastPaper = preferences.string(forKey: "lastPaper") ?? "BOUNDLESS"
+        if let ids = preferences.stringArray(forKey: preferenceKey + ":collapsed") { collapsed = Set(ids) }
+        else { collapsed = Set(notebooks.flatMap(\.allSections).filter { !$0.expanded }.map(\.id)) }
         let last = preferences.string(forKey: preferenceKey + ":page")
         notebook = notebooks.first(where: { $0.pages.contains { $0.id == last } }) ?? notebooks.first
         section = notebook?.allSections.first(where: { $0.pages.contains { $0.id == last } }) ?? notebook?.allSections.first
@@ -50,6 +69,30 @@ import MojianCore
         preferences.set(try? JSONEncoder().encode(settings), forKey: "drawing")
         preferences.set(dark, forKey: "darkPages"); preferences.set(defaultBackground, forKey: "defaultBackground")
         preferences.set(page?.id, forKey: preferenceKey + ":page")
+        preferences.set(try? JSONEncoder().encode(presets), forKey: "toolPresets"); preferences.set(activePreset, forKey: "activePreset")
+        preferences.set(mouseWriting, forKey: "mouseWriting"); preferences.set(lastPaper, forKey: "lastPaper")
+        preferences.set(showSectionPane, forKey: "showSectionPane"); preferences.set(showPagePane, forKey: "showPagePane")
+        preferences.set(Array(collapsed).sorted(), forKey: preferenceKey + ":collapsed")
+    }
+    func isCollapsed(_ id: String) -> Bool { collapsed.contains(id) }
+    func toggleCollapsed(_ id: String) {
+        if collapsed.remove(id) == nil { collapsed.insert(id) }; savePreferences()
+    }
+    var active: ToolPreset { presets.first { $0.id == activePreset } ?? presets[0] }
+    func apply(_ preset: ToolPreset) {
+        activePreset = preset.id; preset.apply(to: &settings); savePreferences(); changed?()
+    }
+    func update(_ preset: ToolPreset) {
+        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
+        presets[index] = preset
+        if preset.id == activePreset { preset.apply(to: &settings) }
+        savePreferences(); changed?()
+    }
+    func addPreset(_ tool: PenTool) {
+        let preset = ToolPreset.added(tool)
+        // Add-only: a new pen/highlighter joins the end of its own ribbon group.
+        let index = presets.lastIndex { $0.tool == tool }.map { $0 + 1 } ?? presets.count
+        presets.insert(preset, at: index); mouseWriting = true; apply(preset)
     }
     func viewport() -> Viewport {
         guard let id = page?.id, let values = preferences.array(forKey: preferenceKey + ":view:" + id) as? [Double], values.count == 3 else { return Viewport(scale: 1, x: 32, y: 24) }
@@ -130,11 +173,16 @@ import MojianCore
         guard canEdit, let d = document, var h = histories[d.pageID], let next = h.1.popLast() else { return }
         h.0.append(d); histories[d.pageID] = h; document = next; contentChanged()
     }
-    func choose(_ tool: PenTool) { settings.tool = tool; savePreferences(); changed?() }
-    func addPage(title: String, paper: String) throws {
-        guard !store.readOnly, let n = notebook, let s = section else { throw MojianError.invalid("请先选择可编辑分区") }
+    func choose(_ tool: PenTool) {
+        if let preset = presets.first(where: { $0.tool == tool && $0.id == activePreset }) ?? presets.first(where: { $0.tool == tool }) { apply(preset) }
+        else { settings.tool = tool; savePreferences(); changed?() }
+    }
+    func addPage(title: String, paper: String, background: String? = nil, in target: Section? = nil) throws {
+        guard !store.readOnly, let n = notebook, let s = target ?? section else { throw MojianError.invalid("请先选择可编辑分区") }
         try flush()
-        let p = CanonicalStore.newPage(title: title, paper: paper, background: defaultBackground)
+        let p = CanonicalStore.newPage(title: title, paper: paper, background: background ?? defaultBackground)
+        let now = ISO8601DateFormatter().string(from: Date())
+        p.json["createdAt"] = .string(now); p.json["updatedAt"] = .string(now)
         try store.writePage(PageDocument(notebook: n.id, page: p.id), incrementRevision: false)
         s.pages.append(p)
         do { try store.saveLibrary(notebooks) } catch { s.pages.removeAll { $0.id == p.id }; throw error }
@@ -146,27 +194,79 @@ import MojianCore
         do { try store.saveLibrary(notebooks) } catch { notebooks.removeLast(); throw error }
         try select(n, n.sections.first, nil)
     }
-    func addSection(title: String, nested: Bool) throws {
-        guard !store.readOnly, let n = notebook else { throw MojianError.invalid("请先打开可编辑笔记本") }; try flush()
-        let s = Section(title: title), parent = nested ? section : nil
+    /// A notebook is always created at library root; a section under `parent`, or at the notebook root.
+    func addSection(title: String, in target: Notebook? = nil, parent: Section?) throws {
+        guard !store.readOnly, let n = target ?? notebook else { throw MojianError.invalid("请先打开可编辑笔记本") }; try flush()
+        let s = Section(title: title)
         if let parent { parent.children.append(s) } else { n.sections.append(s) }
         do { try store.saveLibrary(notebooks) } catch {
             if let parent { parent.children.removeAll { $0.id == s.id } } else { n.sections.removeAll { $0.id == s.id } }; throw error
         }
+        if let parent { collapsed.remove(parent.id) }
         try select(n, s, nil)
     }
-    func renamePage(_ title: String) throws {
-        guard canEdit, let page else { return }; try flush()
-        let prior = page.title; page.title = title
-        do { try store.saveLibrary(notebooks); changed?() } catch { page.title = prior; throw error }
+    private func commitLibrary(_ change: () -> Void, revert: () -> Void) throws {
+        guard !store.readOnly else { throw MojianError.invalid("当前笔记库为只读") }; try flush()
+        change()
+        do { try store.saveLibrary(notebooks); changed?() } catch { revert(); throw error }
     }
-    func setBackground(_ name: String) throws {
+    func rename(_ n: Notebook, _ title: String) throws { let old = n.title; try commitLibrary({ n.title = title }, revert: { n.title = old }) }
+    func rename(_ s: Section, _ title: String) throws { let old = s.title; try commitLibrary({ s.title = title }, revert: { s.title = old }) }
+    func rename(_ p: Page, _ title: String) throws { let old = p.title; try commitLibrary({ p.title = title }, revert: { p.title = old }) }
+    func renamePage(_ title: String) throws { if let page { try rename(page, title) } }
+    private func editAppearance(_ change: (inout JSON) -> Void) throws {
         guard canEdit, let page else { return }; try flush()
         let old = page.json
         let display = AppearanceBridge.display(page)
-        var v = display.view; v["backgroundFormat"] = .string(name); display.view = v; AppearanceBridge.makeCanonical(display)
+        var v = display.view; change(&v); display.view = v; AppearanceBridge.makeCanonical(display)
         page.json["appearance"] = display.json["appearance"]
         do { try store.saveLibrary(notebooks); changed?() } catch { page.json = old; throw error }
+    }
+    func setBackground(_ name: String) throws { try editAppearance { $0["backgroundFormat"] = .string(name) } }
+    func setPaper(_ paper: String) throws { try editAppearance { $0["paperSize"] = .string(paper) } }
+    func setTitleVisible(_ visible: Bool) throws { try editAppearance { $0["pageTitleVisible"] = .bool(visible) } }
+    /// Clearing keeps immutable PDF page backgrounds, like the Windows/Android clear-page command.
+    func clearPage() { mutate { d in d.strokes = []; d.texts = []; d.tags = []; d.objects = d.objects.filter { $0["isPageBackground"].bool() } } }
+    func formatTexts(_ ids: Set<String>, _ change: (inout JSON) -> Void) {
+        mutate { d in d.texts = d.texts.map { item in
+            guard ids.contains(item["id"].string) else { return item }
+            var value = item; change(&value); return value
+        } }
+    }
+    // MARK: Hierarchy deletion
+    /// The index commits first; page files then move to the macOS Trash so a mistaken delete is recoverable.
+    func delete(_ p: Page, from s: Section, in n: Notebook) throws {
+        guard let index = s.pages.firstIndex(where: { $0 === p }) else { return }
+        try commitLibrary({ s.pages.remove(at: index) }, revert: { s.pages.insert(p, at: index) })
+        finishDeletion(notebook: n.id, pages: [p.id], directory: false)
+    }
+    func delete(_ s: Section, in n: Notebook) throws {
+        var restore: (() -> Void)?
+        try commitLibrary({
+            if let i = n.sections.firstIndex(where: { $0 === s }) { n.sections.remove(at: i); restore = { n.sections.insert(s, at: i) }; return }
+            for parent in n.allSections { if let i = parent.children.firstIndex(where: { $0 === s }) { parent.children.remove(at: i); restore = { parent.children.insert(s, at: i) }; return } }
+        }, revert: { restore?() })
+        finishDeletion(notebook: n.id, pages: s.all.flatMap(\.pages).map(\.id), directory: false)
+    }
+    /// Deleting the last notebook leaves a fresh empty notebook, never the sample library.
+    func delete(_ n: Notebook) throws {
+        guard let index = notebooks.firstIndex(where: { $0 === n }) else { return }
+        let replacement = notebooks.count == 1 ? Notebook(title: "我的笔记本", sections: [Section(title: "笔记")]) : nil
+        try commitLibrary({ notebooks.remove(at: index); if let replacement { notebooks.append(replacement) } },
+                          revert: { notebooks.removeAll { $0 === replacement }; notebooks.insert(n, at: index) })
+        finishDeletion(notebook: n.id, pages: n.pages.map(\.id), directory: true)
+    }
+    private func finishDeletion(notebook id: String, pages: [String], directory: Bool) {
+        if directory { store.trashNotebook(id) } else { store.trash(notebook: id, pages: pages) }
+        for page in pages { histories[page] = nil }
+        let liveSection = section.map { s in notebooks.contains { $0.allSections.contains { $0 === s } } } ?? false
+        let livePage = page.map { p in notebooks.contains { $0.pages.contains { $0 === p } } } ?? liveSection
+        if livePage && liveSection { changed?(); return }
+        let n = notebooks.first { $0 === notebook } ?? notebooks.first
+        let s = liveSection ? section : n?.allSections.first
+        page = nil; document = nil; dirty = false
+        do { if let n { try select(n, s, s?.pages.first) } } catch { onError?(error) }
+        changed?()
     }
     func exchangeNotebook() throws -> Notebook {
         guard let notebook else { throw MojianError.invalid("请先打开笔记本") }; try flush()

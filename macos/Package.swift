@@ -6,7 +6,7 @@ let package = Package(
     products: [.executable(name: "Mojian", targets: ["MojianMac"])],
     dependencies: [.package(path: "../ios")],
     targets: [
-        .target(name: "MojianDesktop", dependencies: [.product(name: "MojianCore", package: "ios")], resources: [.copy("Resources/page-backgrounds.json")]),
+        .target(name: "MojianDesktop", dependencies: [.product(name: "MojianCore", package: "ios")], resources: [.copy("Resources/page-backgrounds.json"), .copy("Resources/fluent-icons.json")]),
         .executableTarget(name: "MojianMac", dependencies: ["MojianDesktop"]),
         .testTarget(name: "MojianDesktopTests", dependencies: ["MojianDesktop"])
     ]

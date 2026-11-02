@@ -11,7 +11,8 @@ if [[ "$MODE" == "test" ]]; then
 fi
 swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" --configuration release
 BIN="$(swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" --configuration release --show-bin-path)"
-OUT="$ROOT/macos/artifacts/current"
+# MOJIAN_MAC_OUT stages a QA bundle without replacing the delivered app.
+OUT="${MOJIAN_MAC_OUT:-$ROOT/macos/artifacts/current}"
 STAGE="$(mktemp -d /tmp/.agents/mojian-macos-package.XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/Mojian.app"
@@ -24,7 +25,7 @@ cp "$ROOT/ios/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTIC
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 plutil -lint "$APP/Contents/Info.plist"
-if [[ -d "$OUT/Mojian.app" ]] && pgrep -f "$OUT/Mojian.app/Contents/MacOS/Mojian" >/dev/null; then
+if [[ -d "$OUT/Mojian.app" ]] && pgrep -if "$OUT/Mojian.app/Contents/MacOS/Mojian" >/dev/null; then
     echo "The current Mojian.app is running; close it normally before replacing the deliverable." >&2
     exit 1
 fi

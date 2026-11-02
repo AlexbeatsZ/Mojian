@@ -9,12 +9,17 @@
 
 # Current State
 
-- Native macOS 0.1.0 baseline lives in `macos/` on independent `codex/macos-client`.
+- Native macOS **0.2.0** source in `macos/` on independent `codex/macos-client` now uses the
+  Windows/Android chrome (title-bar ribbon tabs, Fluent icon ribbon generated from Android vectors,
+  rail, black section/gray page panes, add-only tool presets, context-menu rename/delete-to-Trash)
+  with OneNote-for-Mac adaptations (menu bar File, ⌘, Settings, popovers/sheets, pointer vs tool
+  mouse routing). Read `docs/design/macos-client.md` before UI changes. 19 core + 20 desktop tests,
+  staged-app smoke and `--ui-snapshots` visual check pass; installed/running apps are still 0.1.0.
   It reuses MojianCore with AppKit windows/menus, canonical v2 local folders, hierarchy/search,
   editable ink/shapes/text/images, selection/clipboard, Undo/Redo, .mjn exchange, vector PDF and print.
   Existing external libraries open read-only; only explicitly created Mac-local libraries are writable.
   HTTPS sync/adoption, full lifecycle/split/rich-text/output parity and physical stylus acceptance remain.
-  Swift 6.4 / Xcode 27.2 (27B52), macOS 26.6.2 arm64: 19 core and 13 desktop tests pass.
+  Windows checkouts are CRLF: normalize synced files to LF before running `macos/tools/build.sh`.
   Packaged app native NSEvent ink/menu Undo/Redo, view-only byte invariance, PDF and fresh-process
   reopening passed against disposable data only. Independent PDF reader reports A4/zero images.
   Current output: `macos/artifacts/current/Mojian.app` and its arm64 ZIP; ad-hoc signed, not notarized.
@@ -281,4 +286,5 @@
 - `docs/design/data-migration.md`: Notein/OneNote backup conversion and native imported assets.
 - `docs/design/sync-architecture.md`: original interoperability/storage investigation.
 - `docs/design/ios-client.md`: native UIKit/Pencil and parity gaps.
+- `docs/log/2026-11.md`: macOS 0.2 interface parity.
 - `docs/log/2026-10.md`: completed work, validation and historical entry-state archive.

@@ -2,9 +2,9 @@
 
 ## Scope and platform boundary
 
-Native AppKit desktop baseline, version 0.1.0, Apple Silicon arm64, deployment target macOS 13.
+Native AppKit desktop client, version 0.2.0, Apple Silicon arm64, deployment target macOS 13.
 Reuse `MojianCore` JSON/geometry/InkPath/archive/output algorithms. Native menus, NSWindow,
-NSSplitViewController, NSOutlineView, NSTableView and NSView event routing remain macOS-owned.
+NSToolbar, NSTableView, NSPopover/NSMenu and NSView event routing remain macOS-owned.
 Do not use the simulator, Catalyst or old iOS output as a desktop deliverable.
 The supplied `shared/branding/Mojian_macOS.icns` is packaged unchanged.
 
@@ -34,6 +34,46 @@ pending work and keep the current binding/dirty snapshot when saving fails. A co
 must not clear a newer dirty document. Page writes increase revisions monotonically; clean viewing
 never saves page/library state. Assets publish before their referencing page, pages before index.
 Failed imports may leave unindexed staged page-owned files but never announce a partial notebook.
+
+## Desktop chrome (0.2) and macOS adaptation
+
+The window uses the Windows/Android information architecture and palette from `windows-desktop.md`
+and `workspace-ui.md`, not a generic source-list skin: ribbon tabs, a 50 pt icon-only ribbon
+(`#232323`), a 32 pt rail with independent section/page pane toggles, a 196 pt black section pane,
+a 196 pt gray page pane, then the `#0A0A0A` workspace. Rows are draw-based in virtualized tables:
+notebooks show the Fluent notebook icon in the shared accent cycle, sections a 4 pt color bar and
+Fluent chevron (rotated, never a font glyph), pages title plus time/date and a muted `PDF` suffix.
+Selection is `#374048`; the focused section text is lavender `#DAB2E9`. No pane-header titles.
+
+Icons are generated mechanically from `android/app/src/main/res/drawable` by
+`macos/tools/generate-icons.py` into `Resources/fluent-icons.json` (absolute M/L/C/Z, arcs converted,
+group transforms applied, literal non-white colors kept). Do not substitute SF Symbols or redraw them.
+Rerun the generator when Android vectors change.
+
+macOS adaptations, modelled on how OneNote for Mac adapts the Windows client:
+
+- Ribbon tabs `开始/插入/绘图/视图` sit in the unified title bar beside the traffic lights (an
+  NSToolbar item), so no vertical space is spent on a separate tab row. There is no `文件` tab:
+  file, export, print and library commands stay in the menu bar; device options are a Settings
+  window (⌘,) instead of Backstage.
+- Tool flyouts are transient NSPopovers; the add menus, background/paper/zoom dropdowns and pane
+  context menus are native NSMenus; prompts and confirmations are window sheets.
+- Mouse/trackpad routing follows OneNote for Mac: the Draw tab's pointer (`cursor`) returns the
+  mouse to direct selection; choosing any tool preset makes the mouse use that tool. A tablet always
+  uses the active preset. The choice is persisted per device. Windows keeps its own mouse contract.
+- `整页视图` (⌘⇧F) hides tabs/ribbon/rail and panes, keeping transient floating pane buttons; native
+  full screen (⌃⌘F) is separate.
+- Deletion commits the index first, then moves page files/assets (or the notebook folder) to the
+  macOS Trash so a mistaken delete is recoverable; a failed move only leaves an unreferenced orphan.
+
+Ribbon content is limited to commands that work on macOS: clipboard, font size/bold/italic/
+underline/strikethrough/alignment on selected text boxes, text and image insertion, Undo/Redo,
+pointer, add-only tool presets (lasso, eraser, highlighters, pens, shape, hand), background format,
+clear page, full page, zoom lock/presets/in/out/100%/page width, baseline, paper size, title
+visibility and the global dark mode. Presets follow the two-click contract; a click that dismissed a
+transient popover must not reopen it. Presets, pane visibility, expansion and mouse routing are
+device-local preferences and never rewrite canonical files. Context menus offer rename, new
+(sub)section, export/print and delete only; move/copy/merge/link remain absent until implemented.
 
 ## Native interaction and rendering
 

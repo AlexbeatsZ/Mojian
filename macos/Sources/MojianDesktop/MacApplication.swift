@@ -4,6 +4,7 @@ import MojianCore
 @MainActor public final class MacApplication: NSObject, NSApplicationDelegate {
     private var controllers = [MacWindow]()
     private var welcome: NSWindow?
+    private var preferences: PreferencesWindow?
     private static var retained: MacApplication?
     public static func run() {
         let application = NSApplication.shared
@@ -15,6 +16,10 @@ import MojianCore
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "--verify-reopen"), index + 1 < arguments.count {
             DispatchQueue.main.async { self.verifyReopen(URL(fileURLWithPath: arguments[index + 1])) }; return
+        }
+        if let index = arguments.firstIndex(of: "--ui-snapshots"), index + 1 < arguments.count {
+            let library = arguments.firstIndex(of: "--library").flatMap { $0 + 1 < arguments.count ? URL(fileURLWithPath: arguments[$0 + 1]) : nil }
+            DispatchQueue.main.async { self.uiSnapshots(URL(fileURLWithPath: arguments[index + 1]), library: library) }; return
         }
         if let index = arguments.firstIndex(of: "--smoke-test"), index + 1 < arguments.count {
             DispatchQueue.main.async { self.smokeTest(URL(fileURLWithPath: arguments[index + 1])) }
@@ -79,16 +84,30 @@ import MojianCore
             do { try open(url, writable: local) } catch { NSAlert(error: error).runModal() }
         }
     }
-    @objc func showAbout(_ sender: Any?) { NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "墨笺 Mojian", .applicationVersion: "macOS 0.1.0", .credits: NSAttributedString(string: "原生 AppKit 客户端 · 本地笔记与 canonical 格式\nHTTPS 同步及完整跨端功能仍在开发中。")]) }
+    @objc func showAbout(_ sender: Any?) {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "墨笺 Mojian", .applicationVersion: "macOS \(version)", .credits: NSAttributedString(string: "原生 AppKit 客户端 · 与 Windows/Android 同一界面语言\nHTTPS 同步仍在开发中。")])
+    }
+    @objc func showPreferences(_ sender: Any?) {
+        if preferences == nil {
+            preferences = PreferencesWindow(current: { [weak self] in self?.active?.session }) { [weak self] change in
+                for controller in self?.controllers ?? [] { change(controller.session); controller.canvas.needsDisplay = true; controller.refresh(reloadTree: true) }
+            }
+        }
+        preferences?.showWindow(sender)
+    }
     private func configureMenu() {
         let main = NSMenu()
         func menu(_ title: String) -> NSMenu { let item = NSMenuItem(); let menu = NSMenu(title: title); item.submenu = menu; main.addItem(item); return menu }
-        @discardableResult func add(_ menu: NSMenu, _ title: String, _ selector: Selector, _ key: String = "", target: AnyObject? = nil, shift: Bool = false, tag: Int = 0, value: Any? = nil) -> NSMenuItem {
+        @discardableResult func add(_ menu: NSMenu, _ title: String, _ selector: Selector, _ key: String = "", target: AnyObject? = nil, shift: Bool = false, control: Bool = false, tag: Int = 0, value: Any? = nil) -> NSMenuItem {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: key); item.target = target; item.tag = tag; item.representedObject = value
-            if shift { item.keyEquivalentModifierMask = [.command, .shift] }; menu.addItem(item); return item
+            if shift { item.keyEquivalentModifierMask = [.command, .shift] }
+            if control { item.keyEquivalentModifierMask = [.command, .control] }
+            menu.addItem(item); return item
         }
         let app = menu("墨笺")
         add(app, "关于墨笺", #selector(showAbout(_:)), target: self); app.addItem(.separator())
+        add(app, "设置…", #selector(showPreferences(_:)), ",", target: self); app.addItem(.separator())
         add(app, "隐藏墨笺", #selector(NSApplication.hide(_:)), "h", target: NSApp); add(app, "显示全部", #selector(NSApplication.unhideAllApplications(_:)), target: NSApp)
         app.addItem(.separator()); add(app, "退出墨笺", #selector(NSApplication.terminate(_:)), "q", target: NSApp)
         let file = menu("文件")
@@ -100,6 +119,7 @@ import MojianCore
         add(file, "新建子分区…", #selector(MacWindow.newSection(_:)), tag: 1)
         add(file, "新建页面…", #selector(MacWindow.newPage(_:)), "n")
         add(file, "重命名页面…", #selector(MacWindow.renamePage(_:)))
+        add(file, "删除页面…", #selector(MacWindow.deleteCurrentPage(_:)))
         add(file, "保存", #selector(MacWindow.saveNow(_:)), "s")
         file.addItem(.separator()); add(file, "导入笔记本 (.mjn)…", #selector(MacWindow.importNotebook(_:)))
         add(file, "导出笔记本 (.mjn)…", #selector(MacWindow.exportNotebook(_:)))
@@ -108,11 +128,12 @@ import MojianCore
         file.addItem(.separator()); add(file, "关闭窗口", #selector(NSWindow.performClose(_:)), "w")
         let edit = menu("编辑")
         add(edit, "撤销", #selector(MacWindow.performUndo(_:)), "z"); add(edit, "重做", #selector(MacWindow.performRedo(_:)), "z", shift: true)
-        edit.addItem(.separator()); add(edit, "剪切", #selector(MacWindow.cut(_:)), "x"); add(edit, "复制", #selector(MacWindow.copy(_:)), "c"); add(edit, "粘贴", #selector(MacWindow.paste(_:)), "v"); add(edit, "全选", #selector(MacWindow.selectAll(_:)), "a")
+        edit.addItem(.separator()); add(edit, "剪切", #selector(MacWindow.cut(_:)), "x"); add(edit, "复制", #selector(MacWindow.copy(_:)), "c"); add(edit, "粘贴", #selector(MacWindow.paste(_:)), "v")
+        add(edit, "删除", #selector(MacWindow.delete(_:))); add(edit, "全选", #selector(MacWindow.selectAll(_:)), "a")
         let insert = menu("插入"); add(insert, "文字…", #selector(MacWindow.insertTextBlock(_:))); add(insert, "图片…", #selector(MacWindow.insertImage(_:)))
         let draw = menu("绘图")
         for (i, tool) in PenTool.allCases.enumerated() { add(draw, tool.title, #selector(MacWindow.chooseTool(_:)), tag: i) }
-        draw.addItem(.separator()); add(draw, "鼠标书写", #selector(MacWindow.toggleMouseWriting(_:)))
+        draw.addItem(.separator()); add(draw, "鼠标与触控板书写", #selector(MacWindow.toggleMouseWriting(_:)), "d", shift: true)
         let shapes = NSMenu(title: "图形种类"), shapeItem = NSMenuItem(title: "图形种类", action: nil, keyEquivalent: ""); shapeItem.submenu = shapes; draw.addItem(shapeItem)
         for (i, shape) in ShapeKind.allCases.enumerated() { add(shapes, shape.title, #selector(MacWindow.chooseShape(_:)), tag: i) }
         let colors = NSMenu(title: "笔色"), colorsItem = NSMenuItem(title: "笔色", action: nil, keyEquivalent: ""); colorsItem.submenu = colors; draw.addItem(colorsItem)
@@ -122,13 +143,17 @@ import MojianCore
         let view = menu("显示")
         add(view, "放大", #selector(MacWindow.zoomIn(_:)), "+"); add(view, "缩小", #selector(MacWindow.zoomOut(_:)), "-")
         add(view, "实际大小", #selector(MacWindow.actualSize(_:)), "0"); add(view, "适合宽度", #selector(MacWindow.fitPage(_:)), "1")
+        add(view, "整页视图", #selector(MacWindow.toggleFullPage(_:)), "f", shift: true)
         view.addItem(.separator()); add(view, "暗色页面", #selector(MacWindow.toggleTheme(_:)))
+        add(view, "隐藏页面标题", #selector(MacWindow.toggleTitle(_:)))
+        let papers = NSMenu(title: "纸张大小"), paperItem = NSMenuItem(title: "纸张大小", action: nil, keyEquivalent: ""); paperItem.submenu = papers; view.addItem(paperItem)
+        add(papers, "无界纸张", #selector(MacWindow.choosePaper(_:)), value: "BOUNDLESS"); add(papers, "A4 连续纸张", #selector(MacWindow.choosePaper(_:)), value: "A4")
         let backgrounds = NSMenu(title: "当前页背景"), bg = NSMenuItem(title: "当前页背景", action: nil, keyEquivalent: ""); bg.submenu = backgrounds; view.addItem(bg)
         for format in Background.allCases { add(backgrounds, format.title, #selector(MacWindow.chooseBackground(_:)), value: format.rawValue) }
         let defaults = NSMenu(title: "新建页默认背景"), defaultItem = NSMenuItem(title: "新建页默认背景", action: nil, keyEquivalent: ""); defaultItem.submenu = defaults; view.addItem(defaultItem)
         for format in Background.allCases { add(defaults, format.title, #selector(MacWindow.chooseDefaultBackground(_:)), value: format.rawValue) }
-        view.addItem(.separator()); add(view, "切换笔记本侧栏", #selector(MacWindow.toggleSidebar(_:))); add(view, "切换页面列表", #selector(MacWindow.togglePages(_:)))
-        add(view, "进入 / 退出全屏", #selector(MacWindow.fullScreen(_:)), "f", shift: true)
+        view.addItem(.separator()); add(view, "分区栏", #selector(MacWindow.toggleSidebar(_:)), "1", control: true); add(view, "页面栏", #selector(MacWindow.togglePages(_:)), "2", control: true)
+        add(view, "进入 / 退出全屏幕", #selector(MacWindow.fullScreen(_:)), "f", control: true)
         let window = menu("窗口"); add(window, "最小化", #selector(NSWindow.performMiniaturize(_:)), "m"); add(window, "缩放", #selector(NSWindow.performZoom(_:))); add(window, "全部置前", #selector(NSApplication.arrangeInFront(_:)), target: NSApp); NSApp.windowsMenu = window
         NSApp.mainMenu = main
     }
@@ -144,6 +169,54 @@ import MojianCore
             try JSON.object(["freshProcess": .bool(true), "nativeWindow": .bool(true), "strokes": .number(1), "texts": .number(1)]).data().write(to: root.appendingPathComponent("reopen-receipt.json"))
             controller.window?.close(); NSApp.terminate(nil)
         } catch { try? error.localizedDescription.write(to: root.appendingPathComponent("reopen-failure.txt"), atomically: true, encoding: .utf8); exit(1) }
+    }
+    /// Visual QA: whole-window captures of every ribbon tab and pane mode. A generated library is
+    /// written only under /tmp/.agents; `--library` opens an existing library strictly read-only.
+    private func uiSnapshots(_ output: URL, library: URL?) {
+        do {
+            guard output.resolvingSymlinksInPath().path.hasPrefix(URL(fileURLWithPath: "/tmp/.agents").resolvingSymlinksInPath().path + "/") else { throw MojianError.invalid("界面截图必须位于 /tmp/.agents") }
+            let prefsName = "com.meta.mojian.macos.qa.\(UUID().uuidString)", prefs = UserDefaults(suiteName: prefsName)!
+            defer { prefs.removePersistentDomain(forName: prefsName) }
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            if let library { try open(library, writable: false, preferences: prefs) }
+            else { try open(output.appendingPathComponent("library"), create: true, preferences: prefs) }
+            guard let controller = controllers.last, let window = controller.window else { throw MojianError.invalid("未创建原生窗口") }
+            let session = controller.session
+            if library == nil, let n = session.notebook {
+                try session.addSection(title: "化学", in: n, parent: nil)
+                let chemistry = session.section
+                try session.addPage(title: "反应速率", paper: "A4", in: chemistry)
+                session.mutate { d in
+                    for (i, color) in [0, 1, 2].enumerated() {
+                        var s = Settings(); s.color = color
+                        d.strokes.append(s.stroke((0..<40).map { k in InkSample(x: 90 + Double(k) * 9, y: 160 + Double(i) * 70 + sin(Double(k) / 4) * 18, pressure: 0.3 + Double(k % 10) / 20) }))
+                    }
+                    d.texts.append(.object(["id": .string("text-qa"), "text": .string("墨笺 macOS · 与 Windows 同一界面"), "x": .number(90), "y": .number(400), "width": .number(460), "height": .number(60), "fontSize": .number(22), "bold": .bool(true)]))
+                }
+                try session.addPage(title: "第二页", paper: "BOUNDLESS", in: chemistry)
+                try session.addSection(title: "有机化学", in: n, parent: chemistry)
+                try session.addPage(title: "取代反应", paper: "BOUNDLESS")
+                try session.addNotebook(title: "数学")
+                if let first = session.notebooks.first, let page = chemistry?.pages.first { controller.navigate(first, chemistry, page, root: chemistry, focusNotebook: false) }
+                try session.flush()
+            }
+            window.setContentSize(CGSize(width: 1280, height: 800)); controller.canvas.fitPage()
+            func shot(_ name: String) throws {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+                guard let frame = window.contentView?.superview, let bitmap = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { throw MojianError.invalid("原生窗口截图失败") }
+                frame.cacheDisplay(in: frame.bounds, to: bitmap)
+                try bitmap.representation(using: .png, properties: [:])!.write(to: output.appendingPathComponent(name + ".png"))
+            }
+            for tab in RibbonTab.allCases { controller.selectTab(tab); try shot("tab-\(tab.rawValue)-\(tab.title)") }
+            controller.selectTab(.draw)
+            session.settings.recursivePages = true; controller.refresh(reloadTree: true); try shot("recursive-pages")
+            session.settings.recursivePages = false; controller.refresh(reloadTree: true)
+            controller.toggleFullPage(nil); try shot("full-page"); controller.toggleSidebar(nil); try shot("full-page-sections"); controller.toggleFullPage(nil)
+            try JSON.object(["tabs": .number(Double(RibbonTab.allCases.count)), "readOnlyLibrary": .bool(library != nil)]).data().write(to: output.appendingPathComponent("snapshots-receipt.json"))
+            window.close(); NSApp.terminate(nil)
+        } catch {
+            try? "FAILED: \(error.localizedDescription)\n".write(to: output.appendingPathComponent("failure.txt"), atomically: true, encoding: .utf8); exit(1)
+        }
     }
     private func smokeTest(_ root: URL) {
         do {

@@ -5,9 +5,11 @@ import MojianCore
     let session: DesktopSession
     let renderer: MacRenderer
     var viewport: Viewport
-    var selected = Set<String>()
-    var mouseWriting = false
+    var selected = Set<String>() { didSet { if oldValue != selected { selectionChanged?() } } }
+    /// Mouse/trackpad route: select content, or use the active preset (persisted per device).
+    var mouseWriting: Bool { get { session.mouseWriting } set { session.mouseWriting = newValue } }
     var viewportChanged: (() -> Void)?
+    var selectionChanged: (() -> Void)?
     var editText: ((JSON?, CGPoint) -> Void)?
     private var points = [InkSample]()
     private var before: PageDocument?
@@ -163,6 +165,7 @@ import MojianCore
         session.remember(viewport); viewportChanged?(); needsDisplay = true
     }
     override func magnify(with event: NSEvent) {
+        guard !session.settings.pinchLocked else { return }
         viewport.zoom(viewport.scale * (1 + event.magnification), anchor: location(event))
         session.remember(viewport); viewportChanged?(); needsDisplay = true
     }

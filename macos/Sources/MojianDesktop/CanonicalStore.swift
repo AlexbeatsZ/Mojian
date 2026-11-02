@@ -14,6 +14,8 @@ public final class CanonicalStore: @unchecked Sendable {
     private var pageRevisions = [String: Double]()
     private var librarySource: JSON = .object([:])
     private let fm = FileManager.default
+    /// Removal of unreferenced page files; tests substitute a private folder for the user's Trash.
+    var discard: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     private struct Stamp: Equatable {
         var size: UInt64, modified: Date, inode: UInt64
         init(_ url: URL) throws {
@@ -182,6 +184,29 @@ public final class CanonicalStore: @unchecked Sendable {
         guard !fm.fileExists(atPath: url.path) else { throw MojianError.invalid("资源文件已存在") }
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try atomic(data, to: url)
+    }
+    /// Called only after the index no longer references these pages. Files go to the macOS Trash
+    /// (recoverable); a failed move leaves an unreferenced orphan rather than a dangling index entry.
+    @discardableResult public func trash(notebook: String, pages: [String]) -> [String] {
+        mutex.lock(); defer { mutex.unlock() }
+        guard !readOnly, let nb = try? WorkspaceStore.safe(notebook) else { return pages }
+        return pages.filter { id in
+            guard let page = try? WorkspaceStore.safe(id) else { return true }
+            let moved = ["notebooks/\(nb)/pages/\(page).json", "notebooks/\(nb)/pages/\(page).json.previous", "notebooks/\(nb)/assets/\(page)"].map(moveToTrash)
+            return moved.contains(false)
+        }
+    }
+    @discardableResult public func trashNotebook(_ notebook: String) -> Bool {
+        mutex.lock(); defer { mutex.unlock() }
+        guard !readOnly, let nb = try? WorkspaceStore.safe(notebook) else { return false }
+        return moveToTrash("notebooks/\(nb)")
+    }
+    private func moveToTrash(_ relative: String) -> Bool {
+        guard let url = try? checked(relative) else { return false }
+        guard fm.fileExists(atPath: url.path) else { return true }
+        do { try discard(url) } catch { return false }
+        observed = observed.filter { !$0.key.hasPrefix(relative) }
+        return true
     }
     public func assetURL(_ name: String, document: PageDocument, owner: String? = nil) throws -> URL {
         mutex.lock(); defer { mutex.unlock() }
