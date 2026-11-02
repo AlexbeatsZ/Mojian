@@ -14,7 +14,12 @@
   With user approval the local `mojian/artifacts/release/Mojian.exe` is now 0.7.10: the locked
   running file was renamed to `Mojian.exe.previous-running.old` (on-disk 0.7.9) and still backs
   running PIDs 52164/39076, which were not stopped. Delete that `.old` file after they exit;
-  the next launch uses 0.7.10. No other device has 0.7.9/0.7.10. Android current APK is 0.7.10.
+  the next launch uses 0.7.10. Android current APK is 0.7.10.
+  2026-11-02 deployment: ROG client EXE 0.7.10 (not started; sync PID44516/18742/18743
+  unchanged); tablet and phone in place 0.7.10-debug/code18 with matching signer, retained
+  first-install times and byte-identical private prefs/native-sync/library index. Tablet index
+  639564 bytes vs phone 640513 at that time: not converged, unverified why. Mac not included.
+  Private evidence: ignored `.local/deploy-0.7.10-20261102`.
   Review-fix testhost PID49364 (in `%TEMP%/.agents/mojian-review-fixes-20261102`) could not be
   stopped (taskkill: no running instance) and still locks that temp dir.
 - 0.7.9 adds direct image cropping.
