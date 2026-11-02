@@ -12,10 +12,12 @@
   Finger/pen/left-mouse drags pan 1:1 and nothing can be selected/edited; two-finger/wheel/middle
   navigation unchanged; exclusive with Hand/insert-space/tool selection; not persisted. Contract in
   `input-gestures.md`. Windows Release 228/228; no physical device acceptance; iOS not implemented.
-  Built from a clean worktree: the uncommitted Android viewport-cache work (DryInkView/
-  InsertContentLayer/SharedStrokeCodec/ViewportSceneCache, last touched 08:28) is NOT in 0.7.11.
   Local `mojian/artifacts/release/Mojian.exe` is still 0.7.10: running PIDs 28836/39076/52164 lock it;
-  replace after they exit. Android current APK is 0.7.11. Not installed on any device.
+  replace after they exit. Not installed on any device.
+- **Android 0.7.12** (code20, `v0.7.12` APK-only prerelease; Windows stays 0.7.11): gesture-only
+  RenderNode scene tiles during pan/zoom (`ViewportSceneCache`, read `android-page-navigation.md`).
+  JVM 262 passed/1 skipped, lint 0 errors; no device frame-rate/GPU-memory/visual acceptance.
+  Android current APK is 0.7.12. Not installed on any device.
 - Windows/Android source **0.7.10** (Android code **18**) = 0.7.9 image cropping + the
   2026-11-02 Windows storage fixes below; `v0.7.10` prerelease carries EXE/APK. `v0.7.9`
   (05ef468, cropping only) was already published 2026-10-31 and is left unchanged.
