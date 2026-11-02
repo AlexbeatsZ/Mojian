@@ -8,10 +8,14 @@
 
 # Current State
 
-- 2026-11-02 source (unreleased): drawing-toolbar 阅读视图 (book icon after Hand) on Windows/Android.
+- **0.7.11** (`v0.7.11` prerelease at b977596, EXE+APK code19): drawing-toolbar 阅读视图 (book icon after Hand).
   Finger/pen/left-mouse drags pan 1:1 and nothing can be selected/edited; two-finger/wheel/middle
   navigation unchanged; exclusive with Hand/insert-space/tool selection; not persisted. Contract in
   `input-gestures.md`. Windows Release 228/228; no physical device acceptance; iOS not implemented.
+  Built from a clean worktree: the uncommitted Android viewport-cache work (DryInkView/
+  InsertContentLayer/SharedStrokeCodec/ViewportSceneCache, last touched 08:28) is NOT in 0.7.11.
+  Local `mojian/artifacts/release/Mojian.exe` is still 0.7.10: running PIDs 28836/39076/52164 lock it;
+  replace after they exit. Android current APK is 0.7.11. Not installed on any device.
 - Windows/Android source **0.7.10** (Android code **18**) = 0.7.9 image cropping + the
   2026-11-02 Windows storage fixes below; `v0.7.10` prerelease carries EXE/APK. `v0.7.9`
   (05ef468, cropping only) was already published 2026-10-31 and is left unchanged.
