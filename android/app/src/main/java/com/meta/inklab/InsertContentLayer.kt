@@ -29,7 +29,9 @@ class InsertContentLayer(
     private var selectionTransformMutated = false
     private var cropImageId: String? = null
     private var cropPreviewBounds: RectF? = null
-    private val bitmapCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    // Decoding happens synchronously while drawing; a page with a few 1800px images must not
+    // evict and re-decode them on every pan sample.
+    private val bitmapCache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 5).coerceIn(24L shl 20, 160L shl 20).toInt()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }

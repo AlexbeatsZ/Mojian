@@ -8,7 +8,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.RenderNode
 import android.graphics.DashPathEffect
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.View
 import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
@@ -22,6 +24,8 @@ import kotlin.math.sqrt
 
 class DryInkView(context: Context) : View(context) {
     var sceneRenderer: ((Canvas,List<Stroke>,(Stroke)->Unit)->Unit)? = null
+    /** Revision of composed scene content owned outside this view (inserted objects, text). */
+    var sceneRevision: () -> Long = { 0L }
     var onContentChanged: (() -> Unit)? = null
     var backgroundFormat: CanvasBackgroundFormat = CanvasBackgroundFormat.GRID_STANDARD
         set(value) {
@@ -60,7 +64,14 @@ class DryInkView(context: Context) : View(context) {
     private val majorGridPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val marginLinePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val strokeRenderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
+    private val canvasStrokeRenderer = CanvasStrokeRenderer.create()
+    private val strokeRenderer = ViewStrokeRenderer(canvasStrokeRenderer, this)
+    private val matrixValues = FloatArray(9)
+    private var viewportGestureActive = false
+    private var tileScale = 0f
+    private var tileSceneKey: List<Any?>? = null
+    private val sceneTiles = HashMap<Long, RenderNode>()
+    private val spareTiles = ArrayDeque<RenderNode>()
     private val documentToView = Matrix()
     private val eraserCursorPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -208,6 +219,21 @@ class DryInkView(context: Context) : View(context) {
         documentToView.set(matrix)
         invalidate()
         backgroundInvalidator?.invoke()
+    }
+
+    /**
+     * Pan/zoom samples move recorded scene tiles instead of rebuilding every visible stroke mesh.
+     * Tiles exist only while the gesture lasts; ending it returns to direct vector drawing.
+     */
+    fun beginViewportGesture() {
+        viewportGestureActive = true
+    }
+
+    fun endViewportGesture() {
+        if (!viewportGestureActive) return
+        viewportGestureActive = false
+        releaseSceneTiles()
+        invalidate()
     }
 
     internal fun delegateBackgroundRendering(invalidator: () -> Unit) {
@@ -586,33 +612,14 @@ class DryInkView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val tiled = viewportGestureActive && drawSceneTiles(canvas)
         val visible = visibleStrokeBounds()
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
             transformedCanvas.concat(documentToView)
-            if (renderBackgroundInInkLayer) drawGrid(transformedCanvas)
-            val startY = insertSpaceStartY
-            val currentY = insertSpaceCurrentY
-            val renderScene=sceneRenderer
-            if(renderScene != null && startY == null && currentY == null) {
-                renderScene(transformedCanvas,strokes.filter { boundsFor(it).intersects(visible) }) { stroke -> if(!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke) }
-            } else for (stroke in strokes) {
-                val bounds = boundsFor(stroke)
-                if (startY != null && currentY != null) {
-                    val deltaY = currentY - startY
-                    val inputs = stroke.inputs
-                    val isBelow = if (inputs.isEmpty()) false else (0 until inputs.size).minOf { inputs.get(it).y } >= startY
-                    if (isBelow) {
-                        if (!bounds.translated(deltaY).intersects(visible)) continue
-                        transformedCanvas.save()
-                        transformedCanvas.translate(0f, deltaY)
-                        if (!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke)
-                        transformedCanvas.restore()
-                        continue
-                    }
-                }
-                if (!bounds.intersects(visible)) continue
-                if (!SharedStrokeCodec.draw(transformedCanvas,stroke)) scope.drawStroke(stroke)
+            if (!tiled) {
+                if (renderBackgroundInInkLayer) drawGrid(transformedCanvas)
+                drawScene(transformedCanvas, visible) { scope.drawStroke(it) }
             }
             shapePreview?.let { scope.drawStroke(it) }
             drawLasso(transformedCanvas)
@@ -622,6 +629,110 @@ class DryInkView(context: Context) : View(context) {
             drawInsertSpaceGuide(transformedCanvas)
             transformedCanvas.restore()
         }
+    }
+
+    private fun drawScene(canvas: Canvas, visible: StrokeViewportBounds, drawStroke: (Stroke) -> Unit) {
+        val startY = insertSpaceStartY
+        val currentY = insertSpaceCurrentY
+        val renderScene=sceneRenderer
+        if(renderScene != null && startY == null && currentY == null) {
+            renderScene(canvas,strokes.filter { boundsFor(it).intersects(visible) }) { stroke -> if(!SharedStrokeCodec.draw(canvas,stroke)) drawStroke(stroke) }
+        } else for (stroke in strokes) {
+            val bounds = boundsFor(stroke)
+            if (startY != null && currentY != null) {
+                val deltaY = currentY - startY
+                val inputs = stroke.inputs
+                val isBelow = if (inputs.isEmpty()) false else (0 until inputs.size).minOf { inputs.get(it).y } >= startY
+                if (isBelow) {
+                    if (!bounds.translated(deltaY).intersects(visible)) continue
+                    canvas.save()
+                    canvas.translate(0f, deltaY)
+                    if (!SharedStrokeCodec.draw(canvas,stroke)) drawStroke(stroke)
+                    canvas.restore()
+                    continue
+                }
+            }
+            if (!bounds.intersects(visible)) continue
+            if (!SharedStrokeCodec.draw(canvas,stroke)) drawStroke(stroke)
+        }
+    }
+
+    /** Draws the scene from gesture tiles; false keeps the direct vector path for this frame. */
+    private fun drawSceneTiles(canvas: Canvas): Boolean {
+        if (!canvas.isHardwareAccelerated || insertSpaceStartY != null || insertSpaceCurrentY != null) return false
+        documentToView.getValues(matrixValues)
+        if (matrixValues[Matrix.MSKEW_X] != 0f || matrixValues[Matrix.MSKEW_Y] != 0f) return false
+        val scale = matrixValues[Matrix.MSCALE_X]
+        val translationX = matrixValues[Matrix.MTRANS_X]
+        val translationY = matrixValues[Matrix.MTRANS_Y]
+        val sceneKey = listOf(contentRevision, sceneRevision(), sceneRenderer, backgroundFormat,
+            outputPageSettings.darkBackground, renderBackgroundInInkLayer, width, height)
+        if (sceneKey != tileSceneKey || !ViewportSceneCache.scaleUsable(tileScale, scale)) {
+            releaseSceneTiles()
+            tileScale = scale
+            tileSceneKey = sceneKey
+        }
+        val visible = ViewportSceneCache.visibleTiles(tileScale, scale, translationX, translationY, width, height) ?: return false
+        val retained = visible.expanded(ViewportSceneCache.PREFETCH_TILES)
+        val iterator = sceneTiles.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (retained.contains(ViewportSceneCache.column(entry.key), ViewportSceneCache.row(entry.key))) continue
+            entry.value.discardDisplayList()
+            spareTiles.addLast(entry.value)
+            iterator.remove()
+        }
+        val ratio = scale / tileScale
+        canvas.save()
+        canvas.translate(translationX, translationY)
+        canvas.scale(ratio, ratio)
+        for (row in visible.firstRow..visible.lastRow) for (column in visible.firstColumn..visible.lastColumn) {
+            canvas.drawRenderNode(sceneTiles.getOrPut(ViewportSceneCache.key(column, row)) { recordSceneTile(column, row) })
+        }
+        canvas.restore()
+        // Record the ring that the pan reaches next within a small per-frame budget.
+        val deadline = SystemClock.elapsedRealtimeNanos() + ViewportSceneCache.PREFETCH_BUDGET_NANOS
+        var pending = false
+        retained.forEachNearest(visible) { column, row ->
+            val key = ViewportSceneCache.key(column, row)
+            if (key in sceneTiles) return@forEachNearest
+            if (SystemClock.elapsedRealtimeNanos() < deadline) sceneTiles[key] = recordSceneTile(column, row) else pending = true
+        }
+        if (pending) postInvalidateOnAnimation()
+        return true
+    }
+
+    private fun recordSceneTile(column: Int, row: Int): RenderNode {
+        val size = ViewportSceneCache.TILE_SIZE
+        val node = spareTiles.removeFirstOrNull() ?: RenderNode("MojianSceneTile").apply { setUseCompositingLayer(true, null) }
+        node.setPosition(column * size, row * size, (column + 1) * size, (row + 1) * size)
+        val tileToScreen = Matrix().apply {
+            setScale(tileScale, tileScale)
+            postTranslate(-column * size.toFloat(), -row * size.toFloat())
+        }
+        val recording = node.beginRecording(size, size)
+        try {
+            recording.concat(tileToScreen)
+            val bounds = ViewportSceneCache.documentBounds(tileScale, column, row)
+            if (renderBackgroundInInkLayer) drawGrid(recording, visible = RectF(bounds.left, bounds.top, bounds.right, bounds.bottom), viewMatrix = tileToScreen)
+            drawScene(recording, bounds) { canvasStrokeRenderer.draw(recording, it, tileToScreen) }
+        } finally {
+            node.endRecording()
+        }
+        return node
+    }
+
+    private fun releaseSceneTiles() {
+        sceneTiles.values.forEach(RenderNode::discardDisplayList)
+        sceneTiles.clear()
+        spareTiles.clear()
+        tileSceneKey = null
+        tileScale = 0f
+    }
+
+    override fun onDetachedFromWindow() {
+        releaseSceneTiles()
+        super.onDetachedFromWindow()
     }
 
     private fun drawInsertSpaceGuide(canvas: Canvas) {

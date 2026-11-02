@@ -893,6 +893,7 @@ class MainActivity : Activity() {
         resetMouseSecondaryGesture(cancelPreview = true)
         resetXiaomiSecondaryGesture(cancelPreview = true)
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         dryInkView.setEraserCursor(null)
         clearContentSelection()
         if (::textInputLayer.isInitialized) {
@@ -1079,6 +1080,7 @@ class MainActivity : Activity() {
         dryInkView.setInsertSpaceHoverY(null)
         dryInkView.setInsertSpaceGuide(null, null)
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         updateSelectionInteraction()
@@ -2692,6 +2694,7 @@ class MainActivity : Activity() {
             renderToolShelf()
         }
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         tagLayer.beginPlacement(kind)
         selectionOverlay.selectionEnabled = false
         Toast.makeText(this, "点击页面放置${kind.label}标记", Toast.LENGTH_SHORT).show()
@@ -2727,6 +2730,7 @@ class MainActivity : Activity() {
         singleFingerPanEnabled = false
         readingViewEnabled = false
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         insertSpaceActive = false
@@ -2760,6 +2764,7 @@ class MainActivity : Activity() {
         readingPassThrough = false
         panoramaPointerId = null
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         updateSelectionInteraction()
@@ -4638,6 +4643,7 @@ class MainActivity : Activity() {
             SharedWorkspaceCodec.items(doc.sharedSource.optJSONArray("textItems")).firstOrNull { it.optString("id")==id }
                 ?.let { SharedSceneOrder.visible(doc.sharedSource,it) } ?: true
         } ?: true }
+        dryInkView.sceneRevision={ sceneContentRevision }
         dryInkView.sceneRenderer=if(document==null) null else { canvas,strokes,draw ->
             val source=document.sharedSource
             val ordered = orderCache.get(source, sceneContentRevision, dryInkView.contentRevision) {
@@ -5428,6 +5434,7 @@ class MainActivity : Activity() {
         dryInkView.setInsertSpaceHoverY(null)
         dryInkView.setInsertSpaceGuide(null, null)
         transformGestureActive = false
+        dryInkView.endViewportGesture()
         toolDetailPopup?.dismiss()
         toolDetailPopup = null
         mainHandler.removeCallbacks(activatePressureEraser)
@@ -5685,6 +5692,7 @@ class MainActivity : Activity() {
             beginSpringLoadedPanorama()
             if (mouseCanvasGesture == CanvasDragIntent.PAN) {
                 transformGestureActive = true
+                dryInkView.beginViewportGesture()
                 transformGestureArbiter.cancel()
                 lastGestureFocusX = viewX
                 lastGestureFocusY = viewY
@@ -6003,6 +6011,7 @@ class MainActivity : Activity() {
         resetMouseSecondaryGesture(cancelPreview = true)
         resetXiaomiSecondaryGesture(cancelPreview = true)
         transformGestureActive = true
+        dryInkView.beginViewportGesture()
         transformGestureArbiter.cancel()
         lastGestureFocusX = event.getX(fingerIndex)
         lastGestureFocusY = event.getY(fingerIndex)
@@ -6030,12 +6039,19 @@ class MainActivity : Activity() {
         textInputLayer.applyViewport()
         tagLayer.invalidate()
         selectionOverlay.invalidate()
-        refreshViewRibbonState()
+        // Gesture samples only change zoom; rebuilding every ribbon drawable per sample forces layout.
+        if (transformGestureActive) refreshZoomLabel() else refreshViewRibbonState()
+    }
+
+    private fun refreshZoomLabel() {
+        val label = "${(viewport.scale * 100f).roundToInt()}%"
+        zoomPercentButton?.takeIf { it.text.toString() != label }?.text = label
     }
 
     private fun beginTransformGesture(event: MotionEvent, fingerIndices: List<Int>) {
         val (focusX, focusY, span) = gestureGeometry(event, fingerIndices)
         transformGestureActive = true
+        dryInkView.beginViewportGesture()
         lastGestureFocusX = focusX
         lastGestureFocusY = focusY
         transformGestureArbiter.begin(focusX, focusY, span)
@@ -6044,6 +6060,7 @@ class MainActivity : Activity() {
     private fun endTransformGesture() {
         transformGestureActive = false
         transformGestureArbiter.cancel()
+        dryInkView.endViewportGesture()
     }
 
     private fun pageNavigationBlocksSecondary(): Boolean =
@@ -6269,7 +6286,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshViewRibbonState() {
-        zoomPercentButton?.text = "${(viewport.scale * 100f).roundToInt()}%"
+        refreshZoomLabel()
         zoomLockButton?.let { updateToggleVisual(it, zoomLocked) }
         fullViewButton?.let { updateToggleVisual(it, fullPageMode) }
         normalViewButton?.let { updateToggleVisual(it, !fullPageMode) }

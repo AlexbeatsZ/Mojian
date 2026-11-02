@@ -20,6 +20,8 @@ object SharedStrokeCodec {
     private data class Record(val json: JSONObject, var path: Path? = null, val visible: Boolean = true)
     private val records = WeakIdentityCache<Stroke,Record>()
     private val unit = SharedWorkspaceCodec.TO_SHARED.toFloat()
+    // Display and export workers both draw outlines; one fill Paint per thread avoids per-stroke allocation.
+    private val fillPaint = ThreadLocal.withInitial { Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL } }
 
     fun metadata(stroke: Stroke): JSONObject? = records[stroke]?.json
     fun visible(stroke: Stroke): Boolean = records[stroke]?.visible ?: true
@@ -118,10 +120,9 @@ object SharedStrokeCodec {
         if(!visible(stroke)) return true
         val path = path(stroke) ?: return false
         val color = stroke.brush.colorIntArgb
-        canvas.drawPath(path,Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        canvas.drawPath(path,fillPaint.get()!!.apply {
             this.color = if (!printing) color else if (printingPaperColor != null && (color and 0xffffff) == (printingPaperColor and 0xffffff))
                 OutputAppearance.printPaper(color) else OutputAppearance.printInk(color)
-            style=Paint.Style.FILL
         })
         return true
     }

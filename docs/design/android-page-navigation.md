@@ -72,6 +72,19 @@ native sync cannot publish an intermediate index/assets snapshot.
 - 本机页面选择和栏位开合只保存导航偏好，不在每次点页面时争用共享 library/page 文件写锁。
 - `SharedStrokeCodec` 的全局弱引用记录表必须支持工作线程创建笔迹与 UI 使用旧笔迹并发。
 
+## 手势期间的瓦片场景缓存（0.7.12）
+
+平移/缩放手势（双指、单指抓手、鼠标中键、阅读视图）期间，`DryInkView` 把背景与组合场景按
+`ViewportSceneCache.TILE_SIZE`（512 px）录制成硬件 `RenderNode` 瓦片，采样只移动/缩放这些瓦片，
+不再逐帧重建可见笔迹网格。规则：
+
+- 瓦片只在 `beginViewportGesture()` 与 `endViewportGesture()` 之间存在；凡是把 `transformGestureActive` 置为 false 的路径（结束手势、工具/抓手/阅读视图切换、
+  插入空间、标签放置、Activity 暂停）都必须调用 `endViewportGesture()`，静止画面始终回到矢量直绘。
+- 缓存键包含 `contentRevision`、外部 `sceneRevision`（插入对象/文本）、背景格式、深色纸、视图尺寸；
+  任一变化或相对录制倍率漂移超过 1.5 倍时整体重录。插入空间预览、非硬件画布或带斜切的矩阵走直绘。
+- 预取只录可见区外一圈，每帧预算 6 ms，超出则下一帧继续；离开保留范围的瓦片丢弃显示列表并复用。
+- 图片解码缓存为最大堆的 1/5（24–160 MiB），避免平移时反复同步解码大图；描边轮廓按线程复用 Paint。
+
 ## 验证边界
 
 2026-10-28 最终 0.7.0 构建通过 228/228 单元测试、APK、native-test APK 和 lint
