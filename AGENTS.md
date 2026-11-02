@@ -14,7 +14,8 @@
   rail, black section/gray page panes, add-only tool presets, context-menu rename/delete-to-Trash)
   with OneNote-for-Mac adaptations (menu bar File, ⌘, Settings, popovers/sheets, pointer vs tool
   mouse routing). Read `docs/design/macos-client.md` before UI changes. 19 core + 20 desktop tests,
-  staged-app smoke and `--ui-snapshots` visual check pass; installed/running apps are still 0.1.0.
+  staged-app smoke and `--ui-snapshots` visual check pass. 2026-11-02: `/Applications/Mojian.app`
+  0.2.0 installed with the same certificate requirement; launch left the read-only Documents library unchanged.
   It reuses MojianCore with AppKit windows/menus, canonical v2 local folders, hierarchy/search,
   editable ink/shapes/text/images, selection/clipboard, Undo/Redo, .mjn exchange, vector PDF and print.
   Existing external libraries open read-only; only explicitly created Mac-local libraries are writable.
@@ -26,8 +27,9 @@
   `macos-v0.1.0` is published as an independent prerelease with the 677475-byte ZIP uploaded.
   Run `bash macos/tools/build.sh test|build`. Evidence: `/tmp/.agents/mojian-macos-client/native-delivery`.
   Source/task continuation: `/Users/meta/.agents/mojian--macos-client/AGENTS.md`.
-  User-authorized 2026-10-31 install: `/Applications/Mojian.app` 0.1.0 is signed with the existing
+  User-authorized 2026-10-31 install (now replaced by 0.2.0): `/Applications/Mojian.app` was signed with the existing
   Local Development Code Signing identity; its stable certificate requirement and strict verification pass.
+  SSH codesign cannot reach the login keychain (errSecInternalComponent); `open` a .command script instead.
   Current Windows `Documents/Mojian-native` content was copied to Mac `Documents/Mojian`:
   4 notebooks / 104 sections / 615 indexed pages / 1132 referenced assets / 1787 files.
   Windows sync identity/settings/recovery files were excluded; Mac copy opens read-only, no sync.
