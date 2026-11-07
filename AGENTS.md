@@ -7,12 +7,13 @@
 
 # Current State
 
-- **Windows 0.7.23 source**: retained per-item WPF visuals, stable paper/image/PDF nodes, indexed
+- **Windows 0.7.23** (`v0.7.23`, source `8c9aa58`): retained per-item WPF visuals, stable paper/image/PDF nodes, indexed
   delta erasing (no page JSON on contact) and layered wet-ink updates. Synthetic 3,000 strokes /
   240,000 points: eraser contact 353 -> 2.2 ms, allocations 110.7 -> 0.33 MB; 60 moves cause zero
   full scene recordings. Final Release suite 256 passed + one clipboard-restore failure, which
   passed an isolated retry (257 covered). Real selected-page read-only rendering also passed.
-  EXE/release delivery is pending this task's final publish step; physical PC pen feel is open.
+  Self-contained EXE is published on GitHub and replaced at the sole local release path while no
+  product was running (0.7.23+8c9aa58); next launch uses it. Physical PC pen feel is open.
   Read `writing-performance-and-durability.md`; continuation `~/.agents/mojian--windows-ink-performance`.
 - **Android 0.7.22** (code30): adds a focused root `dispatchKeyEventPreIme` entry for the exact
   Xiaomi pen keyboard, ahead of IME hardware-key processing; Activity remains the fallback.
@@ -107,6 +108,9 @@
 
 # Durable Lessons
 
+- Frozen DrawingGroups in one page-sized Visual still make small edits dirty a whole scene.
+  Retain per-content Visuals and unchanged paper/image nodes; measure contact allocations and
+  rendered frames as well as geometry-recording cost. Undo history must release gesture indexes.
 - Never ship the Android product debuggable: ART then disables nterp/AOT and uses generic JNI, which
   made Ink rendering and scene composition several times slower on the tablet than Notein.
 - A host "scene revision" that is bumped for every edit must not be part of a render cache key that
