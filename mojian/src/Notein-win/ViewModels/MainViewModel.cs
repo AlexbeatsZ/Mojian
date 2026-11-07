@@ -904,6 +904,9 @@ public sealed class MainViewModel : ObservableObject
 
     public void FocusCanvas(CanvasSlot slot)
     {
+        // PreviewMouseDown also runs for repeated/promoted pen contacts. Only a
+        // real split-slot change may flush the page writer or rebuild bindings.
+        if (slot == FocusedSlot) return;
         if (slot == CanvasSlot.Right && (!IsSplitView || SecondaryDocument == null)) return;
         SaveFocusedDocument();
         FocusedSlot = slot;

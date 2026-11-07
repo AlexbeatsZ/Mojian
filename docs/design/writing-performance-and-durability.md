@@ -12,6 +12,31 @@ retains the immutable content snapshot and clears that flag; failed jobs remain 
 retry queue. Clean pages are not rewritten on navigation/close. Legacy on-disk viewport data is
 preserved separately so subsequent content saves do not publish the current device's view.
 
+## Main-window contact must not act as navigation (0.7.24, 2026-11-07)
+
+The user continued to observe intermittent pauses while writing and erasing on 0.7.23. A live
+20-second trace confirmed the actual MainWindow `OnLeftCanvasFocus -> FocusCanvas ->
+SaveFocusedDocument` route, which isolated NoteCanvas benchmarks omitted. Both canvas borders
+handle PreviewMouseDown, including promoted pen contacts. `FocusCanvas` previously flushed the
+background page writer, saved settings and rebuilt navigation/appearance even when the requested
+slot was already focused. Slow disk, a concurrent page job or the per-workspace file gate can then
+hold up the next contact; the stall depends on timing rather than one reproducible pen trajectory.
+
+`FocusCanvas` now returns immediately for the current slot. Actual left/right slot changes keep
+their existing durable-save barrier and selection updates. `CanvasFocusPerformanceTests` raises
+the real routed preview event through a MainWindow border while the writer is deliberately held:
+the old contact waited 1,017 ms for its release; the fixed contact returned in 0.35 ms before release.
+Separate tests keep pending ink/file bytes/property notifications untouched on same-slot focus and
+prove source ink is durable after a real split-slot change. Do not generalize this early return to
+page, notebook, workspace, export or close transitions, which must retain save barriers.
+
+The 20-second live trace had 10 GCs (largest stop 8.53 ms); the following two-minute trace was idle
+and captured no GC or writing. A simultaneous UI probe had no foreground samples, so neither is
+proof that the user's intermittent stall was captured or that all causes are eliminated. Trace
+files stay private under the task temporary directory. Tool-setting work in the first trace came
+from real slider input; a speculative binding-refresh change was not included. This remains a
+Windows main-window fix; no shared persisted format or Android behavior changes.
+
 ## Dense-page Windows erasing and layered writing (0.7.23, 2026-11-07)
 
 The 0.7.21 Windows eraser still serialized the entire page on contact, scanned all strokes for each
