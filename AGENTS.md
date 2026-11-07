@@ -15,6 +15,10 @@
   Local `mojian/artifacts/release/Mojian.exe` is updated to 0.7.11 (0.7.11+b977596); running PIDs
   39076/52164 remain backed by `.old` without stopping. ROG client `Mojian.exe` is updated to 0.7.11;
   sync service PID 44516 / listeners 18742+18743 are unchanged.
+- **Android 0.7.17** (code25): fixes the tablet crash when the pen 压感/出墨 slider reaches 0%
+  (AndroidX Ink rejects a degenerate {1,1} modifier range; the behavior is now omitted), removes
+  abandoned page `.tmp` files on load, and logs save durations. Open issue: a dense-page save still
+  takes long enough that HyperOS freezes the backgrounded app mid-write.
 - **Android 0.7.16** (code24): content/sync hash checks verify stability by size + inode, not mtime
   (a HyperOS mtime rewrite during a 6.5 MB hash falsely refused a 0.7.15 save and can fail sync scans).
 - **Android 0.7.15** (code23): idle-based page saves (2 s after the pen rests, at most 20 s dirty

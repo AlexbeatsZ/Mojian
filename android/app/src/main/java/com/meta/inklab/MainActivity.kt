@@ -5447,11 +5447,16 @@ class MainActivity : Activity() {
                 PageInsertDocument(document.notebookId,document.pageId,document.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
                     document.strokes,source,document.diskStamp)
             }
+            val submittedAt = android.os.SystemClock.uptimeMillis()
             pageWrites.submit(pageContentRepository,document,snapshot, failed = { error -> runOnUiThread {
                 if(boundPageKey==key) contentDirty=true
                 Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show()
                 android.util.Log.e("MojianSync","Save refused",error)
-            } }, saved = { nativeSyncController.localSaved() })
+            } }, saved = {
+                // Queue wait + verify + encode + write; dense pages decide whether pause/background saves finish.
+                android.util.Log.i("MojianSync", "page saved in ${android.os.SystemClock.uptimeMillis() - submittedAt} ms")
+                nativeSyncController.localSaved()
+            })
             contentDirty=false
             if(flush) pageWrites.flush()
         } catch(error: Exception) { contentDirty=true;Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show();android.util.Log.e("MojianSync","Save refused",error) }

@@ -235,6 +235,27 @@ class PageContentRepositoryTest {
     }
 
     @Test
+    fun loadingRemovesOnlyAbandonedTemporariesOfThatPage() {
+        val root = Files.createTempDirectory("mojian-stale-temporaries").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            repository.save(PageInsertDocument("book", "page"))
+            val pages = repository.pageFile("book", "page").parentFile!!
+            val old = pages.resolve("page.json.dead.tmp").apply { writeText("partial") }
+            assertTrue(old.setLastModified(System.currentTimeMillis() - PageContentRepository.STALE_TEMPORARY_MS - 60_000))
+            val recent = pages.resolve("page.json.inflight.tmp").apply { writeText("partial") }
+            val other = pages.resolve("other.json.dead.tmp").apply { writeText("partial") }
+            assertTrue(other.setLastModified(old.lastModified()))
+
+            PageContentRepository(root).load("book", "page")
+
+            assertFalse(old.exists())
+            assertTrue(recent.exists())
+            assertTrue(other.exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun mtimeRewrittenWhileVerifyingContentDoesNotRefuseSave() {
         val root = Files.createTempDirectory("mojian-mtime-during-hash").toFile()
         try {

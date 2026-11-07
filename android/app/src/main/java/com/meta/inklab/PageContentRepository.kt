@@ -93,6 +93,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         check(file.isFile || "$notebookId/$pageId" !in receivedPages) { "页面文件尚未同步完成，请稍后重新加载" }
         val generation=stamp(file)
         loadedPages[file.path]?.get()?.takeIf { it.diskStamp==generation }?.let { return it }
+        removeStaleTemporaries(file)
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val source = if(file.isFile) JSONObject(java.security.DigestInputStream(file.inputStream(), digest)
             .reader(Charsets.UTF_8).use { it.readText() }) else null
@@ -137,6 +138,19 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     }
 
     private fun stamp(file: File) = if(file.isFile) "${file.lastModified()}:${file.length()}" else null
+    /**
+     * A write killed mid-way (crash, swipe-away, background freeze then kill) leaves `<page>.json.<uuid>.tmp`.
+     * The published page is intact (rename is atomic); remove such leftovers once they are clearly
+     * abandoned. An in-flight write of this process is always younger than the threshold.
+     */
+    private fun removeStaleTemporaries(file: File, now: Long = System.currentTimeMillis()) {
+        val prefix = "${file.name}."
+        file.parentFile?.listFiles { candidate ->
+            candidate.isFile && candidate.name.startsWith(prefix) && candidate.name.endsWith(".tmp") &&
+                now - candidate.lastModified() > STALE_TEMPORARY_MS
+        }?.forEach { it.delete() }
+    }
+
     /** Size and inode only; unlike [stamp] it is not affected by HyperOS mtime rewrites. */
     private fun physical(file: File): String? = runCatching {
         java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
@@ -247,6 +261,8 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     }
 
     companion object {
+        internal const val STALE_TEMPORARY_MS = 60 * 60 * 1000L
+
         fun safeId(value: String): String {
             require(value.isNotBlank() && value != "." && value != ".." && value.matches(Regex("[A-Za-z0-9._-]+"))) { "Invalid workspace ID" }
             return value

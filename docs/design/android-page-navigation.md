@@ -97,6 +97,15 @@ native sync cannot publish an intermediate index/assets snapshot.
   只改写 mtime，0.7.15 曾在算 6.5 MB 哈希时撞上改写而误拒保存；同步扫描 `NativeSyncHashCache`
   同理，否则整轮同步报"本地文件正在修改"。墨笺以 rename 发布，真实替换必然换 inode。
 
+## 后台冻结与残留临时文件（0.7.17）
+
+- 2026-11-07 平板：切到其他应用约 3 s 后 HyperOS SmartPower 把墨笺置为 idle（冻结），6.5 MB 页面
+  正在进行的整页写盘停在 1 MiB，之后进程被结束即留下 `<page>.json.<uuid>.tmp`；已发布页面因
+  rename 原子性保持完好，只丢最后一次保存的增量。`onPause` 的 1.5 s 等待不足以写完密集页。
+- 加载页面时删除该页超过 `STALE_TEMPORARY_MS`（1 h）的 `.tmp`；本进程正在写的临时文件不会这么旧。
+- 每次保存在 logcat 记 `MojianSync page saved in N ms`（排队+核对+编码+写入），用于决定后续是否
+  做增量序列化缓存或本机笔画日志。
+
 ## 手势期间的瓦片场景缓存（0.7.12）
 
 平移/缩放手势（双指、单指抓手、鼠标中键、阅读视图）期间，`DryInkView` 把背景与组合场景按

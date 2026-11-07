@@ -18,6 +18,23 @@ import androidx.ink.brush.StockBrushes
 object BrushProfiles {
     private val slidingInputModel by lazy { BrushFamily.SlidingWindowModel() }
 
+    internal data class FountainRanges(val pressureLow: Float, val pressureHigh: Float, val speedLow: Float, val speedHigh: Float)
+
+    internal fun fountainRanges(pressureCorrect: Float, speedCorrect: Float): FountainRanges {
+        val pressureScale = (pressureCorrect / 2f).coerceIn(0f, 2f)
+        val speedScale = speedCorrect.coerceIn(0f, 2f)
+        return FountainRanges(
+            pressureLow = 1f - (1f - 0.55f) * pressureScale,
+            pressureHigh = 1f + (1.45f - 1f) * pressureScale,
+            speedLow = 1f + 0.08f * speedScale,
+            speedHigh = (1f - (1f - 0.82f) * speedScale).coerceAtLeast(0.25f),
+        )
+    }
+
+    /** AndroidX Ink requires two finite, distinct target-modifier values. */
+    internal fun isEffectiveModifierRange(start: Float, end: Float): Boolean =
+        start.isFinite() && end.isFinite() && kotlin.math.abs(start - end) > 1e-4f
+
     fun create(
         sizePx: Float,
         pressureCorrect: Float = 2f,
@@ -27,21 +44,16 @@ object BrushProfiles {
         // Notein persists the displayed percentage as percentage / 100: 200% -> 2.0 and
         // 100% -> 1.0. The lab keeps that exact boundary mapping. Internally, 200% remains the
         // reference pressure response, so 400% doubles its distance from a neutral multiplier.
-        val pressureScale = (pressureCorrect / 2f).coerceIn(0f, 2f)
-        val speedScale = speedCorrect.coerceIn(0f, 2f)
-        fun pressureLow(base: Float) = 1f - (1f - base) * pressureScale
-        fun pressureHigh(base: Float) = 1f + (base - 1f) * pressureScale
-        fun speedHigh(base: Float) = (1f - (1f - base) * speedScale).coerceAtLeast(0.25f)
-
+        val ranges = fountainRanges(pressureCorrect, speedCorrect)
         val family =
             fountainFamily(
                 clientId = "inklab-fountain-v3-p${pressureCorrect}-s${speedCorrect}",
                 startSize = 0.55f,
                 endSize = 0.18f,
-                pressureLow = pressureLow(0.55f),
-                pressureHigh = pressureHigh(1.45f),
-                speedLow = 1f + 0.08f * speedScale,
-                speedHigh = speedHigh(0.82f),
+                pressureLow = ranges.pressureLow,
+                pressureHigh = ranges.pressureHigh,
+                speedLow = ranges.speedLow,
+                speedHigh = ranges.speedHigh,
             )
 
         return Brush.createWithColorIntArgb(
@@ -82,7 +94,7 @@ object BrushProfiles {
         speedHigh: Float,
     ): BrushFamily {
         val behaviors =
-            listOf(
+            listOfNotNull(
                 // Fade predicted geometry so prediction reduces nib separation without leaving a
                 // dark false tail. This is the same public stock behavior used by pressurePen V1.
                 StockBrushes.predictionFadeOutBehavior,
@@ -106,7 +118,10 @@ object BrushProfiles {
                     sourceOutOfRangeBehavior = BrushBehavior.OutOfRange.CLAMP,
                     responseTimeMillis = 12L,
                 ),
-                BrushBehavior(
+                // A 0% pressure/speed correction collapses the modifier range to {1, 1}; AndroidX Ink
+                // rejects a degenerate range (crashed while dragging the slider), and the behavior
+                // would have no effect anyway, so it is omitted.
+                if (!isEffectiveModifierRange(pressureLow, pressureHigh)) null else BrushBehavior(
                     source = BrushBehavior.Source.NORMALIZED_PRESSURE,
                     target = BrushBehavior.Target.SIZE_MULTIPLIER,
                     sourceValueRangeStart = 0.18f,
@@ -117,7 +132,7 @@ object BrushProfiles {
                     responseTimeMillis = 20L,
                     enabledToolTypes = setOf(InputToolType.STYLUS),
                 ),
-                BrushBehavior(
+                if (!isEffectiveModifierRange(speedLow, speedHigh)) null else BrushBehavior(
                     source = BrushBehavior.Source.INPUT_SPEED_IN_CENTIMETERS_PER_SECOND,
                     target = BrushBehavior.Target.SIZE_MULTIPLIER,
                     sourceValueRangeStart = 0f,
