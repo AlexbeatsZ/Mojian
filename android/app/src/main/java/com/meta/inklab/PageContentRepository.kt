@@ -10,6 +10,11 @@ class PageContentRepository(val root: File) {
     private var librarySource: JSONObject? = null
     private var libraryContent: String? = null
     private val receivedPages = mutableSetOf<String>()
+    // Bytes this process last read or wrote, with every stamp observed for them. HyperOS FUSE
+    // later rewrites a replaced file's mtime to the replaced file's old value, so a stamp change
+    // is only a hint; the content digest decides whether another writer actually changed it.
+    private class DiskIdentity(val hash: String, val stamps: MutableSet<String>)
+    private val identities = mutableMapOf<String, DiskIdentity>()
     val isShared get() = File(root,"library.json").isFile
 
     @Synchronized
@@ -41,9 +46,37 @@ class PageContentRepository(val root: File) {
     }
 
     fun libraryChanged(): Boolean = libraryContent?.let { File(root,"library.json").readText(Charsets.UTF_8) != it } ?: false
+    @Synchronized
     fun pageChanged(notebookId: String,pageId: String): Boolean {
         val file = pageFile(notebookId,pageId)
-        return observed.containsKey(file.path) && observed[file.path] != stamp(file)
+        if (!observed.containsKey(file.path)) return false
+        if (!unchanged(file, observed[file.path])) return true
+        observed[file.path] = stamp(file)
+        return false
+    }
+
+    /** Current page stamp for callers that later ask [pageUnchangedSince]; not a content identity. */
+    fun pageStamp(notebookId: String, pageId: String): String? = stamp(pageFile(notebookId, pageId))
+
+    @Synchronized
+    fun pageUnchangedSince(notebookId: String, pageId: String, expectedStamp: String?): Boolean =
+        unchanged(pageFile(notebookId, pageId), expectedStamp)
+
+    /** True when [file] still holds the bytes identified by [expectedStamp], even if its metadata drifted. */
+    @Synchronized
+    private fun unchanged(file: File, expectedStamp: String?): Boolean {
+        val current = stamp(file)
+        if (current == expectedStamp) return true
+        if (current == null || expectedStamp == null) return false
+        val known = identities[file.path]?.takeIf { expectedStamp in it.stamps } ?: return false
+        if (NativeSyncFiles.hash(file) != known.hash || stamp(file) != current) return false
+        if (known.stamps.size >= 8) known.stamps.clear()
+        known.stamps += expectedStamp; known.stamps += current
+        return true
+    }
+
+    private fun remember(file: File, hash: String, vararg stamps: String?) {
+        identities[file.path] = DiskIdentity(hash, stamps.filterNotNullTo(mutableSetOf()))
     }
 
     @Synchronized
@@ -52,11 +85,18 @@ class PageContentRepository(val root: File) {
         check(file.isFile || "$notebookId/$pageId" !in receivedPages) { "页面文件尚未同步完成，请稍后重新加载" }
         val generation=stamp(file)
         loadedPages[file.path]?.get()?.takeIf { it.diskStamp==generation }?.let { return it }
-        val source = if(file.isFile) JSONObject(file.readText(Charsets.UTF_8)) else null
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val source = if(file.isFile) JSONObject(java.security.DigestInputStream(file.inputStream(), digest)
+            .reader(Charsets.UTF_8).use { it.readText() }) else null
+        val readHash = source?.let { hex(digest.digest()) }
         val document = source?.let(SharedWorkspaceCodec::decodeDocument) ?: PageInsertDocument(notebookId,pageId)
         require(document.notebookId == notebookId && document.pageId == pageId) { "Page identity mismatch" }
         document.diskFingerprint = source?.let(WorkspaceJson::fingerprint)
-        check(stamp(file)==generation) { "页面正在同步更新，请稍后重新加载" }
+        val after = stamp(file)
+        check(after==generation || (readHash != null && after != null && NativeSyncFiles.hash(file) == readHash && stamp(file) == after)) {
+            "页面正在同步更新，请稍后重新加载"
+        }
+        if (readHash != null) remember(file, readHash, generation, after) else identities.remove(file.path)
         observed[file.path] = generation
         document.diskStamp = generation
         loadedPages[file.path]=java.lang.ref.WeakReference(document)
@@ -70,35 +110,43 @@ class PageContentRepository(val root: File) {
             check(!file.exists()) { "Load the page before modifying it" }
             observed[file.path] = null
         }
-        check(document.diskStamp == stamp(file)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" }
+        check(unchanged(file, document.diskStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" }
+        // Metadata-only drift was accepted above; continue from the stamp the disk reports now.
+        val expectedStamp = stamp(file)
+        document.diskStamp = expectedStamp
         val json = SharedWorkspaceCodec.encodeDocument(document)
         if(WorkspaceJson.fingerprint(json)==document.diskFingerprint) return
         json.put("revision",document.sharedSource.optLong("revision")+1).put("updatedAt",java.time.Instant.now().toString())
-        atomicWrite(file,json,document.diskStamp)
+        val writtenHash = atomicWrite(file,json,expectedStamp)
         document.sharedSource = json
         document.diskFingerprint = WorkspaceJson.fingerprint(json)
-        observed[file.path] = stamp(file); document.diskStamp = stamp(file)
+        val savedStamp = stamp(file)
+        observed[file.path] = savedStamp; document.diskStamp = savedStamp
+        remember(file, writtenHash, savedStamp)
         loadedPages[file.path]=java.lang.ref.WeakReference(document)
     }
 
     private fun stamp(file: File) = if(file.isFile) "${file.lastModified()}:${file.length()}" else null
+    private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
 
-    private fun atomicWrite(file: File,text: String) = atomicWrite(file) { it.write(text) }
     private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?) = atomicWrite(file,
-        beforeReplace={ check(stamp(file)==expectedStamp) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it) }
-    private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},write: (java.io.Writer)->Unit) {
+        beforeReplace={ check(unchanged(file, expectedStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it) }
+    /** Returns the SHA-256 of the bytes published at [file]. */
+    private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},write: (java.io.Writer)->Unit): String {
         localMutations.begin().use {
             check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs()) { "Unable to create workspace directory" }
             val temp = File(file.parentFile,"${file.name}.${java.util.UUID.randomUUID()}.tmp")
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
             try {
                 java.io.FileOutputStream(temp).use { stream ->
-                    val writer=java.io.OutputStreamWriter(stream,Charsets.UTF_8)
+                    val writer=java.io.OutputStreamWriter(java.security.DigestOutputStream(stream, digest),Charsets.UTF_8)
                     write(writer);writer.flush();stream.fd.sync()
                 }
                 beforeReplace()
                 if (file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
                 java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             } finally { temp.delete() }
+            return hex(digest.digest())
         }
     }
 

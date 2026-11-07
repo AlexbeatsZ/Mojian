@@ -15,7 +15,7 @@ class ExportProductSession(private val context: Context, private val repository:
     private val notebookId: String, private val pages: List<ExportPageIdentity>) : ExportPageProvider {
     @Volatile private var cancelled = false
     private val summaries = mutableMapOf<Int, ExportSourceSummary>()
-    private val versions = mutableMapOf<Int, Pair<Long, Long>>()
+    private val versions = mutableMapOf<Int, String?>()
     private val worker = ExportRenderWorker(context)
     private val leased = AtomicBoolean(false)
     override val cacheDirectory: java.io.File by lazy {
@@ -47,8 +47,7 @@ class ExportProductSession(private val context: Context, private val repository:
         checkActive()
         synchronized(summaries) { summaries[index] }?.let { return it }
         val identity = pages[index]
-        val file=repository.pageFile(notebookId,identity.id)
-        val version=file.lastModified() to file.length()
+        val version=repository.pageStamp(notebookId,identity.id)
         val document = repository.load(notebookId, identity.id)
         val bounds = mutableListOf<StrokeViewportBounds>()
         repeat(document.strokes.length()) { strokeIndex ->
@@ -87,7 +86,7 @@ class ExportProductSession(private val context: Context, private val repository:
                 ImportedPagePresentation.imageInverted(display, image.id, image.viewInverted))
         }
         val result=ExportSourceSummary(display,bounds,identity.originalSize,images)
-        check(version == (file.lastModified() to file.length())) { "页面正在更新，请重新打开导出" }
+        check(repository.pageUnchangedSince(notebookId,identity.id,version)) { "页面正在更新，请重新打开导出" }
         synchronized(summaries) { checkActive(); summaries[index]=result; versions[index]=version }
         return result
     }
@@ -114,9 +113,8 @@ class ExportProductSession(private val context: Context, private val repository:
             val summary=summary(sourceIndex)
             val identity=pages[sourceIndex].copy(settings=summary.settings)
             val content=summary.content
-            val file=repository.pageFile(notebookId,identity.id)
             val version=synchronized(summaries) { versions[sourceIndex] }
-            check(version == (file.lastModified() to file.length())) { "页面已更新，请重新打开导出" }
+            check(repository.pageUnchangedSince(notebookId,identity.id,version)) { "页面已更新，请重新打开导出" }
             val document=repository.load(notebookId,identity.id)
             val strokes=(0 until document.strokes.length()).map { index ->
                 checkActive()
@@ -127,7 +125,7 @@ class ExportProductSession(private val context: Context, private val repository:
             }
             val tags=SharedContentCodec.tags(document)
             val snapshots=SharedContentCodec.readText(document)
-            check(version == (file.lastModified() to file.length())) { "页面正在更新，请重新打开导出" }
+            check(repository.pageUnchangedSince(notebookId,identity.id,version)) { "页面正在更新，请重新打开导出" }
             val source=document.sharedSource
             val objects=SharedWorkspaceCodec.items(source.optJSONArray("objects")).associateBy { it.optString("id") }
             val textItems=SharedWorkspaceCodec.items(source.optJSONArray("textItems")).associateBy { it.optString("id") }

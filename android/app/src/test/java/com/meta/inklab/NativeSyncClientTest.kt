@@ -220,6 +220,22 @@ class NativeSyncClientTest {
         assertTrue(engine.hasPendingIncoming)
     }
 
+    @Test fun incomingGateIgnoresMetadataOnlyMtimeRewrite() = isolated { _, root, server ->
+        File(root, "library.json").writeText("base")
+        val engine = client(root, server)
+        engine.sync(idle)
+        server.update("library.json", "remote")
+        engine.sync({ false })
+        server.offline = true
+        assertTrue(engine.recoverIncoming({ action ->
+            assertTrue(File(root, "library.json").setLastModified(1_600_000_000_000L))
+            action()
+            true
+        }))
+        assertEquals("remote", File(root, "library.json").readText())
+        assertFalse(engine.hasPendingIncoming)
+    }
+
     @Test fun cancellationAfterIncomingCommitBeginsDoesNotExposePartialLibrary() = isolated { _, root, server ->
         File(root, "library.json").writeText("base")
         client(root, server).sync(idle)

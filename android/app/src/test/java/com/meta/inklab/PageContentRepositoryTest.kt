@@ -206,6 +206,59 @@ class PageContentRepositoryTest {
     }
 
     @Test
+    fun metadataOnlyMtimeRewriteAfterOwnSaveDoesNotLookLikeAnotherDevice() {
+        val root = Files.createTempDirectory("mojian-mtime-drift").toFile()
+        val queue = PageWriteQueue()
+        try {
+            val repository = PageContentRepository(root)
+            val live = repository.load("book", "page")
+            fun write(id: String) {
+                live.objects += InsertObject.NoteLink(id, 1f, 2f, 300f, 32f, "b", "s", "p", id)
+                val snapshot = PageInsertDocument("book", "page", live.objects.mapTo(mutableListOf()) { InsertObject.fromJson(it.toJson()) },
+                    live.strokes, org.json.JSONObject(live.sharedSource.toString()), live.diskStamp)
+                queue.submit(repository, live, snapshot) { }
+                queue.flush()
+            }
+            val file = repository.pageFile("book", "page")
+            write("first")
+            // HyperOS FUSE later reports the replaced file's old mtime for the renamed page.
+            assertTrue(file.setLastModified(1_700_000_000_000L))
+            assertFalse(repository.pageChanged("book", "page"))
+            write("second")
+            assertTrue(file.setLastModified(1_600_000_000_000L))
+            write("third")
+            assertEquals(3, repository.load("book", "page").objects.size)
+            val stamp = repository.pageStamp("book", "page")
+            assertTrue(file.setLastModified(1_500_000_000_000L))
+            assertTrue(repository.pageUnchangedSince("book", "page", stamp))
+        } finally { queue.close(); root.deleteRecursively() }
+    }
+
+    @Test
+    fun realExternalContentChangeIsStillRefusedEvenWhenMtimeLooksOld() {
+        val root = Files.createTempDirectory("mojian-mtime-external").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            val document = PageInsertDocument("book", "page")
+            document.objects += InsertObject.NoteLink("mine", 1f, 2f, 300f, 32f, "b", "s", "p", "mine")
+            repository.save(document)
+            val file = repository.pageFile("book", "page")
+            val original = file.readText()
+            val stamp = repository.pageStamp("book", "page")
+            val external = original.replace("\"mine\"", "\"else\"")
+            assertEquals(original.length, external.length)
+            file.writeText(external)
+            assertTrue(file.setLastModified(1_700_000_000_000L))
+
+            assertTrue(repository.pageChanged("book", "page"))
+            assertFalse(repository.pageUnchangedSince("book", "page", stamp))
+            document.objects += InsertObject.NoteLink("more", 1f, 2f, 300f, 32f, "b", "s", "p", "more")
+            assertThrows(IllegalStateException::class.java) { repository.save(document) }
+            assertEquals(external, file.readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun savesAtomicallyAndLoadsPageObjects() {
         val root = Files.createTempDirectory("mojian-page-store").toFile()
         try {

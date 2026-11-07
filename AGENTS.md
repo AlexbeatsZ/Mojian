@@ -15,6 +15,11 @@
   Local `mojian/artifacts/release/Mojian.exe` is updated to 0.7.11 (0.7.11+b977596); running PIDs
   39076/52164 remain backed by `.old` without stopping. ROG client `Mojian.exe` is updated to 0.7.11;
   sync service PID 44516 / listeners 18742+18743 are unchanged.
+- **Android 0.7.13** (code21): fixes the tablet's endless "页面已在另一台设备更新" while one person
+  writes. HyperOS 3.0 FUSE later rewrites a rename-replaced file's mtime to the replaced file's old
+  value, so `mtime:length` page stamps drifted without any writer. Stamps are now only a fast path;
+  `PageContentRepository` keeps the SHA-256 of bytes it last read/wrote and accepts metadata-only
+  drift (save, `pageChanged`, export, sync incoming gate). JVM 266 passed/1 skipped, lint 0 errors.
 - **Android 0.7.12** (code20, `v0.7.12` APK-only prerelease; Windows stays 0.7.11): gesture-only
   RenderNode scene tiles during pan/zoom (`ViewportSceneCache`, read `android-page-navigation.md`).
   JVM 262 passed/1 skipped, lint 0 errors; no device frame-rate/GPU-memory/visual acceptance.
@@ -259,6 +264,9 @@
 
 # Durable Lessons
 
+- Android shared storage mtime is not a change detector: on HyperOS 3.0 a renamed-over file
+  first reports the new mtime, then minutes later the replaced file's old one (reproduced with
+  plain `mv`). Use size/mtime only as a hint and confirm with content hashes before refusing writes.
 - Directory names such as `_migration` do not imply disposable backups: check app preferences and
   sync configuration references before cleanup or writable startup against a remembered path.
 - Shared product concepts require Windows/Android trace, tests and refreshed outputs together;

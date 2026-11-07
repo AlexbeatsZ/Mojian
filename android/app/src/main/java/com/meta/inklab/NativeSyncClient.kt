@@ -259,7 +259,7 @@ class NativeSyncClient(
             val backup = if (actual != entry.hash && actual != null) File(target.parentFile, ".mojian-previous-$key.tmp").also {
                 NativeSyncFiles.copyVerified(target, it, actual)
             } else null
-            PreparedIncoming(path, target, before, entry, replacement, backup)
+            PreparedIncoming(path, target, before, actual, entry, replacement, backup)
         }
         try {
             if (changed.isNotEmpty()) {
@@ -282,7 +282,8 @@ class NativeSyncClient(
                 NativeSyncConfiguration.requireDedicatedBoundary(root)
                 prepared.forEach { item ->
                     NativeSyncFiles.safeFile(root, item.path)
-                    check(generation(item.target) == item.generation) { "接收前本地文件发生变化，保留日志等待重试" }
+                    // HyperOS can rewrite a replaced file's mtime later; only a content change blocks replay.
+                    check(generation(item.target) == item.generation || NativeSyncFiles.hash(item.target) == item.actual) { "接收前本地文件发生变化，保留日志等待重试" }
                 }
                 prepared.forEach { item ->
                     item.backup?.let { movePrepared(it, File(item.target.parentFile, "${item.target.name}.previous")) }
@@ -304,7 +305,7 @@ class NativeSyncClient(
     }
 
     private data class Generation(val size: Long, val modified: java.nio.file.attribute.FileTime, val key: Any?)
-    private data class PreparedIncoming(val path: String, val target: File, val generation: Generation?, val entry: NativeSyncEntry, val replacement: File?, val backup: File?)
+    private data class PreparedIncoming(val path: String, val target: File, val generation: Generation?, val actual: String?, val entry: NativeSyncEntry, val replacement: File?, val backup: File?)
     private fun generation(file: File): Generation? {
         if (!file.exists()) return null
         val attributes = Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
