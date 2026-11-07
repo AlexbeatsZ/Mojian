@@ -7,6 +7,11 @@
 
 # Current State
 
+- **Android 0.7.22** (code30): adds a focused root `dispatchKeyEventPreIme` entry for the exact
+  Xiaomi pen keyboard, ahead of IME hardware-key processing; Activity remains the fallback.
+  Existing bindings/state machine are preserved; `MojianPenKey` logs receipt and binding types.
+  Built/OMEN-signed, not yet installed. User's longstanding button failure is not yet physically
+  reproduced or resolved: input device name still matches, capture had no confirmed press.
 - **0.7.21**: Windows now authors `fountain-v2` with calibrated pressure/speed/direction,
   per-pen stability, distributed WPF packet timestamps, physical speed and canonical filled outlines.
   Android adds stability 0–100% (default 50; 1/10/20/60/100 ms at 0/25/50/75/100%) and persists it
@@ -16,7 +21,8 @@
 - Delivery/build status for this active task: `~/.agents/mojian--handwriting-parity/AGENTS.md`.
   Android 0.7.21/code29 APK is OMEN-signed and installed in place on the tablet; speed dexopt passed.
   Windows 0.7.21 source tests pass except the pre-existing Hand-pan pixel baseline described below;
-  Windows publishing/deployment remains in progress; phone is still 0.7.14.
+  Windows 0.7.21 EXE is published and replaced on OMEN while no product process was running;
+  `v0.7.21` prerelease includes EXE+APK. Phone is still 0.7.14; ROG client was not updated.
 - **Android 0.7.20** (code28): product build is non-debuggable despite the `.debug` package suffix.
   ART interpretation and scene-revision cache resets caused the earlier lag. User accepted the new
   tablet feel. Prior injected ~1900-stroke acceptance: frame p90/95/99 24/28/38 ms (Notein 24/27/44),
@@ -54,7 +60,9 @@
 
 # Active Work
 
-- Finish 0.7.21 Windows publication/deployment. Tablet startup/stability UI is verified; physical feel remains separate.
+- Diagnose Xiaomi pen buttons: 0.7.22 is ready for in-place install after the user pauses writing;
+  collect confirmed physical presses and actual pre-IME/binding logs before declaring recovery.
+- Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
 - OMEN SSH full suite has a pre-existing Hand-pan cached pixel-threshold failure: mean 1.870,

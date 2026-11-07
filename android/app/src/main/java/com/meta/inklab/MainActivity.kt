@@ -805,7 +805,7 @@ class MainActivity : Activity() {
                 if (insertContentLayer.endImageCrop()) return true
             }
         }
-        if (shortcutDispatcher.dispatch(event)) return true
+        if (dispatchXiaomiPenKey(event, "activity")) return true
         val keyIdentity = event.deviceId to event.keyCode
         if (event.action == KeyEvent.ACTION_UP && consumedKeyboardShortcutKeys.remove(keyIdentity)) return true
         if (
@@ -928,6 +928,15 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    private fun dispatchXiaomiPenKey(event: KeyEvent, route: String): Boolean {
+        if (!workspaceLoaded || pageLoadingOverlay != null) return false
+        val handled = shortcutDispatcher.dispatch(event)
+        if (handled) {
+            android.util.Log.i("MojianPenKey", "received route=$route key=${event.keyCode} action=${event.action} repeat=${event.repeatCount}")
+        }
+        return handled
+    }
+
     private fun handleXiaomiStylusSignal(signal: StylusShortcutSignal): Boolean {
         if (xiaomiProfileUsesSecondaryLasso(signal.key)) return handleXiaomiSecondarySignal(signal)
         mainHandler.removeCallbacks(dispatchXiaomiGestureDeadline)
@@ -1037,6 +1046,7 @@ class MainActivity : Activity() {
     }
 
     private fun executeStylusBinding(key: XiaomiStylusKey, binding: StylusActionBinding) {
+        android.util.Log.i("MojianPenKey", "binding key=$key type=${binding.type} tool=${binding.toolId.orEmpty()}")
         when (binding.type) {
             StylusBindingType.NONE,
             StylusBindingType.LASSO_CONTEXT,
@@ -1207,7 +1217,7 @@ class MainActivity : Activity() {
 
     private fun buildInterface(): View {
         rootLayout =
-            LinearLayout(this).apply {
+            StylusShortcutLayout(this) { event -> dispatchXiaomiPenKey(event, "pre-ime") }.apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(PAPER_COLOR)
             }
@@ -2043,6 +2053,10 @@ class MainActivity : Activity() {
         xiaomiPenShortcutSettings =
             XiaomiPenShortcutSettings.fromJson(prefs.getString(KEY_XIAOMI_PEN_SHORTCUTS, null))
                 .sanitized(toolShelf.tools.map(ToolPreset::id).toSet())
+        XiaomiStylusKey.entries.forEach { key ->
+            val profile = xiaomiPenShortcutSettings.profile(key)
+            android.util.Log.i("MojianPenKey", "settings key=$key single=${profile.single.type}:${profile.single.toolId.orEmpty()} double=${profile.double.type}:${profile.double.toolId.orEmpty()} hold=${profile.hold.type}:${profile.hold.toolId.orEmpty()}")
+        }
         xiaomiGestureInterpreter.doubleTapMillis = xiaomiPenShortcutSettings.doubleTapMillis
         xiaomiGestureInterpreter.holdMillis = xiaomiPenShortcutSettings.holdMillis
         val savedPenId = prefs.getString(KEY_LAST_PEN_TOOL_ID, "")
