@@ -12,8 +12,8 @@ android {
         applicationId = "com.meta.inklab"
         minSdk = 29
         targetSdk = 36
-        versionCode = 27
-        versionName = "0.7.19"
+        versionCode = 28
+        versionName = "0.7.20"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -30,6 +30,10 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // The installed product is this build type. A debuggable app runs in ART's switch
+            // interpreter with generic JNI stubs and no dex2oat code; on the tablet that made ink
+            // rendering several times slower than Notein. Same package and signer, so it updates in place.
+            isDebuggable = false
         }
         release {
             isMinifyEnabled = false

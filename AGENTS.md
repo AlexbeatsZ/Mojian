@@ -8,6 +8,13 @@
 
 # Current State
 
+- **Android 0.7.20** (code28, includes 0.7.19): the product build type is no longer debuggable
+  (`isDebuggable = false` on `debug`; same package/signer, in-place update). The debuggable build ran
+  in ART's switch interpreter with generic JNI and no dexopt. Persistent tiles no longer reset when the
+  host bumps its scene revision for ink. Tablet acceptance on a ~1900-stroke page (injected writing):
+  frame p90/95/99 24/28/38 ms (0.7.18 debuggable 61/65/73; Notein 24/27/44), dense save 0.33-0.9 s;
+  `fountain-v2` widths match the Notein calibration. Installed in place on the tablet and
+  `cmd package compile -m speed` run; `run-as` no longer works on the product.
 - **Android 0.7.19** (code27): faster dense-page saves. Unchanged strokes reuse cached serialized
   text (`StrokeTextCache`, current page only, 24M-char cap) and cached per-stroke fingerprint digests;
   the pre-write check skips re-reading the page while size + inode match our last write (writers
@@ -235,8 +242,7 @@
 
 # Active Work
 
-- Android 0.7.18 tablet acceptance: compare `fountain-v2` widths with the Notein calibration by
-  uinput injection and measure `dumpsys gfxinfo` while writing (installed, tablet was locked).
+- Subjective tablet writing acceptance of 0.7.20 (brush feel, lag) by the user; phone still 0.7.14.
   Windows authoring does not yet use the `fountain-v2` model.
 
 - 0.7.8 actual phone app-details icon/version is verified; tablet locked-screen and
@@ -281,6 +287,13 @@
   `.\gradlew.bat --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug`.
   Copy `app/build/outputs/apk/debug/app-debug.apk` to `artifacts/current/Mojian-debug.apk`
   **before** `.\gradlew.bat clean`. Retain reusable dependency caches.
+  Installed devices carry OMEN's debug certificate. A Mac build must be re-signed with OMEN's
+  `~/.android/debug.keystore` (`apksigner`) before `adb install -r`; never uninstall to fix a signer.
+  On macOS run unit tests with `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=<real path>` (`/var` is a symlink
+  the sync code rejects); `NativeSyncWireContractTest` additionally needs sync-server's Node deps.
+- Tablet measurement without touching notes: a uinput virtual pen (shell has `uhid`) replays exact
+  pressure/speed strokes; see `~/.agents/knowledge/android-device-ops.md`. Use a temporary page and
+  delete it afterwards; verify every injected sample stays inside the canvas (toolbar taps toggle tools).
 - Never run `connectedDebugAndroidTest` against the only installed product. UTP can uninstall it,
   then HyperOS may reject reinstall; `allowBackup=false` would make its private notes unrecoverable.
   Do not uninstall, clear data or install a test APK on the live app for validation.
@@ -297,6 +310,11 @@
 
 # Durable Lessons
 
+- Never ship the Android product debuggable: ART then disables nterp/AOT and uses generic JNI, which
+  made Ink rendering and scene composition several times slower on the tablet than Notein.
+- A host "scene revision" that is bumped for every edit must not be part of a render cache key that
+  is meant to survive ink edits; profile on device (`simpleperf --app`, `gfxinfo framestats`) because
+  unit tests cannot see these integration paths.
 - Never wait unboundedly for the page write queue on the UI thread in lifecycle callbacks: dense
   pages take seconds per save and an unmerged queue backlogs during continuous writing (bg ANR kill).
 - Page/sync change detection assumes every writer publishes by temp file + rename (new inode).

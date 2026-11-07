@@ -205,7 +205,26 @@ outside pan/zoom gestures, `onDraw` re-records every visible stroke (`drawScene`
 `strokes.filter`). A median Chinese stroke lasts ≈160 ms, so nearly every pen lift blocks the UI
 thread before the next pen-down is handled. Windows WPF keeps one retained visual per stroke and does
 not show this. 0.7.18 keeps composited scene tiles at rest and re-records only tiles intersecting a new or erased
-stroke (see `android-page-navigation.md`). HyperOS's global `MiuiStylusEventBlocker` (40 ms / 8 px)
+stroke (see `android-page-navigation.md`). 0.7.20 fixes the host scene revision still discarding all
+tiles and makes the product non-debuggable: `simpleperf` showed the UI thread almost entirely in
+ART's switch interpreter and generic JNI trampolines (`status=run-from-apk`, no dexopt).
+
+Tablet acceptance 2026-11-07 on one ~1900-stroke temporary page, 60 injected handwriting strokes
+(120 ms gaps, 8 cm/s), `gfxinfo` frame p90/95/99 and UI draw-record p90:
+
+| Build | p90/95/99 ms | UI record p90 |
+|---|---|---|
+| 0.7.17 (user writing, earlier) | 53 / 65 / 113 | n/a |
+| 0.7.18 debuggable | 61 / 65 / 73 | 31.9 ms |
+| 0.7.20 debuggable | 53 / 61 / 77 | 24.9 ms |
+| 0.7.20 non-debuggable, `speed` dexopt | 24 / 28 / 38 | 7.7 ms |
+| Notein 2.1.48 (user writing) | 24 / 27 / 44 | n/a |
+
+The same session verified `fountain-v2` on device by the same uinput method: width relative to p=1 at
+p 0.3/0.4/0.5/0.6/0.8 = 0.091/0.164/0.255/0.364/0.655 (p²), speed factor at 2/4/8/16/32/64 cm/s =
+0.915/0.855/0.76/0.54/0.316/0.159 (Notein 0.92/0.85/0.77/0.54/0.31/0.15), and an accelerating,
+lightening flick tapers from 4 px to 0.1 px. Measure thin strokes per column with the real background
+level; a wide coverage window with a wrong background value adds false width. HyperOS's global `MiuiStylusEventBlocker` (40 ms / 8 px)
 applies to both apps and is not the differentiator.
 
 ## Research Model

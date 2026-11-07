@@ -131,7 +131,11 @@ native sync cannot publish an intermediate index/assets snapshot.
 - 场景键只含 `sceneRevision`（插入对象/文本）、渲染器、背景格式、深色纸、背景是否在墨迹层、视图尺寸。
   笔迹版本由 `SceneTileContentTracker` 跟踪：从已同步版本开始的连续局部编辑（`addStrokes` 加笔、
   `eraseAtDocument` 擦除）只丢弃与其包围盒相交的瓦片（`recordBounds` 含 2 px 防接缝边距）；
-  撤销/重做、变换、删除选择、换页、插入空间等其他变更走整体重录。新增会改变笔迹的路径若能给出
+  撤销/重做、变换、删除选择、换页、插入空间等其他变更走整体重录。
+- `MainActivity.markPageContentChanged` 每次内容变化都会递增 `sceneContentRevision`（含笔迹）。
+  `DryInkView` 在自己触发的加笔/擦除通知前后比较 `sceneRevision()`，只把这次笔迹引起的跳变吸收进
+  `tileSceneRevision`；期间若被其他来源改动则整体重录。0.7.18 曾把它直接放进缓存键，导致每笔仍整体清空。
+  缓存键含 `PageViewSettings` 快照，A4 增页/纸张尺寸变化会刷新瓦片背景。新增会改变笔迹的路径若能给出
   受影响范围，应调用 `markLocal`，否则保持整体重录，绝不能让瓦片显示过期内容。
 - 无轮廓笔画的包围盒按最宽笔尖外扩：`fountain-v2` 半宽 0.85 倍笔宽（1.4 × 1.17），旧笔 0.5 倍；
   包围盒同时决定重录哪些瓦片，偏小会裁掉新笔边缘。

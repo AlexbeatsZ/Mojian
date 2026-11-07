@@ -73,6 +73,8 @@ class DryInkView(context: Context) : View(context) {
     private var tileFractionY = 0f
     private val tileContent = SceneTileContentTracker()
     private var tileSceneKey: List<Any?>? = null
+    /** Host scene revision the tiles show; ink-driven bumps are followed through [tileContent]. */
+    private var tileSceneRevision = Long.MIN_VALUE
     private val sceneTiles = HashMap<Long, RenderNode>()
     private val spareTiles = ArrayDeque<RenderNode>()
     private val documentToView = Matrix()
@@ -153,7 +155,18 @@ class DryInkView(context: Context) : View(context) {
         newStrokes.forEach(::registerStroke)
         // A finished stroke re-records only the scene tiles it touches, not every visible stroke.
         newStrokes.map(::boundsFor).reduceOrNull(ViewportSceneCache::union)?.let { tileContent.markLocal(before, contentRevision, it) }
-        onContentChanged?.invoke()
+        inkDrivenSceneChange { onContentChanged?.invoke() }
+    }
+
+    /**
+     * The host bumps its scene revision for every content change, including ink. A local ink edit
+     * already re-records its own tiles, so its bump must not discard every tile; any other scene change
+     * (objects, text, a revision moved by someone else in between) still does.
+     */
+    private inline fun inkDrivenSceneChange(block: () -> Unit) {
+        val before = sceneRevision()
+        block()
+        if (tileSceneRevision == before) tileSceneRevision = sceneRevision()
     }
 
     fun undo(): Boolean {
@@ -453,7 +466,7 @@ class DryInkView(context: Context) : View(context) {
         }
         if (removed > 0) {
             val before = contentRevision
-            rebuildStrokeMetrics()
+            inkDrivenSceneChange { rebuildStrokeMetrics() }
             erasedBounds?.let { tileContent.markLocal(before, contentRevision, it) }
             invalidate()
         }
@@ -680,13 +693,15 @@ class DryInkView(context: Context) : View(context) {
         val translationX = matrixValues[Matrix.MTRANS_X]
         val translationY = matrixValues[Matrix.MTRANS_Y]
         // Ink revisions are tracked separately so a new stroke does not discard every tile.
-        val sceneKey = listOf(sceneRevision(), sceneRenderer, backgroundFormat,
-            outputPageSettings.darkBackground, renderBackgroundInInkLayer, width, height)
+        // Paper size/sheet count/dark mode live in the page settings; page growth must refresh the background.
+        val sceneKey = listOf(sceneRenderer, backgroundFormat, outputPageSettings.copy(),
+            renderBackgroundInInkLayer, width, height)
         val anchored =
             if (viewportGestureActive) ViewportSceneCache.scaleUsable(tileScale, scale)
             else ViewportSceneCache.exactAtRest(tileScale, scale, tileFractionX, tileFractionY, translationX, translationY)
-        if (sceneKey != tileSceneKey || !anchored) {
+        if (sceneKey != tileSceneKey || sceneRevision() != tileSceneRevision || !anchored) {
             releaseSceneTiles()
+            tileSceneRevision = sceneRevision()
             tileScale = scale
             tileFractionX = ViewportSceneCache.anchorFraction(translationX)
             tileFractionY = ViewportSceneCache.anchorFraction(translationY)
