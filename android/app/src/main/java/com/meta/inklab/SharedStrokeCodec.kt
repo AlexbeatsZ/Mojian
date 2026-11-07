@@ -36,7 +36,11 @@ object SharedStrokeCodec {
             json.optString("vectorPath").isNotBlank() -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optString("brushProfile") == "shape-v1" -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optInt("kind") == 1 -> BrushProfiles.createHighlighter(width,argb,opacity)
-            else -> BrushProfiles.create(width,json.optInt("pressurePercent",200)/100f,json.optInt("inkFlowPercent",100)/100f,
+            // fountain-v2 is the Notein-calibrated authoring brush; anything older (including all
+            // Windows ink) keeps the legacy family so existing notes do not change appearance.
+            json.optString("brushProfile") == BrushProfiles.FOUNTAIN_V2 -> BrushProfiles.create(width,json.optInt("pressurePercent",200)/100f,
+                json.optInt("inkFlowPercent",100)/100f,Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
+            else -> BrushProfiles.createLegacy(width,json.optInt("pressurePercent",200)/100f,json.optInt("inkFlowPercent",100)/100f,
                 Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
         }
         val batch = MutableStrokeInputBatch()
@@ -69,7 +73,7 @@ object SharedStrokeCodec {
         val palette = InkPalette.entries.firstOrNull { (it.argb and 0xffffff)==(color and 0xffffff) } ?: InkPalette.BLACK
         val logicalBlack = (color and 0xffffff) in listOf(0xEFEFEF,0x101317,0x1B1B1F,0x202020)
         val json = shape ?: JSONObject().put("id","stroke-${java.util.UUID.randomUUID()}")
-            .put("kind",if (Color.alpha(color)<240) 1 else 0).put("brushProfile","fountain-v1")
+            .put("kind",if (Color.alpha(color)<240) 1 else 0).put("brushProfile",BrushProfiles.storedProfile(stroke.brush.family.clientBrushFamilyId))
             .put("color",palette.ordinal).put("colorHex",if(logicalBlack) "" else SharedWorkspaceCodec.hex(color))
             .put("widthMm",stroke.brush.size / DOCUMENT_UNITS_PER_MM)
             .put("opacityPercent",Color.alpha(color)*100/255)

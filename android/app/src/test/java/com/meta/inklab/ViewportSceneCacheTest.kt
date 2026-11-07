@@ -65,4 +65,59 @@ class ViewportSceneCacheTest {
             assertEquals(row, ViewportSceneCache.row(key))
         }
     }
+
+    @Test
+    fun restTilesMustMatchZoomAndSubPixelAnchor() {
+        val fraction = ViewportSceneCache.anchorFraction(120.25f)
+        assertEquals(0.25f, fraction, 1e-6f)
+        assertEquals(0.75f, ViewportSceneCache.anchorFraction(-3.25f), 1e-6f)
+        assertTrue(ViewportSceneCache.exactAtRest(2f, 2f, fraction, 0.5f, 7.25f, -1.5f))
+        // A whole-pixel pan keeps the anchor; a sub-pixel pan or any zoom change does not.
+        assertTrue(ViewportSceneCache.exactAtRest(2f, 2f, fraction, 0.5f, 300.25f, 40.5f))
+        assertFalse(ViewportSceneCache.exactAtRest(2f, 2f, fraction, 0.5f, 7.5f, -1.5f))
+        assertFalse(ViewportSceneCache.exactAtRest(2f, 2.01f, fraction, 0.5f, 7.25f, -1.5f))
+        assertFalse(ViewportSceneCache.exactAtRest(0f, 2f, fraction, 0.5f, 7.25f, -1.5f))
+    }
+
+    @Test
+    fun recordBoundsCoverTheAnchoredTileWithSeamMargin() {
+        val bounds = ViewportSceneCache.recordBounds(2f, 1, 0, 0.5f, 0f)
+        val margin = ViewportSceneCache.RECORD_MARGIN_PX
+        assertEquals((size - 0.5f - margin) / 2f, bounds.left, 1e-4f)
+        assertEquals((2 * size - 0.5f + margin) / 2f, bounds.right, 1e-4f)
+        assertEquals(-margin / 2f, bounds.top, 1e-4f)
+        // Neighbouring tiles overlap, so anti-aliased ink on the boundary is recorded by both.
+        val left = ViewportSceneCache.recordBounds(2f, 0, 0, 0.5f, 0f)
+        assertTrue(left.right > bounds.left)
+    }
+
+    @Test
+    fun consecutiveLocalEditsRecordOnlyTheirRegion() {
+        val tracker = SceneTileContentTracker()
+        assertEquals(SceneTileContentTracker.Sync.Full, tracker.sync(10))
+        assertEquals(SceneTileContentTracker.Sync.Unchanged, tracker.sync(10))
+        tracker.markLocal(10, 11, StrokeViewportBounds(0f, 0f, 5f, 5f))
+        tracker.markLocal(11, 13, StrokeViewportBounds(20f, 1f, 30f, 2f))
+        assertEquals(SceneTileContentTracker.Sync.Partial(StrokeViewportBounds(0f, 0f, 30f, 5f)), tracker.sync(13))
+        assertEquals(SceneTileContentTracker.Sync.Unchanged, tracker.sync(13))
+    }
+
+    @Test
+    fun anyUntrackedMutationRecordsEverything() {
+        val tracker = SceneTileContentTracker()
+        tracker.sync(10)
+        // Undo/transform/page replacement bump the revision without a local region.
+        assertEquals(SceneTileContentTracker.Sync.Full, tracker.sync(12))
+        // A local edit after an unsynchronized change cannot be partial either.
+        tracker.markLocal(14, 15, StrokeViewportBounds(0f, 0f, 1f, 1f))
+        assertEquals(SceneTileContentTracker.Sync.Full, tracker.sync(15))
+        // A broken chain (another change between two local edits) falls back to full.
+        tracker.markLocal(15, 16, StrokeViewportBounds(0f, 0f, 1f, 1f))
+        tracker.markLocal(17, 18, StrokeViewportBounds(0f, 0f, 1f, 1f))
+        assertEquals(SceneTileContentTracker.Sync.Full, tracker.sync(18))
+        // Dropped tiles start over.
+        tracker.markLocal(18, 19, StrokeViewportBounds(0f, 0f, 1f, 1f))
+        tracker.reset()
+        assertEquals(SceneTileContentTracker.Sync.Full, tracker.sync(19))
+    }
 }

@@ -25,9 +25,10 @@ internal data class SceneTileRange(val firstColumn: Int, val lastColumn: Int, va
 }
 
 /**
- * Geometry of the gesture-only tiled scene cache. While a pan/zoom gesture is active the
- * composed scene is recorded once per tile at a base zoom; samples only move those layers.
- * Release restores direct vector drawing, so nothing cached survives a static frame.
+ * Geometry of the tiled scene cache. The composed scene is recorded once per tile at a base zoom and
+ * a sub-pixel anchor. Pan/zoom samples only move those layers; at rest the tiles must sit at exactly
+ * the current zoom and fractional translation, so they are drawn 1:1 on whole pixels and match direct
+ * vector drawing. Appended or erased ink re-records only the tiles its bounds touch.
  */
 internal object ViewportSceneCache {
     const val TILE_SIZE = 512
@@ -64,7 +65,83 @@ internal object ViewportSceneCache {
         return StrokeViewportBounds(column * size, row * size, (column + 1) * size, (row + 1) * size)
     }
 
+    /** Sub-pixel part of a translation, recorded into tiles so they can be placed on whole pixels. */
+    fun anchorFraction(translation: Float): Float = translation - floor(translation)
+
+    /** At rest a tile set is usable only when it reproduces the vector scene pixel for pixel. */
+    fun exactAtRest(baseScale: Float, scale: Float, fractionX: Float, fractionY: Float, translationX: Float, translationY: Float): Boolean =
+        baseScale > 0f && kotlin.math.abs(scale - baseScale) <= baseScale * 1e-6f &&
+            kotlin.math.abs(anchorFraction(translationX) - fractionX) <= 1e-3f &&
+            kotlin.math.abs(anchorFraction(translationY) - fractionY) <= 1e-3f
+
+    /**
+     * Document rectangle whose content can reach one tile recorded with the given anchor fraction,
+     * widened by [RECORD_MARGIN_PX] so anti-aliased edges never leave a seam between tiles.
+     */
+    fun recordBounds(baseScale: Float, column: Int, row: Int, fractionX: Float, fractionY: Float): StrokeViewportBounds {
+        val size = TILE_SIZE.toFloat()
+        val margin = RECORD_MARGIN_PX
+        return StrokeViewportBounds(
+            (column * size - fractionX - margin) / baseScale,
+            (row * size - fractionY - margin) / baseScale,
+            ((column + 1) * size - fractionX + margin) / baseScale,
+            ((row + 1) * size - fractionY + margin) / baseScale,
+        )
+    }
+
+    const val RECORD_MARGIN_PX = 2f
+
+    fun union(a: StrokeViewportBounds, b: StrokeViewportBounds): StrokeViewportBounds =
+        StrokeViewportBounds(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom))
+
     fun key(column: Int, row: Int): Long = (column.toLong() shl 32) or (row.toLong() and 0xffffffffL)
     fun column(key: Long): Int = (key shr 32).toInt()
     fun row(key: Long): Int = key.toInt()
+}
+
+/**
+ * Decides how recorded tiles follow ink revisions. Consecutive local edits (appended strokes, erased
+ * strokes) that start from the revision the tiles were synchronized at re-record only their region;
+ * any other change in between, or an unknown mutation, re-records everything.
+ */
+internal class SceneTileContentTracker {
+    sealed interface Sync {
+        data object Unchanged : Sync
+        data object Full : Sync
+        data class Partial(val bounds: StrokeViewportBounds) : Sync
+    }
+
+    private var syncedRevision = Long.MIN_VALUE
+    private var dirty: StrokeViewportBounds? = null
+    private var dirtyBase = Long.MIN_VALUE
+    private var dirtyRevision = Long.MIN_VALUE
+
+    /** A local edit moved the content from [before] to [after], touching only [bounds]. */
+    fun markLocal(before: Long, after: Long, bounds: StrokeViewportBounds) {
+        val current = dirty
+        dirty = when {
+            current == null -> { dirtyBase = before; bounds }
+            dirtyRevision == before -> ViewportSceneCache.union(current, bounds)
+            else -> { dirtyBase = Long.MIN_VALUE; null }
+        }
+        dirtyRevision = after
+    }
+
+    fun sync(revision: Long): Sync {
+        if (revision == syncedRevision) {
+            dirty = null
+            return Sync.Unchanged
+        }
+        val region = dirty
+        val result = if (region != null && dirtyBase == syncedRevision && dirtyRevision == revision) Sync.Partial(region) else Sync.Full
+        syncedRevision = revision
+        dirty = null
+        return result
+    }
+
+    /** Tiles were dropped; the next synchronization starts from scratch. */
+    fun reset() {
+        syncedRevision = Long.MIN_VALUE
+        dirty = null
+    }
 }

@@ -128,8 +128,10 @@ correction controls.
 Installed `com.orion.notein` `v2.1.48.0` (code 358) on Xiaomi Pad 6 Pro. Business DEX is still
 Baidu-protected, as in 2.0.10, so the fountain graph was measured, not decompiled. Static evidence:
 
-- the retained AndroidX classes are Ink **1.1 alpha** (node behaviors such as Damping/Integral/Noise/
-  PolarTarget/ToolTypeFilter, `MultipleBrushFamilies`, `InProgressShapesView`); Mojian pins 1.0.0;
+- the bundled `libink.so` (1,415,664 bytes) is not the 1.0.0 build, and the retained classes include
+  `IntegralNode` and `MultipleBrushFamilies`, which 1.0.0 lacks: most likely Ink 1.1 alpha. Most node
+  types (Damping/Noise/PolarTarget/ToolTypeFilter) and `InProgressShapesView` already exist in 1.0.0,
+  which Mojian pins;
 - no `androidx.input.motionprediction` class is retained. Prediction is vendor-specific: Xiaomi
   `JNIPathEstimateInterface` + `estimate.hdb`, Huawei `HwStrokeEstimate`, vivo `TrackPredCore`
   with per-model `optparam*.cfg`;
@@ -166,14 +168,34 @@ dir = 1 for horizontal/upward motion, ≈1.09–1.12 for downward vertical/diago
   (the AndroidX default), 100% rounds a V into a U and stretches steps to ≈110 ms.
 - Width is document-space (scales with zoom); `W1` at 100% zoom for size 0.5 is ≈8.6 px ≈0.71 mm.
 
-Mojian's current fountain is the opposite in the parts that matter for Chinese stroke edges: it
-starts thin (distance taper 0.55→1), tapers the end by distance, maps pressure linearly into
-0.55×–1.45× (Notein spans ≈0→1 with p²), its speed range 0–85 cm/s only thins by 18% (real
-handwriting peaks at 4–9 cm/s, so it is effectively inactive), and every behavior adds 12–25 ms
-damping. A Mojian fountain that should match Notein must remove both distance tapers, use a
-`p^γ` response curve with no floor, apply `1 − s·g(v)` on physical speed, keep only light speed
-damping, and confirm that strokes carry a physical stroke-unit length so centimetre speed
-sources are active.
+The pre-0.7.18 Mojian fountain (now `fountain-v1` / `BrushProfiles.createLegacy`) was the opposite
+in the parts that matter for Chinese stroke edges: it started thin (distance taper 0.55→1), tapered
+the end by distance, mapped pressure linearly into 0.55×–1.45× (Notein spans ≈0→1 with p²), its
+speed range 0–85 cm/s only thinned by 18% (real handwriting peaks at 4–9 cm/s, so it was effectively
+inactive), and every behavior added 12–25 ms damping.
+
+### Mojian `fountain-v2` (Android 0.7.18)
+
+`BrushProfiles.create` now authors the calibrated model; `fountainV2Spec` holds the pure numbers:
+
+- pressure: `NORMALIZED_PRESSURE` 0..1 → size 0..1.4 through a 16-segment `EasingFunction.Linear`
+  sampling `p^γ`, no damping, stylus only; γ = 0 uses a step at x = 0 (constant width);
+- speed: `INPUT_SPEED_IN_CENTIMETERS_PER_SECOND` 0..64 → 1..(1 − 0.85·s) through the measured g(v)
+  table, 25 ms damping, omitted at 0% ink flow (degenerate range, the 0.7.17 crash guard);
+- direction: stock `NORMALIZED_DIRECTION_Y` 0.45..0.65 → 1..1.17; stock prediction fade;
+  default `SlidingWindowModel` (Notein stability 50%); no distance tapers, no lateral-acceleration term;
+- `InProgressStrokesView` derives `strokeUnitLengthCm` from `displayMetrics.xdpi`, so the speed
+  source is on-glass cm/s like Notein. Strokes rebuilt from JSON have no unit length, but every
+  Android `fountain-v2` stroke stores its outline (`vectorPath`), which is what gets drawn;
+- the nominal tool width keeps Notein's meaning (size 0.5 ≈ 0.71 mm at p = 1), so existing presets
+  draw lighter strokes thinner than v1 did.
+
+Compatibility: the JSON `brushProfile` is `fountain-v2` only for strokes whose family id starts with
+`inklab-fountain-v4-`. Windows-authored ink and older Android ink stay `fountain-v1` and are rebuilt
+with the legacy family when they have no outline (28,755 Windows and 806 older Android strokes on
+the tablet library had none), so existing notes do not change appearance. Windows and iOS draw the
+stored outline for Android strokes and pass the profile string through. Windows authoring still uses
+its own engine; matching it to `fountain-v2` is separate work.
 
 ### Android tablet latency diagnosis (2026-11-07)
 
@@ -182,8 +204,8 @@ frames "slow issue draw commands"; Notein 24/27/44 ms. `DryInkView.addStrokes()`
 outside pan/zoom gestures, `onDraw` re-records every visible stroke (`drawScene`, plus a per-frame
 `strokes.filter`). A median Chinese stroke lasts ≈160 ms, so nearly every pen lift blocks the UI
 thread before the next pen-down is handled. Windows WPF keeps one retained visual per stroke and does
-not show this. The fix is to keep composited scene tiles while writing and re-record only tiles
-intersecting a new or changed stroke. HyperOS's global `MiuiStylusEventBlocker` (40 ms / 8 px)
+not show this. 0.7.18 keeps composited scene tiles at rest and re-records only tiles intersecting a new or erased
+stroke (see `android-page-navigation.md`). HyperOS's global `MiuiStylusEventBlocker` (40 ms / 8 px)
 applies to both apps and is not the differentiator.
 
 ## Research Model

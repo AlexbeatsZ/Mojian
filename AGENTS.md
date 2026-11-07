@@ -8,6 +8,11 @@
 
 # Current State
 
+- **Android 0.7.18** (code26): Notein-calibrated `fountain-v2` brush (p^γ, on-glass speed thinning,
+  no distance tapers; legacy `fountain-v1` kept for existing outline-less ink) and persistent scene
+  tiles that re-record only tiles touched by new/erased ink. Read the 2026-11-07 sections of
+  `handwriting-engine.md` and `android-page-navigation.md`. Installed on the tablet in place (re-signed
+  with OMEN's debug certificate: Mac's default debug key differs; never uninstall to fix a signer).
 - **0.7.11** (`v0.7.11` prerelease at b977596, EXE+APK code19): drawing-toolbar 阅读视图 (book icon after Hand).
   Finger/pen/left-mouse drags pan 1:1 and nothing can be selected/edited; two-finger/wheel/middle
   navigation unchanged; exclusive with Hand/insert-space/tool selection; not persisted. Contract in
@@ -226,9 +231,9 @@
 
 # Active Work
 
-- Tablet handwriting gap vs Notein (2026-11-07, analysis only): rebuild the Android fountain to the
-  calibrated Notein model and make dry-ink rendering incremental while writing. Read the 2026-11-07
-  sections of `docs/design/handwriting-engine.md` first; no code has changed yet.
+- Android 0.7.18 tablet acceptance: compare `fountain-v2` widths with the Notein calibration by
+  uinput injection and measure `dumpsys gfxinfo` while writing (installed, tablet was locked).
+  Windows authoring does not yet use the `fountain-v2` model.
 
 - 0.7.8 actual phone app-details icon/version is verified; tablet locked-screen and
   Windows Explorer/taskbar visual acceptance remain unverified. Do not refresh system

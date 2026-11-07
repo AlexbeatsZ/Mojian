@@ -69,6 +69,9 @@ class DryInkView(context: Context) : View(context) {
     private val matrixValues = FloatArray(9)
     private var viewportGestureActive = false
     private var tileScale = 0f
+    private var tileFractionX = 0f
+    private var tileFractionY = 0f
+    private val tileContent = SceneTileContentTracker()
     private var tileSceneKey: List<Any?>? = null
     private val sceneTiles = HashMap<Long, RenderNode>()
     private val spareTiles = ArrayDeque<RenderNode>()
@@ -146,7 +149,10 @@ class DryInkView(context: Context) : View(context) {
             editHistory.record(ReversibleEditHistory.Edit({ strokes.remove(stroke) }, { strokes.add(stroke) }))
         }
         invalidate()
+        val before = contentRevision
         newStrokes.forEach(::registerStroke)
+        // A finished stroke re-records only the scene tiles it touches, not every visible stroke.
+        newStrokes.map(::boundsFor).reduceOrNull(ViewportSceneCache::union)?.let { tileContent.markLocal(before, contentRevision, it) }
         onContentChanged?.invoke()
     }
 
@@ -223,7 +229,8 @@ class DryInkView(context: Context) : View(context) {
 
     /**
      * Pan/zoom samples move recorded scene tiles instead of rebuilding every visible stroke mesh.
-     * Tiles exist only while the gesture lasts; ending it returns to direct vector drawing.
+     * Tiles stay after the gesture; the next static frame re-anchors them at the exact zoom and
+     * sub-pixel translation if the gesture changed either, so rest frames match vector drawing.
      */
     fun beginViewportGesture() {
         viewportGestureActive = true
@@ -232,7 +239,6 @@ class DryInkView(context: Context) : View(context) {
     fun endViewportGesture() {
         if (!viewportGestureActive) return
         viewportGestureActive = false
-        releaseSceneTiles()
         invalidate()
     }
 
@@ -433,17 +439,22 @@ class DryInkView(context: Context) : View(context) {
     /** First implementation deliberately erases complete strokes touched by the pressure eraser. */
     fun eraseAtDocument(x: Float, y: Float, radius: Float): Int {
         var removed = 0
+        var erasedBounds: StrokeViewportBounds? = null
         val iterator = strokes.iterator()
         while (iterator.hasNext()) {
             val stroke = iterator.next()
             if (strokeMayTouchCircle(stroke, x, y, radius) && strokeTouchesCircle(stroke, x, y, radius + stroke.brush.size * 0.5f)) {
+                val bounds = boundsFor(stroke)
+                erasedBounds = erasedBounds?.let { ViewportSceneCache.union(it, bounds) } ?: bounds
                 iterator.remove()
                 selectedStrokes.remove(stroke)
                 removed++
             }
         }
         if (removed > 0) {
+            val before = contentRevision
             rebuildStrokeMetrics()
+            erasedBounds?.let { tileContent.markLocal(before, contentRevision, it) }
             invalidate()
         }
         if (removed > 0) editHistory.clear()
@@ -612,7 +623,7 @@ class DryInkView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val tiled = viewportGestureActive && drawSceneTiles(canvas)
+        val tiled = drawSceneTiles(canvas)
         val visible = visibleStrokeBounds()
         strokeRenderer.drawWithStrokes(canvas) { transformedCanvas, scope ->
             transformedCanvas.save()
@@ -657,7 +668,10 @@ class DryInkView(context: Context) : View(context) {
         }
     }
 
-    /** Draws the scene from gesture tiles; false keeps the direct vector path for this frame. */
+    /**
+     * Draws the scene from recorded tiles; false keeps the direct vector path for this frame.
+     * During gestures tiles may be scaled/moved; at rest they must be exact (see ViewportSceneCache).
+     */
     private fun drawSceneTiles(canvas: Canvas): Boolean {
         if (!canvas.isHardwareAccelerated || insertSpaceStartY != null || insertSpaceCurrentY != null) return false
         documentToView.getValues(matrixValues)
@@ -665,31 +679,42 @@ class DryInkView(context: Context) : View(context) {
         val scale = matrixValues[Matrix.MSCALE_X]
         val translationX = matrixValues[Matrix.MTRANS_X]
         val translationY = matrixValues[Matrix.MTRANS_Y]
-        val sceneKey = listOf(contentRevision, sceneRevision(), sceneRenderer, backgroundFormat,
+        // Ink revisions are tracked separately so a new stroke does not discard every tile.
+        val sceneKey = listOf(sceneRevision(), sceneRenderer, backgroundFormat,
             outputPageSettings.darkBackground, renderBackgroundInInkLayer, width, height)
-        if (sceneKey != tileSceneKey || !ViewportSceneCache.scaleUsable(tileScale, scale)) {
+        val anchored =
+            if (viewportGestureActive) ViewportSceneCache.scaleUsable(tileScale, scale)
+            else ViewportSceneCache.exactAtRest(tileScale, scale, tileFractionX, tileFractionY, translationX, translationY)
+        if (sceneKey != tileSceneKey || !anchored) {
             releaseSceneTiles()
             tileScale = scale
+            tileFractionX = ViewportSceneCache.anchorFraction(translationX)
+            tileFractionY = ViewportSceneCache.anchorFraction(translationY)
             tileSceneKey = sceneKey
         }
-        val visible = ViewportSceneCache.visibleTiles(tileScale, scale, translationX, translationY, width, height) ?: return false
-        val retained = visible.expanded(ViewportSceneCache.PREFETCH_TILES)
-        val iterator = sceneTiles.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (retained.contains(ViewportSceneCache.column(entry.key), ViewportSceneCache.row(entry.key))) continue
-            entry.value.discardDisplayList()
-            spareTiles.addLast(entry.value)
-            iterator.remove()
+        when (val sync = tileContent.sync(contentRevision)) {
+            SceneTileContentTracker.Sync.Unchanged -> Unit
+            SceneTileContentTracker.Sync.Full -> discardTiles { _, _ -> true }
+            is SceneTileContentTracker.Sync.Partial -> discardTiles { column, row ->
+                ViewportSceneCache.recordBounds(tileScale, column, row, tileFractionX, tileFractionY).intersects(sync.bounds)
+            }
         }
-        val ratio = scale / tileScale
+        // Tiles carry the recorded sub-pixel anchor, so at rest they are composited 1:1 on a whole
+        // pixel (no resampling) and match direct vector drawing.
+        val ratio = if (viewportGestureActive) scale / tileScale else 1f
+        val originX = if (viewportGestureActive) translationX - tileFractionX * ratio else Math.round(translationX - tileFractionX).toFloat()
+        val originY = if (viewportGestureActive) translationY - tileFractionY * ratio else Math.round(translationY - tileFractionY).toFloat()
+        val visible = ViewportSceneCache.visibleTiles(tileScale, scale, originX, originY, width, height) ?: return false
+        val retained = visible.expanded(ViewportSceneCache.PREFETCH_TILES)
+        discardTiles { column, row -> !retained.contains(column, row) }
         canvas.save()
-        canvas.translate(translationX, translationY)
+        canvas.translate(originX, originY)
         canvas.scale(ratio, ratio)
         for (row in visible.firstRow..visible.lastRow) for (column in visible.firstColumn..visible.lastColumn) {
             canvas.drawRenderNode(sceneTiles.getOrPut(ViewportSceneCache.key(column, row)) { recordSceneTile(column, row) })
         }
         canvas.restore()
+        if (!viewportGestureActive) return true
         // Record the ring that the pan reaches next within a small per-frame budget.
         val deadline = SystemClock.elapsedRealtimeNanos() + ViewportSceneCache.PREFETCH_BUDGET_NANOS
         var pending = false
@@ -702,18 +727,29 @@ class DryInkView(context: Context) : View(context) {
         return true
     }
 
+    private inline fun discardTiles(predicate: (column: Int, row: Int) -> Boolean) {
+        val iterator = sceneTiles.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (!predicate(ViewportSceneCache.column(entry.key), ViewportSceneCache.row(entry.key))) continue
+            entry.value.discardDisplayList()
+            spareTiles.addLast(entry.value)
+            iterator.remove()
+        }
+    }
+
     private fun recordSceneTile(column: Int, row: Int): RenderNode {
         val size = ViewportSceneCache.TILE_SIZE
         val node = spareTiles.removeFirstOrNull() ?: RenderNode("MojianSceneTile").apply { setUseCompositingLayer(true, null) }
         node.setPosition(column * size, row * size, (column + 1) * size, (row + 1) * size)
         val tileToScreen = Matrix().apply {
             setScale(tileScale, tileScale)
-            postTranslate(-column * size.toFloat(), -row * size.toFloat())
+            postTranslate(tileFractionX - column * size.toFloat(), tileFractionY - row * size.toFloat())
         }
         val recording = node.beginRecording(size, size)
         try {
             recording.concat(tileToScreen)
-            val bounds = ViewportSceneCache.documentBounds(tileScale, column, row)
+            val bounds = ViewportSceneCache.recordBounds(tileScale, column, row, tileFractionX, tileFractionY)
             if (renderBackgroundInInkLayer) drawGrid(recording, visible = RectF(bounds.left, bounds.top, bounds.right, bounds.bottom), viewMatrix = tileToScreen)
             drawScene(recording, bounds) { canvasStrokeRenderer.draw(recording, it, tileToScreen) }
         } finally {
@@ -728,6 +764,7 @@ class DryInkView(context: Context) : View(context) {
         spareTiles.clear()
         tileSceneKey = null
         tileScale = 0f
+        tileContent.reset()
     }
 
     override fun onDetachedFromWindow() {
@@ -920,7 +957,10 @@ class DryInkView(context: Context) : View(context) {
             right = maxOf(right, input.x)
             bottom = maxOf(bottom, input.y)
         }
-        val margin = stroke.brush.size * 0.5f
+        // Half the widest tip: the calibrated fountain reaches 1.4 x 1.17 = 1.64x its nominal size.
+        // Bounds also bound the tiles a new stroke re-records, so they must not clip its edge.
+        val halfWidth = if (BrushProfiles.storedProfile(stroke.brush.family.clientBrushFamilyId) == BrushProfiles.FOUNTAIN_V2) 0.85f else 0.5f
+        val margin = stroke.brush.size * halfWidth
         return StrokeViewportBounds(left - margin, top - margin, right + margin, bottom + margin)
     }
 
