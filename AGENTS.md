@@ -11,12 +11,10 @@
   saved-preset selector. New/edit named styles own pressure/speed curves, direction, tapers, stability,
   tilt and turn response. Configured new ink snapshots `pen-style-v1` and its canonical outline;
   historical readers stay unchanged. Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
-- **Windows 0.7.24 source**: repeated contact on an already focused canvas returns before the
-  main-window focus route can flush page saves/write settings/rebuild appearance. A real-window
-  PreviewMouseDown regression with a blocked writer measured 1,017 -> 0.35 ms; actual split-slot
-  switches still flush source ink. Release 260/260 pass. Build/deployment pending; running 0.7.23
-  PID20584 is preserved. User reports occasional stalls during both writing and erasing on 0.7.23;
-  this fix addresses a reproduced main-window barrier, not a claim of physical acceptance.
+- **Windows 0.7.26**: dry scene keeps a permanent `BitmapCache` (render thread was saturated
+  re-tessellating old ink under wet ink); topmost new ink on layered pages uses the wet overlay;
+  v2/pen-style eraser hits use modeled samples (`StrokeEraserHitTest`, 8.5 ms -> µs per candidate).
+  Includes 0.7.24 same-canvas focus fix. Physical pen acceptance open; see perf design doc 0.7.26.
 - **Windows 0.7.23** (`v0.7.23`, source `8c9aa58`): retained per-item WPF visuals, stable paper/image/PDF nodes, indexed
   delta erasing (no page JSON on contact) and layered wet-ink updates. Synthetic 3,000 strokes /
   240,000 points: eraser contact 353 -> 2.2 ms, allocations 110.7 -> 0.33 MB; 60 moves cause zero
@@ -86,7 +84,7 @@
 - Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows 0.7.24 install and physical intermittent-stall acceptance are pending. Hand-pan pixel checks pass with their
+- Windows 0.7.26 install (after the running product exits) and physical writing/erasing acceptance are pending. Hand-pan pixel checks pass with their
   original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
@@ -121,6 +119,9 @@
 
 # Durable Lessons
 
+- WPF cost hides on its render thread: measure per-thread CPU in a real window at the user's stored
+  viewport, never only UI-thread timings at 100%. RDP/disconnected sessions invalidate timings.
+  Windowed WPF testhosts can survive as unkillable one-core spinners; check before measuring.
 - Frozen DrawingGroups in one page-sized Visual still make small edits dirty a whole scene.
   Retain per-content Visuals and unchanged paper/image nodes; measure contact allocations and
   rendered frames as well as geometry-recording cost. Undo history must release gesture indexes.

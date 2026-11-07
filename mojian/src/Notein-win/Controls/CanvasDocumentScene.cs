@@ -24,7 +24,12 @@ public sealed class CanvasDocumentScene : FrameworkElement
     {
         if (_root.Transform is not MatrixTransform current || current.Matrix != matrix)
             _root.Transform = new MatrixTransform(matrix);
-        _root.Clip = clip is { } bounds ? new RectangleGeometry(bounds) : null;
+        // A replaced clip dirties the whole layer, which re-renders a cached scene completely.
+        if (clip is { } bounds)
+        {
+            if (_root.Clip is not RectangleGeometry currentClip || currentClip.Rect != bounds) _root.Clip = new RectangleGeometry(bounds);
+        }
+        else if (_root.Clip != null) _root.Clip = null;
         _seen.Clear(); _order.Clear();
     }
 

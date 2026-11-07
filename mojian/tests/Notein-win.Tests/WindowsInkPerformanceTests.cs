@@ -183,6 +183,7 @@ public sealed class WindowsInkPerformanceTests(ITestOutputHelper output)
     public void LayeredWritingUpdatesOnlyWetVisualAndMatchesCanonicalPainter() => WpfTestExecutor.Run(() =>
     {
         var canvas = DenseCanvas();
+        LiveInkCostProbe.SetSceneCache(canvas, false); // Offscreen RTB compares vector pixels only.
         var document = canvas.Document!;
         document.Layers = [new PageLayer { Id = "ink", Order = 0 }, new PageLayer { Id = "cover", Order = 1 }];
         document.Objects.Add(new PageObject { Kind = PageObjectKind.Image, LayerId = "cover", X = 390, Y = 540, Width = 100, Height = 40 });

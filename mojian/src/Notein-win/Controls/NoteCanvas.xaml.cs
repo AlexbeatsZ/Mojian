@@ -229,6 +229,7 @@ public partial class NoteCanvas : UserControl
         PointerOverlay.Owner = this;
         WetInkOverlay.Owner = this;
         SceneLayer.Owner = this;
+        SceneLayer.CacheMode = StaticSceneCache;
         Focusable = true;
         _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); RaiseDocumentChanged(); };
@@ -2481,6 +2482,7 @@ public partial class NoteCanvas : UserControl
     private static bool StrokeHitsCircle(StrokeRecord stroke, Point point, double radius)
     {
         if (!stroke.Bounds.IntersectsWith(new Rect(point.X - radius, point.Y - radius, radius * 2, radius * 2))) return false;
+        if (StrokeEraserHitTest.UsesModeledOutline(stroke)) return StrokeEraserHitTest.ModeledOutlineHitsCircle(stroke, point, radius);
         if (stroke.VectorGeometry is { } geometry)
             return geometry.FillContainsWithDetail(new EllipseGeometry(point, radius, radius)) != IntersectionDetail.Empty;
         if (stroke.Points.Count == 1) return Distance(stroke.Points[0].ToPoint(), point) <= radius;
@@ -2977,7 +2979,8 @@ public partial class NoteCanvas : UserControl
 
     // Imported layers and tags can cover ink; keep those scenes in their
     // canonical painter order instead of moving a lower stroke to an overlay.
-    private bool SeparateWetInk => _activeStroke != null && Document is { Layers.Count: 0, Tags.Count: 0 };
+    private bool SeparateWetInk => _activeStroke != null && Document is { } document &&
+        (document is { Layers.Count: 0, Tags.Count: 0 } || WetInkIsTopmost(document, _activeStroke));
 
     private void RefreshWetInk()
     {
@@ -2995,9 +2998,8 @@ public partial class NoteCanvas : UserControl
     {
         if (!SeparateWetInk) return;
         dc.PushTransform(new MatrixTransform(_viewport.DocumentToViewMatrix()));
-        var stroke = _activeStroke!;
-        dc.DrawDrawing(_strokeDrawings.Get(stroke, Appearance.Theme == PageTheme.Dark, false,
-            context => DrawStroke(context, stroke, lightExport: false)));
+        // The same cache key as the dry scene lets lift reuse this drawing on imported pages too.
+        dc.DrawDrawing(ScreenStrokeDrawing(_activeStroke!));
         dc.Pop();
     }
 
@@ -3020,7 +3022,7 @@ public partial class NoteCanvas : UserControl
                 var inverse = matrix; inverse.Invert();
                 extent = Rect.Transform(overscan, inverse);
             }
-            SceneLayer.BeginScene(matrix, _panCacheActive ? extent : null);
+            SceneLayer.BeginScene(matrix, _panCacheActive || StaticSceneCache != null ? extent : null);
             SceneLayer.DrawPart(_paperSceneKey, PaperSceneSignature(extent), context => DrawPaper(context, lightExport: false, extent));
             foreach (var content in PageScene.CompositeContent(Document, extent, includeUnlayeredText: false))
             {
@@ -3092,7 +3094,7 @@ public partial class NoteCanvas : UserControl
         if (!_panCacheActive) return;
         _panCacheActive = false;
         _panOffset = default;
-        SceneLayer.CacheMode = null;
+        SceneLayer.CacheMode = StaticSceneCache;
         SceneLayer.RenderTransform = Transform.Identity;
         SceneLayer.ClipToBounds = true;
         SceneLayer.InvalidateVisual();

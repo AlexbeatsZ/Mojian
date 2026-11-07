@@ -287,6 +287,7 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         var canvas = new NoteCanvas { Width = 400, Height = 300, Document = new PageDocument("n", "p"),
             SelectedTool = new ToolPreset("pen", DrawingToolKind.Pen) { WidthMm = 2 },
             Appearance = new PageAppearance { ShowTitle = false, Background = CanvasBackgroundFormat.Blank } };
+        LiveInkCostProbe.SetSceneCache(canvas, false); // Offscreen RTB compares vector handoff only.
         canvas.Document.Strokes.Add(new StrokeRecord { Points = [new InkPoint(10, 20), new InkPoint(100, 20)] });
         canvas.SetZoom(.5f);
         canvas.Measure(new Size(400, 300)); canvas.Arrange(new Rect(0, 0, 400, 300)); canvas.UpdateLayout();

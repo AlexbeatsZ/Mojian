@@ -12,6 +12,46 @@ retains the immutable content snapshot and clears that flag; failed jobs remain 
 retry queue. Clean pages are not rewritten on navigation/close. Legacy on-disk viewport data is
 preserved separately so subsequent content saves do not publish the current device's view.
 
+## Render-thread cost and outline erasing (0.7.26, 2026-11-07)
+
+Earlier fixes measured UI-thread code paths only. A real-window probe of copies of the user's
+pages (3,443 and 1,842 native strokes, a 2,937-stroke layered import; 240 Hz pen samples, the
+user's 125% / 240 Hz Intel UHD display) measured per-thread CPU: while writing, WPF's render
+thread was busy 5.8-6.0 s of every 6.1 s. WPF re-tessellates every vector drawing that intersects
+a dirty region, so the growing wet stroke re-rasterized all old ink beneath it on each frame.
+
+`SceneLayer` now keeps a permanent `BitmapCache` (RenderAtScale 1, no ClearType). The scene root
+is clipped to the visible document extent, and the clip/transform are replaced only when they
+actually change: a new clip geometry dirties the whole cached layer. Wet ink, pointer feedback and
+editors stay outside the cache. The pan cache temporarily replaces it and `EndPanCache` restores
+it. Writing render-thread CPU dropped to 1.3-1.8 s with about 3x the frames. On-screen BitBlt
+captures at 125% are pixel-identical with and without the cache (no blur, no handoff jump).
+An offscreen `RenderTargetBitmap` of the control resamples the cache, so tests comparing vector
+handoff pixels through RTB turn it off with the per-canvas `StaticSceneCacheEnabled`. Product
+exports render separate visuals and are unaffected.
+
+Layered/imported pages (597 of 621 pages) previously re-recorded the active stroke inside the
+scene for each sample. `WetInkIsTopmost` checks once per stroke whether any visible item follows
+it in `PageScene.OrderedContent` painter order (or tags exist); new ink normally has the unlisted
+top layer, so it uses the wet overlay. Covered ink keeps the canonical in-scene path.
+
+Erasing: the eraser tested fountain-v2/pen-style strokes with `FillContainsWithDetail` against the
+stored outline (about 45,000 path characters, one disc per modeled sample plus trapezoids);
+8.3-8.5 ms per candidate per sample, plus 0.6 ms to parse the path on first touch.
+`StrokeEraserHitTest` tests the same disc/trapezoid union from `FountainV2Model.Model` samples,
+cached per stroke `RenderVersion`. On 40 real strokes it took 6.3 ms for 1,494 checks vs 4,303 ms;
+the 5 differences were all within 3% of the eraser radius. Imported outlines keep the exact WPF
+test (about 0.06 ms). `FillContains || StrokeContains(wide pen)` was rejected: its widening is
+slow near the boundary and miter joins over-hit.
+
+Diagnosis lessons: the user's views were zoomed to 8.08x and 1.76x, so test at the stored viewport,
+not only at 100%. Sessions attached through RDP or disconnected render differently (tier 0,
+throttled frames), so their timings are not valid. Completed WPF testhosts that show live windows
+can remain as unkillable one-core spinners ("no running instance") until reboot, which consumes
+CPU power shared with the integrated GPU. `LiveInkCostProbe` (`MOJIAN_LIVE_INK_PAGE_JSON`,
+optional `MOJIAN_LIVE_INK_VIEWPORT=scale,tx,ty`), `LiveSceneCachePixelProbe` and
+`EraseHitCostProbe` (`MOJIAN_ERASE_HIT_PAGE_JSON`) are read-only optional probes.
+
 ## Main-window contact must not act as navigation (0.7.24, 2026-11-07)
 
 The user continued to observe intermittent pauses while writing and erasing on 0.7.23. A live
