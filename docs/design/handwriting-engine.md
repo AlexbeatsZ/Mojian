@@ -1,6 +1,6 @@
 # Handwriting Engine Research and Tablet Lab
 
-Last verified: 2026-08-28
+Last verified: 2026-11-07 (Notein 2.1.48 black-box calibration)
 
 ## Objective
 
@@ -122,6 +122,69 @@ AndroidX's stock `pressurePen` already combines prediction fade-out, end taper, 
 width, lateral-acceleration response, high-pressure response, and a sliding-window input model.
 Notein adds or tunes a family identified as `notein-fountain-v1` and persists pressure/speed
 correction controls.
+
+### Notein 2.1.48 calibrated fountain behavior (2026-11-07)
+
+Installed `com.orion.notein` `v2.1.48.0` (code 358) on Xiaomi Pad 6 Pro. Business DEX is still
+Baidu-protected, as in 2.0.10, so the fountain graph was measured, not decompiled. Static evidence:
+
+- the retained AndroidX classes are Ink **1.1 alpha** (node behaviors such as Damping/Integral/Noise/
+  PolarTarget/ToolTypeFilter, `MultipleBrushFamilies`, `InProgressShapesView`); Mojian pins 1.0.0;
+- no `androidx.input.motionprediction` class is retained. Prediction is vendor-specific: Xiaomi
+  `JNIPathEstimateInterface` + `estimate.hdb`, Huawei `HwStrokeEstimate`, vivo `TrackPredCore`
+  with per-model `optparam*.cfg`;
+- `assets/ink/*.noteinbrush` are gzip `BrushFamily` protos XOR `0x5d`; pencil/rainbow families use the
+  default `SlidingWindowModel` (20 ms window, 1/180 s upsampling) and the stock prediction fade.
+  The fountain family is not an asset; it is built at runtime.
+
+Method: a uinput virtual pen with the real `NVTCapacitivePen` axes (shell has `uhid`; HyperOS
+SELinux denies writing `/dev/input/event*`) replayed timed 480 Hz strokes with exact pressure and
+on-glass speed into a Notein page; widths were measured from screenshots. Settings were
+`笔刷粗细 0.5 / 压感 200% / 出墨速度 100% / 稳定性 50%` unless stated, and restored afterwards.
+
+Measured model (steady state, multiplicative):
+
+```text
+width = W1 · p^γ · (1 − s·g(v)) · dir
+γ = 压感 / 100            (200% → p², 107% → ≈linear; p=1 width is the same for every γ)
+s = 出墨速度 / 100
+g(v), v = on-glass cm/s (independent of page zoom):
+  v   ≤1   2    4    8    16   32   ≥64
+  g   0   .08  .15  .23  .46  .69  .85 (cap)
+dir = 1 for horizontal/upward motion, ≈1.09–1.12 for downward vertical/diagonal
+      (matches the stock NORMALIZED_DIRECTION_Y behavior already in Mojian)
+```
+
+- No distance-based start or end taper: a constant-pressure, constant-speed line has the same width
+  from the first to the last pixel. Teardrop heads and hairline tails arise only from the user's
+  pressure falling and speed rising within the stroke (reproduced with v 0.25→40 cm/s, p 0.7→0.2).
+- Very light input disappears: p ≤ 0.05 draws nothing visible at 200%.
+- Pressure has no damping beyond the input window (a 0.3→0.8 step settles in ≈20 ms at 50%
+  stability). Speed is smoothed more (≈50 ms to settle after a 2→32 cm/s step).
+- Tilt 0–45° has no width effect.
+- `稳定性` is the input smoothing window: 0% gives sharp V corners and ≈10 ms steps, 50% ≈20 ms
+  (the AndroidX default), 100% rounds a V into a U and stretches steps to ≈110 ms.
+- Width is document-space (scales with zoom); `W1` at 100% zoom for size 0.5 is ≈8.6 px ≈0.71 mm.
+
+Mojian's current fountain is the opposite in the parts that matter for Chinese stroke edges: it
+starts thin (distance taper 0.55→1), tapers the end by distance, maps pressure linearly into
+0.55×–1.45× (Notein spans ≈0→1 with p²), its speed range 0–85 cm/s only thins by 18% (real
+handwriting peaks at 4–9 cm/s, so it is effectively inactive), and every behavior adds 12–25 ms
+damping. A Mojian fountain that should match Notein must remove both distance tapers, use a
+`p^γ` response curve with no floor, apply `1 − s·g(v)` on physical speed, keep only light speed
+damping, and confirm that strokes carry a physical stroke-unit length so centimetre speed
+sources are active.
+
+### Android tablet latency diagnosis (2026-11-07)
+
+`dumpsys gfxinfo` on the tablet: Mojian 90/95/99th frame percentiles 53/65/113 ms with 90 of 500
+frames "slow issue draw commands"; Notein 24/27/44 ms. `DryInkView.addStrokes()` invalidates and,
+outside pan/zoom gestures, `onDraw` re-records every visible stroke (`drawScene`, plus a per-frame
+`strokes.filter`). A median Chinese stroke lasts ≈160 ms, so nearly every pen lift blocks the UI
+thread before the next pen-down is handled. Windows WPF keeps one retained visual per stroke and does
+not show this. The fix is to keep composited scene tiles while writing and re-record only tiles
+intersecting a new or changed stroke. HyperOS's global `MiuiStylusEventBlocker` (40 ms / 8 px)
+applies to both apps and is not the differentiator.
 
 ## Research Model
 

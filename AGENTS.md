@@ -226,6 +226,10 @@
 
 # Active Work
 
+- Tablet handwriting gap vs Notein (2026-11-07, analysis only): rebuild the Android fountain to the
+  calibrated Notein model and make dry-ink rendering incremental while writing. Read the 2026-11-07
+  sections of `docs/design/handwriting-engine.md` first; no code has changed yet.
+
 - 0.7.8 actual phone app-details icon/version is verified; tablet locked-screen and
   Windows Explorer/taskbar visual acceptance remain unverified. Do not refresh system
   caches or force-close products to obtain screenshots. Mac deployment was deferred;
