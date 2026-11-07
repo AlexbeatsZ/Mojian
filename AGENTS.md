@@ -80,11 +80,11 @@
 
 - 0.7.25 EXE+APK are uploaded; Windows 267 tests and Android 288 tests pass (2 opt-in skipped).
   Local APK is current. Windows `v0.7.26` EXE (b788430) is published and supersedes the staged 0.7.25 EXE;
-  local replacement waits for running 0.7.24 PID39720 to exit normally. No Android install.
+  local release EXE was replaced after PID39720 exited normally (0.7.26+b788430). No Android install.
 - Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows 0.7.26 install (after the running product exits) and physical writing/erasing acceptance are pending. Hand-pan pixel checks pass with their
+- Windows 0.7.26 physical writing/erasing acceptance is pending. Hand-pan pixel checks pass with their
   original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
