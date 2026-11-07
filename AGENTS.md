@@ -20,6 +20,8 @@
   value, so `mtime:length` page stamps drifted without any writer. Stamps are now only a fast path;
   `PageContentRepository` keeps the SHA-256 of bytes it last read/wrote and accepts metadata-only
   drift (save, `pageChanged`, export, sync incoming gate). JVM 266 passed/1 skipped, lint 0 errors.
+  `v0.7.13` APK-only prerelease published; installed in place on Xiaomi Pad 6 Pro (first-install time
+  kept). Phone still 0.7.12. Tablet was locked after install: no on-device writing acceptance yet.
 - **Android 0.7.12** (code20, `v0.7.12` APK-only prerelease; Windows stays 0.7.11): gesture-only
   RenderNode scene tiles during pan/zoom (`ViewportSceneCache`, read `android-page-navigation.md`).
   JVM 262 passed/1 skipped, lint 0 errors; no device frame-rate/GPU-memory/visual acceptance.
