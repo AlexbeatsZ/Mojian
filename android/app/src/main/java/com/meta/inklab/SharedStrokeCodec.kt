@@ -12,6 +12,7 @@ import androidx.ink.brush.InputToolType
 import androidx.ink.geometry.MutableVec
 import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
+import androidx.ink.strokes.StrokeInput
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -36,6 +37,9 @@ object SharedStrokeCodec {
             json.optString("vectorPath").isNotBlank() -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optString("brushProfile") == "shape-v1" -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optInt("kind") == 1 -> BrushProfiles.createHighlighter(width,argb,opacity)
+            json.optString("brushProfile") == PenStyle.PROFILE && PenStyle.fromJson(json.optJSONObject("penStyle")) != null ->
+                BrushProfiles.createStyle(width, PenStyle.fromJson(json.getJSONObject("penStyle"))!!,
+                    Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
             // fountain-v2 is the Notein-calibrated authoring brush; anything older (including pre-0.7.21
             // Windows ink) keeps the legacy family so existing notes do not change appearance.
             json.optString("brushProfile") == BrushProfiles.FOUNTAIN_V2 -> BrushProfiles.create(width,json.optInt("pressurePercent",200)/100f,
@@ -60,8 +64,17 @@ object SharedStrokeCodec {
             var elapsed = -1L
             SharedWorkspaceCodec.items(inputs).forEach { p ->
                 elapsed = maxOf(elapsed+1,p.optLong("elapsedMilliseconds"))
-                batch.add(InputToolType.STYLUS,p.getDouble("x").toFloat()/unit,p.getDouble("y").toFloat()/unit,elapsed,
-                    pressure=p.optDouble("pressure",.5).toFloat().coerceIn(.01f,1f))
+                if (json.optString("brushProfile")==PenStyle.PROFILE) {
+                    batch.add(InputToolType.STYLUS,p.getDouble("x").toFloat()/unit,p.getDouble("y").toFloat()/unit,elapsed,
+                        pressure=p.optDouble("pressure",.5).toFloat().coerceIn(0f,1f),
+                        strokeUnitLengthCm=(json.optDouble("strokeUnitLengthCm",0.0)*unit).toFloat().takeIf { it.isFinite() && it>0 } ?: StrokeInput.NO_STROKE_UNIT_LENGTH,
+                        tiltRadians=p.optDouble("tiltRadians",-1.0).toFloat().takeIf { it.isFinite() && it>=0 && it<=Math.PI/2 } ?: StrokeInput.NO_TILT,
+                        orientationRadians=p.optDouble("orientationRadians",-1.0).toFloat().takeIf { it.isFinite() && it>=0 && it<Math.PI*2 } ?: StrokeInput.NO_ORIENTATION)
+                } else {
+                    // Preserve the original v1/v2 raw-input reconstruction, including absent physical units.
+                    batch.add(InputToolType.STYLUS,p.getDouble("x").toFloat()/unit,p.getDouble("y").toFloat()/unit,elapsed,
+                        pressure=p.optDouble("pressure",.5).toFloat().coerceIn(.01f,1f))
+                }
             }
         }
         return Stroke(brush,batch).also { records[it] = Record(json,visible=visible) }
@@ -81,9 +94,17 @@ object SharedStrokeCodec {
             .put("points",JSONArray().apply { for(i in 0 until stroke.inputs.size) {
                 val p = stroke.inputs.get(i)
                 put(JSONObject().put("x",p.x*unit).put("y",p.y*unit).put("pressure",if(p.pressure.isFinite()) p.pressure else .5f)
-                    .put("elapsedMilliseconds",p.elapsedTimeMillis))
+                    .put("elapsedMilliseconds",p.elapsedTimeMillis).apply {
+                        if (p.hasTilt) put("tiltRadians",p.tiltRadians)
+                        if (p.hasOrientation) put("orientationRadians",p.orientationRadians)
+                    })
             } })
         val familyId = stroke.brush.family.clientBrushFamilyId
+        BrushProfiles.styleFromFamilyId(familyId)?.let { style ->
+            json.put("penStyle", style.toJson()).put("stabilityPercent", style.stabilityPercent)
+            if (stroke.inputs.size>0 && stroke.inputs.get(0).strokeUnitLengthCm>0)
+                json.put("strokeUnitLengthCm",stroke.inputs.get(0).strokeUnitLengthCm/unit)
+        }
         val pressure = Regex("-p([0-9.]+)-s([0-9.]+)").find(familyId)
         json.put("pressurePercent",((pressure?.groupValues?.get(1)?.toFloatOrNull() ?: 2f)*100).toInt())
             .put("inkFlowPercent",((pressure?.groupValues?.get(2)?.toFloatOrNull() ?: 1f)*100).toInt())

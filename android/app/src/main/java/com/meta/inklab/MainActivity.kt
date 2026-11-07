@@ -46,6 +46,9 @@ import android.widget.GridLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import android.widget.EditText
 import android.widget.PopupWindow
 import android.widget.ScrollView
@@ -4935,33 +4938,24 @@ class MainActivity : Activity() {
         when (tool.kind) {
             DrawingToolKind.PEN -> {
                 addPaletteControls(tool)
+                val presetRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                presetRow.addView(detailHint("预设"))
+                presetRow.addView(Spinner(this).apply {
+                    adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, toolShelf.penStyles.map { it.name })
+                    setSelection(toolShelf.penStyles.indexOfFirst { it.id == tool.penStyleId }.coerceAtLeast(0))
+                    onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                        override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                            val preset = toolShelf.penStyles[position]
+                            if (toolShelf.selectedId != tool.id || tool.penStyleId == preset.id) return
+                            toolShelf.applyPenStyle(tool, preset); persistToolShelf(); rebuildBrush()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                toolDetailRow.addView(presetRow, LinearLayout.LayoutParams(MATCH, dp(42)))
                 toolDetailRow.addView(
                     parameterControl("笔宽", ((tool.widthMm * 10).roundToInt() - 1).coerceIn(0, 19), 19, { "${(it + 1) / 10f} mm" }) {
                         tool.widthMm = (it + 1) / 10f
-                        persistToolShelf()
-                        rebuildBrush()
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
-                )
-                toolDetailRow.addView(
-                    parameterControl("压感", tool.pressurePercent, 400, { "$it%" }) {
-                        tool.pressurePercent = it
-                        persistToolShelf()
-                        rebuildBrush()
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
-                )
-                toolDetailRow.addView(
-                    parameterControl("出墨", tool.inkFlowPercent, 200, { "$it%" }) {
-                        tool.inkFlowPercent = it
-                        persistToolShelf()
-                        rebuildBrush()
-                    },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
-                )
-                toolDetailRow.addView(
-                    parameterControl("稳定性", tool.stabilityPercent, 100, { "$it%" }) {
-                        tool.stabilityPercent = it
                         persistToolShelf()
                         rebuildBrush()
                     },
@@ -5075,6 +5069,15 @@ class MainActivity : Activity() {
                         rebuildBrush()
                         renderToolShelf()
                         renderToolDetails()
+                    })
+                }
+                if (tool.kind == DrawingToolKind.PEN) {
+                    addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
+                    addView(detailChip("配置", false) {
+                        toolDetailPopup?.dismiss()
+                        PenStyleDialog(this@MainActivity, toolShelf, tool) {
+                            persistToolShelf(); rebuildBrush(); renderToolDetails()
+                        }.show()
                     })
                 }
             }
@@ -5556,7 +5559,7 @@ class MainActivity : Activity() {
                     opacityPercent = tool.opacityPercent,
                 )
             else ->
-                BrushProfiles.create(
+                tool.penStyle?.let { BrushProfiles.createStyle(tool.widthMm * INTERNAL_UNITS_PER_MM, it, displayColor(tool.color)) } ?: BrushProfiles.create(
                     sizePx = tool.widthMm * INTERNAL_UNITS_PER_MM,
                     pressureCorrect = tool.pressurePercent / 100f,
                     speedCorrect = tool.inkFlowPercent / 100f,

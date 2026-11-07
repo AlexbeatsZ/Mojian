@@ -23,43 +23,6 @@
         <vm:ShapeLabelConverter x:Key="ShapeLabelConverter" />
         <vm:FluentIconConverter x:Key="FluentIcon" />
         <vm:FluentDrawingIconConverter x:Key="FluentDrawingIcon" />
-        <Style x:Key="ShapeChooserStyle" TargetType="ComboBox">
-            <Setter Property="Foreground" Value="#F4F4F4" />
-            <Setter Property="Background" Value="#303030" />
-            <Setter Property="Height" Value="32" />
-            <Setter Property="ItemContainerStyle">
-                <Setter.Value>
-                    <Style TargetType="ComboBoxItem">
-                        <Setter Property="Foreground" Value="#F4F4F4" />
-                        <Setter Property="Padding" Value="10,7" />
-                        <Setter Property="Template">
-                            <Setter.Value><ControlTemplate TargetType="ComboBoxItem">
-                                <Border x:Name="ItemBorder" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
-                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate></Setter.Value>
-                        </Setter>
-                    </Style>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="Template">
-                <Setter.Value><ControlTemplate TargetType="ComboBox">
-                    <Grid>
-                        <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#303030" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="2" /></ControlTemplate></ToggleButton.Template>
-                        </ToggleButton>
-                        <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="10,0,25,0" VerticalAlignment="Center" IsHitTestVisible="False" />
-                        <Path Data="M0,0L4,4L8,0" Stroke="#B9B9B9" StrokeThickness="1.5" Width="8" Height="4" Stretch="Fill" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" IsHitTestVisible="False" />
-                        <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Placement="Bottom" Focusable="False">
-                            <Border Background="#232323" BorderBrush="#4A4A4A" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"><ScrollViewer MaxHeight="320"><ItemsPresenter /></ScrollViewer></Border>
-                        </Popup>
-                    </Grid>
-                </ControlTemplate></Setter.Value>
-            </Setter>
-        </Style>
-
         <Style x:Key="PaneRow" TargetType="Border">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="CornerRadius" Value="2" />
@@ -591,20 +554,22 @@
                 <Border Height="1" Background="{StaticResource BorderHairline}" Margin="0,0,0,8" />
 
                 <StackPanel Visibility="{Binding SelectedToolIsPen, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <DockPanel Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="配置" Width="52" Height="30" Style="{StaticResource RibbonIconButtonStyle}" ToolTip="新建或修改笔触预设" Click="OnPenStyleConfigurationClick" />
+                    <StackPanel Orientation="Horizontal">
                         <TextBlock Text="颜色" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="黑色" Tag="Black" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#1B1B1F" Stroke="White" StrokeThickness="1" /></Button>
                         <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="蓝色" Tag="Blue" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#185ABD" /></Button>
                         <Button Style="{StaticResource RibbonIconButtonStyle}" Width="34" Height="30" ToolTip="红色" Tag="Red" Click="OnSetToolColorClick"><Ellipse Width="18" Height="18" Fill="#C42B1C" /></Button>
                     </StackPanel>
+                    </DockPanel>
+                    <DockPanel Margin="0,0,0,12">
+                        <TextBlock Text="预设" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <ComboBox x:Name="PenStyleSelector" Style="{StaticResource ShapeChooserStyle}" Height="30" DisplayMemberPath="Name" SelectedValuePath="Id"
+                                  ItemsSource="{Binding ToolShelf.PenStyles}" SelectedValue="{Binding SelectedTool.PenStyleId, Mode=OneWay}" SelectionChanged="OnPenStyleSelectionChanged" />
+                    </DockPanel>
                     <DockPanel><TextBlock Text="笔宽" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=WidthSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="WidthSlider" Minimum="0.1" Maximum="2" SmallChange="0.1" LargeChange="0.5" TickFrequency="0.1" Value="{Binding SelectedTool.WidthMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
-                    <DockPanel Margin="0,8,0,0"><TextBlock Text="压感" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=PressureSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="PressureSlider" Minimum="0" Maximum="400" TickFrequency="10" Value="{Binding SelectedTool.PressurePercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
-                    <DockPanel Margin="0,8,0,0"><TextBlock Text="出墨" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=FlowSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="FlowSlider" Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding SelectedTool.InkFlowPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
-                    <DockPanel Margin="0,8,0,0"><TextBlock Text="稳定性" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=StabilitySlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
-                    <Slider x:Name="StabilitySlider" Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding SelectedTool.StabilityPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}">

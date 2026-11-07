@@ -7,6 +7,10 @@
 
 # Current State
 
+- **0.7.25 source (Windows/Android code31)**: pen color row has a configuration button plus a separate
+  saved-preset selector. New/edit named styles own pressure/speed curves, direction, tapers, stability,
+  tilt and turn response. Configured new ink snapshots `pen-style-v1` and its canonical outline;
+  historical readers stay unchanged. Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
 - **Windows 0.7.24 source**: repeated contact on an already focused canvas returns before the
   main-window focus route can flush page saves/write settings/rebuild appearance. A real-window
   PreviewMouseDown regression with a blocked writer measured 1,017 -> 0.35 ms; actual split-slot
@@ -76,6 +80,7 @@
 
 # Active Work
 
+- 0.7.25 final isolated build/publication is in progress; do not replace the running Windows EXE.
 - Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
@@ -163,6 +168,7 @@
 
 # Docs Index
 
+- `docs/design/pen-style-presets.md`: independent selector/configuration, named style editing and immutable stroke snapshots.
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
 

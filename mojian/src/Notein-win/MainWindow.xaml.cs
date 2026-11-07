@@ -1230,6 +1230,23 @@ public partial class MainWindow : Window
         if (sender is Button button && Enum.TryParse<InkPalette>(button.Tag?.ToString(), out var color)) ViewModel.SetSelectedToolColor(color);
     }
 
+    private void OnPenStyleSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || !ViewModel.SelectedToolIsPen || PenStyleSelector.SelectedItem is not NamedPenStyle preset || ViewModel.SelectedTool.PenStyleId == preset.Id) return;
+        ViewModel.ToolShelf.ApplyPenStyle(ViewModel.SelectedTool, preset);
+        ViewModel.SaveToolSettings();
+    }
+
+    private void OnPenStyleConfigurationClick(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.SelectedToolIsPen) return;
+        ViewModel.IsToolFlyoutOpen = false;
+        var dialog = new PenStyleDialog(ViewModel.ToolShelf, ViewModel.SelectedTool) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        PenStyleSelector.Items.Refresh();
+        ViewModel.SaveToolSettings();
+    }
+
     private void OnSetLassoShapeClick(object sender, RoutedEventArgs e)
     {
         if (sender is ToggleButton button && Enum.TryParse<LassoShape>(button.Tag?.ToString(), out var shape))

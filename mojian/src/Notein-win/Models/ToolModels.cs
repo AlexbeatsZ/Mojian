@@ -72,6 +72,8 @@ public class ToolPreset
     public int PressurePercent { get; set; } = 200;
     public int InkFlowPercent { get; set; } = 100;
     public int StabilityPercent { get; set; } = 50;
+    public string PenStyleId { get; set; } = string.Empty;
+    public PenStyle? PenStyle { get; set; }
     public int OpacityPercent { get; set; } = 32;
     public float EraserRadiusMm { get; set; } = 4.5f;
     public bool PressureEraseEnabled { get; set; }
@@ -134,6 +136,8 @@ public class ToolPreset
             ["pressurePercent"] = PressurePercent,
             ["inkFlowPercent"] = InkFlowPercent,
             ["stabilityPercent"] = StabilityPercent,
+            ["penStyleId"] = PenStyleId,
+            ["penStyle"] = PenStyle?.ToJson(),
             ["opacityPercent"] = OpacityPercent,
             ["eraserRadiusMm"] = EraserRadiusMm,
             ["pressureEraseEnabled"] = PressureEraseEnabled,
@@ -175,6 +179,8 @@ public class ToolPreset
             var preset = new ToolPreset(id, kind, color, widthMm, pressurePercent, inkFlowPercent, opacityPercent, eraserRadiusMm, pressureEraseEnabled)
             {
                 StabilityPercent = Math.Clamp(json["stabilityPercent"]?.GetValue<int>() ?? 50, 0, 100),
+                PenStyleId = json["penStyleId"]?.GetValue<string>() ?? string.Empty,
+                PenStyle = Models.PenStyle.FromJson(json["penStyle"] as JsonObject),
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
                 PressureEraseTravelLimitMm = Math.Clamp(json["pressureEraseTravelLimitMm"]?.GetValue<float>() ?? 1f, .1f, 10f),
@@ -196,6 +202,8 @@ public class ToolShelf
 {
     private readonly List<ToolPreset> _mutableTools;
     private int _sequence;
+    private readonly List<NamedPenStyle> _penStyles = [];
+    public IReadOnlyList<NamedPenStyle> PenStyles => _penStyles;
 
     public string SelectedId { get; private set; }
 
@@ -210,6 +218,8 @@ public class ToolShelf
         RestoreMissingDefaults();
         _sequence = _mutableTools.Count + 1;
         SelectedId = _mutableTools[0].Id;
+        _penStyles.AddRange(NamedPenStyle.Defaults());
+        RegisterExistingPenStyles();
     }
 
     public bool Select(string id)
@@ -252,6 +262,7 @@ public class ToolShelf
         };
 
         _mutableTools.Add(preset);
+        if (kind == DrawingToolKind.Pen) ApplyPenStyle(preset, _penStyles.First(p => p.Id == "natural"));
         SelectedId = preset.Id;
         return preset;
     }
@@ -260,6 +271,8 @@ public class ToolShelf
     {
         _mutableTools.Clear();
         _mutableTools.AddRange(other._mutableTools);
+        _penStyles.Clear();
+        _penStyles.AddRange(other._penStyles.Select(s => s with { Style = s.Style.Copy() }));
         RestoreMissingDefaults();
         SelectedId = _mutableTools.Any(t => t.Id == other.SelectedId) ? other.SelectedId : _mutableTools[0].Id;
         _sequence = _mutableTools.Count + 1;
@@ -286,7 +299,50 @@ public class ToolShelf
             array.Add(tool.ToJson());
         }
         root["tools"] = array;
+        root["penStyles"] = new JsonArray(_penStyles.Select(s => (JsonNode)s.ToJson()).ToArray());
         return root.ToJsonString();
+    }
+
+    public PenStyle EffectivePenStyle(ToolPreset tool) => tool.PenStyle?.Copy() ?? Models.PenStyle.FromLegacy(tool.PressurePercent, tool.InkFlowPercent, tool.StabilityPercent);
+
+    private void RegisterExistingPenStyles()
+    {
+        foreach (var tool in _mutableTools.Where(t => t.Kind == DrawingToolKind.Pen && string.IsNullOrEmpty(t.PenStyleId)))
+        {
+            var style = EffectivePenStyle(tool);
+            var preset = _penStyles.FirstOrDefault(s => s.Style.Key() == style.Key());
+            if (preset == null)
+            {
+                var name = tool.DisplayName + "（原设置）";
+                var uniqueName = name; var suffix = 2;
+                while (_penStyles.Any(p => p.Name == uniqueName)) uniqueName = name + " " + suffix++;
+                preset = new("migrated-" + tool.Id, uniqueName, style);
+                _penStyles.Add(preset);
+            }
+            tool.PenStyleId = preset.Id;
+        }
+    }
+
+    public void ApplyPenStyle(ToolPreset tool, NamedPenStyle preset)
+    {
+        tool.PenStyleId = preset.Id;
+        tool.PenStyle = preset.Style.Copy();
+        tool.StabilityPercent = preset.Style.StabilityPercent;
+    }
+
+    public NamedPenStyle SavePenStyle(string? id, string name, PenStyle style)
+    {
+        name = name.Trim();
+        if (name.Length is < 1 or > 40) throw new ArgumentException("名称须为 1–40 个字符。");
+        if (_penStyles.Any(p => p.Id != id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("已有同名预设，请使用其他名称。");
+        var valid = Models.PenStyle.FromJson(style.ToJson()) ?? throw new ArgumentException("笔触参数无效。");
+        var saved = new NamedPenStyle(id ?? Guid.NewGuid().ToString("N"), name, valid);
+        var index = _penStyles.FindIndex(p => p.Id == saved.Id);
+        if (id != null && index < 0) throw new ArgumentException("预设已不存在，请新建预设。");
+        if (index < 0) _penStyles.Add(saved); else _penStyles[index] = saved;
+        foreach (var tool in _mutableTools.Where(t => t.Kind == DrawingToolKind.Pen && t.PenStyleId == saved.Id)) ApplyPenStyle(tool, saved);
+        return saved;
     }
 
     private InkPalette NextPenColor()
@@ -329,6 +385,13 @@ public class ToolShelf
             if (list.Count == 0) return null;
 
             var shelf = new ToolShelf(list);
+            if (node["penStyles"] is JsonArray styles)
+                foreach (var item in styles.OfType<JsonObject>())
+                    if (NamedPenStyle.FromJson(item) is { } saved)
+                    {
+                        var index = shelf._penStyles.FindIndex(s => s.Id == saved.Id);
+                        if (index < 0) shelf._penStyles.Add(saved); else shelf._penStyles[index] = saved;
+                    }
             var selectedId = node["selectedId"]?.GetValue<string>();
             if (!string.IsNullOrEmpty(selectedId) && list.Any(t => t.Id == selectedId))
             {

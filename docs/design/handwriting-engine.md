@@ -263,6 +263,15 @@ applies to both apps and is not the differentiator.
 
 ## Research Model
 
+### Configurable style presets
+
+`pen-style-v1` adds named, editable pressure/speed curves, direction, independent start/end taper,
+stability and advanced tilt/turn/response controls. The pen flyout has a separate saved-preset
+dropdown and a configuration button at the right of its color row. New/edit/save operations live
+inside that configuration window. Read `pen-style-presets.md` before changing this model or UI.
+The calibrated v2 and legacy v1 readers remain unchanged; configured new strokes capture their
+own behavior and canonical outline rather than looking up a mutable preset when rendering.
+
 Treat perceived handwriting quality as two independently testable systems:
 
 1. **Following quality** — event history, motion prediction, front-buffer rendering, modeled-input

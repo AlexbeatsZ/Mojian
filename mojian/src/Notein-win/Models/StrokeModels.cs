@@ -11,6 +11,8 @@ public sealed class InkPoint
     public float Pressure { get; set; } = 0.5f;
     public float TiltX { get; set; }
     public float TiltY { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public float? TiltRadians { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public float? OrientationRadians { get; set; }
     public long ElapsedMilliseconds { get; set; }
 
     public InkPoint() { }
@@ -51,6 +53,7 @@ public sealed class StrokeRecord
     public int PressurePercent { get; set; } = 200;
     public int InkFlowPercent { get; set; } = 100;
     public int StabilityPercent { get; set; } = 50;
+    public PenStyle? PenStyle { get; set; }
     public double StrokeUnitLengthCm { get; set; }
     public int OpacityPercent { get; set; } = 100;
     public string BrushProfile { get; set; } = "fountain-v1";
@@ -167,8 +170,9 @@ public sealed class StrokeRecord
     public StrokeRecord CopyForSave(Notein_win.Services.StrokePointSnapshotCache? pointCache = null)
     {
         var copy = (StrokeRecord)MemberwiseClone();
-        copy.Points = pointCache?.Get(this) ?? Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
+        copy.Points = pointCache?.Get(this) ?? Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, TiltRadians = point.TiltRadians, OrientationRadians = point.OrientationRadians, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
         copy.VectorBounds = VectorBounds?.ToArray();
+        copy.PenStyle = PenStyle?.Copy();
         copy.VectorTransform = VectorTransform.ToArray();
         // UI-owned geometry is never carried into a background writer.
         copy._vectorGeometry = copy._transformedVectorGeometry = null;

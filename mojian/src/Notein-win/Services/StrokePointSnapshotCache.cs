@@ -23,6 +23,7 @@ public sealed class StrokePointSnapshotCache
             entry.Points = stroke.Points.Select(p => new InkPoint
             {
                 X = p.X, Y = p.Y, Pressure = p.Pressure, TiltX = p.TiltX, TiltY = p.TiltY, ElapsedMilliseconds = p.ElapsedMilliseconds,
+                TiltRadians = p.TiltRadians, OrientationRadians = p.OrientationRadians,
             }).ToList();
             entry.Source = stroke.Points;
             entry.Version = stroke.RenderVersion;

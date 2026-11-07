@@ -2000,7 +2000,8 @@ public partial class NoteCanvas : UserControl
                     PressurePercent = tool.PressurePercent,
                     InkFlowPercent = tool.InkFlowPercent,
                     StabilityPercent = tool.StabilityPercent,
-                    BrushProfile = tool.Kind == DrawingToolKind.Pen ? FountainV2Model.Profile : "fountain-v1",
+                    PenStyle = tool.Kind == DrawingToolKind.Pen ? tool.PenStyle?.Copy() : null,
+                    BrushProfile = tool.Kind == DrawingToolKind.Pen ? (tool.PenStyle != null ? PenStyle.Profile : FountainV2Model.Profile) : "fountain-v1",
                     StrokeUnitLengthCm = InkPhysicalScale.ForVisual(this, _viewport.Scale),
                     OpacityPercent = tool.Kind == DrawingToolKind.Pen ? 100 : tool.OpacityPercent,
                 };
@@ -2262,7 +2263,8 @@ public partial class NoteCanvas : UserControl
             if (_activeStroke.Points.Count == 1)
             {
                 var first = _activeStroke.Points[0];
-                _activeStroke.Points.Add(new InkPoint(first.X + 0.01f, first.Y + 0.01f, first.Pressure, elapsedMilliseconds: first.ElapsedMilliseconds + 1));
+                _activeStroke.Points.Add(new InkPoint(first.X + 0.01f, first.Y + 0.01f, first.Pressure, first.TiltX, first.TiltY, first.ElapsedMilliseconds + 1)
+                    { TiltRadians = first.TiltRadians, OrientationRadians = first.OrientationRadians });
                 _activeStroke.InvalidateBounds();
             }
             if (_explicitShape && _activeStroke.Points.All(p => Distance(p.ToPoint(), _shapeStart) < 2))
@@ -2270,7 +2272,7 @@ public partial class NoteCanvas : UserControl
                 Document.Strokes.Remove(_activeStroke);
                 if (_undo.Count > 0) _undo.Pop();
             }
-            if (_activeStroke.BrushProfile == FountainV2Model.Profile)
+            if (_activeStroke.BrushProfile is FountainV2Model.Profile or PenStyle.Profile)
                 FountainV2Model.StoreOutline(_activeStroke);
             _explicitShape = false;
             _activeStroke = null;
@@ -3358,7 +3360,7 @@ public partial class NoteCanvas : UserControl
                 return;
             }
 
-            dc.DrawGeometry(brush, null, stroke.BrushProfile == FountainV2Model.Profile
+            dc.DrawGeometry(brush, null, stroke.BrushProfile is FountainV2Model.Profile or PenStyle.Profile
                 ? FountainV2Model.CreateGeometry(stroke) : FountainStrokeGeometry.Create(stroke));
     }
 
@@ -3825,6 +3827,7 @@ public partial class NoteCanvas : UserControl
         PressurePercent = source.PressurePercent,
         InkFlowPercent = source.InkFlowPercent,
         StabilityPercent = source.StabilityPercent,
+        PenStyle = source.PenStyle?.Copy(),
         StrokeUnitLengthCm = source.StrokeUnitLengthCm,
         OpacityPercent = source.OpacityPercent,
         BrushProfile = source.BrushProfile,
@@ -3837,7 +3840,7 @@ public partial class NoteCanvas : UserControl
         VectorTransform = source.VectorTransform.Select((value, index) => index >= 4 ? value + offset : value).ToArray(),
         Points = source.Points.Select(point => new InkPoint {
             X = point.X + offset, Y = point.Y + offset, Pressure = point.Pressure,
-            TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList(),
+            TiltX = point.TiltX, TiltY = point.TiltY, TiltRadians = point.TiltRadians, OrientationRadians = point.OrientationRadians, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList(),
     };
 
     private static CanvasTag CloneTag(CanvasTag source, float offset = 0) => new()

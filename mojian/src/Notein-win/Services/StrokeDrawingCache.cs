@@ -11,14 +11,14 @@ public sealed class StrokeDrawingCache
     public int BuildCount { get; private set; }
     private sealed record Signature(long Version, int Points, DrawingToolKind Kind, InkPalette Color,
         string ColorHex, float Width, int Pressure, int Flow, int Stability, double UnitCm, int Opacity, string Profile,
-        bool Dark, bool Export, Geometry? Outline, bool InvertImportedImages);
+        bool Dark, bool Export, Geometry? Outline, bool InvertImportedImages, PenStyle? Style);
     private sealed class Entry { public Signature? Signature; public DrawingGroup? Drawing; }
 
     public DrawingGroup Get(StrokeRecord stroke, bool dark, bool export, Action<DrawingContext> draw, bool invertImportedImages = false)
     {
         var signature = new Signature(stroke.RenderVersion, stroke.Points.Count, stroke.Kind, stroke.Color,
             stroke.ColorHex, stroke.WidthMm, stroke.PressurePercent, stroke.InkFlowPercent, stroke.StabilityPercent, stroke.StrokeUnitLengthCm,
-            stroke.OpacityPercent, stroke.BrushProfile, dark, export, stroke.VectorGeometry, invertImportedImages);
+            stroke.OpacityPercent, stroke.BrushProfile, dark, export, stroke.VectorGeometry, invertImportedImages, stroke.PenStyle);
         var entry = _entries.GetOrCreateValue(stroke);
         if (entry.Signature == signature && entry.Drawing != null) return entry.Drawing;
         var drawing = new DrawingGroup();

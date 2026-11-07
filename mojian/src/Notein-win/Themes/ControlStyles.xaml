@@ -316,4 +316,41 @@
         </Setter>
     </Style>
 
+        <Style x:Key="ShapeChooserStyle" TargetType="ComboBox">
+            <Setter Property="Foreground" Value="#F4F4F4" />
+            <Setter Property="Background" Value="#303030" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Foreground" Value="#F4F4F4" />
+                        <Setter Property="Padding" Value="10,7" />
+                        <Setter Property="Template">
+                            <Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+                                <Border x:Name="ItemBorder" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
+                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate></Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value><ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#303030" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="2" /></ControlTemplate></ToggleButton.Template>
+                        </ToggleButton>
+                        <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="10,0,25,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+                        <Path Data="M0,0L4,4L8,0" Stroke="#B9B9B9" StrokeThickness="1.5" Width="8" Height="4" Stretch="Fill" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" IsHitTestVisible="False" />
+                        <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Placement="Bottom" Focusable="False">
+                            <Border Background="#232323" BorderBrush="#4A4A4A" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"><ScrollViewer MaxHeight="320"><ItemsPresenter /></ScrollViewer></Border>
+                        </Popup>
+                    </Grid>
+                </ControlTemplate></Setter.Value>
+            </Setter>
+        </Style>
+
 </ResourceDictionary>

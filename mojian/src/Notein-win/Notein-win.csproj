@@ -9,13 +9,14 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>Mojian</AssemblyName>
     <Product>墨笺</Product>
-    <Version>0.7.24</Version>
+    <Version>0.7.25</Version>
     <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Assets\mojian.png" />
     <EmbeddedResource Include="../../../shared/page-backgrounds.json" LogicalName="Mojian.PageBackgrounds.json" />
+    <EmbeddedResource Include="../../../shared/pen-style-presets.json" LogicalName="Mojian.PenStylePresets.json" />
   </ItemGroup>
 
 </Project>

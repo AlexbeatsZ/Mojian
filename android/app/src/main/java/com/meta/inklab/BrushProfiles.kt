@@ -42,10 +42,58 @@ object BrushProfiles {
     /** Stored `brushProfile` of older strokes (including pre-0.7.21 Windows ink); see [createLegacy]. */
     const val FOUNTAIN_V1 = "fountain-v1"
     private const val FOUNTAIN_V2_FAMILY_PREFIX = "inklab-fountain-v4-"
+    private const val STYLE_PREFIX = "inklab-pen-style-v1:"
 
     /** Profile written to the shared JSON for a stroke drawn with this family. */
     fun storedProfile(clientBrushFamilyId: String): String =
-        if (clientBrushFamilyId.startsWith(FOUNTAIN_V2_FAMILY_PREFIX)) FOUNTAIN_V2 else FOUNTAIN_V1
+        if (clientBrushFamilyId.startsWith(STYLE_PREFIX)) PenStyle.PROFILE else if (clientBrushFamilyId.startsWith(FOUNTAIN_V2_FAMILY_PREFIX)) FOUNTAIN_V2 else FOUNTAIN_V1
+
+    fun styleFromFamilyId(id: String): PenStyle? = if (!id.startsWith(STYLE_PREFIX)) null else runCatching {
+        PenStyle.fromJson(org.json.JSONObject(String(java.util.Base64.getUrlDecoder().decode(id.removePrefix(STYLE_PREFIX)), Charsets.UTF_8)))
+    }.getOrNull()
+
+    /** Compile the same persisted style model into the pinned AndroidX behavior graph. */
+    fun createStyle(sizePx: Float, style: PenStyle, colorArgb: Int): Brush {
+        fun curve(source: BrushBehavior.Source, points: List<CurvePoint>, ms: Int, stylusOnly: Boolean = true): BrushBehavior? {
+            val lo = points.minOf { it.y }.toFloat(); val hi = points.maxOf { it.y }.toFloat()
+            if (kotlin.math.abs(hi - lo) < 1e-5f && kotlin.math.abs(lo - 1f) < 1e-5f) return null
+            val constant = kotlin.math.abs(hi - lo) < 1e-5f
+            val response = if (constant) listOf(ImmutableVec(0f, 1f)) else points.map {
+                ImmutableVec((it.x / points.last().x).toFloat(), ((it.y - lo) / (hi - lo)).toFloat())
+            }
+            return BrushBehavior(
+                source = source, target = BrushBehavior.Target.SIZE_MULTIPLIER,
+                sourceValueRangeStart = 0f, sourceValueRangeEnd = points.last().x.toFloat(),
+                targetModifierRangeStart = if (constant) 1f else lo, targetModifierRangeEnd = if (constant) lo else hi,
+                responseCurve = EasingFunction.Linear(response), responseTimeMillis = ms.toLong(),
+                enabledToolTypes = if (stylusOnly) setOf(InputToolType.STYLUS) else BrushBehavior.ALL_TOOL_TYPES,
+            )
+        }
+        fun modifier(source: BrushBehavior.Source, sourceStart: Float, sourceEnd: Float, low: Float, high: Float, ms: Int = 0): BrushBehavior? =
+            if (!isEffectiveModifierRange(low, high)) null else BrushBehavior(
+                source = source, target = BrushBehavior.Target.SIZE_MULTIPLIER,
+                sourceValueRangeStart = sourceStart, sourceValueRangeEnd = sourceEnd,
+                targetModifierRangeStart = low, targetModifierRangeEnd = high, responseTimeMillis = ms.toLong(),
+            )
+        val unitsPerMm = DOCUMENT_UNITS_PER_MM
+        val behaviors = listOfNotNull(
+            StockBrushes.predictionFadeOutBehavior,
+            if (style.pressureEnabled) curve(BrushBehavior.Source.NORMALIZED_PRESSURE, style.pressureCurve, style.pressureResponseMs) else null,
+            if (style.speedEnabled) curve(BrushBehavior.Source.INPUT_SPEED_IN_CENTIMETERS_PER_SECOND, style.speedCurve, style.speedResponseMs) else null,
+            if (style.directionEnabled) modifier(BrushBehavior.Source.NORMALIZED_DIRECTION_Y, .45f, .65f, 1f, (1 + style.directionAmount).toFloat(), style.directionResponseMs) else null,
+            if (style.startEnabled) modifier(BrushBehavior.Source.DISTANCE_TRAVELED_IN_MULTIPLES_OF_BRUSH_SIZE,
+                0f, (style.startLengthMm * unitsPerMm / sizePx).toFloat(), style.startMinimum.toFloat(), 1f) else null,
+            if (style.endEnabled) modifier(BrushBehavior.Source.DISTANCE_REMAINING_IN_MULTIPLES_OF_BRUSH_SIZE,
+                (style.endLengthMm * unitsPerMm / sizePx).toFloat(), 0f, 1f, style.endMinimum.toFloat()) else null,
+            if (style.tiltEnabled) modifier(BrushBehavior.Source.TILT_IN_RADIANS, 0f, (Math.PI / 3).toFloat(), 1f, style.tiltWidth.toFloat()) else null,
+            if (style.turnEnabled) modifier(BrushBehavior.Source.INPUT_ACCELERATION_LATERAL_IN_CENTIMETERS_PER_SECOND_SQUARED,
+                -80f, -230f, 1f, (1 + style.turnAmount).toFloat(), 25) else null,
+        )
+        // A self-contained family id carries the immutable snapshot through asynchronous pen-up.
+        val id = STYLE_PREFIX + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(style.toJson().toString().toByteArray(Charsets.UTF_8))
+        val family = BrushFamily(tip = BrushTip(behaviors = behaviors), clientBrushFamilyId = id, inputModel = stabilityModel(style.stabilityPercent))
+        return Brush.createWithColorIntArgb(family = family, colorIntArgb = colorArgb, size = sizePx, epsilon = .01f)
+    }
 
     /**
      * Width at full pressure and rest, relative to the nominal tool width. Calibrated against Notein

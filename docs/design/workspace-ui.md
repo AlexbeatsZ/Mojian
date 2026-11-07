@@ -154,6 +154,11 @@ Each toolbar item is a `ToolPreset`, not a global mode plus unrelated settings. 
 a new preset. Tool presets are add-only: neither the ribbon nor a tool flyout may expose a delete-tool
 button, and persisted presets are never silently discarded.
 
+Pen mark styles are a named library within that existing ToolShelf. A separate saved-preset dropdown
+chooses the current pen style; a configuration button at the right of the color row opens new/edit
+operations. Color/nominal width stay per tool, behavior curves and stability live in the style editor.
+Read `pen-style-presets.md` for snapshot ownership, editing and history compatibility.
+
 Required working tools:
 
 - fountain pen with logical black, blue, or red color plus independent width, pressure response,
