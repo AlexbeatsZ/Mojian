@@ -268,6 +268,9 @@ class PageContentRepositoryTest {
             val document = PageInsertDocument("book", "page")
             document.objects += InsertObject.NoteLink("first", 1f, 2f, 300f, 32f, "b", "s", "p", "first")
             repository.save(document)
+            // A renamed-in copy of our own bytes forces the content hash (new inode).
+            val file = repository.pageFile("book", "page")
+            replaceByRename(file, file.readText())
             rewriteDuringHash = true
             document.objects += InsertObject.NoteLink("second", 1f, 2f, 300f, 32f, "b", "s", "p", "second")
             repository.save(document)
@@ -287,7 +290,7 @@ class PageContentRepositoryTest {
             val file = repository.pageFile("book", "page")
             val modified = file.lastModified()
             val external = file.readText().replace("\"mine\"", "\"else\"")
-            file.writeText(external)
+            replaceByRename(file, external)
             // HyperOS can report the replaced file's mtime: same size + same mtime as our own write.
             assertTrue(file.setLastModified(modified))
             assertEquals(document.diskStamp, repository.pageStamp("book", "page"))
@@ -311,7 +314,7 @@ class PageContentRepositoryTest {
             val stamp = repository.pageStamp("book", "page")
             val external = original.replace("\"mine\"", "\"else\"")
             assertEquals(original.length, external.length)
-            file.writeText(external)
+            replaceByRename(file, external)
             assertTrue(file.setLastModified(1_700_000_000_000L))
 
             assertTrue(repository.pageChanged("book", "page"))
@@ -361,5 +364,39 @@ class PageContentRepositoryTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    /** Every real writer of a canonical page (Mojian, native sync, Syncthing) publishes by rename. */
+    private fun replaceByRename(file: java.io.File, text: String) {
+        val temporary = java.io.File(file.parentFile, "${file.name}.external.tmp").apply { writeText(text) }
+        Files.move(temporary.toPath(), file.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+
+    @Test
+    fun unchangedInodeSkipsFullReReadButReplacementIsStillHashed() {
+        val root = Files.createTempDirectory("mojian-physical-identity").toFile()
+        try {
+            var hashes = 0
+            val repository = PageContentRepository(root) { hashes++; NativeSyncFiles.hash(it) }
+            val document = PageInsertDocument("book", "page")
+            document.objects += InsertObject.NoteLink("first", 1f, 2f, 300f, 32f, "b", "s", "p", "first")
+            repository.save(document)
+            val file = repository.pageFile("book", "page")
+            // Windows NTFS exposes no inode key; the repository then always hashes (covered elsewhere).
+            org.junit.Assume.assumeTrue(Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey() != null)
+            // HyperOS mtime rewrite only: same inode and size, no 6.5 MB re-read needed.
+            assertTrue(file.setLastModified(file.lastModified() - 86_400_000L))
+            document.objects += InsertObject.NoteLink("second", 1f, 2f, 300f, 32f, "b", "s", "p", "second")
+            repository.save(document)
+            assertEquals(0, hashes)
+
+            // A renamed-in replacement with our own bytes has a new inode: content is hashed and accepted.
+            replaceByRename(file, file.readText())
+            document.objects += InsertObject.NoteLink("third", 1f, 2f, 300f, 32f, "b", "s", "p", "third")
+            repository.save(document)
+            assertEquals(1, hashes)
+            assertEquals(listOf("first", "second", "third"), PageContentRepository(root).load("book", "page").objects.map { it.id })
+        } finally { root.deleteRecursively() }
     }
 }

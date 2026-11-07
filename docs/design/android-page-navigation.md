@@ -97,6 +97,18 @@ native sync cannot publish an intermediate index/assets snapshot.
   只改写 mtime，0.7.15 曾在算 6.5 MB 哈希时撞上改写而误拒保存；同步扫描 `NativeSyncHashCache`
   同理，否则整轮同步报"本地文件正在修改"。墨笺以 rename 发布，真实替换必然换 inode。
 
+## 密集页保存提速（0.7.19）
+
+- 每次保存都整页重写，但绝大部分是没变的笔画。笔画 JSON 一经生成即不再原地修改（变换会复制，加载的
+  笔画保留解析出的对象），因此按对象身份缓存：`StrokeTextCache` 保存当前页每笔序列化后的文本，每次
+  写入只保留页面上仍存在的笔画，超过 2400 万字符即停止缓存，避免导入的超大页面在内存中翻倍；输出字节
+  与不缓存时完全相同。`WorkspaceJson.fingerprint` 对每笔缓存 32 字节的类型化摘要。
+- 写前核对：只要大小 + inode 与本进程最后一次读/写时一致就不再重读整页算哈希。前提是墨笺、原生同步
+  与 Syncthing 都以"临时文件 + rename"发布页面，外部替换必换 inode；不支持其他程序原地改写同一 inode
+  且长度不变。拿不到 inode 的文件系统（如 Windows NTFS 的 Java `fileKey()`）退回每次哈希。
+- logcat `MojianSync page saved in N ms (UI snapshot …; verify/encode/write/fingerprint …, strokes cached x/y)`
+  分段记录耗时，便于在平板上确认收益。
+
 ## 后台冻结与残留临时文件（0.7.17）
 
 - 2026-11-07 平板：切到其他应用约 3 s 后 HyperOS SmartPower 把墨笺置为 idle（冻结），6.5 MB 页面

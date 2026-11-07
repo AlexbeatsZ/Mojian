@@ -5439,6 +5439,7 @@ class MainActivity : Activity() {
         val document=insertContentLayer.currentDocument() ?: return false
         if (document.notebookId!=key.notebookId || document.pageId!=key.pageId) return false
         try {
+            val snapshotStarted = android.os.SystemClock.uptimeMillis()
             val snapshot = synchronized(document) {
                 document.strokes=org.json.JSONArray().apply { dryInkView.snapshotStrokes().forEach { put(SharedStrokeCodec.encode(it)) } }
                 val source=JSONObject().apply { document.sharedSource.keys().forEach { key->put(key,document.sharedSource.get(key)) } }
@@ -5448,13 +5449,15 @@ class MainActivity : Activity() {
                     document.strokes,source,document.diskStamp)
             }
             val submittedAt = android.os.SystemClock.uptimeMillis()
+            val snapshotMillis = submittedAt - snapshotStarted
             pageWrites.submit(pageContentRepository,document,snapshot, failed = { error -> runOnUiThread {
                 if(boundPageKey==key) contentDirty=true
                 Toast.makeText(this,"笔记未保存：${error.message}",Toast.LENGTH_LONG).show()
                 android.util.Log.e("MojianSync","Save refused",error)
             } }, saved = {
                 // Queue wait + verify + encode + write; dense pages decide whether pause/background saves finish.
-                android.util.Log.i("MojianSync", "page saved in ${android.os.SystemClock.uptimeMillis() - submittedAt} ms")
+                android.util.Log.i("MojianSync", "page saved in ${android.os.SystemClock.uptimeMillis() - submittedAt} ms " +
+                    "(UI snapshot $snapshotMillis ms; ${pageContentRepository.lastSaveTimings})")
                 nativeSyncController.localSaved()
             })
             contentDirty=false

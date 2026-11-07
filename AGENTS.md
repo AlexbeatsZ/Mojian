@@ -8,6 +8,10 @@
 
 # Current State
 
+- **Android 0.7.19** (code27): faster dense-page saves. Unchanged strokes reuse cached serialized
+  text (`StrokeTextCache`, current page only, 24M-char cap) and cached per-stroke fingerprint digests;
+  the pre-write check skips re-reading the page while size + inode match our last write (writers
+  publish by rename). Save phases are logged as `MojianSync page saved in …`. See `android-page-navigation.md`.
 - **Android 0.7.18** (code26): Notein-calibrated `fountain-v2` brush (p^γ, on-glass speed thinning,
   no distance tapers; legacy `fountain-v1` kept for existing outline-less ink) and persistent scene
   tiles that re-record only tiles touched by new/erased ink. Read the 2026-11-07 sections of
@@ -295,6 +299,8 @@
 
 - Never wait unboundedly for the page write queue on the UI thread in lifecycle callbacks: dense
   pages take seconds per save and an unmerged queue backlogs during continuous writing (bg ANR kill).
+- Page/sync change detection assumes every writer publishes by temp file + rename (new inode).
+  An in-place, same-length rewrite of a canonical page by another program would not be detected.
 - Do not re-check mtime around hashing either: on HyperOS it can change mid-hash with no write.
   Use size + inode for "file replaced while reading"; Mojian publishes by rename.
 - Android shared storage mtime is not a change detector: on HyperOS 3.0 a renamed-over file

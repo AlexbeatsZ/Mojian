@@ -13,8 +13,16 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     // Bytes this process last read or wrote, with every stamp observed for them. HyperOS FUSE
     // later rewrites a replaced file's mtime to the replaced file's old value, so a stamp change
     // is only a hint; the content digest decides whether another writer actually changed it.
-    private class DiskIdentity(val hash: String, val stamps: MutableSet<String>)
+    // `physical` (size + inode) of the bytes we read/wrote: Mojian and native sync publish by rename,
+    // so while it is unchanged the bytes are ours and a 6.5 MB re-read per save can be skipped.
+    private class DiskIdentity(val hash: String, val stamps: MutableSet<String>, val physical: String?)
     private val identities = mutableMapOf<String, DiskIdentity>()
+    // Serialized stroke text of the page saved most recently (dense pages are rewritten whole).
+    private var strokeTextPath: String? = null
+    private var strokeText = StrokeTextCache()
+    /** Phase timings of the last completed page save, for on-device diagnosis. */
+    @Volatile var lastSaveTimings: String = ""
+        private set
     val isShared get() = File(root,"library.json").isFile
 
     @Synchronized
@@ -77,14 +85,16 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         // Stability during hashing is size + inode: HyperOS may rewrite only the mtime at any moment,
         // which must not fail a check of unchanged bytes; a real replacement always has a new inode.
         val before = physical(file)
-        if (hashFile(file) != known.hash || physical(file) != before) return false
+        if (before == null || before != known.physical) {
+            if (hashFile(file) != known.hash || physical(file) != before) return false
+        }
         if (known.stamps.size >= 8) known.stamps.clear()
         known.stamps += expectedStamp; known.stamps += current
         return true
     }
 
-    private fun remember(file: File, hash: String, vararg stamps: String?) {
-        identities[file.path] = DiskIdentity(hash, stamps.filterNotNullTo(mutableSetOf()))
+    private fun remember(file: File, hash: String, physical: String?, vararg stamps: String?) {
+        identities[file.path] = DiskIdentity(hash, stamps.filterNotNullTo(mutableSetOf()), physical)
     }
 
     @Synchronized
@@ -106,7 +116,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         check(after==generation || (readHash != null && after != null && hashFile(file) == readHash && physical(file) == afterPhysical)) {
             "页面正在同步更新，请稍后重新加载"
         }
-        if (readHash != null) remember(file, readHash, generation, after) else identities.remove(file.path)
+        if (readHash != null) remember(file, readHash, afterPhysical, generation, after) else identities.remove(file.path)
         observed[file.path] = generation
         document.diskStamp = generation
         loadedPages[file.path]=java.lang.ref.WeakReference(document)
@@ -120,7 +130,9 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
             check(!file.exists()) { "Load the page before modifying it" }
             observed[file.path] = null
         }
+        val started = System.nanoTime()
         check(unchanged(file, document.diskStamp, verifyContent = true)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" }
+        val verified = System.nanoTime()
         // Content was verified above; continue from the stamp the disk reports now. The pre-replace
         // check below only guards the short encode/write window, so its stamp fast path is enough.
         val expectedStamp = stamp(file)
@@ -128,12 +140,19 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         val json = SharedWorkspaceCodec.encodeDocument(document)
         if(WorkspaceJson.fingerprint(json)==document.diskFingerprint) return
         json.put("revision",document.sharedSource.optLong("revision")+1).put("updatedAt",java.time.Instant.now().toString())
-        val writtenHash = atomicWrite(file,json,expectedStamp)
+        val encoded = System.nanoTime()
+        if (strokeTextPath != file.path) { strokeTextPath = file.path; strokeText = StrokeTextCache() }
+        val writtenHash = atomicWrite(file,json,expectedStamp,strokeText)
+        val written = System.nanoTime()
         document.sharedSource = json
         document.diskFingerprint = WorkspaceJson.fingerprint(json)
+        fun ms(from: Long, to: Long) = (to - from) / 1_000_000
+        lastSaveTimings = "verify ${ms(started, verified)} ms, encode ${ms(verified, encoded)} ms, " +
+            "write ${ms(encoded, written)} ms (strokes cached ${strokeText.hits}/${strokeText.hits + strokeText.misses}), " +
+            "fingerprint ${ms(written, System.nanoTime())} ms, ${file.length()} bytes"
         val savedStamp = stamp(file)
         observed[file.path] = savedStamp; document.diskStamp = savedStamp
-        remember(file, writtenHash, savedStamp)
+        remember(file, writtenHash, physical(file), savedStamp)
         loadedPages[file.path]=java.lang.ref.WeakReference(document)
     }
 
@@ -154,12 +173,15 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     /** Size and inode only; unlike [stamp] it is not affected by HyperOS mtime rewrites. */
     private fun physical(file: File): String? = runCatching {
         java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
-            java.nio.file.LinkOption.NOFOLLOW_LINKS).let { "${it.size()}:${it.fileKey()}" }
+            java.nio.file.LinkOption.NOFOLLOW_LINKS).let { attributes ->
+            // Without an inode key, size alone is no identity: callers then fall back to hashing.
+            attributes.fileKey()?.let { "${attributes.size()}:$it" }
+        }
     }.getOrNull()
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
 
-    private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?) = atomicWrite(file,
-        beforeReplace={ check(unchanged(file, expectedStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it) }
+    private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?,cache: StrokeTextCache?) = atomicWrite(file,
+        beforeReplace={ check(unchanged(file, expectedStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it,cache) }
     /** Returns the SHA-256 of the bytes published at [file]. */
     private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},write: (java.io.Writer)->Unit): String {
         localMutations.begin().use {
