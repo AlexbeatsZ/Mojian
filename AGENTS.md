@@ -19,12 +19,13 @@
   (AndroidX Ink rejects a degenerate {1,1} modifier range; the behavior is now omitted), removes
   abandoned page `.tmp` files on load, and logs save durations. Open issue: a dense-page save still
   takes long enough that HyperOS freezes the backgrounded app mid-write.
+  `v0.7.17` APK published; tablet in place 0.7.17/code25; phone still 0.7.14 (ADB disconnected).
 - **Android 0.7.16** (code24): content/sync hash checks verify stability by size + inode, not mtime
   (a HyperOS mtime rewrite during a 6.5 MB hash falsely refused a 0.7.15 save and can fail sync scans).
 - **Android 0.7.15** (code23): idle-based page saves (2 s after the pen rests, at most 20 s dirty
   while writing continuously; lifecycle/navigation still flush) and content-hash verification before
   every page write. Step 2 (device-local stroke journal) is not started. See `android-page-navigation.md`.
-  `v0.7.15` APK published; tablet in place 0.7.15/code23; phone still 0.7.14 (ADB disconnected).
+  `v0.7.15` APK published.
 - **Android 0.7.14** (code22): drawing-bar 「光标模式」 (cursor icon, right of 阅读视图; Android only,
   device-local `fingerCursorMode`, default off): finger taps on blank paper create a text box only
   when on; mouse/pen unaffected (`input-gestures.md`). Also fixes the tablet bg ANR on pause:
