@@ -15,6 +15,9 @@
   Local `mojian/artifacts/release/Mojian.exe` is updated to 0.7.11 (0.7.11+b977596); running PIDs
   39076/52164 remain backed by `.old` without stopping. ROG client `Mojian.exe` is updated to 0.7.11;
   sync service PID 44516 / listeners 18742+18743 are unchanged.
+- **Android 0.7.15** (code23): idle-based page saves (2 s after the pen rests, at most 20 s dirty
+  while writing continuously; lifecycle/navigation still flush) and content-hash verification before
+  every page write. Step 2 (device-local stroke journal) is not started. See `android-page-navigation.md`.
 - **Android 0.7.14** (code22): drawing-bar 「光标模式」 (cursor icon, right of 阅读视图; Android only,
   device-local `fingerCursorMode`, default off): finger taps on blank paper create a text box only
   when on; mouse/pen unaffected (`input-gestures.md`). Also fixes the tablet bg ANR on pause:

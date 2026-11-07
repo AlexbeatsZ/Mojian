@@ -487,7 +487,13 @@ class MainActivity : Activity() {
     private var sceneContentRevision = 0L
     private var workspaceLoaded = false
     private val pageWrites = PageWriteQueue()
-    private val saveSharedContent = Runnable { persistGeneratedShapes(flush=false) }
+    private var contentDirtySince = 0L
+    private val saveSharedContent: Runnable = Runnable {
+        if (contentDirty && activeStrokes.isNotEmpty() &&
+            PageSavePolicy.deferForActiveStroke(contentDirtySince, android.os.SystemClock.uptimeMillis())) {
+            mainHandler.postDelayed(saveSharedContent, PageSavePolicy.ACTIVE_STROKE_RETRY_MS)
+        } else persistGeneratedShapes(flush=false)
+    }
     private val syncRefresh = object : Runnable {
         override fun run() {
             if (workspaceLoaded && !contentDirty && currentFocus !is EditText) refreshSharedWorkspace()
@@ -585,9 +591,12 @@ class MainActivity : Activity() {
     private fun markPageContentChanged() {
         sceneContentRevision++
         if(restoringPageInk || boundPageKey==null) return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!contentDirty) contentDirtySince = now
         contentDirty=true
         dryInkView.invalidate()
-        mainHandler.removeCallbacks(saveSharedContent);mainHandler.postDelayed(saveSharedContent,300)
+        mainHandler.removeCallbacks(saveSharedContent)
+        mainHandler.postDelayed(saveSharedContent, PageSavePolicy.delayMillis(contentDirtySince, now))
     }
 
     private fun showSyncOptions() {

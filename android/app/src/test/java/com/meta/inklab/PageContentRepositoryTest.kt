@@ -235,6 +235,28 @@ class PageContentRepositoryTest {
     }
 
     @Test
+    fun externalReplacementReportingOurExactStampIsStillRefusedBySave() {
+        val root = Files.createTempDirectory("mojian-same-stamp-external").toFile()
+        try {
+            val repository = PageContentRepository(root)
+            val document = PageInsertDocument("book", "page")
+            document.objects += InsertObject.NoteLink("mine", 1f, 2f, 300f, 32f, "b", "s", "p", "mine")
+            repository.save(document)
+            val file = repository.pageFile("book", "page")
+            val modified = file.lastModified()
+            val external = file.readText().replace("\"mine\"", "\"else\"")
+            file.writeText(external)
+            // HyperOS can report the replaced file's mtime: same size + same mtime as our own write.
+            assertTrue(file.setLastModified(modified))
+            assertEquals(document.diskStamp, repository.pageStamp("book", "page"))
+
+            document.objects += InsertObject.NoteLink("more", 1f, 2f, 300f, 32f, "b", "s", "p", "more")
+            assertThrows(IllegalStateException::class.java) { repository.save(document) }
+            assertEquals(external, file.readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun realExternalContentChangeIsStillRefusedEvenWhenMtimeLooksOld() {
         val root = Files.createTempDirectory("mojian-mtime-external").toFile()
         try {

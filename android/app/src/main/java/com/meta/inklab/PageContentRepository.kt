@@ -62,13 +62,18 @@ class PageContentRepository(val root: File) {
     fun pageUnchangedSince(notebookId: String, pageId: String, expectedStamp: String?): Boolean =
         unchanged(pageFile(notebookId, pageId), expectedStamp)
 
-    /** True when [file] still holds the bytes identified by [expectedStamp], even if its metadata drifted. */
+    /**
+     * True when [file] still holds the bytes identified by [expectedStamp], even if its metadata drifted.
+     * [verifyContent] makes the content digest authoritative even when the stamp matches: HyperOS can
+     * report a replaced file with an older mtime, so an equal stamp does not prove equal bytes. Writers
+     * verify; frequent UI-side change polls use the stamp as a fast path.
+     */
     @Synchronized
-    private fun unchanged(file: File, expectedStamp: String?): Boolean {
+    private fun unchanged(file: File, expectedStamp: String?, verifyContent: Boolean = false): Boolean {
         val current = stamp(file)
-        if (current == expectedStamp) return true
-        if (current == null || expectedStamp == null) return false
-        val known = identities[file.path]?.takeIf { expectedStamp in it.stamps } ?: return false
+        if (current == null || expectedStamp == null) return current == expectedStamp
+        val known = identities[file.path]?.takeIf { expectedStamp in it.stamps } ?: return current == expectedStamp
+        if (current == expectedStamp && !verifyContent) return true
         if (NativeSyncFiles.hash(file) != known.hash || stamp(file) != current) return false
         if (known.stamps.size >= 8) known.stamps.clear()
         known.stamps += expectedStamp; known.stamps += current
@@ -110,8 +115,9 @@ class PageContentRepository(val root: File) {
             check(!file.exists()) { "Load the page before modifying it" }
             observed[file.path] = null
         }
-        check(unchanged(file, document.diskStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" }
-        // Metadata-only drift was accepted above; continue from the stamp the disk reports now.
+        check(unchanged(file, document.diskStamp, verifyContent = true)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" }
+        // Content was verified above; continue from the stamp the disk reports now. The pre-replace
+        // check below only guards the short encode/write window, so its stamp fast path is enough.
         val expectedStamp = stamp(file)
         document.diskStamp = expectedStamp
         val json = SharedWorkspaceCodec.encodeDocument(document)

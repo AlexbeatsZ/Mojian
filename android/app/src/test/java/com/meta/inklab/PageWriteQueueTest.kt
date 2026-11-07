@@ -39,4 +39,14 @@ class PageWriteQueueTest {
             assertEquals(listOf("a", "b", "c"), repository.load("book", "page").objects.map { it.id })
         } finally { release.countDown(); queue.close(); root.deleteRecursively() }
     }
+
+    @Test
+    fun pageSavesWaitForIdleButContinuousWritingIsBounded() {
+        assertEquals(PageSavePolicy.IDLE_DELAY_MS, PageSavePolicy.delayMillis(dirtySinceMs = 1_000, nowMs = 1_000))
+        assertEquals(PageSavePolicy.IDLE_DELAY_MS, PageSavePolicy.delayMillis(1_000, 1_000 + 10_000))
+        assertEquals(1_000L, PageSavePolicy.delayMillis(1_000, 1_000 + PageSavePolicy.MAX_DIRTY_MS - 1_000))
+        assertEquals(0L, PageSavePolicy.delayMillis(1_000, 1_000 + PageSavePolicy.MAX_DIRTY_MS + 5_000))
+        assertTrue(PageSavePolicy.deferForActiveStroke(1_000, 1_000 + 5_000))
+        assertFalse(PageSavePolicy.deferForActiveStroke(1_000, 1_000 + PageSavePolicy.MAX_DIRTY_MS))
+    }
 }

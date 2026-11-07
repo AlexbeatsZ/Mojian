@@ -83,6 +83,17 @@ native sync cannot publish an intermediate index/assets snapshot.
   标记未保存并提示。导航、复制、清纸等需要屏障的路径仍完整 flush（在工作线程或用户主动操作中）。
 - 落盘使用 256 KiB 字节缓冲 + 64 KiB 字符缓冲，减少 FUSE 共享存储的逐次小写。
 
+## 停笔保存与内容哈希判定（0.7.15）
+
+- 调研（2026-11-07）：OneNote 先存本机缓存（约 30 s 或退出）、只追加修订并以文件头事务计数提交；
+  Xournal++ 每 3 分钟整文件自动保存到旁路文件；Saber 停笔 10 s 后整本保存；webobsidian 以内容
+  SHA-256 作版本、不看 mtime。墨笺共享 JSON 格式不改，只调整保存节奏与身份判定。
+- 内容变化后等停笔 `PageSavePolicy.IDLE_DELAY_MS`（2 s）再整页保存；连续书写时距首次未保存不超过
+  `MAX_DIRTY_MS`（20 s）；到期时笔仍按着则每 500 ms 重试到抬笔，超期立即保存。切页、切后台、
+  导出等屏障照常保存。代价：两次保存之间进程被杀最多丢这段内容（第 2 步本机笔画日志另行设计）。
+- 写入前的检查以内容哈希为准（`unchanged(verifyContent = true)`）：HyperOS 会把被替换文件报告成旧
+  mtime，相同 mtime+大小不能证明字节相同。替换前的短窗口检查与 UI 端 3 s 轮询仍用 stamp 快速路径。
+
 ## 手势期间的瓦片场景缓存（0.7.12）
 
 平移/缩放手势（双指、单指抓手、鼠标中键、阅读视图）期间，`DryInkView` 把背景与组合场景按
