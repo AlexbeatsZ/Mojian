@@ -20,6 +20,7 @@
   when on; mouse/pen unaffected (`input-gestures.md`). Also fixes the tablet bg ANR on pause:
   `PageWriteQueue` skips superseded same-page snapshots (ticketed), `onPause` waits at most 1.5 s,
   page writes are buffered (`android-page-navigation.md`).
+  `v0.7.14` APK published; phone in place 0.7.14/code22; tablet still 0.7.13 (app was in use).
 - **Android 0.7.13** (code21): fixes the tablet's endless "页面已在另一台设备更新" while one person
   writes. HyperOS 3.0 FUSE later rewrites a rename-replaced file's mtime to the replaced file's old
   value, so `mtime:length` page stamps drifted without any writer. Stamps are now only a fast path;
