@@ -166,7 +166,11 @@ public sealed class WorkspaceStore
             var current = PageStamp(path);
             if (current != null && snapshot.DiskStamp != current && !(_localVersions.TryGetValue(path, out var local) && local.Contains(snapshot.DiskStamp)))
                 throw new IOException("页面已更新，已阻止旧页面覆盖。请重新加载。");
-            AtomicWrite(path, JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions));
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions);
+            var encodeMs = clock.Elapsed.TotalMilliseconds;
+            AtomicWrite(path, bytes);
+            System.Diagnostics.Trace.TraceInformation($"MojianSave encode {encodeMs:F1} ms, write {clock.Elapsed.TotalMilliseconds - encodeMs:F1} ms, {bytes.Length} bytes");
             if (!_localVersions.TryGetValue(path, out var versions)) _localVersions[path] = versions = new HashSet<string?>();
             versions.Add(snapshot.DiskStamp);
             snapshot.DiskStamp = PageStamp(path);

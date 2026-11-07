@@ -71,6 +71,7 @@ public class ToolPreset
     public float WidthMm { get; set; } = 0.4f;
     public int PressurePercent { get; set; } = 200;
     public int InkFlowPercent { get; set; } = 100;
+    public int StabilityPercent { get; set; } = 50;
     public int OpacityPercent { get; set; } = 32;
     public float EraserRadiusMm { get; set; } = 4.5f;
     public bool PressureEraseEnabled { get; set; }
@@ -132,6 +133,7 @@ public class ToolPreset
             ["widthMm"] = WidthMm,
             ["pressurePercent"] = PressurePercent,
             ["inkFlowPercent"] = InkFlowPercent,
+            ["stabilityPercent"] = StabilityPercent,
             ["opacityPercent"] = OpacityPercent,
             ["eraserRadiusMm"] = EraserRadiusMm,
             ["pressureEraseEnabled"] = PressureEraseEnabled,
@@ -172,6 +174,7 @@ public class ToolPreset
                 : LassoShape.Freeform;
             var preset = new ToolPreset(id, kind, color, widthMm, pressurePercent, inkFlowPercent, opacityPercent, eraserRadiusMm, pressureEraseEnabled)
             {
+                StabilityPercent = Math.Clamp(json["stabilityPercent"]?.GetValue<int>() ?? 50, 0, 100),
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
                 PressureEraseTravelLimitMm = Math.Clamp(json["pressureEraseTravelLimitMm"]?.GetValue<float>() ?? 1f, .1f, 10f),

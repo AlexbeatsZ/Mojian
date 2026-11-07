@@ -36,10 +36,11 @@ object SharedStrokeCodec {
             json.optString("vectorPath").isNotBlank() -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optString("brushProfile") == "shape-v1" -> ShapeStrokeCodec.brush(palette,width / DOCUMENT_UNITS_PER_MM,opacity,argb,json.getString("id"))
             json.optInt("kind") == 1 -> BrushProfiles.createHighlighter(width,argb,opacity)
-            // fountain-v2 is the Notein-calibrated authoring brush; anything older (including all
+            // fountain-v2 is the Notein-calibrated authoring brush; anything older (including pre-0.7.21
             // Windows ink) keeps the legacy family so existing notes do not change appearance.
             json.optString("brushProfile") == BrushProfiles.FOUNTAIN_V2 -> BrushProfiles.create(width,json.optInt("pressurePercent",200)/100f,
-                json.optInt("inkFlowPercent",100)/100f,Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
+                json.optInt("inkFlowPercent",100)/100f,Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)),
+                stabilityPercent=json.optInt("stabilityPercent",50))
             else -> BrushProfiles.createLegacy(width,json.optInt("pressurePercent",200)/100f,json.optInt("inkFlowPercent",100)/100f,
                 Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
         }
@@ -86,6 +87,8 @@ object SharedStrokeCodec {
         val pressure = Regex("-p([0-9.]+)-s([0-9.]+)").find(familyId)
         json.put("pressurePercent",((pressure?.groupValues?.get(1)?.toFloatOrNull() ?: 2f)*100).toInt())
             .put("inkFlowPercent",((pressure?.groupValues?.get(2)?.toFloatOrNull() ?: 1f)*100).toInt())
+        if (BrushProfiles.storedProfile(familyId) == BrushProfiles.FOUNTAIN_V2)
+            json.put("stabilityPercent", Regex("-t([0-9]+)").find(familyId)?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0,100) ?: 50)
         // Store the actual filled AndroidX outline, so the desktop uses the same brush result.
         val outline = StringBuilder()
         val position = MutableVec()

@@ -1,6 +1,6 @@
 # Handwriting Engine Research and Tablet Lab
 
-Last verified: 2026-11-07 (Notein 2.1.48 black-box calibration)
+Last verified: 2026-11-07 (Notein calibration; Windows/Android 0.7.21)
 
 ## Objective
 
@@ -191,11 +191,45 @@ inactive), and every behavior added 12–25 ms damping.
   draw lighter strokes thinner than v1 did.
 
 Compatibility: the JSON `brushProfile` is `fountain-v2` only for strokes whose family id starts with
-`inklab-fountain-v4-`. Windows-authored ink and older Android ink stay `fountain-v1` and are rebuilt
+`inklab-fountain-v4-`. Pre-0.7.21 Windows ink and older Android ink stay `fountain-v1` and are rebuilt
 with the legacy family when they have no outline (28,755 Windows and 806 older Android strokes on
 the tablet library had none), so existing notes do not change appearance. Windows and iOS draw the
-stored outline for Android strokes and pass the profile string through. Windows authoring still uses
-its own engine; matching it to `fountain-v2` is separate work.
+stored outline for Android strokes and pass the profile string through.
+
+### Stability and Windows authoring (0.7.21)
+
+Both pen flyouts expose 稳定性 0–100%, default 50%, stored per device-local tool preset.
+Notein's five measured windows were approximately 6/13/19/59/94 ms at 0/25/50/75/100%.
+The chosen mapping is 0–50% → 0–20 ms, 50–100% → 20–100 ms; the API minimum is 1 ms.
+Android caches the corresponding `SlidingWindowModel(window, 180)` and writes `stabilityPercent`
+alongside its canonical outline. Old presets and old strokes without this field default to 50%.
+
+Windows `FountainV2Model` uses the same 16-segment pressure response, speed table, clamped flow
+endpoint (minimum 0.05 at the cap, including flow >100%) and direction multiplier. Position and
+pressure use time-weighted centered averages; their windows shrink symmetrically at the start/end
+so both raw endpoints stay fixed. Speed is a time-window derivative of the modeled positions;
+speed/direction targets have 25 ms exponential damping. Upsampling targets 180 Hz with at most
+100 subdivisions per raw gap. This follows the public AndroidX algorithm conceptually, independently
+of its native mesh implementation; it is not proof of identical device latency or identical meshes.
+Reference reviewed: Google Ink `ink/strokes/internal/stroke_input_modeler/sliding_window_input_modeler.cc`
+at https://github.com/google/ink (centered window, trapezoidal integration and bounded upsampling).
+
+`StylusPacketClock` distributes coalesced WPF samples over event timestamps instead of reading a
+Stopwatch once per dispatch packet, handles signed timestamp wrap and enforces positive stored
+intervals. Physical speed uses zoom × WPF device-pixel scale / raw monitor DPI, with a logical-DPI
+fallback when no window/monitor is available; `strokeUnitLengthCm` records the authoring scale.
+Stationary pressure changes are retained. Raw pressure is not remapped: a read-only sample of
+3,409 old outline-less v1 strokes (75,187 points) had 48.7% pressure=1 and 35,173/71,778 nonpositive
+time intervals. This is historical stored evidence, not a fresh hardware pressure capture or a
+justification for inventing a per-device correction curve.
+
+New Windows pen strokes use `fountain-v2`, opaque pen ink, and a filled nonzero `vectorPath` with
+`vectorBounds` and an identity `vectorTransform`. Circles use cubic Beziers because the iOS parser
+does not support SVG A commands. The saved outline is the rendered shape; raw points, pressure,
+timing and parameters remain for editing. Move/scale compose `vectorTransform`; recolor, native
+copy, undo/redo, erasing, `.mjn` and output retain the outline. Existing v1 ink and shapes keep
+their renderers. The timestamp/smoothing/outline and native WPF edit/handoff regressions cover
+this contract; Android native stability/shape tests are compile-only pending device acceptance.
 
 ### Android tablet latency diagnosis (2026-11-07)
 

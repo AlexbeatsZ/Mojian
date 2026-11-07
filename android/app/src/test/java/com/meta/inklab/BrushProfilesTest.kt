@@ -62,4 +62,24 @@ class BrushProfilesTest {
         assertEquals(BrushProfiles.FOUNTAIN_V1, BrushProfiles.storedProfile("inklab-fountain-v3-p2.0-s1.0"))
         assertEquals(BrushProfiles.FOUNTAIN_V1, BrushProfiles.storedProfile(""))
     }
+
+    @Test
+    fun stabilityMapsToMeasuredNoteinWindows() {
+        assertEquals(1L, BrushProfiles.stabilityWindowMillis(0))
+        assertEquals(10L, BrushProfiles.stabilityWindowMillis(25))
+        assertEquals(20L, BrushProfiles.stabilityWindowMillis(50))
+        assertEquals(60L, BrushProfiles.stabilityWindowMillis(75))
+        assertEquals(100L, BrushProfiles.stabilityWindowMillis(100))
+        assertEquals(100L, BrushProfiles.stabilityWindowMillis(250))
+        assertTrue((0..100).zipWithNext().all { (a, b) -> BrushProfiles.stabilityWindowMillis(a) <= BrushProfiles.stabilityWindowMillis(b) })
+    }
+
+    @Test
+    fun toolPresetPersistsStability() {
+        val tool = ToolPreset(id = "pen-test", kind = DrawingToolKind.PEN, stabilityPercent = 80)
+        assertEquals(80, ToolPreset.fromJson(tool.toJson())!!.stabilityPercent)
+        val legacy = tool.toJson().apply { remove("stabilityPercent") }
+        assertEquals(50, ToolPreset.fromJson(legacy)!!.stabilityPercent)
+        assertEquals(100, ToolPreset.fromJson(tool.toJson().put("stabilityPercent", 900))!!.stabilityPercent)
+    }
 }

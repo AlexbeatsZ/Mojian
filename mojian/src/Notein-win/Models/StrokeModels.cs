@@ -50,6 +50,8 @@ public sealed class StrokeRecord
     }
     public int PressurePercent { get; set; } = 200;
     public int InkFlowPercent { get; set; } = 100;
+    public int StabilityPercent { get; set; } = 50;
+    public double StrokeUnitLengthCm { get; set; }
     public int OpacityPercent { get; set; } = 100;
     public string BrushProfile { get; set; } = "fountain-v1";
     public string ColorHex { get; set; } = string.Empty;
@@ -162,10 +164,10 @@ public sealed class StrokeRecord
 
     public void InvalidateBounds() { _cachedBounds = null; RenderVersion++; }
 
-    public StrokeRecord CopyForSave()
+    public StrokeRecord CopyForSave(Notein_win.Services.StrokePointSnapshotCache? pointCache = null)
     {
         var copy = (StrokeRecord)MemberwiseClone();
-        copy.Points = Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
+        copy.Points = pointCache?.Get(this) ?? Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
         copy.VectorBounds = VectorBounds?.ToArray();
         copy.VectorTransform = VectorTransform.ToArray();
         // UI-owned geometry is never carried into a background writer.
@@ -260,12 +262,12 @@ public sealed class PageDocument
     public PageDocument() { }
     public PageDocument(string notebookId, string pageId) { NotebookId = notebookId; PageId = pageId; }
 
-    public PageDocument CopyForSave() => new(NotebookId, PageId)
+    public PageDocument CopyForSave(Notein_win.Services.StrokePointSnapshotCache? pointCache = null) => new(NotebookId, PageId)
     {
         Version = Version, Revision = Revision, UpdatedAt = UpdatedAt, AdditionalData = AdditionalData, DiskStamp = DiskStamp,
         Viewport = new PageViewport { Scale = Viewport.Scale, TranslationX = Viewport.TranslationX, TranslationY = Viewport.TranslationY },
         LegacyViewport = new PageViewport { Scale = LegacyViewport.Scale, TranslationX = LegacyViewport.TranslationX, TranslationY = LegacyViewport.TranslationY },
-        Strokes = Strokes.Select(stroke => stroke.CopyForSave()).ToList(),
+        Strokes = Strokes.Select(stroke => stroke.CopyForSave(pointCache)).ToList(),
         Tags = Tags.Select(tag => tag.CopyForSave()).ToList(),
         TextItems = TextItems.Select(text => text.CopyForSave()).ToList(),
         Objects = Objects.Select(item => item.CopyForSave()).ToList(),

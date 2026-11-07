@@ -15,6 +15,7 @@ public sealed class MainViewModel : ObservableObject
 
     private readonly PreferencesStore _preferencesStore;
     private readonly PageSaveQueue _pageSaves = new();
+    private readonly StrokePointSnapshotCache _strokePointSnapshots = new();
     private readonly WorkspaceUiMutationGate _workspaceUiGate = new();
     private AppPreferences _preferences;
     private WorkspaceStore _store;
@@ -987,7 +988,9 @@ public sealed class MainViewModel : ObservableObject
         if (page == null) return;
         document.UpdatedAt = page.UpdatedAt = DateTime.UtcNow;
         document.Revision++;
-        var snapshot = document.CopyForSave();
+        var snapshotClock = System.Diagnostics.Stopwatch.StartNew();
+        var snapshot = document.CopyForSave(_strokePointSnapshots);
+        System.Diagnostics.Trace.TraceInformation($"MojianSave snapshot {snapshotClock.Elapsed.TotalMilliseconds:F1} ms, {snapshot.Strokes.Count} strokes");
         SaveStateText = "正在保存…";
         _pageSaves.Enqueue(_store, snapshot, _library.CopyForSave());
         document.HasPendingContentChanges = false;

@@ -196,6 +196,8 @@ class MainActivity : Activity() {
                 activeStrokes.remove(pointerId)?.let(wetInkView::cancelStroke)
                 mainHandler.removeCallbacks(activatePressureEraser)
                 pressureEraser.cancelCandidate()
+                shapePreset = shapePreset?.copy(widthMm = shapeSettings.widthMm)
+                shapeBrush = null
                 updateShapePreview(ShapeKind.LINE)
             } else mainHandler.postDelayed(this, 30L)
         }
@@ -4921,6 +4923,14 @@ class MainActivity : Activity() {
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
+                toolDetailRow.addView(
+                    parameterControl("稳定性", tool.stabilityPercent, 100, { "$it%" }) {
+                        tool.stabilityPercent = it
+                        persistToolShelf()
+                        rebuildBrush()
+                    },
+                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                )
             }
 
             DrawingToolKind.HIGHLIGHTER -> {
@@ -5514,6 +5524,7 @@ class MainActivity : Activity() {
                     sizePx = tool.widthMm * INTERNAL_UNITS_PER_MM,
                     pressureCorrect = tool.pressurePercent / 100f,
                     speedCorrect = tool.inkFlowPercent / 100f,
+                    stabilityPercent = tool.stabilityPercent,
                     colorArgb = displayColor(tool.color),
                 )
         }

@@ -86,14 +86,19 @@ public sealed class ShapeGeometryTests
                 Call("BeginDirectPointer",new Point(200,200),false);
                 Call("ContinuePointer",new Point(250,250),.5f,0f,0f,false);
                 Call("CancelDirectPointerForPageNavigation"); Assert.Single(canvas.Document.Strokes);
-                canvas.SelectedTool=new ToolPreset("pen",DrawingToolKind.Pen);
+                canvas.SelectedTool=new ToolPreset("pen",DrawingToolKind.Pen) { WidthMm=.2f };
                 Call("BeginPointer",new Point(10,10),.5f,0f,0f,true,false,false);
                 Call("ContinuePointer",new Point(110,40),.5f,0f,0f,true);
                 var hold=(HoldToStraighten)typeof(NoteCanvas).GetField("_straighten",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(canvas)!;
-                canvas.ResolveShapeSettings=()=>new ToolPreset("shape",DrawingToolKind.Shape) { StraightenDelayMillis=600 };
+                canvas.ResolveShapeSettings=()=>new ToolPreset("shape",DrawingToolKind.Shape) { StraightenDelayMillis=600, WidthMm=1.3f };
                 hold.Begin(new(10,10),Environment.TickCount64-1000); hold.Move(new(110,40),Environment.TickCount64-800,2.5);
-                Call("TryStraighten"); Call("EndPointer",true);
+                Call("TryStraighten");
+                Assert.Equal(1.3f,canvas.Document.Strokes[^1].WidthMm);
+                Call("ContinuePointer",new Point(150,60),.5f,0f,0f,true);
+                Call("EndPointer",true);
                 Assert.Equal(2,canvas.Document.Strokes[^1].Points.Count); Assert.Equal("shape-v1",canvas.Document.Strokes[^1].BrushProfile);
+                Assert.Equal(1.3f,canvas.Document.Strokes[^1].WidthMm);
+                canvas.Undo(); canvas.Redo(); Assert.Equal(1.3f,canvas.Document.Strokes[^1].WidthMm);
             } catch (Exception e) { failure=e; }
         });
         if (failure!=null) throw failure;

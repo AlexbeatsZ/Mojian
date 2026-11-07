@@ -39,7 +39,7 @@ object BrushProfiles {
 
     /** Stored `brushProfile` of strokes authored with [create]. */
     const val FOUNTAIN_V2 = "fountain-v2"
-    /** Stored `brushProfile` of older strokes (and every Windows-authored stroke); see [createLegacy]. */
+    /** Stored `brushProfile` of older strokes (including pre-0.7.21 Windows ink); see [createLegacy]. */
     const val FOUNTAIN_V1 = "fountain-v1"
     private const val FOUNTAIN_V2_FAMILY_PREFIX = "inklab-fountain-v4-"
 
@@ -95,12 +95,36 @@ object BrushProfiles {
         )
     }
 
+    /**
+     * Notein `稳定性` → input smoothing window, measured 2026-11-07 (0/25/50/75/100% ≈
+     * 6/13/19/59/94 ms including sampling): 0-50% spans 0-20 ms (50% = AndroidX default), 50-100%
+     * spans 20-100 ms. Larger windows round corners and delay width changes.
+     */
+    internal fun stabilityWindowMillis(stabilityPercent: Int): Long {
+        val p = stabilityPercent.coerceIn(0, 100)
+        val window = if (p <= 50) 20f * p / 50f else 20f + 80f * (p - 50) / 50f
+        return Math.round(window).toLong().coerceAtLeast(1L)
+    }
+
+    private val stabilityModels = HashMap<Long, BrushFamily.SlidingWindowModel>()
+
+    private fun stabilityModel(stabilityPercent: Int): BrushFamily.InputModel {
+        val window = stabilityWindowMillis(stabilityPercent)
+        if (window == 20L) return slidingInputModel
+        return synchronized(stabilityModels) {
+            stabilityModels.getOrPut(window) { BrushFamily.SlidingWindowModel(window, UPSAMPLING_HZ) }
+        }
+    }
+
+    private const val UPSAMPLING_HZ = 180
+
     /** Authoring brush: the Notein-calibrated fountain, stored as [FOUNTAIN_V2]. */
     fun create(
         sizePx: Float,
         pressureCorrect: Float = 2f,
         speedCorrect: Float = 1f,
         colorArgb: Int = Color.rgb(16, 19, 23),
+        stabilityPercent: Int = 50,
     ): Brush {
         val spec = fountainV2Spec(pressureCorrect, speedCorrect)
         val behaviors =
@@ -147,14 +171,14 @@ object BrushProfiles {
         val family =
             BrushFamily(
                 tip = BrushTip(behaviors = behaviors),
-                clientBrushFamilyId = "${FOUNTAIN_V2_FAMILY_PREFIX}p$pressureCorrect-s$speedCorrect",
-                inputModel = slidingInputModel,
+                clientBrushFamilyId = "${FOUNTAIN_V2_FAMILY_PREFIX}p$pressureCorrect-s$speedCorrect-t$stabilityPercent",
+                inputModel = stabilityModel(stabilityPercent),
             )
         return Brush.createWithColorIntArgb(family = family, colorIntArgb = colorArgb, size = sizePx, epsilon = 0.01f)
     }
 
     /**
-     * The pre-0.7.18 fountain. Strokes stored as [FOUNTAIN_V1] without an outline (all Windows ink and
+     * The pre-0.7.18 fountain. Strokes stored as [FOUNTAIN_V1] without an outline (older Windows ink and
      * older Android ink) are rebuilt with it so existing notes keep their appearance.
      */
     fun createLegacy(

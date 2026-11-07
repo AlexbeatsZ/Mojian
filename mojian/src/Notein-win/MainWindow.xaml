@@ -603,6 +603,8 @@
                     <Slider x:Name="PressureSlider" Minimum="0" Maximum="400" TickFrequency="10" Value="{Binding SelectedTool.PressurePercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                     <DockPanel Margin="0,8,0,0"><TextBlock Text="出墨" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=FlowSlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="FlowSlider" Minimum="0" Maximum="200" TickFrequency="10" Value="{Binding SelectedTool.InkFlowPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <DockPanel Margin="0,8,0,0"><TextBlock Text="稳定性" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=StabilitySlider, Path=Value, StringFormat={}{0:F0}%}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <Slider x:Name="StabilitySlider" Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding SelectedTool.StabilityPercent, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}">

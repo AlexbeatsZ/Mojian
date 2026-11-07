@@ -303,11 +303,15 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         Render(); var builds = Builds();
         for (var i = 1; i <= 30; i++)
         {
+            // Use real packet sample timing; a synthetic tight loop otherwise describes a
+            // multi-metre/second pen and a 20 ms input filter is still catching up at lift.
+            typeof(NoteCanvas).GetField("_stylusSampleMilliseconds", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(canvas, (long?) (i * 8L));
             Call("ContinuePointer", new Point(200 + i * 2, 100), .5f, 0f, 0f, true);
             var pixels = Render();
             Assert.Equal(builds, Builds());
             Assert.True(pixels[(100 * 400 + 220) * 4] > 80 || i < 12);
         }
+        typeof(NoteCanvas).GetField("_stylusSampleMilliseconds", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(canvas, null);
         var wet = Render();
         Call("EndPointer", true); var completed = Render();
         Assert.True(Builds() > builds);

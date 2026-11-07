@@ -29,6 +29,8 @@ data class ToolPreset(
     var widthMm: Float = 0.4f,
     var pressurePercent: Int = 200,
     var inkFlowPercent: Int = 100,
+    /** Notein-style input smoothing (0-100%); 50% is the AndroidX default 20 ms window. */
+    var stabilityPercent: Int = 50,
     var opacityPercent: Int = 32,
     var eraserRadiusMm: Float = 4.5f,
     var pressureEraseEnabled: Boolean = false,
@@ -58,6 +60,7 @@ data class ToolPreset(
             put("widthMm", widthMm.toDouble())
             put("pressurePercent", pressurePercent)
             put("inkFlowPercent", inkFlowPercent)
+            put("stabilityPercent", stabilityPercent)
             put("opacityPercent", opacityPercent)
             put("eraserRadiusMm", eraserRadiusMm.toDouble())
             put("pressureEraseEnabled", pressureEraseEnabled)
@@ -96,6 +99,7 @@ data class ToolPreset(
                     widthMm = widthMm,
                     pressurePercent = pressurePercent,
                     inkFlowPercent = inkFlowPercent,
+                    stabilityPercent = json.optInt("stabilityPercent", 50).coerceIn(0, 100),
                     opacityPercent = opacityPercent,
                     eraserRadiusMm = eraserRadiusMm,
                     pressureEraseEnabled = pressureEraseEnabled,

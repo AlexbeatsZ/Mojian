@@ -1,6 +1,6 @@
 # Windows / Android Product Parity
 
-Last verified: 2026-10-02
+Last verified: 2026-11-07
 
 Read this document before changing a product feature, command, persisted page concept, or user-visible
 interaction that exists in both the Android and Windows editions of 墨笺.
@@ -45,6 +45,12 @@ Parity means the same product outcome, not identical operating-system APIs. For 
   historical blank extents; both clients follow `docs/design/boundless-canvas.md` and `export-and-print.md`.
 
 ## Completion gate
+
+0.7.21 aligns pen stability controls and new `fountain-v2` authoring on Windows/Android. Native
+render/input adapters remain platform-specific; canonical filled outlines carry completed ink
+between clients. Hold-to-straighten uses the shared `shape-default` width on both clients, while
+keeping the source ink color/opacity. See `handwriting-engine.md` and `shapes-and-straightening.md`.
+Android native tests are compile-only; physical pen acceptance remains a separate gate.
 
 Page backgrounds now have one executable contract, `shared/page-backgrounds.json`, packaged by
 both clients. See `page-backgrounds.md`; fixed screen/density-based spacing must not return.

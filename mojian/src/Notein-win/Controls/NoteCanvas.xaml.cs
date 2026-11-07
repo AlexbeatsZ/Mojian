@@ -101,6 +101,8 @@ public partial class NoteCanvas : UserControl
 
     public event EventHandler? PasteRequested;
     private readonly Stopwatch _strokeClock = new();
+    private readonly StylusPacketClock _stylusPacketClock = new();
+    private long? _stylusSampleMilliseconds;
     private readonly StrokeDrawingCache _strokeDrawings = new();
     private bool _drawingDryScene;
     private OutputAppearance? _outputAppearance;
@@ -1192,7 +1194,13 @@ public partial class NoteCanvas : UserControl
             _cropStylusGesture = true;
             CaptureStylus(); e.Handled = true; return;
         }
-        BeginPointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true, forcePan: false, forceErase: _stylusEraserActive);
+        _stylusPacketClock.Reset(e.Timestamp);
+        _stylusSampleMilliseconds = 0;
+        try
+        {
+            BeginPointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true, forcePan: false, forceErase: _stylusEraserActive);
+        }
+        finally { _stylusSampleMilliseconds = null; }
         e.Handled = true;
     }
 
@@ -1246,10 +1254,24 @@ public partial class NoteCanvas : UserControl
         }
         else
         {
-            foreach (var point in points)
-                ContinuePointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true);
+            AppendStylusPacket(points, e.Timestamp);
         }
         e.Handled = true;
+    }
+
+    private void AppendStylusPacket(StylusPointCollection points, int timestamp)
+    {
+        var times = _stylusPacketClock.Distribute(timestamp, points.Count);
+        try
+        {
+            for (var i = 0; i < points.Count; i++)
+            {
+                var point = points[i];
+                _stylusSampleMilliseconds = times[i];
+                ContinuePointer(point.ToPoint(), point.PressureFactor, Tilt(point, StylusPointProperties.XTiltOrientation), Tilt(point, StylusPointProperties.YTiltOrientation), isStylus: true);
+            }
+        }
+        finally { _stylusSampleMilliseconds = null; }
     }
 
     private void HandleStylusButtonDown(object sender, StylusButtonEventArgs e)
@@ -1343,6 +1365,8 @@ public partial class NoteCanvas : UserControl
             var finalPoint = e.GetPosition(this);
             ContinuePointer(finalPoint, 0, 0, 0, isStylus: true);
         }
+        else if (_activeStroke != null && !_explicitShape && !_straighten.Snapped)
+            AppendStylusPacket(e.GetStylusPoints(this), e.Timestamp);
         EndPointer(isStylus: true);
         _stylusActive = false;
         _stylusEraserActive = false;
@@ -1979,6 +2003,10 @@ public partial class NoteCanvas : UserControl
                 {
                     PressurePercent = tool.PressurePercent,
                     InkFlowPercent = tool.InkFlowPercent,
+                    StabilityPercent = tool.StabilityPercent,
+                    BrushProfile = tool.Kind == DrawingToolKind.Pen ? FountainV2Model.Profile : "fountain-v1",
+                    StrokeUnitLengthCm = InkPhysicalScale.ForVisual(this, _viewport.Scale),
+                    OpacityPercent = tool.Kind == DrawingToolKind.Pen ? 100 : tool.OpacityPercent,
                 };
                 AddStrokePoint(_activeStroke, docPoint, pressure, tiltX, tiltY);
                 PushInkUndo(_activeStroke.Id);
@@ -2246,6 +2274,8 @@ public partial class NoteCanvas : UserControl
                 Document.Strokes.Remove(_activeStroke);
                 if (_undo.Count > 0) _undo.Pop();
             }
+            if (_activeStroke.BrushProfile == FountainV2Model.Profile)
+                FountainV2Model.StoreOutline(_activeStroke);
             _explicitShape = false;
             _activeStroke = null;
             _pressureEraseArmed = true;
@@ -2272,6 +2302,7 @@ public partial class NoteCanvas : UserControl
         var end = _activeStroke.Points[^1].ToPoint();
         _activeStroke.Points = ShapeGeometry.Points(ShapeKind.Line, _shapeStart, end);
         _activeStroke.BrushProfile = "shape-v1";
+        _activeStroke.WidthMm = settings.WidthMm;
         if (_activeStroke.Kind == DrawingToolKind.Pen) _activeStroke.OpacityPercent = 100;
         _straightenTimer.Stop();
         InvalidateVisual();
@@ -2405,12 +2436,18 @@ public partial class NoteCanvas : UserControl
 
     private void AddStrokePoint(StrokeRecord stroke, Point documentPoint, float pressure, float tiltX, float tiltY)
     {
+        var time = _stylusSampleMilliseconds ?? _strokeClock.ElapsedMilliseconds;
         if (stroke.Points.Count > 0)
         {
             var previous = stroke.Points[^1];
-            if (Math.Abs(previous.X - documentPoint.X) < 0.01 && Math.Abs(previous.Y - documentPoint.Y) < 0.01) return;
+            if (Math.Abs(previous.X - documentPoint.X) < 0.01 && Math.Abs(previous.Y - documentPoint.Y) < 0.01 &&
+                Math.Abs(previous.Pressure - pressure) < .001 && time - previous.ElapsedMilliseconds < 4) return;
+            time = Math.Max(time, previous.ElapsedMilliseconds + 1);
         }
-        stroke.Points.Add(new InkPoint((float)documentPoint.X, (float)documentPoint.Y, pressure, tiltX, tiltY, _strokeClock.ElapsedMilliseconds));
+        stroke.Points.Add(new InkPoint((float)documentPoint.X, (float)documentPoint.Y, pressure, tiltX, tiltY, time)
+        {
+            Pressure = float.IsFinite(pressure) ? Math.Clamp(pressure, 0, 1) : .5f,
+        });
         stroke.InvalidateBounds();
     }
 
@@ -3281,7 +3318,8 @@ public partial class NoteCanvas : UserControl
                 return;
             }
 
-            dc.DrawGeometry(brush, null, FountainStrokeGeometry.Create(stroke));
+            dc.DrawGeometry(brush, null, stroke.BrushProfile == FountainV2Model.Profile
+                ? FountainV2Model.CreateGeometry(stroke) : FountainStrokeGeometry.Create(stroke));
     }
 
     private static void DrawPolyline(DrawingContext dc, IReadOnlyList<InkPoint> points, Pen pen)
@@ -3738,6 +3776,8 @@ public partial class NoteCanvas : UserControl
         WidthMm = source.WidthMm,
         PressurePercent = source.PressurePercent,
         InkFlowPercent = source.InkFlowPercent,
+        StabilityPercent = source.StabilityPercent,
+        StrokeUnitLengthCm = source.StrokeUnitLengthCm,
         OpacityPercent = source.OpacityPercent,
         BrushProfile = source.BrushProfile,
         SourceBrush = source.SourceBrush,

@@ -1,6 +1,6 @@
 # Windows writing performance and durability
 
-Last verified: 2026-10-28
+Last verified: 2026-11-07
 
 Read before changing Windows wet/dry rendering, pointer feedback, undo history,
 autosave scheduling, recovery, or same-page split document ownership.
@@ -11,6 +11,32 @@ and shutdown flush it, and incoming refresh must not replace such a document. Qu
 retains the immutable content snapshot and clears that flag; failed jobs remain in the existing
 retry queue. Clean pages are not rewritten on navigation/close. Legacy on-disk viewport data is
 preserved separately so subsequent content saves do not publish the current device's view.
+
+## Dense save/input follow-up (0.7.21)
+
+Windows JSON encoding and atomic write already run on the save worker. A synthetic 1,900-stroke,
+121,600-point, 10,088,486-byte page measured 73–127 ms per save before this change, so the Android
+multi-second encoding/freeze failure was not reproduced. Keep Windows' existing atomic write and
+external-write guard; do not replace them with HyperOS-specific inode rules.
+
+The UI-thread `CopyForSave` still cloned every point: seven warm runs took 2.7–18.0 ms.
+`QueueSaveDocument` now uses a `StrokePointSnapshotCache` keyed by live stroke identity,
+`RenderVersion`, point-list identity and count. Unchanged point graphs are reused only by frozen
+background save jobs; each stroke's scalar style and vector arrays are copied on every snapshot.
+Ordinary `CopyForSave()` continues to make independent editable copies. Every in-place point edit
+must call `InvalidateBounds` (already required for drawing/bounds). The cache is weakly keyed and
+does not retain inactive documents. Warm copies of the same page measured 0.6–0.9 ms after caching.
+`MojianSave` Trace events report UI snapshot, background encode and write durations.
+
+The v2 renderer keeps the existing dry/wet cache separation. Adding one v2 stroke on a 1,900-stroke
+synthetic scene builds its wet drawing once and does not rebuild the 1,900 old drawing entries;
+stroke finalization measured about 5 ms in the software fixture. These are fixture timings, not
+physical pen-to-photon measurements. The Release assembly reports JIT optimization enabled.
+
+In this OMEN SSH test environment the pre-existing `HandPanMovesCachedSceneWithoutPerSampleRedrawAndMatchesVectorPixels`
+fails its cached anti-aliasing threshold (mean 1.870, one-row-shift mean 4.546). Repeating with the
+original de9a57a canvas gives the same failure. The threshold is retained; this task does not
+claim a completely green full suite or a repaired baseline pan-cache issue.
 
 ## Recoverable deletion and native-sync publication (2026-10-28)
 
