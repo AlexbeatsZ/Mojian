@@ -10,6 +10,9 @@ Android explicit folder opening/creation and first-run selection follow `android
 Native-sync status is a compact canvas bottom-right overlay on both clients, rather than a
 left-corner badge or a full-width Android row. Windows save errors stack above it. Browsing
 does not publish note changes; see `native-sync.md` for local viewport persistence and polling.
+The overlay is display-only (2026-11-07): touches and pen contact pass through to the canvas and
+it opens nothing. Sync configuration is an explicit settings item (Android `选项 → 常规 → 同步`,
+Windows Backstage); never reintroduce an overlay click/tooltip entry.
 
 The shared Shapes tool, its seven primitives, and the hold-to-straighten toggle/delay live in the
 drawing-tool flyout. Read `shapes-and-straightening.md` before modifying this tool or its parameters.

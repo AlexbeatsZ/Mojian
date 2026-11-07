@@ -230,7 +230,7 @@ class MainActivity : Activity() {
     private val nativeSyncController by lazy {
         WorkspaceSyncController(this, ::applyNativeSyncIncoming) { status, visible ->
             nativeSyncStatus = status
-            nativeSyncStatusView?.apply { text = status; tooltipText = status; visibility = if (visible) View.VISIBLE else View.GONE }
+            nativeSyncStatusView?.apply { text = status; contentDescription = status; visibility = if (visible) View.VISIBLE else View.GONE }
         }
     }
     private val workspace: NotebookWorkspace
@@ -1242,7 +1242,8 @@ class MainActivity : Activity() {
             }
         rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(34)))
         rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(50)))
-        nativeSyncStatusView = TextView(this).apply {
+        // Display-only: it must never consume canvas touches or open configuration (settings owns that).
+        nativeSyncStatusView = PassiveStatusView(this).apply {
             text = nativeSyncStatus
             textSize = 11f
             maxLines = 1
@@ -1252,7 +1253,6 @@ class MainActivity : Activity() {
             background = rounded(0xEE232323.toInt(), 0f, Color.TRANSPARENT)
             setPadding(dp(8), dp(4), dp(8), dp(4))
             visibility = View.GONE
-            setOnClickListener { showNativeSyncOptions() }
         }
 
         val workArea =
@@ -1562,6 +1562,28 @@ class MainActivity : Activity() {
                             toolbarValue,
                         ),
                         LinearLayout.LayoutParams(MATCH, dp(76)),
+                    )
+
+                    // Sync configuration lives only here; the canvas status overlay is display-only.
+                    addView(optionsSectionTitle("同步"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
+                    addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
+                    val nativeSyncValue = settingsValueButton("配置")
+                    nativeSyncValue.setOnClickListener { showNativeSyncOptions() }
+                    addView(
+                        settingsRow("原生 HTTPS 同步", "服务器地址、访问令牌、启用开关和独立副本。当前：$nativeSyncStatus", nativeSyncValue),
+                        LinearLayout.LayoutParams(MATCH, dp(76)),
+                    )
+                    val folderValue = settingsValueButton("选择")
+                    folderValue.setOnClickListener { openWorkspaceFolderPicker() }
+                    addView(
+                        settingsRow("笔记文件夹", "打开已有墨笺笔记库，或选择空文件夹新建。", folderValue),
+                        LinearLayout.LayoutParams(MATCH, dp(72)),
+                    )
+                    val legacySyncValue = settingsValueButton("设置")
+                    legacySyncValue.setOnClickListener { showLegacySyncOptions() }
+                    addView(
+                        settingsRow("Syncthing 共享文件夹", "文件夹权限、重新加载或选择共享笔记库；不要与原生同步共用同一文件夹。", legacySyncValue),
+                        LinearLayout.LayoutParams(MATCH, dp(72)),
                     )
                 }
             addView(

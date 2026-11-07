@@ -90,6 +90,13 @@ flush pending content saves without manufacturing new page revisions for clean d
 unchanged library saves do not write or emit local-save notifications. Foreground periodic
 manifest checks still receive changes from other devices even when there are no local edits.
 The compact status is anchored at the canvas bottom-right; save failures appear above it.
+That overlay is display-only on both clients: it never consumes taps, stylus hover or other
+pointer input, and never opens configuration. Windows marks it `IsHitTestVisible="False"`;
+Android uses `PassiveStatusView` (no click listener, no tooltip, touch/hover dispatch returns
+false). Do not add a tooltip on Android: a tooltip alone makes the view consume touches.
+Configuration (addresses, token, enable switch, dedicated clone) lives only in settings:
+Windows Backstage `原生同步设置`, Android `选项 → 常规 → 同步 → 原生 HTTPS 同步` (also the
+left `同步` entry), together with the note-folder and Syncthing shared-folder entries.
 
 Successful page/library persistence precedes synchronization. A disconnected device remains
 editable, and the next foreground pass discovers durable local changes. Windows activation
