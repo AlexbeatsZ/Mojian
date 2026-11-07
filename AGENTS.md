@@ -7,7 +7,7 @@
 
 # Current State
 
-- **0.7.25 source (Windows/Android code31)**: pen color row has a configuration button plus a separate
+- **0.7.25 published (Windows/Android code31, source `d940f41`)**: pen color row has a configuration button plus a separate
   saved-preset selector. New/edit named styles own pressure/speed curves, direction, tapers, stability,
   tilt and turn response. Configured new ink snapshots `pen-style-v1` and its canonical outline;
   historical readers stay unchanged. Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
@@ -80,7 +80,9 @@
 
 # Active Work
 
-- 0.7.25 final isolated build/publication is in progress; do not replace the running Windows EXE.
+- 0.7.25 EXE+APK are uploaded; Windows 267 tests and Android 288 tests pass (2 opt-in skipped).
+  Local APK is current; Windows still runs 0.7.24 PID39720. New EXE is staged in the pen-styles task
+  temporary publish directory, awaiting normal exit before local replacement. No Android install.
 - Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
