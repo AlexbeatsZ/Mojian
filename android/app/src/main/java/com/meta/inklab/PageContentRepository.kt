@@ -139,7 +139,9 @@ class PageContentRepository(val root: File) {
             val digest = java.security.MessageDigest.getInstance("SHA-256")
             try {
                 java.io.FileOutputStream(temp).use { stream ->
-                    val writer=java.io.OutputStreamWriter(java.security.DigestOutputStream(stream, digest),Charsets.UTF_8)
+                    // Few large writes: FUSE shared storage is slow per syscall.
+                    val writer=java.io.BufferedWriter(java.io.OutputStreamWriter(java.security.DigestOutputStream(
+                        java.io.BufferedOutputStream(stream, 256 * 1024), digest),Charsets.UTF_8), 64 * 1024)
                     write(writer);writer.flush();stream.fd.sync()
                 }
                 beforeReplace()

@@ -1,12 +1,22 @@
 package com.meta.inklab
 
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
-/** Page snapshots are serialized on one worker; navigation/lifecycle boundaries flush it. */
+/**
+ * Page snapshots are serialized on one worker; navigation/lifecycle boundaries flush it.
+ * Every snapshot is a whole page, so an older queued snapshot of the same page is skipped once a
+ * newer one was submitted: continuous writing on a dense page must not build a backlog that a
+ * lifecycle flush then waits on (ANR). Submission order is an explicit ticket, not map order.
+ */
 class PageWriteQueue {
     private val executor = Executors.newSingleThreadExecutor()
     private val pending = AtomicInteger()
+    private val tickets = AtomicLong()
+    private val latest = java.util.concurrent.ConcurrentHashMap<String,Long>()
     private val failures = java.util.concurrent.ConcurrentHashMap<String,Exception>()
     private val revisions = mutableMapOf<String,Long>() // worker-owned
     val isIdle get() = pending.get() == 0
@@ -16,8 +26,11 @@ class PageWriteQueue {
         saved: () -> Unit = {}, failed: (Exception)->Unit) {
         pending.incrementAndGet()
         val key = "${repository.root}/${live.notebookId}/${live.pageId}"
+        val ticket = tickets.incrementAndGet()
+        latest[key] = ticket
         executor.execute {
             try {
+                if (latest[key] != ticket) return@execute
                 synchronized(live) {
                     snapshot.diskStamp = live.diskStamp
                     snapshot.diskFingerprint = live.diskFingerprint
@@ -43,6 +56,14 @@ class PageWriteQueue {
     fun flush() {
         executor.submit {}.get()
         failures.values.firstOrNull()?.let { throw it }
+    }
+
+    /** Bounded flush for the UI thread; false means writes are still running on the worker. */
+    fun flush(timeoutMillis: Long): Boolean {
+        try { executor.submit {}.get(timeoutMillis, TimeUnit.MILLISECONDS) }
+        catch (_: TimeoutException) { return false }
+        failures.values.firstOrNull()?.let { throw it }
+        return true
     }
     fun close() { executor.shutdown() }
 }

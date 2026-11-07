@@ -74,4 +74,12 @@ class DirectInputPolicyTest {
         assertEquals(false, DirectInputPolicy.isSelectionDeleteKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_DOWN, 0, true))
         assertEquals(false, DirectInputPolicy.isSelectionDeleteKey(KeyEvent.KEYCODE_DEL, KeyEvent.ACTION_UP, 0, false))
     }
+
+    @Test
+    fun cursorModeOnlyGatesFingerTapsOnBlankPaper() {
+        assertEquals(false, DirectInputPolicy.blankTapCreatesText(fromFinger = true, fingerCursorMode = false))
+        assertEquals(true, DirectInputPolicy.blankTapCreatesText(fromFinger = true, fingerCursorMode = true))
+        assertEquals(true, DirectInputPolicy.blankTapCreatesText(fromFinger = false, fingerCursorMode = false))
+        assertEquals(true, DirectInputPolicy.blankTapCreatesText(fromFinger = false, fingerCursorMode = true))
+    }
 }

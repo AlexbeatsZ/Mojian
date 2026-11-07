@@ -34,6 +34,17 @@ Android 由 `CanvasInputHost` 在双指导航判定之后、笔侧键/鼠标右�
 触摸与 `StylusDown` 入口分别进入 `BeginReadingPan`，并在 `OnMouseDown` 拦截右键。设备判定表见两端
 `DirectInputPolicy.readingViewPointerIntent` / `ReadingViewPointerIntent`。
 
+## 光标模式（仅 Android）
+
+绘图栏「阅读视图」右侧的「光标模式」（光标图标）是用户 2026-11-07 明确要求的 **Android 专属** 开关，
+Windows 不做。目的：书写时手指/手掌碰到纸面不再新建临时文本框、唤起输入法。
+
+- 关闭（默认）：手指单击空白纸面只清空选区、结束文本编辑，不新建文本框、不弹输入法。
+- 开启：手指单击空白处照旧新建临时文本框。
+- 只影响手指单击空白处；鼠标单击、触控笔点击不受开关影响。点在已有文本/图片/标签/笔迹上的选择与编辑行为不变。
+- 设备本地设置 `workspace-options/fingerCursorMode`，不进笔记或同步数据；全页工具栏 ID `draw:cursor`。
+  判定在 `DirectInputPolicy.blankTapCreatesText`，由 `MainActivity.handleDirectTap` 调用。
+
 ## 1. 不可破坏的总原则
 
 软件同时支持触控笔、手指和鼠标，但三类设备不共享全局工具模式：

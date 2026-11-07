@@ -15,6 +15,11 @@
   Local `mojian/artifacts/release/Mojian.exe` is updated to 0.7.11 (0.7.11+b977596); running PIDs
   39076/52164 remain backed by `.old` without stopping. ROG client `Mojian.exe` is updated to 0.7.11;
   sync service PID 44516 / listeners 18742+18743 are unchanged.
+- **Android 0.7.14** (code22): drawing-bar 「光标模式」 (cursor icon, right of 阅读视图; Android only,
+  device-local `fingerCursorMode`, default off): finger taps on blank paper create a text box only
+  when on; mouse/pen unaffected (`input-gestures.md`). Also fixes the tablet bg ANR on pause:
+  `PageWriteQueue` skips superseded same-page snapshots (ticketed), `onPause` waits at most 1.5 s,
+  page writes are buffered (`android-page-navigation.md`).
 - **Android 0.7.13** (code21): fixes the tablet's endless "页面已在另一台设备更新" while one person
   writes. HyperOS 3.0 FUSE later rewrites a rename-replaced file's mtime to the replaced file's old
   value, so `mtime:length` page stamps drifted without any writer. Stamps are now only a fast path;
@@ -267,6 +272,8 @@
 
 # Durable Lessons
 
+- Never wait unboundedly for the page write queue on the UI thread in lifecycle callbacks: dense
+  pages take seconds per save and an unmerged queue backlogs during continuous writing (bg ANR kill).
 - Android shared storage mtime is not a change detector: on HyperOS 3.0 a renamed-over file
   first reports the new mtime, then minutes later the replaced file's old one (reproduced with
   plain `mv`). Use size/mtime only as a hint and confirm with content hashes before refusing writes.

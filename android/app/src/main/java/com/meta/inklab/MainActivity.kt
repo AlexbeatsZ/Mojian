@@ -316,6 +316,7 @@ class MainActivity : Activity() {
     private var insertSpaceDownX = 0f
     private var insertSpaceDownY = 0f
     private var readingViewEnabled = false
+    private var fingerCursorModeEnabled = false
     private var readingPanPointerId: Int? = null
     private var readingPassThrough = false
     private val twoFingerNavigation = CanvasNavigationGuard()
@@ -511,6 +512,7 @@ class MainActivity : Activity() {
 
     private fun initializeWorkspaceRepository() {
         val prefs = getSharedPreferences(OPTIONS_PREFERENCES,MODE_PRIVATE)
+        fingerCursorModeEnabled = prefs.getBoolean(FINGER_CURSOR_MODE_KEY, false)
         val configured = requireNotNull(prefs.getString("sharedWorkspaceRoot",null)) { "请先选择笔记文件夹" }
         val root = File(configured).canonicalFile
         pageContentRepository = PageContentRepository(root)
@@ -872,7 +874,16 @@ class MainActivity : Activity() {
         if (::paperContainer.isInitialized) paperContainer.cancelPointerSequence()
         mainHandler.removeCallbacks(syncRefresh)
         mainHandler.removeCallbacks(saveSharedContent)
-        if(workspaceLoaded && ::dryInkView.isInitialized) saveBoundPageSession()
+        if(workspaceLoaded && ::dryInkView.isInitialized) {
+            // Never block onPause on a dense-page write; the worker finishes it in the background.
+            saveBoundPageSession(flush = false)
+            try {
+                if (!pageWrites.flush(PAUSE_FLUSH_TIMEOUT_MS)) android.util.Log.w("MojianSync", "Page write continues after pause")
+            } catch (error: Exception) {
+                contentDirty = true
+                Toast.makeText(this, "笔记未保存：${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
         cancelShapeGesture()
         dismissDarkTooltip()
         toolDetailPopup?.dismiss()
@@ -2222,7 +2233,7 @@ class MainActivity : Activity() {
 
     private fun isKnownFullPageToolId(id: String): Boolean =
         when {
-            id in setOf("draw:undo", "draw:redo", "draw:add", "draw:pan", "draw:reading", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
+            id in setOf("draw:undo", "draw:redo", "draw:add", "draw:pan", "draw:reading", "draw:cursor", "draw:insert_space", "draw:rule_lines", "draw:clear") -> true
             id.startsWith("home:") -> HomeCommand.fromId(id.removePrefix("home:")) != null
             id.startsWith("tool:") -> toolShelf.tools.any { it.id == id.removePrefix("tool:") }
             else -> false
@@ -2772,6 +2783,20 @@ class MainActivity : Activity() {
         Toast.makeText(
             this,
             if (readingViewEnabled) "已开启阅读视图：单指、触控笔和鼠标拖动都平移页面，不会选中内容" else "已退出阅读视图",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /** Device-local; only gates finger taps on blank paper (see DirectInputPolicy.blankTapCreatesText). */
+    private fun toggleFingerCursorMode() {
+        fingerCursorModeEnabled = !fingerCursorModeEnabled
+        getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+            .putBoolean(FINGER_CURSOR_MODE_KEY, fingerCursorModeEnabled).apply()
+        if (!fingerCursorModeEnabled) textInputLayer.abandonTemporaryEditors()
+        renderToolShelf()
+        Toast.makeText(
+            this,
+            if (fingerCursorModeEnabled) "已开启光标模式：手指单击空白处会新建文本框" else "已关闭光标模式：手指单击空白处不再新建文本框，鼠标单击不受影响",
             Toast.LENGTH_SHORT,
         ).show()
     }
@@ -4706,6 +4731,7 @@ class MainActivity : Activity() {
             add(FullPageToolDescriptor("draw:add", "添加绘图工具", "add"))
             add(FullPageToolDescriptor("draw:pan", "触控笔抓手", "hand_left"))
             add(FullPageToolDescriptor("draw:reading", "阅读视图", "book_open"))
+            add(FullPageToolDescriptor("draw:cursor", "光标模式", "cursor"))
             add(FullPageToolDescriptor("draw:insert_space", "插入空白空间", "insert_space"))
             add(FullPageToolDescriptor("draw:rule_lines", "设置背景格式", "rule_lines"))
             add(FullPageToolDescriptor("draw:clear", "清纸", "delete_dismiss"))
@@ -4747,6 +4773,7 @@ class MainActivity : Activity() {
             "draw:pan" ->
                 commandButton("hand_left", "触控笔抓手", singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) }
             "draw:reading" -> commandButton("book_open", "阅读视图", readingViewEnabled) { toggleReadingView() }
+            "draw:cursor" -> commandButton("cursor", "光标模式", fingerCursorModeEnabled) { toggleFingerCursorMode() }
             "draw:insert_space" ->
                 commandButton("insert_space", "插入空白空间", insertSpaceModeEnabled, preserveColors = true) { anchor ->
                     handleInsertSpace(anchor)
@@ -4795,6 +4822,10 @@ class MainActivity : Activity() {
         )
         row.addView(
             commandButton("book_open", "阅读视图", selected = readingViewEnabled) { toggleReadingView() },
+            LinearLayout.LayoutParams(dp(40), dp(42)),
+        )
+        row.addView(
+            commandButton("cursor", "光标模式", selected = fingerCursorModeEnabled) { toggleFingerCursorMode() },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
         row.addView(verticalDivider())
@@ -5890,7 +5921,11 @@ class MainActivity : Activity() {
             return
         }
         clearContentSelection()
-        textInputLayer.createTemporaryEditor(viewX, viewY)
+        if (DirectInputPolicy.blankTapCreatesText(fromFinger, fingerCursorModeEnabled)) textInputLayer.createTemporaryEditor(viewX, viewY)
+        else {
+            textInputLayer.abandonTemporaryEditors()
+            textInputLayer.endEditing()
+        }
         updateSelectionInteraction()
     }
 
@@ -8088,6 +8123,8 @@ class MainActivity : Activity() {
         private const val MAXIMUM_PANORAMA_SENSITIVITY = 3f
         private const val ERASER_RADIUS_STEPS = 159
         private const val OPTIONS_PREFERENCES = "workspace-options"
+        private const val FINGER_CURSOR_MODE_KEY = "fingerCursorMode"
+        private const val PAUSE_FLUSH_TIMEOUT_MS = 1500L
         private const val FULL_PAGE_TOOLBAR_KEY = "full-page-toolbar"
         private const val KEY_TOOL_SHELF = "tool-shelf"
         private const val KEY_LAST_PEN_TOOL_ID = "last-pen-tool-id"

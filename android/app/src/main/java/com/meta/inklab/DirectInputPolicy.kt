@@ -43,6 +43,14 @@ object DirectInputPolicy {
         device == DirectInputDevice.MOUSE || device == DirectInputDevice.PEN
 
     /**
+     * Android cursor mode: a finger tap on blank paper opens a text box only while the mode is
+     * on, so resting or brushing fingers while writing never raise the keyboard. Mouse and pen
+     * clicks are not affected.
+     */
+    fun blankTapCreatesText(fromFinger: Boolean, fingerCursorMode: Boolean): Boolean =
+        !fromFinger || fingerCursorMode
+
+    /**
      * Finger, pen and primary-mouse drags pan the page; middle-button navigation keeps its
      * own pan/zoom path; right-button menus and lassos are suppressed because they select.
      */

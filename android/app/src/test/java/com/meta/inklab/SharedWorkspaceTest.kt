@@ -166,9 +166,16 @@ class SharedWorkspaceTest {
                 queue.submit(repository,document,PageInsertDocument("book","new-page",sharedSource=source)) {}
             }
             queue.flush()
+            // Superseded queued snapshots may be skipped; the latest content always lands.
+            val coalesced=repository.load("book","new-page").sharedSource.getLong("revision")
+            assertTrue(coalesced in 1L..3L)
+            assertEquals("revision-3",repository.load("book","new-page").sharedSource.getJSONArray("textItems").getJSONObject(0).getString("text"))
+            queue.submit(repository,document,PageInsertDocument("book","new-page",
+                sharedSource=JSONObject().put("textItems",JSONArray().put(JSONObject().put("text","revision-4"))))) {}
+            queue.flush()
             val current=repository.load("book","new-page")
-            assertEquals(3,current.sharedSource.getLong("revision"))
-            assertEquals("revision-3",current.sharedSource.getJSONArray("textItems").getJSONObject(0).getString("text"))
+            assertEquals(coalesced+1,current.sharedSource.getLong("revision"))
+            assertEquals("revision-4",current.sharedSource.getJSONArray("textItems").getJSONObject(0).getString("text"))
             repository.pageFile("book","new-page").writeText(SharedWorkspaceCodec.encodeDocument(current).put("remoteChange",true).toString())
             queue.submit(repository,document,PageInsertDocument("book","new-page")) {}
             assertThrows(IllegalStateException::class.java) { queue.flush() }
