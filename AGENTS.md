@@ -7,6 +7,13 @@
 
 # Current State
 
+- **Windows 0.7.23 source**: retained per-item WPF visuals, stable paper/image/PDF nodes, indexed
+  delta erasing (no page JSON on contact) and layered wet-ink updates. Synthetic 3,000 strokes /
+  240,000 points: eraser contact 353 -> 2.2 ms, allocations 110.7 -> 0.33 MB; 60 moves cause zero
+  full scene recordings. Final Release suite 256 passed + one clipboard-restore failure, which
+  passed an isolated retry (257 covered). Real selected-page read-only rendering also passed.
+  EXE/release delivery is pending this task's final publish step; physical PC pen feel is open.
+  Read `writing-performance-and-durability.md`; continuation `~/.agents/mojian--windows-ink-performance`.
 - **Android 0.7.22** (code30): adds a focused root `dispatchKeyEventPreIme` entry for the exact
   Xiaomi pen keyboard, ahead of IME hardware-key processing; Activity remains the fallback.
   Existing bindings/state machine are preserved; `MojianPenKey` logs receipt and binding types.
@@ -65,8 +72,8 @@
 - Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- OMEN SSH full suite has a pre-existing Hand-pan cached pixel-threshold failure: mean 1.870,
-  shifted mean 4.546; restoring de9a57a canvas reproduces it. Keep the threshold and report it.
+- Windows 0.7.23 physical pen/eraser acceptance is pending. Hand-pan pixel checks pass with their
+  original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.

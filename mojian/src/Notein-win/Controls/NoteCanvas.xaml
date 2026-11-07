@@ -5,7 +5,7 @@
              Focusable="True"
              IsManipulationEnabled="True"
              ClipToBounds="True">
-    <Grid>
+    <Grid Background="#0A0A0A">
         <local:CanvasDocumentScene x:Name="SceneLayer" IsHitTestVisible="False" ClipToBounds="True" />
         <local:CanvasWetInkOverlay x:Name="WetInkOverlay" IsHitTestVisible="False" />
         <Canvas x:Name="EditorLayer" Background="Transparent" />

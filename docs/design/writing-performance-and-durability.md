@@ -12,6 +12,44 @@ retains the immutable content snapshot and clears that flag; failed jobs remain 
 retry queue. Clean pages are not rewritten on navigation/close. Legacy on-disk viewport data is
 preserved separately so subsequent content saves do not publish the current device's view.
 
+## Dense-page Windows erasing and layered writing (0.7.23, 2026-11-07)
+
+The 0.7.21 Windows eraser still serialized the entire page on contact, scanned all strokes for each
+sample and invalidated a single page-sized scene visual. A synthetic 3,000-stroke / 240,000-point
+page reproduced 353 ms and 110.7 MB of UI-thread allocations on contact; 60 move samples caused
+60 complete scene recordings. Frozen DrawingGroups avoided rebuilding geometry, but did not give
+the compositor independent dirty bounds for each stroke. Layered/tagged pages also re-recorded and
+sorted all visible content for every wet-ink sample to preserve imported occlusion.
+
+`CanvasDocumentScene` now retains a DrawingVisual per visible content item under one document
+transform, with frozen stroke drawings from the existing cache. Normal changes reconcile identity
+and painter order; appending/removing ink preserves other visual nodes. Wet ink on layered/tagged
+pages updates its existing node at its canonical depth, including under source image/text covers.
+`PageScene.CompositeContent` supplies both the screen and export painter, including their existing
+unlayered text/editor distinction. Pan overscan/temporary bitmap caching is unchanged; all static
+ink remains vector-backed. Changing page clears visual ownership; viewport/style changes reconcile
+the scene and stroke cache keys include stored outline identity and imported color adaptation.
+Paper and image/PDF nodes also retain unchanged drawings across contact/lift. Their signatures
+include paper/style/viewport geometry, image transforms/crop, asset path/mtime and PDF decode
+revision. The workspace background belongs to the static Grid instead of being re-recorded on
+every canvas invalidation. Asset reloads bypass WPF's URI image cache after our mtime key changes.
+
+`EraseGesture` builds a 64-document-unit spatial grid once per contact (large bounds have a bounded
+overflow list). Each sample tests nearby candidates with the existing exact circle/outline hit
+test. Actual hits remove only their visual nodes. One lazy undo entry owns removed stroke/tag
+records and their original list positions; pressure activation uses the same entry after discarding
+the temporary wet stroke. No hit means no undo entry, redo invalidation or content save. Cancelling
+restores the removed records; lift releases all grid/index storage, leaving only erased records in
+history. The gesture marks content pending on its first deletion and still publishes through the
+existing save queue at completion; preceding pending edits are flushed even after an empty erase.
+Explicit Undo/Redo and complex edits retain the existing whole-document snapshot behavior.
+
+This is a Windows WPF input/compositor repair. Android's separate `DryInkView.eraseAtDocument` and
+AndroidX authoring already use local tile invalidation and have no WPF/JSON-on-contact path. No
+shared brush, persisted schema, Android build, sync transport or user note content changes here.
+Source/native fixture results are recorded in `docs/log/2026-11.md`; physical PC pen feel remains
+user acceptance. Software RenderTargetBitmap times are not physical frame-rate measurements.
+
 ## Dense save/input follow-up (0.7.21)
 
 Windows JSON encoding and atomic write already run on the save worker. A synthetic 1,900-stroke,
@@ -73,9 +111,8 @@ otherwise a passing suite can leave an orphan testhost locking product/test DLLs
 test-only runs do not create a Dispatcher just to dispose it.
 The caret fixture clears the default sample content before testing a blank click, and asserts
 that the temporary editor exists instead of accidentally reading an old insertion anchor.
-Full Windows test execution still
-has pre-existing UI-harness lifecycle and caret failures; this record is not a green full-suite
-claim. The 2026-10-28 log records independent HEAD comparisons and the Release FailFast boundary.
+Earlier UI-harness lifecycle/caret failures and the Release FailFast boundary are historical
+evidence in the 2026-10-28 log. Current suite results are recorded in the latest monthly entry.
 
 ## Incident and measured baseline
 

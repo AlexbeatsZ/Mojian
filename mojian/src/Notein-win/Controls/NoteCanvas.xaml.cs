@@ -29,12 +29,6 @@ public sealed class CanvasWetInkOverlay : FrameworkElement
     protected override void OnRender(DrawingContext context) => Owner?.DrawWetInk(context);
 }
 
-public sealed class CanvasDocumentScene : FrameworkElement
-{
-    internal NoteCanvas? Owner { get; set; }
-    protected override void OnRender(DrawingContext context) => Owner?.DrawScreenScene(context);
-}
-
 public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 {
     public PageObject Value { get; } = value;
@@ -62,7 +56,7 @@ public partial class NoteCanvas : UserControl
 
     private readonly ViewportState _viewport = new();
     private Rect? _importedPaperBounds;
-    private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null)
+    private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null, EraseGesture? Erased = null)
     {
         public static implicit operator UndoEntry(string json) => new(Json: json);
     }
@@ -135,6 +129,7 @@ public partial class NoteCanvas : UserControl
     private double _insertStartY;
     private double _insertCurrentY;
     private Point? _eraserViewPoint;
+    private EraseGesture? _eraseGesture;
     private Point? _hoverViewPoint;
     private bool _stylusActive;
     private bool _stylusInRange;
@@ -289,6 +284,7 @@ public partial class NoteCanvas : UserControl
         if (canvas._activeStroke != null && args.OldValue is PageDocument old) old.Strokes.Remove(canvas._activeStroke);
         canvas._undo.Clear();
         canvas._redo.Clear();
+        canvas.SceneLayer.Clear();
         canvas.ClearTransientState();
         canvas._bitmapCache.Clear();
         canvas._pdfBitmapCache.Clear();
@@ -313,7 +309,7 @@ public partial class NoteCanvas : UserControl
     private static void OnPointerModeChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
-        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive || canvas._eraseGesture != null) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -322,7 +318,7 @@ public partial class NoteCanvas : UserControl
     private static void OnReadingViewChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
-        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive || canvas._eraseGesture != null) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.CancelDirectPointer();
         canvas.AbandonTemporaryText();
@@ -336,7 +332,7 @@ public partial class NoteCanvas : UserControl
     private static void OnSelectedToolChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
-        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive) canvas.CancelStylusToolActionForNavigation();
+        if (canvas._activeStroke != null || canvas._stylusSelectionTransformActive || canvas._eraseGesture != null) canvas.CancelStylusToolActionForNavigation();
         canvas.CancelRightButtonLasso();
         canvas.UpdatePointerCursor();
         canvas.InvalidateVisual();
@@ -2019,7 +2015,7 @@ public partial class NoteCanvas : UserControl
                 UpdatePressureEraseCandidate(viewPoint, pressure, isStylus, tool);
                 break;
             case DrawingToolKind.Eraser:
-                PushUndo();
+                BeginEraseGesture();
                 _eraserViewPoint = viewPoint;
                 var eraserTool = forceErase ? ResolvePressureEraserTool?.Invoke() ?? tool : tool;
                 PerformErase(docPoint, eraserTool.EraserRadiusMm * UnitsPerMillimeter);
@@ -2172,7 +2168,7 @@ public partial class NoteCanvas : UserControl
         {
             _eraserViewPoint = viewPoint;
             PerformErase(docPoint, (_activePressureEraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter);
-            InvalidateVisual();
+            PointerOverlay.InvalidateVisual();
             return;
         }
         if (_activeStroke != null)
@@ -2201,7 +2197,7 @@ public partial class NoteCanvas : UserControl
             _eraserViewPoint = viewPoint;
             var eraserTool = SelectedTool?.Kind == DrawingToolKind.Eraser ? SelectedTool : ResolvePressureEraserTool?.Invoke();
             PerformErase(docPoint, (eraserTool?.EraserRadiusMm ?? ToolPreset.MinimumEraserRadiusMm) * UnitsPerMillimeter);
-            InvalidateVisual();
+            PointerOverlay.InvalidateVisual();
         }
     }
 
@@ -2281,7 +2277,9 @@ public partial class NoteCanvas : UserControl
             _pressureEraseArmed = true;
             changed = true;
         }
-        if (_eraserViewPoint.HasValue) changed = true;
+        if (_eraseGesture?.HasChanges == true) changed = true;
+        _eraseGesture?.Complete();
+        _eraseGesture = null;
         _eraserViewPoint = null;
         var endPressureEraserTool = _temporaryPressureEraser;
         _pressureCandidate = false;
@@ -2289,7 +2287,7 @@ public partial class NoteCanvas : UserControl
         _temporaryPressureEraser = false;
         _activePressureEraserTool = null;
         _pressureTimer.Stop();
-        if (changed) MarkChanged(immediate: true);
+        if (changed || Document.HasPendingContentChanges) MarkChanged(immediate: true);
         if (endPressureEraserTool) EndSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser);
         InvalidateVisual();
     }
@@ -2325,9 +2323,11 @@ public partial class NoteCanvas : UserControl
             _temporaryPressureEraser ||
             _isInsertingSpace ||
             _stylusSelectionTransformActive;
-        var snapshot = restoreDocument && _undo.Count > 0 ? _undo.Pop() : null;
+        var snapshot = restoreDocument && (_eraseGesture == null || _eraseGesture.HistoryPushed) && _undo.Count > 0 ? _undo.Pop() : null;
 
         _activeStroke = null;
+        _eraseGesture?.Complete();
+        _eraseGesture = null;
         _eraserViewPoint = null;
         _temporaryPressureEraser = false;
         _pressureCandidateEraserTool = null;
@@ -2390,15 +2390,14 @@ public partial class NoteCanvas : UserControl
         if (activeStroke == null) return;
         _straightenTimer.Stop(); _straighten.Cancel();
         Document?.Strokes.Remove(activeStroke);
-        // Upgrade the append-only undo entry before this gesture can remove
-        // existing ink. Ordinary writing never snapshots the whole document.
+        // Replace the abandoned append entry with one delta for the erased ink.
         if (_undo.Count > 0 && _undo.Peek().AddedStrokeId == activeStroke.Id) _undo.Pop();
-        PushUndo();
         _activeStroke = null;
         _pressureCandidate = false;
         _pressureCandidateEraserTool = null;
         _pressureTimer.Stop();
         _activePressureEraserTool = BeginSpringLoadedTool?.Invoke(SpringLoadedToolKind.Eraser) ?? eraserTool;
+        BeginEraseGesture();
         _temporaryPressureEraser = true;
         _eraserViewPoint = _pressureStartView;
         var documentPoint = _viewport.ViewToDocument(_pressureStartView.X, _pressureStartView.Y);
@@ -2451,12 +2450,30 @@ public partial class NoteCanvas : UserControl
         stroke.InvalidateBounds();
     }
 
+    private void BeginEraseGesture()
+    {
+        if (Document == null) return;
+        _eraseGesture = new EraseGesture(Document);
+        _saveTimer.Stop();
+        ClearSelection();
+    }
+
     private void PerformErase(Point point, double radius)
     {
         if (Document == null) return;
-        Document.Strokes.RemoveAll(stroke => PageScene.IsVisible(Document, stroke.LayerId) && StrokeHitsCircle(stroke, point, radius));
-        Document.Tags.RemoveAll(tag => Distance(new Point(tag.DocumentX, tag.DocumentY), point) <= radius + 14);
-        ClearSelection();
+        if (_eraseGesture == null) BeginEraseGesture();
+        var gesture = _eraseGesture!;
+        var bounds = new Rect(point.X - radius, point.Y - radius, radius * 2, radius * 2);
+        var strokes = gesture.Candidates(bounds)
+            .Where(stroke => PageScene.IsVisible(Document, stroke.LayerId) && StrokeHitsCircle(stroke, point, radius)).ToHashSet();
+        var tags = Document.Tags.Where(tag => Distance(new Point(tag.DocumentX, tag.DocumentY), point) <= radius + 14).ToHashSet();
+        if (strokes.Count == 0 && tags.Count == 0) return;
+        if (!gesture.HistoryPushed) { PushHistory(new UndoEntry(Erased: gesture)); gesture.HistoryPushed = true; }
+        foreach (var stroke in strokes) { gesture.Remove(stroke); SceneLayer.RemovePart(stroke); }
+        foreach (var tag in tags) { gesture.Remove(tag); SceneLayer.RemovePart(tag); }
+        Document.Strokes.RemoveAll(strokes.Contains);
+        Document.Tags.RemoveAll(tags.Contains);
+        Document.HasPendingContentChanges = true;
     }
 
     private static bool StrokeHitsCircle(StrokeRecord stroke, Point point, double radius)
@@ -2949,7 +2966,6 @@ public partial class NoteCanvas : UserControl
         PointerOverlay.InvalidateVisual();
         WetInkOverlay.InvalidateVisual();
         SceneLayer.InvalidateVisual();
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(10, 10, 10)), null, new Rect(0, 0, ActualWidth, ActualHeight));
         if (Document == null)
         {
             DrawText(dc, "选择或新建一个页面", new Point(48, 48), 18, new SolidColorBrush(Color.FromRgb(185, 185, 185)));
@@ -2964,8 +2980,14 @@ public partial class NoteCanvas : UserControl
     private void RefreshWetInk()
     {
         if (SeparateWetInk) { WetInkOverlay.InvalidateVisual(); PointerOverlay.InvalidateVisual(); }
+        else if (_activeStroke != null && SceneLayer.UpdatePart(_activeStroke, ScreenStrokeDrawing(_activeStroke)))
+            PointerOverlay.InvalidateVisual();
         else InvalidateVisual();
     }
+
+    private DrawingGroup ScreenStrokeDrawing(StrokeRecord stroke) => _strokeDrawings.Get(stroke,
+        Appearance.Theme == PageTheme.Dark, false, context => DrawStroke(context, stroke, lightExport: false),
+        ImportedPagePresentation.Applies(Document?.PageId) && ImportedPagePresentation.InvertImages(Document?.PageId, Appearance));
 
     internal void DrawWetInk(DrawingContext dc)
     {
@@ -2979,7 +3001,7 @@ public partial class NoteCanvas : UserControl
 
     internal void DrawScreenScene(DrawingContext dc)
     {
-        if (Document == null) return;
+        if (Document == null) { SceneLayer.Clear(); return; }
         SceneRenderCount++;
         _drawingDryScene = SeparateWetInk;
         _drawingScreen = true;
@@ -2995,15 +3017,33 @@ public partial class NoteCanvas : UserControl
                 var overscan = PanOverscanViewRect();
                 var inverse = matrix; inverse.Invert();
                 extent = Rect.Transform(overscan, inverse);
-                dc.PushClip(new RectangleGeometry(overscan));
             }
-            dc.PushTransform(new MatrixTransform(matrix));
-            DrawDocument(dc, CanvasRenderLayer.Composite, lightExport: false, extent);
-            if (_moveCopyVisible && _moveOriginalDrawing != null) dc.DrawDrawing(_moveOriginalDrawing);
-            dc.Pop();
-            if (_panCacheActive) dc.Pop();
+            SceneLayer.BeginScene(matrix, _panCacheActive ? extent : null);
+            SceneLayer.DrawPart(_paperSceneKey, PaperSceneSignature(extent), context => DrawPaper(context, lightExport: false, extent));
+            foreach (var content in PageScene.CompositeContent(Document, extent, includeUnlayeredText: false))
+            {
+                switch (content)
+                {
+                    case PageObject item: AddScreenObject(item, extent); break;
+                    case StrokeRecord stroke: AddScreenStroke(stroke, extent); break;
+                    case TextItem text: SceneLayer.DrawPart(text, context => DrawTextItems(context, false, [text])); break;
+                    case CanvasTag tag: SceneLayer.DrawPart(tag, context => DrawTags(context, false, [tag])); break;
+                }
+            }
+            if (_moveCopyVisible && _moveOriginalDrawing != null) SceneLayer.DrawPart(_moveSceneKey, _moveOriginalDrawing);
+            SceneLayer.EndScene();
         }
         finally { _drawingDryScene = false; _drawingScreen = false; }
+    }
+
+    private readonly object _paperSceneKey = new();
+    private readonly object _moveSceneKey = new();
+
+    private void AddScreenStroke(StrokeRecord stroke, Rect extent)
+    {
+        if (_drawingDryScene && ReferenceEquals(stroke, _activeStroke)) return;
+        if (Document == null || !PageScene.IsVisible(Document, stroke.LayerId) || !StrokeViewportCulling.IsVisible(stroke, extent)) return;
+        SceneLayer.DrawPart(stroke, ScreenStrokeDrawing(stroke));
     }
 
     // Panning used to re-rasterize every visible stroke for each pointer sample (about
@@ -3060,18 +3100,18 @@ public partial class NoteCanvas : UserControl
     {
         if (Document == null) return;
         if (layer is CanvasRenderLayer.Background or CanvasRenderLayer.Composite) DrawPaper(dc, lightExport, extent);
-        if (layer == CanvasRenderLayer.Composite && Document.Layers.Count > 0)
+        if (layer == CanvasRenderLayer.Composite)
         {
-            foreach (var content in PageScene.OrderedContent(Document, extent))
+            foreach (var content in PageScene.CompositeContent(Document, extent, lightExport || _outputAppearance != null))
             {
                 switch (content)
                 {
                     case PageObject item: DrawObjects(dc, lightExport, extent, [item]); break;
                     case StrokeRecord stroke: DrawStrokes(dc, lightExport, extent, [stroke]); break;
                     case TextItem text: DrawTextItems(dc, lightExport, [text]); break;
+                    case CanvasTag tag: DrawTags(dc, lightExport, [tag]); break;
                 }
             }
-            DrawTags(dc, lightExport);
             return;
         }
         if (layer is CanvasRenderLayer.Inserts or CanvasRenderLayer.Composite) DrawObjects(dc, lightExport, extent);
@@ -3453,7 +3493,11 @@ public partial class NoteCanvas : UserControl
         try
         {
             var source = new BitmapImage();
-            source.BeginInit(); source.CacheOption = BitmapCacheOption.OnLoad; source.UriSource = new Uri(path); source.EndInit(); source.Freeze();
+            // Our cache key includes the asset mtime. WPF's URI cache does not, so a
+            // replaced file must be decoded afresh when that key changes.
+            source.BeginInit(); source.CacheOption = BitmapCacheOption.OnLoad;
+            source.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            source.UriSource = new Uri(path); source.EndInit(); source.Freeze();
             var result = adaptImported ? ImportedImageAppearance.Adapt(source, Appearance.Theme == PageTheme.Dark) : ApplyImageInversion(source, inverted);
             _bitmapCache[key] = result;
             return result;
@@ -3493,6 +3537,7 @@ public partial class NoteCanvas : UserControl
             {
                 if (generation != _pdfRenderGeneration) return;
                 _pdfBitmapCache[key] = bitmap;
+                _pdfSceneRevision++;
                 InvalidateVisual();
             });
         }
@@ -3662,7 +3707,8 @@ public partial class NoteCanvas : UserControl
     {
         if (entry.Json != null) { RestoreSnapshot(entry.Json); return; }
         if (Document == null) return;
-        Document.Strokes.RemoveAll(stroke => stroke.Id == entry.AddedStrokeId);
+        if (entry.Erased != null) entry.Erased.Restore(Document);
+        else Document.Strokes.RemoveAll(stroke => stroke.Id == entry.AddedStrokeId);
         ClearSelection();
         MarkChanged(immediate: true);
         InvalidateVisual();
@@ -3728,6 +3774,8 @@ public partial class NoteCanvas : UserControl
 
     private void ClearTransientState()
     {
+        _eraseGesture?.Complete();
+        _eraseGesture = null;
         _cropStylusGesture = false;
         _stylusDeselectOnly = false;
         FinishSelectionMove(commit: false);

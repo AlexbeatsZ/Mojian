@@ -30,6 +30,24 @@ public static class PageScene
     public static bool IsVisible(PageDocument document, string layerId) =>
         document.Layers.FirstOrDefault(layer => layer.Id == layerId)?.Visible ?? true;
 
+    // Screen visuals and the single-context export painter share this exact order.
+    public static IEnumerable<object> CompositeContent(PageDocument document, Rect viewport, bool includeUnlayeredText)
+    {
+        if (document.Layers.Count > 0)
+        {
+            foreach (var content in OrderedContent(document, viewport)) yield return content;
+            foreach (var tag in document.Tags) yield return tag;
+            yield break;
+        }
+        foreach (var item in document.Objects)
+            if (new Rect(item.X, item.Y, item.Width, item.Height).IntersectsWith(viewport)) yield return item;
+        foreach (var stroke in document.Strokes)
+            if (StrokeViewportCulling.IsVisible(stroke, viewport)) yield return stroke;
+        foreach (var tag in document.Tags) yield return tag;
+        if (includeUnlayeredText)
+            foreach (var text in document.TextItems) yield return text;
+    }
+
     public static IEnumerable<object> OrderedContent(PageDocument document, Rect? viewport = null)
     {
         int LayerOrder(string id) => document.Layers.FirstOrDefault(layer => layer.Id == id)?.Order ?? int.MaxValue;
