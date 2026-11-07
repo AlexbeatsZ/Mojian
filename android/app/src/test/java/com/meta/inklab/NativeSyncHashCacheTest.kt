@@ -51,4 +51,17 @@ class NativeSyncHashCacheTest {
             assertEquals(4, hashes)
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun mtimeRewrittenWhileHashingDoesNotFailTheScan() {
+        val parent = File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
+        val root = Files.createTempDirectory(parent.toPath(), "mojian-sync-mtime-drift").toFile()
+        try {
+            File(root, "library.json").writeText("library")
+            val cache = NativeSyncHashCache { file ->
+                file.setLastModified(file.lastModified() - 86_400_000L)
+                NativeSyncFiles.hash(file)
+            }
+            assertEquals(setOf("library.json"), cache.scan(root).keys)
+        } finally { root.deleteRecursively() }
+    }
 }

@@ -235,6 +235,27 @@ class PageContentRepositoryTest {
     }
 
     @Test
+    fun mtimeRewrittenWhileVerifyingContentDoesNotRefuseSave() {
+        val root = Files.createTempDirectory("mojian-mtime-during-hash").toFile()
+        try {
+            var rewriteDuringHash = false
+            val repository = PageContentRepository(root) { file ->
+                // HyperOS rewrites the mtime at an arbitrary moment, here while the bytes are hashed.
+                if (rewriteDuringHash) { rewriteDuringHash = false; file.setLastModified(file.lastModified() - 86_400_000L) }
+                NativeSyncFiles.hash(file)
+            }
+            val document = PageInsertDocument("book", "page")
+            document.objects += InsertObject.NoteLink("first", 1f, 2f, 300f, 32f, "b", "s", "p", "first")
+            repository.save(document)
+            rewriteDuringHash = true
+            document.objects += InsertObject.NoteLink("second", 1f, 2f, 300f, 32f, "b", "s", "p", "second")
+            repository.save(document)
+            assertFalse(rewriteDuringHash)
+            assertEquals(listOf("first", "second"), repository.load("book", "page").objects.map { it.id })
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun externalReplacementReportingOurExactStampIsStillRefusedBySave() {
         val root = Files.createTempDirectory("mojian-same-stamp-external").toFile()
         try {

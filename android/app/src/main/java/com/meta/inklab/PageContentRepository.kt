@@ -3,7 +3,7 @@ package com.meta.inklab
 import java.io.File
 import org.json.JSONObject
 
-class PageContentRepository(val root: File) {
+class PageContentRepository(val root: File, private val hashFile: (File) -> String? = NativeSyncFiles::hash) {
     private val localMutations = LocalMutationEpoch.forWorkspace(root)
     private val observed = mutableMapOf<String, String?>()
     private val loadedPages = mutableMapOf<String, java.lang.ref.WeakReference<PageInsertDocument>>()
@@ -74,7 +74,10 @@ class PageContentRepository(val root: File) {
         if (current == null || expectedStamp == null) return current == expectedStamp
         val known = identities[file.path]?.takeIf { expectedStamp in it.stamps } ?: return current == expectedStamp
         if (current == expectedStamp && !verifyContent) return true
-        if (NativeSyncFiles.hash(file) != known.hash || stamp(file) != current) return false
+        // Stability during hashing is size + inode: HyperOS may rewrite only the mtime at any moment,
+        // which must not fail a check of unchanged bytes; a real replacement always has a new inode.
+        val before = physical(file)
+        if (hashFile(file) != known.hash || physical(file) != before) return false
         if (known.stamps.size >= 8) known.stamps.clear()
         known.stamps += expectedStamp; known.stamps += current
         return true
@@ -98,7 +101,8 @@ class PageContentRepository(val root: File) {
         require(document.notebookId == notebookId && document.pageId == pageId) { "Page identity mismatch" }
         document.diskFingerprint = source?.let(WorkspaceJson::fingerprint)
         val after = stamp(file)
-        check(after==generation || (readHash != null && after != null && NativeSyncFiles.hash(file) == readHash && stamp(file) == after)) {
+        val afterPhysical = physical(file)
+        check(after==generation || (readHash != null && after != null && hashFile(file) == readHash && physical(file) == afterPhysical)) {
             "页面正在同步更新，请稍后重新加载"
         }
         if (readHash != null) remember(file, readHash, generation, after) else identities.remove(file.path)
@@ -133,6 +137,11 @@ class PageContentRepository(val root: File) {
     }
 
     private fun stamp(file: File) = if(file.isFile) "${file.lastModified()}:${file.length()}" else null
+    /** Size and inode only; unlike [stamp] it is not affected by HyperOS mtime rewrites. */
+    private fun physical(file: File): String? = runCatching {
+        java.nio.file.Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java,
+            java.nio.file.LinkOption.NOFOLLOW_LINKS).let { "${it.size()}:${it.fileKey()}" }
+    }.getOrNull()
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
 
     private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?) = atomicWrite(file,

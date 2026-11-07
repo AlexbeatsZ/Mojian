@@ -93,6 +93,9 @@ native sync cannot publish an intermediate index/assets snapshot.
   导出等屏障照常保存。代价：两次保存之间进程被杀最多丢这段内容（第 2 步本机笔画日志另行设计）。
 - 写入前的检查以内容哈希为准（`unchanged(verifyContent = true)`）：HyperOS 会把被替换文件报告成旧
   mtime，相同 mtime+大小不能证明字节相同。替换前的短窗口检查与 UI 端 3 s 轮询仍用 stamp 快速路径。
+- 哈希期间的稳定性只比较 大小 + inode（`physical`），不比较 mtime（0.7.16）：HyperOS 会在任意时刻
+  只改写 mtime，0.7.15 曾在算 6.5 MB 哈希时撞上改写而误拒保存；同步扫描 `NativeSyncHashCache`
+  同理，否则整轮同步报"本地文件正在修改"。墨笺以 rename 发布，真实替换必然换 inode。
 
 ## 手势期间的瓦片场景缓存（0.7.12）
 

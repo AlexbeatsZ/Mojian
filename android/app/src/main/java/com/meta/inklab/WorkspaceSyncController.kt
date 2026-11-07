@@ -93,7 +93,14 @@ internal class WorkspaceSyncController(
         }
     }
 
+    @Volatile private var lastLoggedStatus: String? = null
+
     private fun publish(value: String, visible: Boolean, request: Long) {
+        // Status was screen-only; keep transitions in logcat so sync failures can be diagnosed later.
+        if (value != lastLoggedStatus) {
+            lastLoggedStatus = value
+            android.util.Log.i("MojianSync", "status: $value")
+        }
         handler.post { if (!closed && foreground && generation.get() == request) stateChanged(value, visible) }
     }
 

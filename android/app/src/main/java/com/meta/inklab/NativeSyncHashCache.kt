@@ -47,7 +47,9 @@ internal class NativeSyncHashCache(private val hashFile: (File) -> String? = Nat
                     val file = NativeSyncFiles.safeFile(root, relative)
                     val value = requireNotNull(hashFile(file))
                     val after = Files.readAttributes(path, BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                    check(after.isRegularFile && after.size() == attributes.size() && after.lastModifiedTime() == attributes.lastModifiedTime() && after.fileKey() == attributes.fileKey()) { "本地文件正在修改，下次重试" }
+                    // Not mtime: HyperOS rewrites a renamed file's mtime later, which would fail whole passes.
+                    // Mojian publishes by rename, so a real replacement changes the inode or size.
+                    check(after.isRegularFile && after.size() == attributes.size() && after.fileKey() == attributes.fileKey()) { "本地文件正在修改，下次重试" }
                     entries[relative] = Entry(after.size(), after.lastModifiedTime(), after.fileKey(), value)
                     value
                 }

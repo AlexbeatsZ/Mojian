@@ -15,6 +15,8 @@
   Local `mojian/artifacts/release/Mojian.exe` is updated to 0.7.11 (0.7.11+b977596); running PIDs
   39076/52164 remain backed by `.old` without stopping. ROG client `Mojian.exe` is updated to 0.7.11;
   sync service PID 44516 / listeners 18742+18743 are unchanged.
+- **Android 0.7.16** (code24): content/sync hash checks verify stability by size + inode, not mtime
+  (a HyperOS mtime rewrite during a 6.5 MB hash falsely refused a 0.7.15 save and can fail sync scans).
 - **Android 0.7.15** (code23): idle-based page saves (2 s after the pen rests, at most 20 s dirty
   while writing continuously; lifecycle/navigation still flush) and content-hash verification before
   every page write. Step 2 (device-local stroke journal) is not started. See `android-page-navigation.md`.
@@ -279,6 +281,8 @@
 
 - Never wait unboundedly for the page write queue on the UI thread in lifecycle callbacks: dense
   pages take seconds per save and an unmerged queue backlogs during continuous writing (bg ANR kill).
+- Do not re-check mtime around hashing either: on HyperOS it can change mid-hash with no write.
+  Use size + inode for "file replaced while reading"; Mojian publishes by rename.
 - Android shared storage mtime is not a change detector: on HyperOS 3.0 a renamed-over file
   first reports the new mtime, then minutes later the replaced file's old one (reproduced with
   plain `mv`). Use size/mtime only as a hint and confirm with content hashes before refusing writes.
