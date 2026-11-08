@@ -7,10 +7,12 @@
 
 # Current State
 
-- **0.7.25 published (Windows/Android code31, source `d940f41`)**: pen color row has a configuration button plus a separate
-  saved-preset selector. New/edit named styles own pressure/speed curves, direction, tapers, stability,
-  tilt and turn response. Configured new ink snapshots `pen-style-v1` and its canonical outline;
-  historical readers stay unchanged. Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
+- **0.7.27 published (Windows/Android code32, source `c433980`)**: only `Notein风格` is preinstalled;
+  original pressure/flow/stability stay visible. Configuration is JSON text/file import, with functions,
+  engine parameters and configurable front controls. Selecting a file only fills the text box.
+  WPF preset switching is fixed; historical ink/snapshots and 0.7.26 performance are preserved.
+  Local Windows EXE replaced while closed; K70/Pad updated in place and optimized, Pad resumed normally.
+  Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
 - **Windows 0.7.26**: dry scene keeps a permanent `BitmapCache` (render thread was saturated
   re-tessellating old ink under wet ink); topmost new ink on layered pages uses the wet overlay;
   v2/pen-style eraser hits use modeled samples (`StrokeEraserHitTest`, 8.5 ms -> µs per candidate).
@@ -78,24 +80,15 @@
 
 # Active Work
 
-- **2026-11-08 pen configuration correction, release authorized**: user rejected control-point editing,
-  removed main sliders and invented built-ins. Only `Notein风格` is preinstalled; preserve per-tool
-  width/pressure/flow/stability (local black: .3 mm/78/20/0). Configuration is JSON text import with
-  file selection filling the text box, never importing immediately. Files define functions, engine
-  parameters and visible slider bindings; schema/examples are in shared/ and docs/examples/.
-  Nested WPF preset dropdown ownership and refresh are fixed. Source tests: Windows 279 passed;
-  Android 292 passed/2 opt-in skipped, native test code compiled, lint 0 errors/144 warnings.
-  Full AndroidX tip/material/graph capabilities are researched, not falsely exposed as supported
-  by the WPF width engine. Read pen-style-presets.md. User then explicitly authorized replacement
-  on reachable devices; packaging Windows/Android 0.7.27/code32 is active. Preserve installed data,
-  package/signer and original parameters. Current outputs remain Windows .7.26 / Android .7.25 until delivery.
-- 0.7.25 EXE+APK are uploaded; Windows 267 tests and Android 288 tests pass (2 opt-in skipped).
-  Local APK is current. Windows `v0.7.26` EXE (b788430) is published and supersedes the staged 0.7.25 EXE;
-  local release EXE was replaced after PID39720 exited normally (0.7.26+b788430). No Android install.
-- Tablet 0.7.21 startup/stability UI is verified; physical feel remains separate.
+- 0.7.27 delivery is complete under explicit user authorization: EXE/APK published and current outputs
+  replaced, phone 0.7.14/code22 and tablet 0.7.22/code30 upgraded to code32 without uninstall/data clear.
+  Existing library file counts/index sizes and first-install times stayed unchanged. Tablet cold launch
+  880 ms/resumed; phone stays at its original launcher. Windows remains closed, new EXE .7.27+c433980.
+  Windows 279 tests and Android 292 passed/2 skipped; native fixture compile-only, lint 0 errors/144 warnings.
+  Full native behavior graphs/materials/non-round tips remain a documented extension goal, not v1 support.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows 0.7.26 physical writing/erasing acceptance is pending. Hand-pan pixel checks pass with their
+- Windows 0.7.27 physical writing/erasing acceptance is pending. Hand-pan pixel checks pass with their
   original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
