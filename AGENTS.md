@@ -7,11 +7,11 @@
 
 # Current State
 
-- **0.7.28 in progress (Windows/Android code33)**: PDF page-pane import now creates one note
-  per file with vertically stacked immutable backgrounds and one original PDF asset. Both clients
-  use the PDF original/invert/ask policy; physical output retains every source sheet and its size.
-  Old split imports are unchanged. See `insert-and-export.md` / `export-and-print.md`.
-  Task: `~/.agents/mojian--pdf-document-import/AGENTS.md`; code verified, release packaging pending.
+- **0.7.28 published (Windows/Android code33)**: PDF page-pane import creates one note per file,
+  with vertically stacked immutable backgrounds and one original PDF asset. Both clients use the
+  PDF original/invert/ask policy; physical output retains every source sheet and its size.
+  Old split imports stay unchanged. Current EXE/APK refreshed; no device install/restart this task.
+  Read `insert-and-export.md` / `export-and-print.md`; task `~/.agents/mojian--pdf-document-import`.
 - **0.7.27 published (Windows/Android code32, source `c433980`)**: only `Notein风格` is preinstalled;
   original pressure/flow/stability stay visible. Configuration is JSON text/file import, with functions,
   engine parameters and configurable front controls. Selecting a file only fills the text box.
@@ -72,16 +72,12 @@
 
 # Active Work
 
-- 0.7.27 delivery is complete under explicit user authorization: EXE/APK published and current outputs
-  replaced, phone 0.7.14/code22 and tablet 0.7.22/code30 upgraded to code32 without uninstall/data clear.
-  Existing library file counts/index sizes and first-install times stayed unchanged. Tablet cold launch
-  880 ms/resumed; phone stays at its original launcher. Windows remains closed, new EXE .7.27+c433980.
-  Windows 279 tests and Android 292 passed/2 skipped; native fixture compile-only, lint 0 errors/144 warnings.
-  Full native behavior graphs/materials/non-round tips remain a documented extension goal, not v1 support.
+- 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows 0.7.27 physical writing/erasing acceptance is pending. Hand-pan pixel checks pass with their
-  original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
+- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 282/283,
+  existing Hand-pan pixel failure mean 1.870 / shifted 4.546; final PDF/pagination checks 12/12 pass.
+  Preserve the original threshold. Android: 298 passed/1 opt-in skipped, APK/test APK/lint pass.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
