@@ -803,7 +803,9 @@ class MainActivity : Activity() {
                 pendingExport = null
                 pendingSectionExport = null
             }
-            REQUEST_PDF_PAGES -> uris.firstOrNull()?.let(::importPdfPages)
+            REQUEST_PDF_PAGES -> uris.firstOrNull()?.let { uri ->
+                chooseDisplayFilter(pdfPrintoutDisplayMode, "PDF 如何显示？") { inverted -> importPdfPages(uri, inverted) }
+            }
             REQUEST_SAVE_IMAGE -> data.data?.let(::finishSaveImageAs)
         }
     }
@@ -7331,31 +7333,53 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun importPdfPages(uri: Uri) {
+    private fun importPdfPages(uri: Uri, inverted: Boolean) {
         val target = pendingPdfPageTarget.also { pendingPdfPageTarget = null } ?: return
-        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == target.notebookId } ?: return
+        if (notebookLibrary.notebooks.none { it.id == target.notebookId }) return
+        val repository = pageContentRepository
+        val importer = pdfPageImporter
+        val library = notebookLibrary
+        val mutation = LocalMutationEpoch.forWorkspace(repository.root).begin()
         Toast.makeText(this, "正在导入 PDF…", Toast.LENGTH_SHORT).show()
-        ioExecutor.execute {
-            runCatching { pdfPageImporter.importPages(target.notebookId, uri) }
-                .onSuccess { result ->
-                    runOnUiThread {
-                        if (!notebook.addPages(target.sectionId, result.pages)) {
-                            result.pages.forEach { page -> pageContentRepository.deletePageData(target.notebookId, page.id) }
-                            Toast.makeText(this, "PDF 导入位置已不存在", Toast.LENGTH_LONG).show()
-                            return@runOnUiThread
+        try {
+            ioExecutor.execute {
+                runCatching { importer.importDocument(target.notebookId, uri, inverted) }
+                    .onSuccess { result ->
+                        runOnUiThread {
+                            mutation.use {
+                                var published = false
+                                try {
+                                    check(!isDestroyed && !isFinishing && pageContentRepository === repository && notebookLibrary === library) {
+                                        "笔记库已切换，请重新导入 PDF"
+                                    }
+                                    check(saveBoundPageSession()) { "当前页面未能保存，请重试" }
+                                    val candidate = PdfDocumentLayout.attach(library, target.notebookId, target.sectionId, result.page) {
+                                        if (repository.isShared) repository.saveLibrary(it)
+                                        else check(getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit()
+                                            .putString(KEY_NOTEBOOK_LIBRARY, it.toJsonString()).commit()) { "无法保存笔记目录" }
+                                    }
+                                    published = true
+                                    notebookLibrary = candidate
+                                    val location = workspace.captureLocation()
+                                    target.splitSide?.takeIf { splitViewState.enabled }?.let { side -> splitViewState.setLocation(side, location) }
+                                    persistWorkspacePreferences(saveLibrary = false)
+                                    persistPageViewSettings()
+                                    renderWorkspace()
+                                    nativeSyncController.localSaved()
+                                    Toast.makeText(this, "已导入 PDF（${result.sourcePageCount} 页）", Toast.LENGTH_LONG).show()
+                                } catch (error: Exception) {
+                                    if (!published) runCatching { repository.deletePageData(target.notebookId, result.page.id) }
+                                        .onFailure { error.addSuppressed(it) }
+                                    reportBackgroundFailure("PDF 导入失败", error)
+                                }
+                            }
                         }
-                        notebookLibrary.selectNotebook(target.notebookId)
-                        val location = notebook.captureLocation()
-                        target.splitSide?.takeIf { splitViewState.enabled }?.let { side ->
-                            splitViewState.setLocation(side, location)
-                        }
-                        persistPageViewSettings()
-                        persistWorkspacePreferences()
-                        renderWorkspace()
-                        Toast.makeText(this, "已导入 ${result.pages.size} 页 PDF", Toast.LENGTH_LONG).show()
                     }
-                }
-                .onFailure { reportBackgroundFailure("PDF 导入失败", it) }
+                    .onFailure { mutation.close(); reportBackgroundFailure("PDF 导入失败", it) }
+            }
+        } catch (error: Exception) {
+            mutation.close()
+            reportBackgroundFailure("PDF 导入失败", error)
         }
     }
 

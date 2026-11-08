@@ -23,6 +23,12 @@ public static class ExportLayout
         var content = Rect.Empty;
         foreach (var bounds in InfinitePageLayout.ContentBounds(document)) content.Union(bounds);
         var appearance = page.Appearance;
+        // A PDF note owns multiple immutable background objects, one per original sheet.
+        // Legacy split imports have at most one and keep their exact saved MediaBox below.
+        var pdfSheets = document.Objects.Where(item => item.IsPageBackground && item.Kind == PageObjectKind.PdfPrintout)
+            .OrderBy(item => item.Y).Select(item => new Rect(item.X, item.Y, item.Width, item.Height)).ToArray();
+        if (appearance.PaperKind == PaperKind.Pdf && pdfSheets.Length > 1 && options.Paper == ExportPaper.Auto)
+            return pdfSheets.Select(source => new ExportSheet(source, source.Width, source.Height, 1, 0)).ToArray();
         if (ImportedPagePresentation.Applies(document.PageId) && appearance.PaperKind != PaperKind.Pdf)
         {
             appearance = appearance.Clone();
@@ -42,8 +48,9 @@ public static class ExportLayout
         var sheets = new List<ExportSheet>();
         if (appearance.PaperKind == PaperKind.Pdf)
         {
-            var source = new Rect(0, 0, appearance.Width, appearance.Height);
-            return [new(source, w, h, Math.Min((w - 2 * margin) / source.Width, (h - 2 * margin) / source.Height), margin)];
+            var sources = pdfSheets.Length > 1 ? pdfSheets : [new Rect(0, 0, appearance.Width, appearance.Height)];
+            return sources.Select(source => new ExportSheet(source, w, h,
+                Math.Min((w - 2 * margin) / source.Width, (h - 2 * margin) / source.Height), margin)).ToArray();
         }
         if (appearance.PaperKind == PaperKind.A4)
         {

@@ -1,6 +1,6 @@
 # Windows / Android Product Parity
 
-Last verified: 2026-11-07
+Last verified: 2026-11-08
 
 Read this document before changing a product feature, command, persisted page concept, or user-visible
 interaction that exists in both the Android and Windows editions of 墨笺.
@@ -37,6 +37,9 @@ Parity means the same product outcome, not identical operating-system APIs. For 
   bounds and submitting only strokes intersecting the visible viewport to the native renderer.
   Viewport movement must not rescan every input point or rewrite the complete page document; full
   export still renders every stroke.
+- PDF import from the page pane creates one note per file on both clients. Source sheets scroll
+  vertically within it, share one original asset, and retain individual physical output boundaries.
+  Both entries honor the same original/invert/ask policy. See `insert-and-export.md`.
 - Shared `.mjn`, page appearance, object, and asset semantics remain compatible even when the native
   picker, clipboard, pointer, or window integration differs.
 - Boundless paper is anchored at document origin and grows only to the right/down when any actual

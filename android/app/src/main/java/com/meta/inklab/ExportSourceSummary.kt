@@ -5,10 +5,11 @@ data class ExportSourceSummary(
     val content: List<StrokeViewportBounds>,
     val originalSize: PdfOutputPageSize?,
     val images: List<ExportImageChoice> = emptyList(),
+    val pdfSheets: List<StrokeViewportBounds> = emptyList(),
 ) {
     fun sheets(options: ExportOptions, outputSize: PdfOutputPageSize? = null): List<Pair<ExportSheet, Int>> {
         val paper = settings.pageColor.displayArgb(settings.darkBackground)
         val color = if (options.printing && settings.darkBackground) OutputAppearance.printPaper(paper) else paper
-        return ExportLayout.plan(settings, content, options, originalSize, outputSize).map { it to color }
+        return ExportLayout.plan(settings, content, options, originalSize, outputSize, pdfSheets).map { it to color }
     }
 }

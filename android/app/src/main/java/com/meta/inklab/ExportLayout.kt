@@ -20,7 +20,15 @@ data class ExportSheet(val source: StrokeViewportBounds, val widthPoints: Float,
 
 object ExportLayout {
     fun plan(settings: PageViewSettings, content: List<StrokeViewportBounds>, options: ExportOptions,
-        original: PdfOutputPageSize? = null, outputSize: PdfOutputPageSize? = null): List<ExportSheet> {
+        original: PdfOutputPageSize? = null, outputSize: PdfOutputPageSize? = null,
+        pdfSheets: List<StrokeViewportBounds> = emptyList()): List<ExportSheet> {
+        if (settings.paperSize == PaperSize.PDF && pdfSheets.size > 1) return pdfSheets.map { source ->
+            val width = source.right - source.left
+            val height = source.bottom - source.top
+            val size = PdfOutputPageSize(width / DOCUMENT_UNITS_PER_PDF_POINT, height / DOCUMENT_UNITS_PER_PDF_POINT)
+            plan(settings.copy(customDocumentWidth = width, customDocumentHeight = height), emptyList(), options, size, outputSize)
+                .single().copy(source = source)
+        }
         val bounds = content.reduceOrNull { a, b -> StrokeViewportBounds(minOf(a.left,b.left), minOf(a.top,b.top), maxOf(a.right,b.right), maxOf(a.bottom,b.bottom)) }
         val sourceWidth = settings.documentWidth ?: A4PageLayout.pageWidth
         val sourceHeight = settings.documentHeight ?: A4PageLayout.pageHeight

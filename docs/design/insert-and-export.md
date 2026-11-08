@@ -1,6 +1,6 @@
 # Insert Objects and Export Containers
 
-Last verified: 2026-10-31
+Last verified: 2026-11-08
 
 Old Notein/OneNote pages additionally use the read-only paper/image/ink contrast compatibility
 in `imported-page-presentation.md`. Original files and persisted inversion flags remain unchanged;
@@ -71,10 +71,25 @@ ribbon. `屏幕剪辑` and `页面模板` are intentionally omitted.
   page. It therefore behaves like a batch image insertion while preserving the source PDF in the
   private package.
 - PDF import from the gray page-pane `+` is a different operation from an Insert-ribbon printout.
-  It creates one `NotePage` per source PDF page. Each new page stores the original PDF reference,
-  page number/count, original PDF point dimensions, and a private rendered page image. That image
-  is an immutable page-background object at document origin; normal insert objects, ink, text, and
-  tags remain above it.
+  It creates exactly one `NotePage` for the entire PDF, titled with the filename without `.pdf`.
+  All physical PDF pages are immutable background objects stacked vertically, left-aligned at
+  their original document dimensions, with no inter-sheet gap. The note width is the widest
+  source page and its height is the sum of all source-page heights. Normal insert objects, ink,
+  text and tags remain editable above these backgrounds; source pages cannot be moved/deleted
+  as ordinary objects. Only one original PDF is copied into this note's own asset directory.
+- Both import entries use the PDF display policy (original / invert / ask), with the existing
+  light-theme policy. One answer applies to the entire document and persists on every background's
+  `ViewInverted` / `viewInverted`; source PDF and preview PNG bytes are never inverted in storage.
+  Android's page-pane import previously skipped this policy; 0.7.28 connects it.
+- The existing canonical v2 format carries the continuous note's total dimensions and each
+  background's own coordinates, size, source asset and source page number. No schema migration
+  or automatic consolidation of older split imports occurs. Singular PDF metadata describes
+  the first sheet; physical export uses the ordered immutable PDF backgrounds when there are
+  multiple sheets, retaining their individual page sizes and annotation offsets.
+- Both clients prepare the complete new page/assets before publishing a candidate library entry,
+  leaving the previous selection/index unchanged if import or publication fails. Android renders
+  one source page at a time and recycles each bitmap. Its local mutation epoch spans staging,
+  index publication and cleanup, and a switched/destroyed workspace rejects stale completion.
 - A spreadsheet keeps the original workbook and a bounded first-sheet cell preview. Tapping it
   delegates editing to an installed spreadsheet application. Spreadsheet previews and inserted
   tables automatically use dark cells/light text on the canvas and white cells/dark text in export;

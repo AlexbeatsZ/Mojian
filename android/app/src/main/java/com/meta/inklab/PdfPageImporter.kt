@@ -11,104 +11,31 @@ import java.util.UUID
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-data class PdfPageImportResult(
-    val pages: List<NotePage>,
-    val sourceDocumentName: String,
-)
+data class PdfPageImportResult(val page: NotePage, val sourcePageCount: Int)
 
-class PdfPageImporter(
-    private val repository: PageContentRepository,
-    private val assetStore: AssetStore,
-) {
-    fun importPages(notebookId: String, uri: Uri): PdfPageImportResult {
-        val allocatedPageIds = mutableListOf<String>()
-        val sourceOwnerPageId = nextPageId().also(allocatedPageIds::add)
+class PdfPageImporter(private val repository: PageContentRepository, private val assetStore: AssetStore) {
+    fun importDocument(notebookId: String, uri: Uri, inverted: Boolean): PdfPageImportResult {
+        val pageId = "pdf-page-${UUID.randomUUID()}"
         try {
-            val source = assetStore.importUri(notebookId, sourceOwnerPageId, uri)
-            val pages = mutableListOf<NotePage>()
+            val source = assetStore.importUri(notebookId, pageId, uri)
+            val sheets = mutableListOf<ImportedPdfSheet>()
             ParcelFileDescriptor.open(source.file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                 PdfRenderer(descriptor).use { renderer ->
                     require(renderer.pageCount > 0) { "PDF 没有可导入的页面" }
-                    val pageIds =
-                        List(renderer.pageCount) { index ->
-                            if (index == 0) sourceOwnerPageId else nextPageId().also(allocatedPageIds::add)
-                        }
-                    val baseTitle = source.displayName.withoutPdfSuffix().ifBlank { "PDF" }
                     for (index in 0 until renderer.pageCount) {
                         renderer.openPage(index).use { page ->
-                            val pageId = pageIds[index]
-                            val pageNumber = index + 1
-                            val widthPoints = page.width.toFloat().coerceAtLeast(1f)
-                            val heightPoints = page.height.toFloat().coerceAtLeast(1f)
-                            val documentWidth = widthPoints * DOCUMENT_UNITS_PER_PDF_POINT
-                            val documentHeight = heightPoints * DOCUMENT_UNITS_PER_PDF_POINT
-                            val renderedAssetName = "${UUID.randomUUID()}-pdf-page-$pageNumber.png"
-                            // The canonical workspace resolves assets in each page's own directory.
-                            if(pageId!=sourceOwnerPageId) source.file.copyTo(File(repository.assetDirectory(notebookId,pageId),source.storedName),overwrite=true)
-                            renderPage(page, File(repository.assetDirectory(notebookId, pageId), renderedAssetName))
-
-                            val pdfInfo =
-                                PdfPageInfo(
-                                    sourceOwnerPageId = pageId,
-                                    sourceAssetName = source.storedName,
-                                    renderedAssetName = renderedAssetName,
-                                    sourceDocumentName = source.displayName,
-                                    pageNumber = pageNumber,
-                                    pageCount = renderer.pageCount,
-                                    widthPoints = widthPoints,
-                                    heightPoints = heightPoints,
-                                )
-                            val settings =
-                                PageViewSettings(
-                                    paperSize = PaperSize.PDF,
-                                    pageColor = PageColor.WHITE,
-                                    backgroundFormat = CanvasBackgroundFormat.BLANK,
-                                    pageTitleVisible = false,
-                                    darkBackground = false,
-                                    a4PageCount = 1,
-                                    customDocumentWidth = documentWidth,
-                                    customDocumentHeight = documentHeight,
-                                )
-                            val title = if (renderer.pageCount == 1) baseTitle else "$baseTitle · $pageNumber"
-                            pages +=
-                                NotePage(
-                                    id = pageId,
-                                    title = title,
-                                    subtitle = "$pageNumber / ${renderer.pageCount}",
-                                    viewSettings = settings,
-                                    pdfPage = pdfInfo,
-                                )
-                            repository.save(
-                                PageInsertDocument(
-                                    notebookId = notebookId,
-                                    pageId = pageId,
-                                    objects =
-                                        mutableListOf(
-                                            InsertObject.Image(
-                                                id = "pdf-background-${UUID.randomUUID()}",
-                                                documentX = 0f,
-                                                documentY = 0f,
-                                                width = documentWidth,
-                                                height = documentHeight,
-                                                assetName = renderedAssetName,
-                                                displayName = "$title.pdf-page",
-                                                mimeType = "image/png",
-                                                sourceKind = ImageSourceKind.PDF_PAGE,
-                                                viewInverted = false,
-                                                sourceAssetName = source.storedName,
-                                                sourcePageNumber = pageNumber,
-                                                pageBackground = true,
-                                            ),
-                                        ),
-                                ),
-                            )
+                            val assetName = "${UUID.randomUUID()}-pdf-page-${index + 1}.png"
+                            renderPage(page, File(repository.assetDirectory(notebookId, pageId), assetName))
+                            sheets += ImportedPdfSheet(index + 1, page.width.toFloat(), page.height.toFloat(), assetName)
                         }
                     }
                 }
             }
-            return PdfPageImportResult(pages, source.displayName)
+            val note = PdfDocumentLayout.create(notebookId, pageId, source.displayName, source.storedName, sheets, inverted)
+            repository.save(note.document)
+            return PdfPageImportResult(note.page, sheets.size)
         } catch (error: Throwable) {
-            allocatedPageIds.forEach { pageId -> repository.deletePageData(notebookId, pageId) }
+            repository.deletePageData(notebookId, pageId)
             throw error
         }
     }
@@ -130,11 +57,6 @@ class PdfPageImporter(
             bitmap.recycle()
         }
     }
-
-    private fun nextPageId(): String = "pdf-page-${UUID.randomUUID()}"
-
-    private fun String.withoutPdfSuffix(): String =
-        if (endsWith(".pdf", ignoreCase = true)) dropLast(4) else this
 
     companion object {
         private const val MAX_RENDER_SIDE_PX = 2400f

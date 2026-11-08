@@ -1,6 +1,6 @@
 # Export scopes and physical pagination
 
-Last verified: 2026-10-28
+Last verified: 2026-11-08
 
 Old migrated non-PDF pages use continuous content pagination, including negative-coordinate
 content, instead of clipping imported layouts to an A4 origin. Paper, image and ink display
@@ -149,6 +149,12 @@ desktop screen width. Both pattern palettes currently use the original uniform d
   They fit wide content to usable paper width without upscaling narrow content, then cut downward
   into full-size output pages. Deletion and viewport history do not retain empty historical paper.
   A wholly empty logical note yields one blank sheet.
+- A PDF imported as one logical note still exports one physical sheet per immutable PDF background,
+  ordered by its document Y coordinate. Automatic keeps each original page boundary/size, including
+  mixed portrait/landscape dimensions; explicit paper uniformly fits each physical sheet separately.
+  The source rectangle retains its original Y offset so annotations on later sheets are included.
+  Old split imports keep their prior single-sheet metadata path. Section/notebook counts and output
+  page ranges continue to use physical sheets rather than the number of navigation entries.
 - Source PDF pages preserve their original page boundary in Automatic mode. Native Android PDF
   dimensions remain integer points. Actual PDF/image assets remain image content in the current
   renderer; authored/imported ink and text remain vector geometry.
