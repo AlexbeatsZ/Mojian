@@ -1564,8 +1564,8 @@ class MainActivity : Activity() {
                         }
                         addView(
                             settingsRow(
-                                "暗色模式 PDF 插图",
-                                "逐页插入时的显示方式；保留原始 PDF 文件。",
+                                "暗色模式 PDF 显示",
+                                "导入 PDF 和插入打印样式时的显示方式；保留原始 PDF 文件。",
                                 pdfFilterValue,
                             ),
                             LinearLayout.LayoutParams(MATCH, dp(72)),
