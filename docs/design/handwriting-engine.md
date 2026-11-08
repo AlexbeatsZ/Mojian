@@ -265,10 +265,12 @@ applies to both apps and is not the differentiator.
 
 ### Configurable style presets
 
-`pen-style-v1` adds named, editable pressure/speed curves, direction, independent start/end taper,
-stability and advanced tilt/turn/response controls. The pen flyout has a separate saved-preset
-dropdown and a configuration button at the right of its color row. New/edit/save operations live
-inside that configuration window. Read `pen-style-presets.md` before changing this model or UI.
+`pen-style-v1` carries resolved pressure/speed functions, direction, start/end taper, input modeling
+and tilt/turn/response parameters. The pen flyout keeps its separate saved-preset dropdown and
+configuration button, but configuration is now JSON text/file import, not a control-point editor.
+Only Notein风格 is preinstalled; it preserves v2 and the user's pressure/flow/stability percentages.
+Files define both functions and the visible parameter controls. Read `pen-style-presets.md` and
+`shared/pen-configuration.schema.json` before changing this model or UI.
 The calibrated v2 and legacy v1 readers remain unchanged; configured new strokes capture their
 own behavior and canonical outline rather than looking up a mutable preset when rendering.
 

@@ -155,9 +155,11 @@ a new preset. Tool presets are add-only: neither the ribbon nor a tool flyout ma
 button, and persisted presets are never silently discarded.
 
 Pen mark styles are a named library within that existing ToolShelf. A separate saved-preset dropdown
-chooses the current pen style; a configuration button at the right of the color row opens new/edit
-operations. Color/nominal width stay per tool, behavior curves and stability live in the style editor.
-Read `pen-style-presets.md` for snapshot ownership, editing and history compatibility.
+chooses the current pen style; the configuration button at the right of the color row opens JSON
+text/file import. Selecting a file only fills the editor; Import validates and saves. Color/nominal
+width stay per tool. Files define functions and visible parameter controls; Notein风格 preserves the
+existing pressure, ink flow and stability controls. It is the only preinstalled style.
+Read `pen-style-presets.md` for snapshot ownership, import and history compatibility.
 
 Required working tools:
 

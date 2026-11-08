@@ -29,6 +29,17 @@ data class PenStyle(
     var pressureResponseMs: Int = 0,
     var speedResponseMs: Int = 25,
     var directionResponseMs: Int = 25,
+    var speedMaximumCmPerSecond: Double = 64.0,
+    var directionMinimum: Double = .45,
+    var directionMaximum: Double = .65,
+    var turnMinimum: Double = 80.0,
+    var turnMaximum: Double = 230.0,
+    var turnResponseMs: Int = 25,
+    var tiltMaximumRadians: Double = Math.PI / 3,
+    var inputWindowMs: Int = 0,
+    var upsamplingHz: Int = 180,
+    var startResponseMs: Int = 0,
+    var endResponseMs: Int = 0,
 ) {
     fun snapshot() = copy(pressureCurve = pressureCurve.toList(), speedCurve = speedCurve.toList())
     fun sameParameters(other: PenStyle): Boolean {
@@ -47,6 +58,9 @@ data class PenStyle(
         put("tiltEnabled", tiltEnabled); put("tiltWidth", tiltWidth)
         put("turnEnabled", turnEnabled); put("turnAmount", turnAmount)
         put("pressureResponseMs", pressureResponseMs); put("speedResponseMs", speedResponseMs); put("directionResponseMs", directionResponseMs)
+        put("speedMaximumCmPerSecond", speedMaximumCmPerSecond); put("directionMinimum", directionMinimum); put("directionMaximum", directionMaximum)
+        put("turnMinimum", turnMinimum); put("turnMaximum", turnMaximum); put("turnResponseMs", turnResponseMs); put("tiltMaximumRadians", tiltMaximumRadians)
+        put("inputWindowMs", inputWindowMs); put("upsamplingHz", upsamplingHz); put("startResponseMs", startResponseMs); put("endResponseMs", endResponseMs)
     }
 
     companion object {
@@ -72,7 +86,7 @@ data class PenStyle(
         }
         private fun curveJson(curve: List<CurvePoint>) = JSONArray().apply { curve.forEach { put(JSONObject().put("x", it.x).put("y", it.y)) } }
         private fun readCurve(json: JSONArray?, end: Double): List<CurvePoint> {
-            require(json != null && json.length() in 2..33)
+            require(json != null && json.length() in 2..257)
             return (0 until json.length()).map { i -> json.getJSONObject(i).let { CurvePoint(it.getDouble("x"), it.getDouble("y")) } }.also { curve ->
                 require(curve.first().x == 0.0 && curve.last().x == end)
                 require(curve.all { it.x.isFinite() && it.x in 0.0..end && it.y.isFinite() && it.y in 0.0..3.0 })
@@ -85,7 +99,7 @@ data class PenStyle(
             fun time(key: String, default: Int) = j.optInt(key, default).also { require(it in 0..100) }
             PenStyle(
                 pressureEnabled = j.optBoolean("pressureEnabled", true), pressureCurve = readCurve(j.optJSONArray("pressureCurve"), 1.0),
-                speedEnabled = j.optBoolean("speedEnabled", true), speedCurve = readCurve(j.optJSONArray("speedCurve"), 64.0),
+                speedEnabled = j.optBoolean("speedEnabled", true), speedCurve = readCurve(j.optJSONArray("speedCurve"), j.optDouble("speedMaximumCmPerSecond", 64.0)),
                 directionEnabled = j.optBoolean("directionEnabled", true), directionAmount = number("directionAmount", .17, 0.0, 1.0),
                 startEnabled = j.optBoolean("startEnabled"), startLengthMm = number("startLengthMm", .5, .1, 20.0), startMinimum = number("startMinimum", .55, 0.0, 1.0),
                 endEnabled = j.optBoolean("endEnabled"), endLengthMm = number("endLengthMm", 1.0, .1, 20.0), endMinimum = number("endMinimum", .18, 0.0, 1.0),
@@ -93,17 +107,24 @@ data class PenStyle(
                 tiltEnabled = j.optBoolean("tiltEnabled"), tiltWidth = number("tiltWidth", 1.5, .1, 3.0),
                 turnEnabled = j.optBoolean("turnEnabled"), turnAmount = number("turnAmount", .25, 0.0, 1.0),
                 pressureResponseMs = time("pressureResponseMs", 0), speedResponseMs = time("speedResponseMs", 25), directionResponseMs = time("directionResponseMs", 25),
-            )
+                speedMaximumCmPerSecond = number("speedMaximumCmPerSecond", 64.0, 1.0, 1000.0),
+                directionMinimum = number("directionMinimum", .45, -1.0, 1.0), directionMaximum = number("directionMaximum", .65, -1.0, 1.0),
+                turnMinimum = number("turnMinimum", 80.0, 0.0, 100000.0), turnMaximum = number("turnMaximum", 230.0, 0.0, 100000.0), turnResponseMs = time("turnResponseMs", 25),
+                tiltMaximumRadians = number("tiltMaximumRadians", Math.PI / 3, .01, Math.PI / 2),
+                inputWindowMs = j.optInt("inputWindowMs", 0).also { require(it in 0..500) }, upsamplingHz = j.optInt("upsamplingHz", 180).also { require(it in 30..1000) },
+                startResponseMs = time("startResponseMs", 0), endResponseMs = time("endResponseMs", 0),
+            ).also { require(it.directionMinimum < it.directionMaximum && it.turnMinimum < it.turnMaximum) }
         }.getOrNull()
     }
 }
 
-data class NamedPenStyle(val id: String, val name: String, val style: PenStyle) {
+data class NamedPenStyle(val id: String, val name: String, val style: PenStyle, val configuration: PenConfiguration? = null) {
     override fun toString() = name
-    fun toJson() = JSONObject().put("id", id).put("name", name).put("style", style.toJson())
+    fun toJson() = JSONObject().put("id", id).put("name", name).put("style", style.toJson()).apply { configuration?.let { put("configuration", it.toJson()) } }
     companion object {
         fun fromJson(j: JSONObject?): NamedPenStyle? = runCatching {
             require(j != null)
+            j.optJSONObject("configuration")?.let { return@runCatching fromConfiguration(PenConfiguration.parse(it.toString())) }
             val id = j.getString("id"); val name = j.getString("name")
             require(id.isNotBlank() && name.isNotBlank() && name.length <= 40)
             NamedPenStyle(id, name, requireNotNull(PenStyle.fromJson(j.optJSONObject("style"))))
@@ -111,7 +132,8 @@ data class NamedPenStyle(val id: String, val name: String, val style: PenStyle) 
         fun defaults(): List<NamedPenStyle> {
             val source = requireNotNull(NamedPenStyle::class.java.getResourceAsStream("/pen-style-presets.json")).bufferedReader().use { it.readText() }
             val values = JSONArray(source)
-            return (0 until values.length()).map { requireNotNull(fromJson(values.getJSONObject(it))) }
+            return (0 until values.length()).map { fromConfiguration(PenConfiguration.parse(values.getJSONObject(it).toString())) }
         }
+        fun fromConfiguration(config: PenConfiguration) = NamedPenStyle(config.id, config.name, config.resolve(config.parameters), config)
     }
 }

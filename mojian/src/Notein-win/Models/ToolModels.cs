@@ -62,6 +62,7 @@ public static class InkPaletteExtensions
 
 public class ToolPreset
 {
+    public Dictionary<string, Dictionary<string, double>> PenParameterValues { get; set; } = [];
     public const float MinimumEraserRadiusMm = 0.25f;
     public const float MaximumEraserRadiusMm = 40f;
 
@@ -138,6 +139,7 @@ public class ToolPreset
             ["stabilityPercent"] = StabilityPercent,
             ["penStyleId"] = PenStyleId,
             ["penStyle"] = PenStyle?.ToJson(),
+            ["penParameterValues"] = JsonSerializer.SerializeToNode(PenParameterValues),
             ["opacityPercent"] = OpacityPercent,
             ["eraserRadiusMm"] = EraserRadiusMm,
             ["pressureEraseEnabled"] = PressureEraseEnabled,
@@ -181,6 +183,7 @@ public class ToolPreset
                 StabilityPercent = Math.Clamp(json["stabilityPercent"]?.GetValue<int>() ?? 50, 0, 100),
                 PenStyleId = json["penStyleId"]?.GetValue<string>() ?? string.Empty,
                 PenStyle = Models.PenStyle.FromJson(json["penStyle"] as JsonObject),
+                PenParameterValues = json["penParameterValues"]?.Deserialize<Dictionary<string, Dictionary<string, double>>>() ?? [],
                 PressureEraseDwellMilliseconds = Math.Clamp(json["pressureEraseDwellMilliseconds"]?.GetValue<int>() ?? 140, 50, 500),
                 PressureEraseThresholdPercent = Math.Clamp(json["pressureEraseThresholdPercent"]?.GetValue<int>() ?? 78, 40, 100),
                 PressureEraseTravelLimitMm = Math.Clamp(json["pressureEraseTravelLimitMm"]?.GetValue<float>() ?? 1f, .1f, 10f),
@@ -262,7 +265,7 @@ public class ToolShelf
         };
 
         _mutableTools.Add(preset);
-        if (kind == DrawingToolKind.Pen) ApplyPenStyle(preset, _penStyles.First(p => p.Id == "natural"));
+        if (kind == DrawingToolKind.Pen) ApplyPenStyle(preset, _penStyles.First(p => p.Id == "notein"));
         SelectedId = preset.Id;
         return preset;
     }
@@ -308,42 +311,34 @@ public class ToolShelf
     private void RegisterExistingPenStyles()
     {
         foreach (var tool in _mutableTools.Where(t => t.Kind == DrawingToolKind.Pen && string.IsNullOrEmpty(t.PenStyleId)))
-        {
-            var style = EffectivePenStyle(tool);
-            var preset = _penStyles.FirstOrDefault(s => s.Style.Key() == style.Key());
-            if (preset == null)
-            {
-                var name = tool.DisplayName + "（原设置）";
-                var uniqueName = name; var suffix = 2;
-                while (_penStyles.Any(p => p.Name == uniqueName)) uniqueName = name + " " + suffix++;
-                preset = new("migrated-" + tool.Id, uniqueName, style);
-                _penStyles.Add(preset);
-            }
-            tool.PenStyleId = preset.Id;
-        }
+            ApplyPenStyle(tool, _penStyles.Single(p => p.Id == "notein"));
     }
 
     public void ApplyPenStyle(ToolPreset tool, NamedPenStyle preset)
     {
         tool.PenStyleId = preset.Id;
-        tool.PenStyle = preset.Style.Copy();
-        tool.StabilityPercent = preset.Style.StabilityPercent;
+        tool.PenStyle = preset.Configuration?.Resolve(preset.Configuration.ValuesFor(tool)) ?? preset.Style.Copy() with { StabilityPercent = tool.StabilityPercent };
     }
 
-    public NamedPenStyle SavePenStyle(string? id, string name, PenStyle style)
+    public NamedPenStyle ImportPenConfiguration(string text)
     {
-        name = name.Trim();
-        if (name.Length is < 1 or > 40) throw new ArgumentException("名称须为 1–40 个字符。");
-        if (_penStyles.Any(p => p.Id != id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException("已有同名预设，请使用其他名称。");
-        var valid = Models.PenStyle.FromJson(style.ToJson()) ?? throw new ArgumentException("笔触参数无效。");
-        var saved = new NamedPenStyle(id ?? Guid.NewGuid().ToString("N"), name, valid);
-        var index = _penStyles.FindIndex(p => p.Id == saved.Id);
-        if (id != null && index < 0) throw new ArgumentException("预设已不存在，请新建预设。");
-        if (index < 0) _penStyles.Add(saved); else _penStyles[index] = saved;
-        foreach (var tool in _mutableTools.Where(t => t.Kind == DrawingToolKind.Pen && t.PenStyleId == saved.Id)) ApplyPenStyle(tool, saved);
-        return saved;
+        var imported = NamedPenStyle.FromConfiguration(PenConfiguration.Parse(text));
+        if (_penStyles.Any(p => p.Id != imported.Id && string.Equals(p.Name, imported.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("已有同名配置，请修改 name 或使用相同 id 更新。");
+        // Resolve against every affected tool before committing a replacement.
+        var affected = _mutableTools.Where(t => t.Kind == DrawingToolKind.Pen && t.PenStyleId == imported.Id).ToList();
+        foreach (var tool in affected) _ = imported.Configuration!.Resolve(imported.Configuration.ValuesFor(tool));
+        var index = _penStyles.FindIndex(p => p.Id == imported.Id);
+        if (index < 0) _penStyles.Add(imported); else _penStyles[index] = imported;
+        foreach (var tool in affected) ApplyPenStyle(tool, imported);
+        return imported;
     }
+
+    public IReadOnlyList<PenParameterControl> PenControls(ToolPreset tool) =>
+        _penStyles.FirstOrDefault(p => p.Id == tool.PenStyleId)?.Configuration?.Controls ?? [];
+
+    public void SetPenParameter(ToolPreset tool, string parameter, double value) =>
+        (_penStyles.First(p => p.Id == tool.PenStyleId).Configuration ?? throw new ArgumentException("旧配置须先转换为函数配置。")).SetValue(tool, parameter, value);
 
     private InkPalette NextPenColor()
     {
@@ -389,9 +384,15 @@ public class ToolShelf
                 foreach (var item in styles.OfType<JsonObject>())
                     if (NamedPenStyle.FromJson(item) is { } saved)
                     {
+                        if (IsSupersededDefault(saved, shelf._mutableTools)) continue;
                         var index = shelf._penStyles.FindIndex(s => s.Id == saved.Id);
                         if (index < 0) shelf._penStyles.Add(saved); else shelf._penStyles[index] = saved;
                     }
+            foreach (var tool in shelf._mutableTools.Where(t => t.Kind == DrawingToolKind.Pen))
+            {
+                var selected = shelf._penStyles.FirstOrDefault(p => p.Id == tool.PenStyleId) ?? shelf._penStyles.First(p => p.Id == "notein");
+                shelf.ApplyPenStyle(tool, selected);
+            }
             var selectedId = node["selectedId"]?.GetValue<string>();
             if (!string.IsNullOrEmpty(selectedId) && list.Any(t => t.Id == selectedId))
             {
@@ -403,6 +404,15 @@ public class ToolShelf
         {
             return null;
         }
+    }
+
+    private static bool IsSupersededDefault(NamedPenStyle saved, IEnumerable<ToolPreset> tools)
+    {
+        if (tools.Any(t => saved.Id == "migrated-" + t.Id && saved.Name.Contains("（原设置）", StringComparison.Ordinal) &&
+            saved.Style.Key() == Models.PenStyle.FromLegacy(t.PressurePercent, t.InkFlowPercent, t.StabilityPercent).Key())) return true;
+        using var stream = typeof(NamedPenStyle).Assembly.GetManifestResourceStream("Mojian.PenStyleMigration.json")!;
+        return JsonNode.Parse(stream)!.AsArray().OfType<JsonObject>().Select(NamedPenStyle.FromJson)
+            .Any(p => p != null && p.Id == saved.Id && p.Name == saved.Name && p.Style.Key() == saved.Style.Key());
     }
 
     public static IEnumerable<ToolPreset> Defaults() => new List<ToolPreset>

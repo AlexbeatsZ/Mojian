@@ -1,0 +1,183 @@
+{
+  "format": "mojian-pen/v1",
+  "id": "legacy-android",
+  "name": "旧版 Android 笔触",
+  "parameters": {
+    "pressure": 200,
+    "flow": 100,
+    "windowMs": 20
+  },
+  "controls": [
+    {
+      "parameter": "pressure",
+      "label": "压感",
+      "min": 0,
+      "max": 400,
+      "step": 1,
+      "unit": "%",
+      "legacyField": "pressurePercent"
+    },
+    {
+      "parameter": "flow",
+      "label": "出墨",
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "unit": "%",
+      "legacyField": "inkFlowPercent"
+    },
+    {
+      "parameter": "windowMs",
+      "label": "稳定性",
+      "min": 1,
+      "max": 100,
+      "step": 1,
+      "unit": " ms"
+    }
+  ],
+  "style": {
+    "pressureEnabled": true,
+    "pressureCurve": {
+      "breaks": [
+        0.18,
+        0.88
+      ],
+      "function": {
+        "op": "linear",
+        "args": [
+          "x",
+          0.18,
+          0.88,
+          {
+            "op": "subtract",
+            "args": [
+              1,
+              {
+                "op": "multiply",
+                "args": [
+                  0.45,
+                  {
+                    "op": "divide",
+                    "args": [
+                      "$pressure",
+                      200
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "args": [
+              1,
+              {
+                "op": "multiply",
+                "args": [
+                  0.45,
+                  {
+                    "op": "divide",
+                    "args": [
+                      "$pressure",
+                      200
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "samples": 0
+    },
+    "speedEnabled": true,
+    "speedCurve": {
+      "function": {
+        "op": "linear",
+        "args": [
+          "x",
+          0,
+          85,
+          {
+            "op": "add",
+            "args": [
+              1,
+              {
+                "op": "multiply",
+                "args": [
+                  0.08,
+                  {
+                    "op": "divide",
+                    "args": [
+                      "$flow",
+                      100
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "max",
+            "args": [
+              0.25,
+              {
+                "op": "subtract",
+                "args": [
+                  1,
+                  {
+                    "op": "multiply",
+                    "args": [
+                      0.18,
+                      {
+                        "op": "divide",
+                        "args": [
+                          "$flow",
+                          100
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "samples": 0
+    },
+    "directionEnabled": true,
+    "directionAmount": 0.17,
+    "startEnabled": true,
+    "startLengthMm": {
+      "op": "multiply",
+      "args": [
+        "$widthMm",
+        1.25
+      ]
+    },
+    "startMinimum": 0.55,
+    "endEnabled": true,
+    "endLengthMm": {
+      "op": "multiply",
+      "args": [
+        "$widthMm",
+        2.5
+      ]
+    },
+    "endMinimum": 0.18,
+    "stabilityPercent": 50,
+    "tiltEnabled": false,
+    "tiltWidth": 1.5,
+    "turnEnabled": true,
+    "turnAmount": 0.25,
+    "pressureResponseMs": 20,
+    "speedResponseMs": 18,
+    "directionResponseMs": 25,
+    "inputWindowMs": "$windowMs",
+    "speedMaximumCmPerSecond": 85,
+    "startResponseMs": 12,
+    "endResponseMs": 12,
+    "turnResponseMs": 25
+  }
+}

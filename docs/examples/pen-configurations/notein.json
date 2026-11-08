@@ -1,0 +1,233 @@
+{
+  "format": "mojian-pen/v1",
+  "id": "notein",
+  "name": "Notein风格",
+  "parameters": {
+    "pressure": 200,
+    "flow": 100,
+    "stability": 50
+  },
+  "controls": [
+    {
+      "parameter": "pressure",
+      "label": "压感",
+      "min": 0,
+      "max": 400,
+      "step": 1,
+      "unit": "%",
+      "legacyField": "pressurePercent"
+    },
+    {
+      "parameter": "flow",
+      "label": "出墨",
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "unit": "%",
+      "legacyField": "inkFlowPercent"
+    },
+    {
+      "parameter": "stability",
+      "label": "稳定性",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "unit": "%",
+      "legacyField": "stabilityPercent"
+    }
+  ],
+  "style": {
+    "pressureEnabled": true,
+    "pressureCurve": {
+      "samples": 16,
+      "function": {
+        "op": "multiply",
+        "args": [
+          1.4,
+          {
+            "op": "pow",
+            "args": [
+              "x",
+              {
+                "op": "divide",
+                "args": [
+                  "$pressure",
+                  100
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "speedEnabled": true,
+    "speedCurve": {
+      "breaks": [
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64
+      ],
+      "function": {
+        "op": "subtract",
+        "args": [
+          1,
+          {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "min",
+                "args": [
+                  0.95,
+                  {
+                    "op": "multiply",
+                    "args": [
+                      0.85,
+                      {
+                        "op": "divide",
+                        "args": [
+                          "$flow",
+                          100
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "piecewise",
+                    "segments": [
+                      {
+                        "from": 0,
+                        "to": 1,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            0,
+                            1,
+                            0,
+                            0
+                          ]
+                        }
+                      },
+                      {
+                        "from": 1,
+                        "to": 2,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            1,
+                            2,
+                            0,
+                            0.08
+                          ]
+                        }
+                      },
+                      {
+                        "from": 2,
+                        "to": 4,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            2,
+                            4,
+                            0.08,
+                            0.15
+                          ]
+                        }
+                      },
+                      {
+                        "from": 4,
+                        "to": 8,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            4,
+                            8,
+                            0.15,
+                            0.23
+                          ]
+                        }
+                      },
+                      {
+                        "from": 8,
+                        "to": 16,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            8,
+                            16,
+                            0.23,
+                            0.46
+                          ]
+                        }
+                      },
+                      {
+                        "from": 16,
+                        "to": 32,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            16,
+                            32,
+                            0.46,
+                            0.69
+                          ]
+                        }
+                      },
+                      {
+                        "from": 32,
+                        "to": 64,
+                        "value": {
+                          "op": "linear",
+                          "args": [
+                            "x",
+                            32,
+                            64,
+                            0.69,
+                            0.85
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  0.85
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "samples": 0
+    },
+    "directionEnabled": true,
+    "directionAmount": 0.17,
+    "startEnabled": false,
+    "startLengthMm": 0.5,
+    "startMinimum": 0.55,
+    "endEnabled": false,
+    "endLengthMm": 1,
+    "endMinimum": 0.18,
+    "stabilityPercent": "$stability",
+    "tiltEnabled": false,
+    "tiltWidth": 1.5,
+    "turnEnabled": false,
+    "turnAmount": 0.25,
+    "pressureResponseMs": 0,
+    "speedResponseMs": 25,
+    "directionResponseMs": 25
+  }
+}

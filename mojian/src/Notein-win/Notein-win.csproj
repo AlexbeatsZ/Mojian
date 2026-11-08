@@ -9,7 +9,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>Mojian</AssemblyName>
     <Product>墨笺</Product>
-    <Version>0.7.26</Version>
+    <Version>0.7.27</Version>
     <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -17,6 +17,7 @@
     <Resource Include="Assets\mojian.png" />
     <EmbeddedResource Include="../../../shared/page-backgrounds.json" LogicalName="Mojian.PageBackgrounds.json" />
     <EmbeddedResource Include="../../../shared/pen-style-presets.json" LogicalName="Mojian.PenStylePresets.json" />
+    <EmbeddedResource Include="../../../shared/pen-style-legacy-migration.json" LogicalName="Mojian.PenStyleMigration.json" />
   </ItemGroup>
 
 </Project>

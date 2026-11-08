@@ -78,6 +78,17 @@
 
 # Active Work
 
+- **2026-11-08 pen configuration correction, release authorized**: user rejected control-point editing,
+  removed main sliders and invented built-ins. Only `Notein风格` is preinstalled; preserve per-tool
+  width/pressure/flow/stability (local black: .3 mm/78/20/0). Configuration is JSON text import with
+  file selection filling the text box, never importing immediately. Files define functions, engine
+  parameters and visible slider bindings; schema/examples are in shared/ and docs/examples/.
+  Nested WPF preset dropdown ownership and refresh are fixed. Source tests: Windows 279 passed;
+  Android 292 passed/2 opt-in skipped, native test code compiled, lint 0 errors/144 warnings.
+  Full AndroidX tip/material/graph capabilities are researched, not falsely exposed as supported
+  by the WPF width engine. Read pen-style-presets.md. User then explicitly authorized replacement
+  on reachable devices; packaging Windows/Android 0.7.27/code32 is active. Preserve installed data,
+  package/signer and original parameters. Current outputs remain Windows .7.26 / Android .7.25 until delivery.
 - 0.7.25 EXE+APK are uploaded; Windows 267 tests and Android 288 tests pass (2 opt-in skipped).
   Local APK is current. Windows `v0.7.26` EXE (b788430) is published and supersedes the staged 0.7.25 EXE;
   local release EXE was replaced after PID39720 exited normally (0.7.26+b788430). No Android install.
@@ -171,7 +182,7 @@
 
 # Docs Index
 
-- `docs/design/pen-style-presets.md`: independent selector/configuration, named style editing and immutable stroke snapshots.
+- `docs/design/pen-style-presets.md`: JSON import, functions, dynamic parameter controls and immutable stroke snapshots.
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
 

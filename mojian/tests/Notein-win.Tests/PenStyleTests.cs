@@ -1,8 +1,11 @@
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -15,64 +18,178 @@ namespace Notein_win.Tests;
 
 public sealed class PenStyleTests
 {
-    [Fact]
-    public void SharedBuiltinsAndLegacySettingsHaveEquivalentCalibratedCurves()
-    {
-        var natural = NamedPenStyle.Defaults().Single(p => p.Id == "natural").Style;
-        Assert.Equal("natural", new ToolShelf().Selected.PenStyleId);
-        Assert.Equal(3, new ToolShelf().PenStyles.Count);
-        Assert.All(NamedPenStyle.Defaults(), p => Assert.NotNull(PenStyle.FromJson(p.Style.ToJson())));
-        for (var p = 0; p <= 16; p++)
-        foreach (var v in new double[] { 0, 1, 2, 4, 8, 16, 32, 64 })
-            Assert.Equal(FountainV2Model.WidthMultiplier(p / 16d, 200, v, 100, 0),
-                PenStyle.Evaluate(natural.PressureCurve, p / 16d) * PenStyle.Evaluate(natural.SpeedCurve, v), 7);
-        Assert.False(natural.StartEnabled); Assert.False(natural.EndEnabled);
-        Assert.True(NamedPenStyle.Defaults().Single(p => p.Id == "classic").Style.TurnEnabled);
-    }
+    private static JsonObject Config(string id = "test", string name = "测试笔触")
+    { var json = NamedPenStyle.Defaults().Single().Configuration!.ToJson(); json["id"] = id; json["name"] = name; return json; }
 
     [Fact]
-    public void SaveNewEditExistingAndRestorePreserveReferencesAndHistoricalSnapshots()
+    public void OnlyNoteinIsPreinstalledAndOriginalPercentagesStillControlTheCurve()
     {
-        var shelf = new ToolShelf();
-        var black = shelf.Tools.Single(t => t.Id == "pen-black");
-        var blue = shelf.Tools.Single(t => t.Id == "pen-blue");
-        var draft = PenStyle.FromLegacy(78, 20, 0);
-        var saved = shelf.SavePenStyle(null, "硬笔练字", draft);
-        shelf.ApplyPenStyle(black, saved); shelf.ApplyPenStyle(blue, saved);
-        var historical = new StrokeRecord { PenStyle = black.PenStyle!.Copy(), BrushProfile = PenStyle.Profile };
-        draft.PressureCurve[0] = new(0, 2);
-        Assert.Equal(0, saved.Style.PressureCurve[0].Y);
-        var changed = saved.Style.Copy(); changed.EndEnabled = true; changed.StabilityPercent = 75;
-        shelf.SavePenStyle(saved.Id, "硬笔练字 2", changed);
-        Assert.True(black.PenStyle!.EndEnabled); Assert.True(blue.PenStyle!.EndEnabled);
-        Assert.Equal(75, black.StabilityPercent); Assert.False(historical.PenStyle!.EndEnabled);
-        Assert.Equal(.4f, black.WidthMm); Assert.Equal(InkPalette.Blue, blue.Color);
+        var old = new ToolPreset("pen-black", DrawingToolKind.Pen) { WidthMm = .3f, PressurePercent = 78, InkFlowPercent = 20, StabilityPercent = 0 };
+        var shelf = ToolShelf.FromJson(new JsonObject { ["tools"] = new JsonArray(old.ToJson()) }.ToJsonString())!;
+        Assert.Equal("Notein风格", Assert.Single(shelf.PenStyles).Name); Assert.Equal("notein", old.PenStyleId == "" ? shelf.Selected.PenStyleId : old.PenStyleId);
+        var tool = shelf.Selected;
+        Assert.Equal(.3f, tool.WidthMm); Assert.Equal(78, tool.PressurePercent); Assert.Equal(20, tool.InkFlowPercent); Assert.Equal(0, tool.StabilityPercent);
+        var expected = PenStyle.FromLegacy(78, 20, 0);
+        Assert.Equal(expected.Key(), tool.PenStyle!.Key());
+        shelf.SetPenParameter(tool, "pressure", 180); shelf.SetPenParameter(tool, "flow", 150); shelf.SetPenParameter(tool, "stability", 75);
+        Assert.Equal(PenStyle.FromLegacy(180, 150, 75).Key(), tool.PenStyle!.Key());
         var restored = ToolShelf.FromJson(shelf.ToJson())!;
-        Assert.Equal("硬笔练字 2", restored.PenStyles.Single(p => p.Id == saved.Id).Name);
-        Assert.Equal(saved.Id, restored.Tools.Single(t => t.Id == "pen-black").PenStyleId);
-        Assert.True(restored.Tools.Single(t => t.Id == "pen-blue").PenStyle!.EndEnabled);
-        Assert.Throws<ArgumentException>(() => shelf.SavePenStyle(null, "硬笔练字 2", changed));
-        Assert.Throws<ArgumentException>(() => shelf.SavePenStyle(null, " ", changed));
-        var natural = shelf.PenStyles.Single(p => p.Id == "natural").Style.Copy(); natural.PressureEnabled = false;
-        shelf.SavePenStyle("natural", "自然钢笔", natural);
-        Assert.False(shelf.Add(DrawingToolKind.Pen).PenStyle!.PressureEnabled);
-        var snapshot = historical.CopyForSave();
-        historical.PenStyle.PressureCurve[0] = new(0, 1);
-        Assert.Equal(0, snapshot.PenStyle!.PressureCurve[0].Y);
+        Assert.Equal(tool.PenStyle.Key(), restored.Selected.PenStyle!.Key());
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)] [InlineData(78, 20, 0)] [InlineData(200, 100, 50)] [InlineData(400, 200, 100)]
+    public void NoteinConfigurationMatchesThePreviousActualV2Model(int pressure, int flow, int stability)
+    {
+        var config = NamedPenStyle.Defaults().Single().Configuration!;
+        var tool = new ToolPreset("p", DrawingToolKind.Pen) { PressurePercent = pressure, InkFlowPercent = flow, StabilityPercent = stability };
+        var stroke = new StrokeRecord { BrushProfile = FountainV2Model.Profile, WidthMm = .3f, PressurePercent = pressure, InkFlowPercent = flow, StabilityPercent = stability, StrokeUnitLengthCm = .015,
+            Points = Enumerable.Range(0, 80).Select(i => new InkPoint(i * 2, 30 + (float)Math.Sin(i * .2) * 12, (float)(.3 + .3 * Math.Sin(i * .1)), elapsedMilliseconds: i * 7)).ToList() };
+        var original = FountainV2Model.Model(stroke);
+        stroke.PenStyle = config.Resolve(config.ValuesFor(tool)); stroke.BrushProfile = PenStyle.Profile;
+        var resolved = FountainV2Model.Model(stroke);
+        Assert.Equal(original.Count, resolved.Count);
+        for (var i = 0; i < original.Count; i++) { Assert.Equal(original[i].Position, resolved[i].Position); Assert.Equal(original[i].Width, resolved[i].Width, 6); }
     }
 
     [Fact]
-    public void LegacyToolsKeepTheirParametersAndRendererUntilAStyleIsChosen()
+    public void OldAndroidResponseCanBeDescribedByFunctionsAndEngineParameters()
     {
-        var tool = new ToolPreset("pen-black", DrawingToolKind.Pen) { PressurePercent = 78, InkFlowPercent = 20, StabilityPercent = 0 };
-        var oldJson = "{\"selectedId\":\"pen-black\",\"tools\":[" + tool.ToJson().ToJsonString() + "]}";
-        var shelf = ToolShelf.FromJson(oldJson)!;
-        Assert.Null(shelf.Selected.PenStyle);
-        Assert.Equal(78, shelf.Selected.PressurePercent); Assert.Equal(20, shelf.Selected.InkFlowPercent);
-        Assert.Contains(shelf.PenStyles, p => p.Id == shelf.Selected.PenStyleId);
-        Assert.Equal("fountain-v1", new StrokeRecord().BrushProfile);
-        Assert.Null(PenStyle.FromJson(PenStyle.FromLegacy().ToJson().ApplyInvalidCurve()));
+        using var source = typeof(PenStyleTests).Assembly.GetManifestResourceStream("PenConfiguration.LegacyExample.json")!;
+        var config = PenConfiguration.Parse(new StreamReader(source).ReadToEnd());
+        var tool = new ToolPreset("pen", DrawingToolKind.Pen) { WidthMm = .3f, PressurePercent = 78, InkFlowPercent = 20 };
+        var resolved = config.Resolve(config.ValuesFor(tool));
+        Assert.Equal(85, resolved.SpeedMaximumCmPerSecond); Assert.Equal(20, resolved.InputWindowMs);
+        Assert.Equal(tool.WidthMm * 1.25, resolved.StartLengthMm, 6); Assert.Equal(tool.WidthMm * 2.5, resolved.EndLengthMm, 6);
+        Assert.True(resolved.TurnEnabled); Assert.Equal(12, resolved.StartResponseMs); Assert.Equal(12, resolved.EndResponseMs);
+        Assert.Equal(20, resolved.PressureResponseMs); Assert.Equal(18, resolved.SpeedResponseMs);
+        foreach (var p in new[] { 0d, .18, .5, .88, 1d })
+            Assert.Equal(1 + .45 * .39 * (2 * Math.Clamp((p - .18) / .7, 0, 1) - 1), PenStyle.Evaluate(resolved.PressureCurve, p), 7);
+        Assert.Equal(1 + .08 * .2, PenStyle.Evaluate(resolved.SpeedCurve, 0), 7); Assert.Equal(1 - .18 * .2, PenStyle.Evaluate(resolved.SpeedCurve, 85), 7);
+        var shelf = new ToolShelf([tool]); shelf.ApplyPenStyle(tool, shelf.ImportPenConfiguration(config.Text)); shelf.SetPenParameter(tool, "windowMs", 80);
+        Assert.Equal(80, tool.PenStyle!.InputWindowMs); Assert.Equal(50, tool.StabilityPercent);
     }
+
+    [Fact]
+    public void ImportUpdatesByIdPreservesKnobsAndCannotChangeHistoricalInk()
+    {
+        var shelf = new ToolShelf(); var tool = shelf.Selected;
+        var json = Config(); json["controls"]![0]!["label"] = "压力曲率";
+        var imported = shelf.ImportPenConfiguration(json.ToJsonString()); shelf.ApplyPenStyle(tool, imported);
+        shelf.SetPenParameter(tool, "pressure", 78); shelf.SetPenParameter(tool, "stability", 0);
+        var historical = new StrokeRecord { BrushProfile = PenStyle.Profile, PenStyle = tool.PenStyle!.Copy() };
+        json["style"]!["endEnabled"] = true;
+        shelf.ImportPenConfiguration(json.ToJsonString());
+        Assert.True(tool.PenStyle!.EndEnabled); Assert.False(historical.PenStyle!.EndEnabled); Assert.Equal(78, tool.PressurePercent); Assert.Equal(0, tool.StabilityPercent);
+        shelf.ApplyPenStyle(tool, shelf.PenStyles.Single(p => p.Id == "notein"));
+        shelf.ApplyPenStyle(tool, shelf.PenStyles.Single(p => p.Id == imported.Id));
+        Assert.Equal(78, tool.PressurePercent); Assert.Equal("压力曲率", shelf.PenControls(tool)[0].Label);
+        var restored = ToolShelf.FromJson(shelf.ToJson())!;
+        Assert.Equal(imported.Id, restored.Selected.PenStyleId); Assert.True(restored.Selected.PenStyle!.EndEnabled);
+        var before = shelf.ToJson(); json["id"] = "duplicate";
+        Assert.Throws<ArgumentException>(() => shelf.ImportPenConfiguration(json.ToJsonString())); Assert.Equal(before, shelf.ToJson());
+    }
+
+    [Fact]
+    public void SmoothFunctionsAndParameterBindingsWorkWithoutEditablePoints()
+    {
+        var json = Config();
+        json["style"]!["pressureCurve"] = new JsonObject { ["samples"] = 256, ["function"] = new JsonObject { ["op"] = "smoothstep", ["args"] = new JsonArray("x", 0, 1, 0, 1.4) } };
+        json["controls"] = new JsonArray(new JsonObject { ["parameter"] = "stability", ["label"] = "速度平滑", ["min"] = 0, ["max"] = 100, ["step"] = 1, ["unit"] = " ms" });
+        json["style"]!["speedResponseMs"] = "$stability"; json["style"]!["stabilityPercent"] = 0;
+        var shelf = new ToolShelf(); shelf.ApplyPenStyle(shelf.Selected, shelf.ImportPenConfiguration(json.ToJsonString()));
+        shelf.SetPenParameter(shelf.Selected, "stability", 80);
+        Assert.Equal(80, shelf.Selected.PenStyle!.SpeedResponseMs); Assert.Equal(0, shelf.Selected.PenStyle.StabilityPercent);
+        for (var i = 0; i <= 1000; i++) { var x = i / 1000d; Assert.InRange(Math.Abs(PenStyle.Evaluate(shelf.Selected.PenStyle.PressureCurve, x) - 1.4 * x * x * (3 - 2 * x)), 0, .00002); }
+        var invalid = Config(); invalid["style"]!["pressureCurve"] = new JsonObject { ["function"] = "$unknown" };
+        var before = shelf.ToJson(); Assert.Throws<ArgumentException>(() => shelf.ImportPenConfiguration(invalid.ToJsonString())); Assert.Equal(before, shelf.ToJson());
+        invalid = Config(); invalid["style"]!["unsupportedEffect"] = 1;
+        Assert.Throws<ArgumentException>(() => PenConfiguration.Parse(invalid.ToJsonString()));
+        Assert.Throws<ArgumentException>(() => PenConfiguration.Parse(new string(' ', PenConfiguration.MaximumBytes + 1)));
+    }
+
+    [Fact]
+    public void PreviousGeneratedPresetsAreRemovedButUserChangesSurvive()
+    {
+        using var stream = typeof(NamedPenStyle).Assembly.GetManifestResourceStream("Mojian.PenStyleMigration.json")!;
+        var old = JsonNode.Parse(stream)!.AsArray();
+        var changed = old[0]!.DeepClone(); changed["style"]!["endEnabled"] = true;
+        var shelf = new ToolShelf(); var root = JsonNode.Parse(shelf.ToJson())!;
+        root["penStyles"] = old.DeepClone(); root["tools"]![0]!["penStyleId"] = "classic";
+        var migrated = ToolShelf.FromJson(root.ToJsonString())!;
+        Assert.Single(migrated.PenStyles); Assert.Equal("notein", migrated.Selected.PenStyleId);
+        root["penStyles"]!.AsArray().Add(changed);
+        Assert.Contains(ToolShelf.FromJson(root.ToJsonString())!.PenStyles, p => p.Id == "natural" && p.Style.EndEnabled);
+    }
+
+    [Fact]
+    public void FileSelectionOnlyFillsTextAndInvalidImportOrCancelHasNoSideEffects() => WpfTestExecutor.Run(() =>
+    {
+        LoadTheme(); var shelf = new ToolShelf(); var before = shelf.ToJson();
+        var path = Path.Combine(Path.GetTempPath(), ".agents", "mojian-pen-styles", "import-fixture.json"); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var text = Config().ToJsonString(); File.WriteAllText(path, text);
+        try
+        {
+            var dialog = new PenStyleDialog(shelf, shelf.Selected); dialog.LoadFile(path); Assert.Equal(text, dialog.ConfigurationText); Assert.Equal(before, shelf.ToJson());
+            dialog.ConfigurationText = "invalid"; dialog.Import(); Assert.Null(dialog.SavedPreset); Assert.Equal(before, shelf.ToJson());
+            dialog.ConfigurationText = NamedPenStyle.Defaults().Single().Configuration!.Text;
+            dialog.Show(); dialog.UpdateLayout(); Capture(dialog, "MOJIAN_PEN_STYLE_SCREENSHOT"); dialog.Close(); Assert.Equal(before, shelf.ToJson());
+            var importing = new PenStyleDialog(shelf, shelf.Selected) { ConfigurationText = text };
+            importing.Dispatcher.BeginInvoke(importing.Import, DispatcherPriority.Loaded); Assert.True(importing.ShowDialog());
+            Assert.Equal("test", shelf.Selected.PenStyleId);
+        }
+        finally { File.Delete(path); }
+    });
+
+    [Fact]
+    public void RealFlyoutKeepsKnobsAndNestedDropdownClickDoesNotCloseItsOwner() => WpfTestExecutor.Run(() =>
+    {
+        LoadTheme(); var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-pen-styles", "fixture-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        MainWindow? window = null;
+        try
+        {
+            var prefs = new PreferencesStore(Path.Combine(root, "preferences.json")); var model = new MainViewModel(root, prefs); model.AddPage("fixture", new PageAppearance()); model.SaveAll();
+            model.SelectedTool.WidthMm = .3f;
+            var custom = Config(); custom["style"]!["endEnabled"] = true; model.ToolShelf.ImportPenConfiguration(custom.ToJsonString());
+            window = new MainWindow(model); window.Show(); window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var popup = (Popup)window.FindName("ToolFlyoutPopup"); popup.PlacementTarget = window; model.IsToolFlyoutOpen = true;
+            var selector = (ComboBox)window.FindName("PenStyleSelector"); selector.IsDropDownOpen = true; window.UpdateLayout(); window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var item = (ComboBoxItem)selector.ItemContainerGenerator.ContainerFromIndex(1);
+            Assert.NotNull(item);
+            var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent, Source = item };
+            typeof(MainWindow).GetMethod("OnWindowPreviewMouseDown", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [window, down]);
+            Assert.True(model.IsToolFlyoutOpen);
+            selector.SelectedIndex = 1; selector.IsDropDownOpen = false;
+            Assert.Equal("test", model.SelectedTool.PenStyleId); Assert.True(model.SelectedTool.PenStyle!.EndEnabled);
+            selector.SelectedIndex = 0; Assert.Equal("notein", model.SelectedTool.PenStyleId);
+            var sliders = ((StackPanel)window.FindName("PenParameterPanel")).Children.OfType<Slider>().ToList(); Assert.Equal(3, sliders.Count);
+            sliders.Single(s => Equals(s.Tag, "pressure")).Value = 78; sliders.Single(s => Equals(s.Tag, "flow")).Value = 20; sliders.Single(s => Equals(s.Tag, "stability")).Value = 0;
+            Assert.Equal(PenStyle.FromLegacy(78, 20, 0).Key(), model.SelectedTool.PenStyle!.Key());
+            Capture((FrameworkElement)popup.Child, "MOJIAN_PEN_TOOL_SCREENSHOT");
+            var invalidAt100 = Config("singular", "无效参数回归");
+            invalidAt100["style"]!["speedResponseMs"] = new JsonObject { ["op"] = "divide", ["args"] = new JsonArray(100, new JsonObject { ["op"] = "subtract", ["args"] = new JsonArray("$pressure", 100) }) };
+            model.SelectedTool.PressurePercent = 200;
+            var singular = model.ToolShelf.ImportPenConfiguration(invalidAt100.ToJsonString()); model.SaveToolSettings(); selector.SelectedValue = singular.Id;
+            var singularSlider = ((StackPanel)window.FindName("PenParameterPanel")).Children.OfType<Slider>().Single(s => Equals(s.Tag, "pressure"));
+            singularSlider.Value = 100; Assert.Equal(200, singularSlider.Value); Assert.Equal(200, model.SelectedTool.PressurePercent); Assert.NotNull(singularSlider.ToolTip);
+            selector.SelectedValue = "notein"; model.ToolShelf.SetPenParameter(model.SelectedTool, "pressure", 78); model.SaveToolSettings();
+            window.Close(); window = null;
+            var restored = new MainViewModel(root, prefs); Assert.Equal(78, restored.SelectedTool.PressurePercent); Assert.Equal("notein", restored.SelectedTool.PenStyleId);
+        }
+        finally { window?.Close(); Assert.StartsWith(Path.GetFullPath(Path.Combine(Path.GetTempPath(), ".agents", "mojian-pen-styles")) + Path.DirectorySeparatorChar, Path.GetFullPath(root)); Directory.Delete(root, true); }
+    });
+
+    [Fact]
+    public void NewInkCapturesResolvedStyleAndOutlineBeforeLaterConfigurationChanges() => WpfTestExecutor.Run(() =>
+    {
+        var shelf = new ToolShelf(); var json = Config(); json["style"]!["endEnabled"] = true; shelf.ApplyPenStyle(shelf.Selected, shelf.ImportPenConfiguration(json.ToJsonString()));
+        var page = new PageDocument("n", "p"); var canvas = new NoteCanvas { Document = page, SelectedTool = shelf.Selected };
+        void Call(string name, params object[] args) => typeof(NoteCanvas).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, args);
+        Call("BeginPointer", new Point(20, 40), .5f, 0f, 0f, true, false, false); Call("ContinuePointer", new Point(60, 40), .5f, 0f, 0f, true); Call("EndPointer", true);
+        var ink = Assert.Single(page.Strokes); Assert.Equal(PenStyle.Profile, ink.BrushProfile); Assert.NotEmpty(ink.VectorPath);
+        json["style"]!["endEnabled"] = false; shelf.ImportPenConfiguration(json.ToJsonString()); Assert.True(ink.PenStyle!.EndEnabled);
+        var restored = JsonSerializer.Deserialize<StrokeRecord>(JsonSerializer.Serialize(ink))!; Assert.Equal(ink.VectorPath, restored.VectorPath); Assert.True(restored.PenStyle!.EndEnabled);
+    });
 
     private static StrokeRecord Line(PenStyle style) => new()
     {
@@ -112,126 +229,12 @@ public sealed class PenStyleTests
         Assert.Equal(.75f, restored.Points[0].OrientationRadians);
     }
 
-    [Fact]
-    public void NativeAuthoringCapturesStyleBeforeLaterPresetEdits() => WpfTestExecutor.Run(() =>
+    private static void Capture(FrameworkElement element, string variable)
     {
-        var shelf = new ToolShelf(); var tool = shelf.Selected;
-        shelf.ApplyPenStyle(tool, shelf.PenStyles.Single(p => p.Id == "classic"));
-        var page = new PageDocument("n", "p"); var canvas = new NoteCanvas { Document = page, SelectedTool = tool };
-        void Call(string name, params object[] args) => typeof(NoteCanvas).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(canvas, args);
-        Call("BeginPointer", new Point(20, 40), .5f, 0f, 0f, true, false, false);
-        Call("ContinuePointer", new Point(60, 40), .5f, 0f, 0f, true);
-        Call("EndPointer", true);
-        var ink = Assert.Single(page.Strokes);
-        Assert.Equal(PenStyle.Profile, ink.BrushProfile); Assert.NotEmpty(ink.VectorPath);
-        tool.PenStyle!.EndEnabled = false;
-        Assert.True(ink.PenStyle!.EndEnabled);
-        var cloned = (StrokeRecord)typeof(NoteCanvas).GetMethod("CloneStroke", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [ink, 10f])!;
-        Assert.Equal(ink.VectorPath, cloned.VectorPath); Assert.True(cloned.PenStyle!.EndEnabled);
-    });
-
-    [Fact]
-    public void ConfigurationDraftCancelIsIsolatedAndNativeLayoutRenders() => WpfTestExecutor.Run(() =>
-    {
-        LoadTheme();
-        var shelf = new ToolShelf(); var before = shelf.ToJson();
-        var dialog = new PenStyleDialog(shelf, shelf.Selected);
-        dialog.Show(); dialog.UpdateLayout();
-        var draft = (PenStyle)typeof(PenStyleDialog).GetField("_draft", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(dialog)!;
-        draft.EndEnabled = true; draft.PressureCurve[0] = new(0, 2);
-        Assert.Equal(before, shelf.ToJson());
-        var path = Environment.GetEnvironmentVariable("MOJIAN_PEN_STYLE_SCREENSHOT");
-        if (!string.IsNullOrEmpty(path))
-        {
-            var bitmap = new RenderTargetBitmap((int)dialog.ActualWidth, (int)dialog.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(dialog);
-            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-            using var file = File.Create(path); encoder.Save(file);
-        }
-        dialog.Close();
-        var saveDialog = new PenStyleDialog(shelf, shelf.Selected);
-        saveDialog.Dispatcher.BeginInvoke(() =>
-        {
-            saveDialog.NewPreset();
-            ((TextBox)typeof(PenStyleDialog).GetField("_name", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(saveDialog)!).Text = "课堂笔";
-            saveDialog.Save();
-        }, DispatcherPriority.Loaded);
-        Assert.True(saveDialog.ShowDialog());
-        Assert.Equal("课堂笔", shelf.PenStyles.Single(p => p.Id == shelf.Selected.PenStyleId).Name);
-        var count = shelf.PenStyles.Count; var id = shelf.Selected.PenStyleId;
-        var editDialog = new PenStyleDialog(shelf, shelf.Selected);
-        editDialog.Dispatcher.BeginInvoke(() =>
-        {
-            ((PenStyle)typeof(PenStyleDialog).GetField("_draft", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(editDialog)!).EndEnabled = true;
-            editDialog.Save();
-        }, DispatcherPriority.Loaded);
-        Assert.True(editDialog.ShowDialog()); Assert.Equal(count, shelf.PenStyles.Count); Assert.Equal(id, shelf.Selected.PenStyleId);
-        Assert.True(shelf.Selected.PenStyle!.EndEnabled);
-    });
-
-    [Fact]
-    public void ToolFlyoutHasIndependentSavedPresetSelectorAndConfigurationButton() => WpfTestExecutor.Run(() =>
-    {
-        LoadTheme();
-        var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-pen-styles", "fixture-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        MainWindow? window = null;
-        try
-        {
-            var prefs = new PreferencesStore(Path.Combine(root, "preferences.json"));
-            var model = new MainViewModel(root, prefs);
-            model.AddPage("preset fixture", new PageAppearance()); model.SaveAll();
-            window = new MainWindow(model); window.Show();
-            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var selector = (ComboBox)window.FindName("PenStyleSelector");
-            Assert.Equal(model.ToolShelf.PenStyles.Count, selector.Items.Count);
-            Assert.All(selector.Items.Cast<object>(), p => Assert.IsType<NamedPenStyle>(p));
-            var file = model.Store.GetPageDocumentPath(model.PrimaryDocument!.NotebookId, model.PrimaryDocument.PageId);
-            var savedInk = File.ReadAllBytes(file);
-            selector.SelectedValue = "uniform";
-            Assert.Equal("uniform", model.SelectedTool.PenStyleId);
-            Assert.False(model.SelectedTool.PenStyle!.PressureEnabled);
-            Assert.Equal(savedInk, File.ReadAllBytes(file));
-            var popup = (System.Windows.Controls.Primitives.Popup)window.FindName("ToolFlyoutPopup");
-            popup.PlacementTarget = window; popup.PlacementRectangle = new Rect(20, 80, 1, 1); model.IsToolFlyoutOpen = true;
-            window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var child = (FrameworkElement)popup.Child;
-            IEnumerable<DependencyObject> Descendants(DependencyObject node)
-            {
-                yield return node;
-                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
-                    foreach (var nested in Descendants(VisualTreeHelper.GetChild(node, i))) yield return nested;
-            }
-            Assert.Single(Descendants(child).OfType<Button>(), b => Equals(b.Content, "配置"));
-            Assert.True(child.ActualHeight >= 180);
-            var path = Environment.GetEnvironmentVariable("MOJIAN_PEN_TOOL_SCREENSHOT");
-            if (!string.IsNullOrEmpty(path))
-            {
-                var bitmap = new RenderTargetBitmap((int)Math.Ceiling(child.ActualWidth), (int)Math.Ceiling(child.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(child);
-                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var output = File.Create(path); encoder.Save(output);
-            }
-            window.Close(); window = null;
-            var restored = new MainViewModel(root, prefs);
-            Assert.Equal("uniform", restored.SelectedTool.PenStyleId); Assert.False(restored.SelectedTool.PenStyle!.PressureEnabled);
-        }
-        finally
-        {
-            window?.Close();
-            Assert.StartsWith(Path.GetFullPath(Path.Combine(Path.GetTempPath(), ".agents", "mojian-pen-styles")) + Path.DirectorySeparatorChar, Path.GetFullPath(root));
-            Directory.Delete(root, true);
-        }
-    });
-
+        if (Environment.GetEnvironmentVariable(variable) is not { Length: > 0 } path) return;
+        element.UpdateLayout(); var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth), (int)Math.Ceiling(element.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(element);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var file = File.Create(path); encoder.Save(file);
+    }
     private static void LoadTheme()
-    {
-        foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" })
-            Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
-    }
-}
-
-internal static class InvalidPenStyleFixture
-{
-    public static System.Text.Json.Nodes.JsonObject ApplyInvalidCurve(this System.Text.Json.Nodes.JsonObject value)
-    {
-        value["pressureCurve"]![1]!["x"] = 0; return value;
-    }
+    { foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" }) Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative))); }
 }

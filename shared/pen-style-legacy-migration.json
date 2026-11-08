@@ -1,0 +1,313 @@
+[
+  {
+    "id": "natural",
+    "name": "自然钢笔",
+    "style": {
+      "version": 1,
+      "pressureEnabled": true,
+      "pressureCurve": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 0.0625,
+          "y": 0.00546875
+        },
+        {
+          "x": 0.125,
+          "y": 0.021875
+        },
+        {
+          "x": 0.1875,
+          "y": 0.04921875
+        },
+        {
+          "x": 0.25,
+          "y": 0.0875
+        },
+        {
+          "x": 0.3125,
+          "y": 0.13671875
+        },
+        {
+          "x": 0.375,
+          "y": 0.196875
+        },
+        {
+          "x": 0.4375,
+          "y": 0.26796875
+        },
+        {
+          "x": 0.5,
+          "y": 0.35
+        },
+        {
+          "x": 0.5625,
+          "y": 0.44296874999999997
+        },
+        {
+          "x": 0.625,
+          "y": 0.546875
+        },
+        {
+          "x": 0.6875,
+          "y": 0.6617187499999999
+        },
+        {
+          "x": 0.75,
+          "y": 0.7875
+        },
+        {
+          "x": 0.8125,
+          "y": 0.92421875
+        },
+        {
+          "x": 0.875,
+          "y": 1.071875
+        },
+        {
+          "x": 0.9375,
+          "y": 1.23046875
+        },
+        {
+          "x": 1,
+          "y": 1.4
+        }
+      ],
+      "speedEnabled": true,
+      "speedCurve": [
+        {
+          "x": 0,
+          "y": 1
+        },
+        {
+          "x": 1,
+          "y": 1
+        },
+        {
+          "x": 2,
+          "y": 0.92
+        },
+        {
+          "x": 4,
+          "y": 0.85
+        },
+        {
+          "x": 8,
+          "y": 0.77
+        },
+        {
+          "x": 16,
+          "y": 0.54
+        },
+        {
+          "x": 32,
+          "y": 0.31000000000000005
+        },
+        {
+          "x": 64,
+          "y": 0.15000000000000002
+        }
+      ],
+      "directionEnabled": true,
+      "directionAmount": 0.17,
+      "startEnabled": false,
+      "startLengthMm": 0.5,
+      "startMinimum": 0.55,
+      "endEnabled": false,
+      "endLengthMm": 1,
+      "endMinimum": 0.18,
+      "stabilityPercent": 50,
+      "tiltEnabled": false,
+      "tiltWidth": 1.5,
+      "turnEnabled": false,
+      "turnAmount": 0.25,
+      "pressureResponseMs": 0,
+      "speedResponseMs": 25,
+      "directionResponseMs": 25
+    }
+  },
+  {
+    "id": "classic",
+    "name": "经典钢笔",
+    "style": {
+      "version": 1,
+      "pressureEnabled": true,
+      "pressureCurve": [
+        {
+          "x": 0,
+          "y": 0.55
+        },
+        {
+          "x": 0.18,
+          "y": 0.55
+        },
+        {
+          "x": 0.88,
+          "y": 1.45
+        },
+        {
+          "x": 1,
+          "y": 1.45
+        }
+      ],
+      "speedEnabled": true,
+      "speedCurve": [
+        {
+          "x": 0,
+          "y": 1.08
+        },
+        {
+          "x": 64,
+          "y": 0.884235294117647
+        }
+      ],
+      "directionEnabled": true,
+      "directionAmount": 0.17,
+      "startEnabled": true,
+      "startLengthMm": 0.5,
+      "startMinimum": 0.55,
+      "endEnabled": true,
+      "endLengthMm": 1,
+      "endMinimum": 0.18,
+      "stabilityPercent": 50,
+      "tiltEnabled": false,
+      "tiltWidth": 1.5,
+      "turnEnabled": true,
+      "turnAmount": 0.25,
+      "pressureResponseMs": 20,
+      "speedResponseMs": 18,
+      "directionResponseMs": 25
+    }
+  },
+  {
+    "id": "uniform",
+    "name": "均匀圆笔",
+    "style": {
+      "version": 1,
+      "pressureEnabled": false,
+      "pressureCurve": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 0.0625,
+          "y": 0.00546875
+        },
+        {
+          "x": 0.125,
+          "y": 0.021875
+        },
+        {
+          "x": 0.1875,
+          "y": 0.04921875
+        },
+        {
+          "x": 0.25,
+          "y": 0.0875
+        },
+        {
+          "x": 0.3125,
+          "y": 0.13671875
+        },
+        {
+          "x": 0.375,
+          "y": 0.196875
+        },
+        {
+          "x": 0.4375,
+          "y": 0.26796875
+        },
+        {
+          "x": 0.5,
+          "y": 0.35
+        },
+        {
+          "x": 0.5625,
+          "y": 0.44296874999999997
+        },
+        {
+          "x": 0.625,
+          "y": 0.546875
+        },
+        {
+          "x": 0.6875,
+          "y": 0.6617187499999999
+        },
+        {
+          "x": 0.75,
+          "y": 0.7875
+        },
+        {
+          "x": 0.8125,
+          "y": 0.92421875
+        },
+        {
+          "x": 0.875,
+          "y": 1.071875
+        },
+        {
+          "x": 0.9375,
+          "y": 1.23046875
+        },
+        {
+          "x": 1,
+          "y": 1.4
+        }
+      ],
+      "speedEnabled": false,
+      "speedCurve": [
+        {
+          "x": 0,
+          "y": 1
+        },
+        {
+          "x": 1,
+          "y": 1
+        },
+        {
+          "x": 2,
+          "y": 0.92
+        },
+        {
+          "x": 4,
+          "y": 0.85
+        },
+        {
+          "x": 8,
+          "y": 0.77
+        },
+        {
+          "x": 16,
+          "y": 0.54
+        },
+        {
+          "x": 32,
+          "y": 0.31000000000000005
+        },
+        {
+          "x": 64,
+          "y": 0.15000000000000002
+        }
+      ],
+      "directionEnabled": false,
+      "directionAmount": 0.17,
+      "startEnabled": false,
+      "startLengthMm": 0.5,
+      "startMinimum": 0.55,
+      "endEnabled": false,
+      "endLengthMm": 1,
+      "endMinimum": 0.18,
+      "stabilityPercent": 50,
+      "tiltEnabled": false,
+      "tiltWidth": 1.5,
+      "turnEnabled": false,
+      "turnAmount": 0.25,
+      "pressureResponseMs": 0,
+      "speedResponseMs": 25,
+      "directionResponseMs": 25
+    }
+  }
+]

@@ -80,18 +80,18 @@ object BrushProfiles {
             StockBrushes.predictionFadeOutBehavior,
             if (style.pressureEnabled) curve(BrushBehavior.Source.NORMALIZED_PRESSURE, style.pressureCurve, style.pressureResponseMs) else null,
             if (style.speedEnabled) curve(BrushBehavior.Source.INPUT_SPEED_IN_CENTIMETERS_PER_SECOND, style.speedCurve, style.speedResponseMs) else null,
-            if (style.directionEnabled) modifier(BrushBehavior.Source.NORMALIZED_DIRECTION_Y, .45f, .65f, 1f, (1 + style.directionAmount).toFloat(), style.directionResponseMs) else null,
+            if (style.directionEnabled) modifier(BrushBehavior.Source.NORMALIZED_DIRECTION_Y, style.directionMinimum.toFloat(), style.directionMaximum.toFloat(), 1f, (1 + style.directionAmount).toFloat(), style.directionResponseMs) else null,
             if (style.startEnabled) modifier(BrushBehavior.Source.DISTANCE_TRAVELED_IN_MULTIPLES_OF_BRUSH_SIZE,
-                0f, (style.startLengthMm * unitsPerMm / sizePx).toFloat(), style.startMinimum.toFloat(), 1f) else null,
+                0f, (style.startLengthMm * unitsPerMm / sizePx).toFloat(), style.startMinimum.toFloat(), 1f, style.startResponseMs) else null,
             if (style.endEnabled) modifier(BrushBehavior.Source.DISTANCE_REMAINING_IN_MULTIPLES_OF_BRUSH_SIZE,
-                (style.endLengthMm * unitsPerMm / sizePx).toFloat(), 0f, 1f, style.endMinimum.toFloat()) else null,
-            if (style.tiltEnabled) modifier(BrushBehavior.Source.TILT_IN_RADIANS, 0f, (Math.PI / 3).toFloat(), 1f, style.tiltWidth.toFloat()) else null,
+                (style.endLengthMm * unitsPerMm / sizePx).toFloat(), 0f, 1f, style.endMinimum.toFloat(), style.endResponseMs) else null,
+            if (style.tiltEnabled) modifier(BrushBehavior.Source.TILT_IN_RADIANS, 0f, style.tiltMaximumRadians.toFloat(), 1f, style.tiltWidth.toFloat()) else null,
             if (style.turnEnabled) modifier(BrushBehavior.Source.INPUT_ACCELERATION_LATERAL_IN_CENTIMETERS_PER_SECOND_SQUARED,
-                -80f, -230f, 1f, (1 + style.turnAmount).toFloat(), 25) else null,
+                -style.turnMinimum.toFloat(), -style.turnMaximum.toFloat(), 1f, (1 + style.turnAmount).toFloat(), style.turnResponseMs) else null,
         )
         // A self-contained family id carries the immutable snapshot through asynchronous pen-up.
         val id = STYLE_PREFIX + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(style.toJson().toString().toByteArray(Charsets.UTF_8))
-        val family = BrushFamily(tip = BrushTip(behaviors = behaviors), clientBrushFamilyId = id, inputModel = stabilityModel(style.stabilityPercent))
+        val family = BrushFamily(tip = BrushTip(behaviors = behaviors), clientBrushFamilyId = id, inputModel = stabilityModel(style.stabilityPercent, style.inputWindowMs, style.upsamplingHz))
         return Brush.createWithColorIntArgb(family = family, colorIntArgb = colorArgb, size = sizePx, epsilon = .01f)
     }
 
@@ -154,13 +154,15 @@ object BrushProfiles {
         return Math.round(window).toLong().coerceAtLeast(1L)
     }
 
-    private val stabilityModels = HashMap<Long, BrushFamily.SlidingWindowModel>()
+    private val stabilityModels = object : LinkedHashMap<Pair<Long, Int>, BrushFamily.SlidingWindowModel>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<Long, Int>, BrushFamily.SlidingWindowModel>?) = size > 64
+    }
 
-    private fun stabilityModel(stabilityPercent: Int): BrushFamily.InputModel {
-        val window = stabilityWindowMillis(stabilityPercent)
-        if (window == 20L) return slidingInputModel
+    private fun stabilityModel(stabilityPercent: Int, overrideMillis: Int = 0, rate: Int = UPSAMPLING_HZ): BrushFamily.InputModel {
+        val window = if (overrideMillis > 0) overrideMillis.toLong() else stabilityWindowMillis(stabilityPercent)
+        if (window == 20L && rate == UPSAMPLING_HZ) return slidingInputModel
         return synchronized(stabilityModels) {
-            stabilityModels.getOrPut(window) { BrushFamily.SlidingWindowModel(window, UPSAMPLING_HZ) }
+            stabilityModels.getOrPut(window to rate) { BrushFamily.SlidingWindowModel(window, rate) }
         }
     }
 

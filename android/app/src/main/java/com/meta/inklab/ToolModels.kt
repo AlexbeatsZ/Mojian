@@ -43,6 +43,7 @@ data class ToolPreset(
     var pressureEraseTravelLimitMm: Float = 1f,
     var penStyleId: String = "",
     var penStyle: PenStyle? = null,
+    val penParameterValues: MutableMap<String, MutableMap<String, Double>> = mutableMapOf(),
 ) {
     val displayName: String
         get() =
@@ -64,6 +65,7 @@ data class ToolPreset(
             put("inkFlowPercent", inkFlowPercent)
             put("stabilityPercent", stabilityPercent)
             put("penStyleId", penStyleId)
+            put("penParameterValues", JSONObject().apply { penParameterValues.forEach { (id, values) -> put(id, JSONObject(values.toMap())) } })
             penStyle?.let { put("penStyle", it.toJson()) }
             put("opacityPercent", opacityPercent)
             put("eraserRadiusMm", eraserRadiusMm.toDouble())
@@ -106,6 +108,12 @@ data class ToolPreset(
                     stabilityPercent = json.optInt("stabilityPercent", 50).coerceIn(0, 100),
                     penStyleId = json.optString("penStyleId", ""),
                     penStyle = PenStyle.fromJson(json.optJSONObject("penStyle")),
+                    penParameterValues = mutableMapOf<String, MutableMap<String, Double>>().apply {
+                        json.optJSONObject("penParameterValues")?.let { all -> all.keys().forEach { key ->
+                            val values = all.getJSONObject(key)
+                            put(key, values.keys().asSequence().associateWith { values.getDouble(it) }.toMutableMap())
+                        } }
+                    },
                     opacityPercent = opacityPercent,
                     eraserRadiusMm = eraserRadiusMm,
                     pressureEraseEnabled = pressureEraseEnabled,
@@ -136,13 +144,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
 
     init {
         mutableTools.filter { it.kind == DrawingToolKind.PEN && it.penStyleId.isBlank() }.forEach { tool ->
-            val style = effectivePenStyle(tool)
-            val preset = mutablePenStyles.firstOrNull { it.style.sameParameters(style) } ?: run {
-                val baseName = "${tool.displayName}（原设置）"; var title = baseName; var suffix = 2
-                while (mutablePenStyles.any { it.name == title }) title = "$baseName ${suffix++}"
-                NamedPenStyle("migrated-${tool.id}", title, style).also { mutablePenStyles.add(it) }
-            }
-            tool.penStyleId = preset.id
+            applyPenStyle(tool, mutablePenStyles.single { it.id == "notein" })
         }
     }
 
@@ -150,21 +152,22 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
 
     fun applyPenStyle(tool: ToolPreset, preset: NamedPenStyle) {
         tool.penStyleId = preset.id
-        tool.penStyle = preset.style.snapshot()
-        tool.stabilityPercent = preset.style.stabilityPercent
+        tool.penStyle = preset.configuration?.resolve(preset.configuration.valuesFor(tool)) ?: preset.style.snapshot().copy(stabilityPercent = tool.stabilityPercent)
     }
 
-    fun savePenStyle(id: String?, name: String, style: PenStyle): NamedPenStyle {
-        val title = name.trim()
-        require(title.length in 1..40) { "名称须为 1–40 个字符。" }
-        require(mutablePenStyles.none { it.id != id && it.name.equals(title, ignoreCase = true) }) { "已有同名预设，请使用其他名称。" }
-        val saved = NamedPenStyle(id ?: java.util.UUID.randomUUID().toString(), title, requireNotNull(PenStyle.fromJson(style.toJson())))
-        val index = mutablePenStyles.indexOfFirst { it.id == saved.id }
-        require(id == null || index >= 0) { "预设已不存在，请新建预设。" }
-        if (index < 0) mutablePenStyles.add(saved) else mutablePenStyles[index] = saved
-        mutableTools.filter { it.kind == DrawingToolKind.PEN && it.penStyleId == saved.id }.forEach { applyPenStyle(it, saved) }
-        return saved
+    fun importPenConfiguration(text: String): NamedPenStyle {
+        val imported = NamedPenStyle.fromConfiguration(PenConfiguration.parse(text))
+        require(mutablePenStyles.none { it.id != imported.id && it.name.equals(imported.name, ignoreCase = true) }) { "已有同名配置，请修改 name 或使用相同 id 更新。" }
+        val affected = mutableTools.filter { it.kind == DrawingToolKind.PEN && it.penStyleId == imported.id }
+        affected.forEach { imported.configuration!!.resolve(imported.configuration.valuesFor(it)) }
+        val index = mutablePenStyles.indexOfFirst { it.id == imported.id }
+        if (index < 0) mutablePenStyles.add(imported) else mutablePenStyles[index] = imported
+        affected.forEach { applyPenStyle(it, imported) }
+        return imported
     }
+
+    fun penControls(tool: ToolPreset) = mutablePenStyles.firstOrNull { it.id == tool.penStyleId }?.configuration?.controls ?: emptyList()
+    fun setPenParameter(tool: ToolPreset, parameter: String, value: Double) = requireNotNull(mutablePenStyles.first { it.id == tool.penStyleId }.configuration) { "旧配置须先转换为函数配置。" }.setValue(tool, parameter, value)
 
     var selectedId: String = mutableTools.first().id
         private set
@@ -223,7 +226,7 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                     )
             }
         mutableTools.add(preset)
-        if (kind == DrawingToolKind.PEN) applyPenStyle(preset, mutablePenStyles.first { it.id == "natural" })
+        if (kind == DrawingToolKind.PEN) applyPenStyle(preset, mutablePenStyles.first { it.id == "notein" })
         selectedId = preset.id
         if (kind == DrawingToolKind.ERASER) pressureEraserId = preset.id
         return preset
@@ -285,9 +288,13 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
                 val shelf = ToolShelf(list)
                 root.optJSONArray("penStyles")?.let { styles ->
                     for (i in 0 until styles.length()) NamedPenStyle.fromJson(styles.optJSONObject(i))?.let { saved ->
+                        if (isSupersededDefault(saved, shelf.mutableTools)) return@let
                         val index = shelf.mutablePenStyles.indexOfFirst { it.id == saved.id }
                         if (index < 0) shelf.mutablePenStyles.add(saved) else shelf.mutablePenStyles[index] = saved
                     }
+                }
+                shelf.mutableTools.filter { it.kind == DrawingToolKind.PEN }.forEach { tool ->
+                    shelf.applyPenStyle(tool, shelf.mutablePenStyles.firstOrNull { it.id == tool.penStyleId } ?: shelf.mutablePenStyles.first { it.id == "notein" })
                 }
                 if (root.optInt("version", 1) < 2) {
                     shelf.pressureEraser.pressureEraseEnabled =
@@ -305,6 +312,14 @@ class ToolShelf(initialTools: List<ToolPreset> = defaults()) {
             } catch (_: Exception) {
                 null
             }
+        }
+
+        private fun isSupersededDefault(saved: NamedPenStyle, tools: List<ToolPreset>): Boolean {
+            if (tools.any { saved.id == "migrated-${it.id}" && saved.name.contains("（原设置）") && saved.style.sameParameters(PenStyle.fromLegacy(it.pressurePercent, it.inkFlowPercent, it.stabilityPercent)) }) return true
+            val source = requireNotNull(NamedPenStyle::class.java.getResourceAsStream("/pen-style-legacy-migration.json")).bufferedReader().use { it.readText() }
+            val array = JSONArray(source)
+            return (0 until array.length()).mapNotNull { NamedPenStyle.fromJson(array.optJSONObject(it)) }
+                .any { it.id == saved.id && it.name == saved.name && it.style.sameParameters(saved.style) }
         }
 
         fun defaults(): List<ToolPreset> =

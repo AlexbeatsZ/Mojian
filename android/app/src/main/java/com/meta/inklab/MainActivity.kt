@@ -181,6 +181,7 @@ private data class SectionExportTarget(
 )
 
 class MainActivity : Activity() {
+    private var pendingPenConfigurationContent: ((String) -> Unit)? = null
     private val activeStrokes = mutableMapOf<Int, InProgressStrokeId>()
     private val straighten = HoldToStraighten()
     private var shapePointerId: Int? = null
@@ -750,6 +751,21 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PEN_CONFIGURATION) {
+            val fill = pendingPenConfigurationContent; pendingPenConfigurationContent = null
+            if (resultCode == RESULT_OK && data?.data != null && fill != null) {
+                try {
+                    val bytes = contentResolver.openInputStream(data.data!!)!!.use { input ->
+                        val buffer = ByteArray(PenConfiguration.MAXIMUM_BYTES + 1); var total = 0
+                        while (total < buffer.size) { val n = input.read(buffer, total, buffer.size - total); if (n < 0) break; if (n == 0) break; total += n }
+                        buffer.copyOf(total)
+                    }
+                    require(bytes.size <= PenConfiguration.MAXIMUM_BYTES) { "配置文件不能超过 128 KiB。" }
+                    fill(String(bytes, Charsets.UTF_8).removePrefix("\uFEFF"))
+                } catch (error: Exception) { Toast.makeText(this, error.message, Toast.LENGTH_LONG).show() }
+            }
+            return
+        }
         if (resultCode != RESULT_OK || data == null) {
             if (requestCode == REQUEST_EXPORT) {
                 pendingRichExportSession?.let { it.cancel(); richExportSessions.remove(it) }
@@ -4948,7 +4964,7 @@ class MainActivity : Activity() {
                         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                             val preset = toolShelf.penStyles[position]
                             if (toolShelf.selectedId != tool.id || tool.penStyleId == preset.id) return
-                            toolShelf.applyPenStyle(tool, preset); persistToolShelf(); rebuildBrush()
+                            toolShelf.applyPenStyle(tool, preset); persistToolShelf(); rebuildBrush(); renderToolDetails()
                         }
                     }
                 }, LinearLayout.LayoutParams(0, dp(42), 1f))
@@ -4961,6 +4977,19 @@ class MainActivity : Activity() {
                     },
                     LinearLayout.LayoutParams(MATCH, dp(44)),
                 )
+                toolShelf.penStyles.firstOrNull { it.id == tool.penStyleId }?.configuration?.let { config ->
+                    val values = config.valuesFor(tool)
+                    config.controls.forEach { control ->
+                        var accepted = ((values.getValue(control.parameter) - control.min) / control.step).roundToInt()
+                        lateinit var parameterView: View
+                        parameterView = parameterControl(control.label, accepted,
+                            ((control.max - control.min) / control.step).roundToInt(), { control.format(control.min + it * control.step) }) { progress ->
+                            try { toolShelf.setPenParameter(tool, control.parameter, (control.min + progress * control.step).coerceIn(control.min, control.max)); accepted = progress; persistToolShelf(); rebuildBrush() }
+                            catch (error: IllegalArgumentException) { ((parameterView as ViewGroup).getChildAt(1) as SeekBar).progress = accepted; Toast.makeText(this, error.message, Toast.LENGTH_SHORT).show() }
+                        }
+                        toolDetailRow.addView(parameterView, LinearLayout.LayoutParams(MATCH, dp(44)))
+                    }
+                }
             }
 
             DrawingToolKind.HIGHLIGHTER -> {
@@ -5075,7 +5104,12 @@ class MainActivity : Activity() {
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
                     addView(detailChip("配置", false) {
                         toolDetailPopup?.dismiss()
-                        PenStyleDialog(this@MainActivity, toolShelf, tool) {
+                        PenStyleDialog(this@MainActivity, toolShelf, tool, { fill ->
+                            pendingPenConfigurationContent = fill
+                            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                            }, REQUEST_PEN_CONFIGURATION)
+                        }) {
                             persistToolShelf(); rebuildBrush(); renderToolDetails()
                         }.show()
                     })
@@ -5544,6 +5578,7 @@ class MainActivity : Activity() {
     }
 
     private fun rebuildBrush() {
+        toolShelf.penStyles.firstOrNull { it.id == toolShelf.selected.penStyleId && it.configuration != null }?.let { toolShelf.applyPenStyle(toolShelf.selected, it) }
         if (toolShelf.selected.kind == DrawingToolKind.PEN || toolShelf.selected.kind == DrawingToolKind.HIGHLIGHTER) {
             currentBrush = brushFor(toolShelf.selected)
         }
@@ -8226,6 +8261,7 @@ class MainActivity : Activity() {
         private const val REQUEST_PDF_PAGES = 4107
         private const val REQUEST_SAVE_IMAGE = 4108
         private const val REQUEST_WORKSPACE_FOLDER = 4109
+        private const val REQUEST_PEN_CONFIGURATION = 4110
         private const val PDF_EXPORT_LONGEST_SIDE_PX = 1800f
         private const val SPLIT_FOCUS_PULSE_MILLIS = 500L
         private const val DARK_TOOLTIP_DELAY_MILLIS = 500L

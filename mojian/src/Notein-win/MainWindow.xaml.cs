@@ -20,6 +20,9 @@ namespace Notein_win;
 public partial class MainWindow : Window
 {
     private bool _eventsWired;
+    private bool _penStyleUiUpdating;
+    private ToolPreset? _penControlOwner;
+    private NamedPenStyle? _penControlPreset;
     private TextBox? _lastTextBox;
     private TextBox? _clipboardTextBox;
     private TextStyleSnapshot? _formatPainter;
@@ -35,6 +38,8 @@ public partial class MainWindow : Window
     {
         DataContext = viewModel;
         InitializeComponent();
+        viewModel.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(MainViewModel.SelectedTool)) RefreshPenStyleControls(); };
+        RefreshPenStyleControls();
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         PreviewGotKeyboardFocus += (_, e) =>
@@ -646,7 +651,8 @@ public partial class MainWindow : Window
     private static bool IsWithin(DependencyObject source, DependencyObject? ancestor)
     {
         if (ancestor == null) return false;
-        for (var current = source; current != null; current = VisualTreeHelper.GetParent(current))
+        for (var current = source; current != null; current = current is ComboBoxItem item && ItemsControl.ItemsControlFromItemContainer(item) is ComboBox owner ? owner :
+            current is Visual ? VisualTreeHelper.GetParent(current) ?? LogicalTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
             if (ReferenceEquals(current, ancestor)) return true;
         return false;
     }
@@ -1232,7 +1238,7 @@ public partial class MainWindow : Window
 
     private void OnPenStyleSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!IsLoaded || !ViewModel.SelectedToolIsPen || PenStyleSelector.SelectedItem is not NamedPenStyle preset || ViewModel.SelectedTool.PenStyleId == preset.Id) return;
+        if (_penStyleUiUpdating || !IsLoaded || !ViewModel.SelectedToolIsPen || PenStyleSelector.SelectedItem is not NamedPenStyle preset || ViewModel.SelectedTool.PenStyleId == preset.Id) return;
         ViewModel.ToolShelf.ApplyPenStyle(ViewModel.SelectedTool, preset);
         ViewModel.SaveToolSettings();
     }
@@ -1243,8 +1249,43 @@ public partial class MainWindow : Window
         ViewModel.IsToolFlyoutOpen = false;
         var dialog = new PenStyleDialog(ViewModel.ToolShelf, ViewModel.SelectedTool) { Owner = this };
         if (dialog.ShowDialog() != true) return;
-        PenStyleSelector.Items.Refresh();
+        _penControlPreset = null;
         ViewModel.SaveToolSettings();
+    }
+
+    private void RefreshPenStyleControls()
+    {
+        if (PenStyleSelector == null || _penStyleUiUpdating) return;
+        _penStyleUiUpdating = true;
+        try
+        {
+            var shelf = ViewModel.ToolShelf; var tool = ViewModel.SelectedTool;
+            if (!PenStyleSelector.Items.Cast<NamedPenStyle>().SequenceEqual(shelf.PenStyles)) PenStyleSelector.ItemsSource = shelf.PenStyles.ToList();
+            PenStyleSelector.SelectedValue = tool.PenStyleId;
+            var preset = shelf.PenStyles.FirstOrDefault(p => p.Id == tool.PenStyleId);
+            if (ReferenceEquals(_penControlOwner, tool) && ReferenceEquals(_penControlPreset, preset)) return;
+            _penControlOwner = tool; _penControlPreset = preset; PenParameterPanel.Children.Clear();
+            if (tool.Kind != DrawingToolKind.Pen || preset?.Configuration is not { } config) return;
+            var values = config.ValuesFor(tool);
+            foreach (var control in config.Controls)
+            {
+                var row = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 8, 0, 0) };
+                row.Children.Add(new TextBlock { Text = control.Label, Foreground = (Brush)FindResource("TextSecondary") });
+                var value = new TextBlock { Text = control.Format(values[control.Parameter]), Foreground = (Brush)FindResource("TextPrimary") };
+                DockPanel.SetDock(value, Dock.Right); row.Children.Add(value); PenParameterPanel.Children.Add(row);
+                var slider = new Slider { Name = control.LegacyField switch { "pressurePercent" => "PressureSlider", "inkFlowPercent" => "FlowSlider", "stabilityPercent" => "StabilitySlider", _ => "" }, Tag = control.Parameter,
+                    Minimum = control.Min, Maximum = control.Max, TickFrequency = control.Step, SmallChange = control.Step, LargeChange = control.Step * 10, IsSnapToTickEnabled = true, Value = values[control.Parameter] };
+                var accepted = slider.Value; var restoring = false;
+                slider.ValueChanged += (_, _) =>
+                {
+                    if (restoring) return;
+                    try { shelf.SetPenParameter(tool, control.Parameter, slider.Value); accepted = slider.Value; value.Text = control.Format(slider.Value); slider.ToolTip = null; ViewModel.SaveToolSettings(); }
+                    catch (ArgumentException error) { restoring = true; slider.Value = accepted; restoring = false; slider.ToolTip = error.Message; }
+                };
+                PenParameterPanel.Children.Add(slider);
+            }
+        }
+        finally { _penStyleUiUpdating = false; }
     }
 
     private void OnSetLassoShapeClick(object sender, RoutedEventArgs e)
@@ -1256,6 +1297,8 @@ public partial class MainWindow : Window
     private void OnToolSettingChanged(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
+        if (ViewModel.SelectedToolIsPen && ViewModel.ToolShelf.PenStyles.FirstOrDefault(p => p.Id == ViewModel.SelectedTool.PenStyleId) is { Configuration: not null } preset)
+            ViewModel.ToolShelf.ApplyPenStyle(ViewModel.SelectedTool, preset);
         ViewModel.SaveToolSettings();
         LeftCanvas.InvalidateVisual();
         RightCanvas.InvalidateVisual();

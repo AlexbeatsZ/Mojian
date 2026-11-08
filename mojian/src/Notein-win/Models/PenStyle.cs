@@ -31,6 +31,17 @@ public sealed record PenStyle
     public int PressureResponseMs { get; set; }
     public int SpeedResponseMs { get; set; } = 25;
     public int DirectionResponseMs { get; set; } = 25;
+    public double SpeedMaximumCmPerSecond { get; set; } = 64;
+    public double DirectionMinimum { get; set; } = .45;
+    public double DirectionMaximum { get; set; } = .65;
+    public double TurnMinimum { get; set; } = 80;
+    public double TurnMaximum { get; set; } = 230;
+    public int TurnResponseMs { get; set; } = 25;
+    public double TiltMaximumRadians { get; set; } = Math.PI / 3;
+    public int InputWindowMs { get; set; }
+    public int UpsamplingHz { get; set; } = 180;
+    public int StartResponseMs { get; set; }
+    public int EndResponseMs { get; set; }
 
     public PenStyle Copy() => this with { PressureCurve = [.. PressureCurve], SpeedCurve = [.. SpeedCurve] };
 
@@ -72,7 +83,11 @@ public sealed record PenStyle
         try
         {
             var style = json?.Deserialize<PenStyle>(JsonOptions);
-            return style is { Version: 1 } && ValidCurve(style.PressureCurve, 1) && ValidCurve(style.SpeedCurve, 64) &&
+            return style is { Version: 1 } && ValidCurve(style.PressureCurve, 1) && ValidCurve(style.SpeedCurve, style.SpeedMaximumCmPerSecond) &&
+                FiniteRange(style.SpeedMaximumCmPerSecond, 1, 1000) && FiniteRange(style.DirectionMinimum, -1, 1) && FiniteRange(style.DirectionMaximum, -1, 1) && style.DirectionMinimum < style.DirectionMaximum &&
+                FiniteRange(style.TurnMinimum, 0, 100000) && FiniteRange(style.TurnMaximum, 0, 100000) && style.TurnMinimum < style.TurnMaximum &&
+                FiniteRange(style.TiltMaximumRadians, .01, Math.PI / 2) && style.InputWindowMs is >= 0 and <= 500 && style.UpsamplingHz is >= 30 and <= 1000 &&
+                style.TurnResponseMs is >= 0 and <= 100 && style.StartResponseMs is >= 0 and <= 100 && style.EndResponseMs is >= 0 and <= 100 &&
                 style.StabilityPercent is >= 0 and <= 100 && style.PressureResponseMs is >= 0 and <= 100 &&
                 style.SpeedResponseMs is >= 0 and <= 100 && style.DirectionResponseMs is >= 0 and <= 100 &&
                 FiniteRange(style.DirectionAmount, 0, 1) && FiniteRange(style.TurnAmount, 0, 1) &&
@@ -83,29 +98,32 @@ public sealed record PenStyle
         catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException) { return null; }
     }
     private static bool FiniteRange(double x, double min, double max) => double.IsFinite(x) && x >= min && x <= max;
-    private static bool ValidCurve(List<CurvePoint>? points, double end) => points is { Count: >= 2 and <= 33 } &&
+    private static bool ValidCurve(List<CurvePoint>? points, double end) => points is { Count: >= 2 and <= 257 } &&
         points.All(p => p != null && FiniteRange(p.X, 0, end) && FiniteRange(p.Y, 0, 3)) && points[0].X == 0 && points[^1].X == end &&
         points.Zip(points.Skip(1)).All(pair => pair.First.X < pair.Second.X);
 }
 
-public sealed record NamedPenStyle(string Id, string Name, PenStyle Style)
+public sealed record NamedPenStyle(string Id, string Name, PenStyle Style, PenConfiguration? Configuration = null)
 {
     public override string ToString() => Name;
-    public JsonObject ToJson() => new() { ["id"] = Id, ["name"] = Name, ["style"] = Style.ToJson() };
+    public JsonObject ToJson() => new() { ["id"] = Id, ["name"] = Name, ["style"] = Style.ToJson(), ["configuration"] = Configuration?.ToJson() };
     public static NamedPenStyle? FromJson(JsonObject? json)
     {
         try
         {
+            if (json?["configuration"] is JsonObject config) return FromConfiguration(PenConfiguration.Parse(config.ToJsonString()));
             var id = json?["id"]?.GetValue<string>(); var name = json?["name"]?.GetValue<string>();
             var style = PenStyle.FromJson(json?["style"] as JsonObject);
             return !string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name) && name.Length <= 40 && style != null ? new(id, name, style) : null;
         }
-        catch (InvalidOperationException) { return null; }
+        catch (Exception error) when (error is InvalidOperationException or ArgumentException) { return null; }
     }
 
     public static IReadOnlyList<NamedPenStyle> Defaults()
     {
         using var stream = typeof(NamedPenStyle).Assembly.GetManifestResourceStream("Mojian.PenStylePresets.json")!;
-        return JsonNode.Parse(stream)!.AsArray().OfType<JsonObject>().Select(j => FromJson(j) ?? throw new InvalidDataException("Invalid built-in pen style")).ToList();
+        return JsonNode.Parse(stream)!.AsArray().OfType<JsonObject>().Select(j => FromConfiguration(PenConfiguration.Parse(j.ToJsonString()))).ToList();
     }
+
+    public static NamedPenStyle FromConfiguration(PenConfiguration config) => new(config.Id, config.Name, config.Resolve(config.Parameters), config);
 }

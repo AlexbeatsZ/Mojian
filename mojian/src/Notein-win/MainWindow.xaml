@@ -566,10 +566,11 @@
                     <DockPanel Margin="0,0,0,12">
                         <TextBlock Text="预设" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <ComboBox x:Name="PenStyleSelector" Style="{StaticResource ShapeChooserStyle}" Height="30" DisplayMemberPath="Name" SelectedValuePath="Id"
-                                  ItemsSource="{Binding ToolShelf.PenStyles}" SelectedValue="{Binding SelectedTool.PenStyleId, Mode=OneWay}" SelectionChanged="OnPenStyleSelectionChanged" />
+                                  SelectionChanged="OnPenStyleSelectionChanged" />
                     </DockPanel>
-                    <DockPanel><TextBlock Text="笔宽" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=WidthSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
+                    <DockPanel LastChildFill="False"><TextBlock Text="笔宽" Foreground="{StaticResource TextSecondary}" /><TextBlock DockPanel.Dock="Right" Text="{Binding ElementName=WidthSlider, Path=Value, StringFormat={}{0:F1} mm}" Foreground="{StaticResource TextPrimary}" /></DockPanel>
                     <Slider x:Name="WidthSlider" Minimum="0.1" Maximum="2" SmallChange="0.1" LargeChange="0.5" TickFrequency="0.1" Value="{Binding SelectedTool.WidthMm, Mode=TwoWay}" ValueChanged="OnToolSettingChanged" />
+                    <StackPanel x:Name="PenParameterPanel" />
                 </StackPanel>
 
                 <StackPanel Visibility="{Binding SelectedToolIsHighlighter, Converter={StaticResource BoolToVisibility}}">

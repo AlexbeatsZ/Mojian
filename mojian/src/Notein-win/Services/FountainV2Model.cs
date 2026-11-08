@@ -72,6 +72,7 @@ public static class FountainV2Model
         }
         var modeledInputs = new List<(Point Position, double Pressure, double Time)>();
         var window = StabilityWindowMillis(stroke.PenStyle?.StabilityPercent ?? stroke.StabilityPercent);
+        if (stroke.PenStyle is { InputWindowMs: > 0 } inputStyle) window = inputStyle.InputWindowMs;
         var left = 0;
         var right = 0;
         var unitCm = stroke.StrokeUnitLengthCm > 0 ? stroke.StrokeUnitLengthCm : 2.54 / 96;
@@ -99,7 +100,7 @@ public static class FountainV2Model
         Append(0);
         for (var i = 1; i < count; i++)
         {
-            var steps = (int)Math.Min(100, Math.Ceiling((times[i] - times[i - 1]) / (1000d / 180)));
+            var steps = (int)Math.Min(100, Math.Ceiling((times[i] - times[i - 1]) / (1000d / (stroke.PenStyle?.UpsamplingHz ?? 180))));
             for (var step = 1; step <= steps; step++)
                 Append(times[i - 1] + (times[i] - times[i - 1]) * step / steps);
         }
@@ -145,7 +146,7 @@ public static class FountainV2Model
         for (var i = 1; i < inputs.Count; i++) distances[i] = distances[i - 1] + (inputs[i].Position - inputs[i - 1].Position).Length;
         var unitCm = stroke.StrokeUnitLengthCm > 0 ? stroke.StrokeUnitLengthCm : 2.54 / 96;
         var left = 0; var right = 0; var raw = 0;
-        double pressure = 1, speed = 1, direction = 1, turn = 1;
+        double pressure = 1, speed = 1, direction = 1, turn = 1, headResponse = 1, tailResponse = 1;
         var previousVelocity = new Vector();
         Point At(double time, int index)
         {
@@ -169,18 +170,20 @@ public static class FountainV2Model
             var dy = delta.Length > 1e-8 ? delta.Y / delta.Length : 0;
             pressure = Response(pressure, style.PressureEnabled ? PenStyle.Evaluate(style.PressureCurve, input.Pressure) : 1, dt, style.PressureResponseMs, i == 0);
             speed = Response(speed, style.SpeedEnabled ? PenStyle.Evaluate(style.SpeedCurve, velocity.Length) : 1, dt, style.SpeedResponseMs, i == 0);
-            direction = Response(direction, style.DirectionEnabled ? 1 + style.DirectionAmount * Math.Clamp((dy - .45) / .2, 0, 1) : 1, dt, style.DirectionResponseMs, i == 0);
-            turn = Response(turn, style.TurnEnabled ? 1 + style.TurnAmount * Math.Clamp((-lateral - 80) / 150, 0, 1) : 1, dt, 25, i == 0);
+            direction = Response(direction, style.DirectionEnabled ? 1 + style.DirectionAmount * Math.Clamp((dy - style.DirectionMinimum) / (style.DirectionMaximum - style.DirectionMinimum), 0, 1) : 1, dt, style.DirectionResponseMs, i == 0);
+            turn = Response(turn, style.TurnEnabled ? 1 + style.TurnAmount * Math.Clamp((-lateral - style.TurnMinimum) / (style.TurnMaximum - style.TurnMinimum), 0, 1) : 1, dt, style.TurnResponseMs, i == 0);
             while (raw + 1 < rawTimes.Length && rawTimes[raw + 1] <= input.Time) raw++;
             var p = stroke.Points[raw];
             // WPF stores degrees from vertical on each axis; Android Ink consumes total radians.
             var tx = Math.Tan(Math.Clamp(p.TiltX, -89, 89) * Math.PI / 180);
             var ty = Math.Tan(Math.Clamp(p.TiltY, -89, 89) * Math.PI / 180);
             var tilt = p.TiltRadians is { } radians && float.IsFinite(radians) ? Math.Clamp(radians, 0, Math.PI / 2) : Math.Atan(Math.Sqrt(tx * tx + ty * ty));
-            var tiltWidth = style.TiltEnabled ? 1 + (style.TiltWidth - 1) * Math.Clamp(tilt / (Math.PI / 3), 0, 1) : 1;
+            var tiltWidth = style.TiltEnabled ? 1 + (style.TiltWidth - 1) * Math.Clamp(tilt / style.TiltMaximumRadians, 0, 1) : 1;
             var head = style.StartEnabled ? style.StartMinimum + (1 - style.StartMinimum) * Math.Clamp(distances[i] / (style.StartLengthMm * UnitsPerMm), 0, 1) : 1;
             var tail = style.EndEnabled ? style.EndMinimum + (1 - style.EndMinimum) * Math.Clamp((distances[^1] - distances[i]) / (style.EndLengthMm * UnitsPerMm), 0, 1) : 1;
-            result.Add(new(input.Position, input.Pressure, input.Time, stroke.WidthMm * UnitsPerMm * pressure * speed * direction * turn * tiltWidth * head * tail));
+            headResponse = Response(headResponse, head, dt, style.StartResponseMs, i == 0);
+            tailResponse = Response(tailResponse, tail, dt, style.EndResponseMs, i == 0);
+            result.Add(new(input.Position, input.Pressure, input.Time, stroke.WidthMm * UnitsPerMm * pressure * speed * direction * turn * tiltWidth * headResponse * tailResponse));
             previousVelocity = velocity;
         }
         return result;

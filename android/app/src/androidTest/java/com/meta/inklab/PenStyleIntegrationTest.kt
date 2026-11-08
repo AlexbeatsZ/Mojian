@@ -13,6 +13,7 @@ class PenStyleIntegrationTest {
         val styles = NamedPenStyle.defaults().map { it.style } + listOf(
             PenStyle.fromLegacy().apply { pressureCurve = listOf(CurvePoint(0.0, 0.0), CurvePoint(1.0, 0.0)) },
             PenStyle.fromLegacy().apply { pressureCurve = listOf(CurvePoint(0.0, 1.0), CurvePoint(.5, 2.0), CurvePoint(1.0, 1.0)) },
+            PenStyle.fromLegacy().apply { speedMaximumCmPerSecond = 85.0; speedCurve = listOf(CurvePoint(0.0, 1.08), CurvePoint(85.0, .82)); inputWindowMs = 80; upsamplingHz = 240; startEnabled = true; startResponseMs = 12; endEnabled = true; endResponseMs = 12; turnEnabled = true; turnResponseMs = 50 },
         )
         for (style in styles) {
             val brush = BrushProfiles.createStyle(.4f * DOCUMENT_UNITS_PER_MM, style, Color.BLACK)

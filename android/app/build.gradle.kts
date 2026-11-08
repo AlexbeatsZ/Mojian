@@ -6,14 +6,15 @@ plugins {
 android {
     namespace = "com.meta.inklab"
     sourceSets.getByName("main").resources.srcDir("../../shared")
+    sourceSets.getByName("test").resources.srcDir("../../docs/examples/pen-configurations")
     compileSdk = 36
 
     defaultConfig {
         applicationId = "com.meta.inklab"
         minSdk = 29
         targetSdk = 36
-        versionCode = 31
-        versionName = "0.7.25"
+        versionCode = 32
+        versionName = "0.7.27"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
