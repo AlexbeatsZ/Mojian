@@ -219,8 +219,8 @@
                             <Button DockPanel.Dock="Right" Content="{Binding PdfDisplayModeButtonText}" Command="{Binding CyclePdfDisplayModeCommand}"
                                     Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
                             <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="暗色模式 PDF 插图" Foreground="{StaticResource TextPrimary}" FontSize="14" />
-                                <TextBlock Text="逐页插入时的显示方式；保留原始 PDF 文件。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="暗色模式 PDF 显示" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="导入 PDF 和插入打印样式时的显示方式；保留原始 PDF 文件。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </DockPanel>
                     </Border>

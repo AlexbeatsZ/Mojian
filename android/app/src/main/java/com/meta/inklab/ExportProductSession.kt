@@ -85,7 +85,7 @@ class ExportProductSession(private val context: Context, private val repository:
             ExportImageChoice(image.id,"${identity.title} · 图片 ${imageIndex+1} · ${image.displayName}",
                 ImportedPagePresentation.imageInverted(display, image.id, image.viewInverted))
         }
-        val result=ExportSourceSummary(display,bounds,identity.originalSize,images)
+        val result=ExportSourceSummary(display,bounds,identity.originalSize,images,PdfDocumentLayout.sheetBounds(document.objects))
         check(repository.pageUnchangedSince(notebookId,identity.id,version)) { "页面正在更新，请重新打开导出" }
         synchronized(summaries) { checkActive(); summaries[index]=result; versions[index]=version }
         return result

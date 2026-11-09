@@ -740,10 +740,18 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public PageDocument? AddPdfPage(string title, RenderedPdfPage sourcePage, string sourcePath, bool invert)
+        => AddPdfDocument(title, [sourcePage], sourcePath, invert);
+
+    public PageDocument? AddPdfDocument(string title, IReadOnlyList<RenderedPdfPage> sourcePages, string sourcePath, bool invert)
     {
+        if (!CanAddPage) return null;
+        if (sourcePages.Count == 0) throw new InvalidDataException("PDF 没有可导入的页面。");
+        if (sourcePages.Any(source => !double.IsFinite(source.WidthPoints) || source.WidthPoints <= 0 ||
+            !double.IsFinite(source.HeightPoints) || source.HeightPoints <= 0))
+            throw new InvalidDataException("PDF 页面尺寸无效。");
+        SaveAll();
         using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
-        var rememberedPageAppearance = _settings.LastPageAppearance.Clone();
-        var appearance = new PageAppearance
+        var appearance = DisplayAppearance(new PageAppearance
         {
             PaperKind = PaperKind.Pdf,
             Theme = PageTheme.Dark,
@@ -751,41 +759,53 @@ public sealed class MainViewModel : ObservableObject
             PageColor = "#1B1B1B",
             ShowTitle = false,
             SheetCount = 1,
-            Width = sourcePage.WidthPoints * 96d / 72d,
-            Height = sourcePage.HeightPoints * 96d / 72d,
-        };
-        var page = AddPage(title, appearance);
-        _settings.LastPageAppearance = rememberedPageAppearance;
-        SaveSettings();
-        var document = FocusedDocument;
-        if (page == null || document == null) return null;
+            Width = sourcePages.Max(source => source.WidthPoints) * 96d / 72d,
+            Height = sourcePages.Sum(source => source.HeightPoints) * 96d / 72d,
+        });
+        // Publish the index only after the complete document and its page-owned assets exist.
+        var candidate = _library.CopyForSave();
+        var page = candidate.ActiveNotebook.AddPage(title, appearance);
+        var document = new PageDocument(candidate.ActiveNotebook.Id, page.Id);
+        var sourcePage = sourcePages[0];
 
         page.IsPdfPage = true;
         page.PdfPageNumber = sourcePage.PageNumber;
         page.PdfPageCount = sourcePage.PageCount;
         page.PdfWidthPoints = sourcePage.WidthPoints;
         page.PdfHeightPoints = sourcePage.HeightPoints;
-        var sourceAsset = _store.ImportAsset(document.NotebookId, document.PageId, sourcePath);
-        page.PdfSourceAssetName = sourceAsset;
-        page.PdfSourceDocumentName = Path.GetFileName(sourcePath);
-        var renderedAsset = _store.WriteAsset(document.NotebookId, document.PageId, ".png", sourcePage.PngBytes);
-        document.Objects.Add(new PageObject
+        try
         {
-            Kind = PageObjectKind.PdfPrintout,
-            X = 0,
-            Y = 0,
-            Width = (float)appearance.Width,
-            Height = (float)appearance.Height,
-            DisplayName = $"{Path.GetFileName(sourcePath)} · {sourcePage.PageNumber}/{sourcePage.PageCount}",
-            AssetName = renderedAsset,
-            MimeType = "image/png",
-            ViewInverted = invert,
-            SourceAssetName = sourceAsset,
-            SourcePageNumber = sourcePage.PageNumber,
-            IsPageBackground = true,
-        });
-        _store.SavePage(document);
-        SaveLibrary();
+            var sourceAsset = _store.ImportAsset(document.NotebookId, document.PageId, sourcePath);
+            page.PdfSourceAssetName = sourceAsset;
+            page.PdfSourceDocumentName = Path.GetFileName(sourcePath);
+            var y = 0f;
+            foreach (var source in sourcePages)
+            {
+                var height = (float)(source.HeightPoints * 96d / 72d);
+                document.Objects.Add(new PageObject
+                {
+                    Kind = PageObjectKind.PdfPrintout,
+                    X = 0, Y = y,
+                    Width = (float)(source.WidthPoints * 96d / 72d), Height = height,
+                    DisplayName = $"{Path.GetFileName(sourcePath)} · {source.PageNumber}/{source.PageCount}",
+                    AssetName = _store.WriteAsset(document.NotebookId, document.PageId, ".png", source.PngBytes),
+                    MimeType = "image/png", ViewInverted = invert,
+                    SourceAssetName = sourceAsset, SourcePageNumber = source.PageNumber,
+                    IsPageBackground = true,
+                });
+                y += height;
+            }
+            _store.SavePage(document);
+            _store.SaveLibrary(candidate);
+        }
+        catch
+        {
+            _store.DeletePageData(document.NotebookId, document.PageId);
+            throw;
+        }
+        _library = candidate;
+        AssignFocusedDocument(document);
+        LocalSaveCompleted?.Invoke();
         RefreshNavigation();
         return document;
     }

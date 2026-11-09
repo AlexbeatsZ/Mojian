@@ -721,11 +721,7 @@ public partial class MainWindow : Window
             Mouse.OverrideCursor = Cursors.Wait;
             var pages = await PdfImportService.RenderAsync(dialog.PdfPath);
             var baseTitle = Path.GetFileNameWithoutExtension(dialog.PdfPath);
-            foreach (var page in pages)
-            {
-                var title = pages.Count == 1 ? baseTitle : $"{baseTitle} {page.PageNumber}";
-                ViewModel.AddPdfPage(title, page, dialog.PdfPath, invert.Value);
-            }
+            ViewModel.AddPdfDocument(baseTitle, pages, dialog.PdfPath, invert.Value);
         }
         catch (Exception ex)
         {

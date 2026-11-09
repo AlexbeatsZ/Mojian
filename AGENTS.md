@@ -7,6 +7,11 @@
 
 # Current State
 
+- **0.7.28 published (Windows/Android code33)**: PDF page-pane import creates one note per file,
+  with vertically stacked immutable backgrounds and one original PDF asset. Both clients use the
+  PDF original/invert/ask policy; physical output retains every source sheet and its size.
+  Old split imports stay unchanged. Current EXE/APK refreshed; no device install/restart this task.
+  Read `insert-and-export.md` / `export-and-print.md`; task `~/.agents/mojian--pdf-document-import`.
 - **0.7.27 published (Windows/Android code32, source `c433980`)**: only `Notein风格` is preinstalled;
   original pressure/flow/stability stay visible. Configuration is JSON text/file import, with functions,
   engine parameters and configurable front controls. Selecting a file only fills the text box.
@@ -17,14 +22,6 @@
   re-tessellating old ink under wet ink); topmost new ink on layered pages uses the wet overlay;
   v2/pen-style eraser hits use modeled samples (`StrokeEraserHitTest`, 8.5 ms -> µs per candidate).
   Includes 0.7.24 same-canvas focus fix. Physical pen acceptance open; see perf design doc 0.7.26.
-- **Windows 0.7.23** (`v0.7.23`, source `8c9aa58`): retained per-item WPF visuals, stable paper/image/PDF nodes, indexed
-  delta erasing (no page JSON on contact) and layered wet-ink updates. Synthetic 3,000 strokes /
-  240,000 points: eraser contact 353 -> 2.2 ms, allocations 110.7 -> 0.33 MB; 60 moves cause zero
-  full scene recordings. Final Release suite 256 passed + one clipboard-restore failure, which
-  passed an isolated retry (257 covered). Real selected-page read-only rendering also passed.
-  Self-contained EXE is published on GitHub and replaced at the sole local release path while no
-  product was running (0.7.23+8c9aa58); next launch uses it. Physical PC pen feel is open.
-  Read `writing-performance-and-durability.md`; continuation `~/.agents/mojian--windows-ink-performance`.
 - **Android 0.7.22** (code30): adds a focused root `dispatchKeyEventPreIme` entry for the exact
   Xiaomi pen keyboard, ahead of IME hardware-key processing; Activity remains the fallback.
   Existing bindings/state machine are preserved; `MojianPenKey` logs receipt and binding types.
@@ -38,11 +35,6 @@
   in tools/strokes. Both clients' hold-to-straighten uses `shape-default.WidthMm`, retaining source
   color/highlighter opacity. Old v1 ink stays unchanged. Read `handwriting-engine.md` and
   `shapes-and-straightening.md`. Windows queued snapshots cache frozen unchanged point lists.
-- Delivery/build status for this active task: `~/.agents/mojian--handwriting-parity/AGENTS.md`.
-  Tablet now has Android 0.7.22/code30, preserving the 0.7.21 handwriting changes.
-  Windows 0.7.21 source tests pass except the pre-existing Hand-pan pixel baseline described below;
-  Windows 0.7.21 EXE is published and replaced on OMEN while no product process was running;
-  `v0.7.21` prerelease includes EXE+APK. Phone is still 0.7.14; ROG client was not updated.
 - **Android 0.7.20** (code28): product build is non-debuggable despite the `.debug` package suffix.
   ART interpretation and scene-revision cache resets caused the earlier lag. User accepted the new
   tablet feel. Prior injected ~1900-stroke acceptance: frame p90/95/99 24/28/38 ms (Notein 24/27/44),
@@ -84,16 +76,12 @@
 
 # Active Work
 
-- 0.7.27 delivery is complete under explicit user authorization: EXE/APK published and current outputs
-  replaced, phone 0.7.14/code22 and tablet 0.7.22/code30 upgraded to code32 without uninstall/data clear.
-  Existing library file counts/index sizes and first-install times stayed unchanged. Tablet cold launch
-  880 ms/resumed; phone stays at its original launcher. Windows remains closed, new EXE .7.27+c433980.
-  Windows 279 tests and Android 292 passed/2 skipped; native fixture compile-only, lint 0 errors/144 warnings.
-  Full native behavior graphs/materials/non-round tips remain a documented extension goal, not v1 support.
+- 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows 0.7.27 physical writing/erasing acceptance is pending. Hand-pan pixel checks pass with their
-  original thresholds; the 0.7.21 SSH-only failure remains historical evidence in the November log.
+- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 282/283,
+  existing Hand-pan pixel failure mean 1.870 / shifted 4.546; final PDF/pagination checks 12/12 pass.
+  Preserve the original threshold. Android: 298 passed/1 opt-in skipped, APK/test APK/lint pass.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
