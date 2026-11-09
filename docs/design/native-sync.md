@@ -149,6 +149,20 @@ Conflicts block synchronization across restart. V1 has no automatic resolution U
 preserve the complete clone and recovery directory for reviewed resolution. Deleting checkpoint
 or journal files to clear a warning is not a supported recovery procedure.
 
+### Historical default fields and conflict recovery
+
+The 2026-11-08 OMEN incident demonstrated that a save can materialize default stability/unit
+fields on otherwise identical old strokes. Byte-level hashing then treats the serialized page
+as changed. A remote erasure of the same page creates a conflict that blocks the whole library,
+including unrelated incoming content. Historical round-trip stability and dependency-safe
+conflict handling remain product work. Incident evidence is in the November log.
+
+Reviewed recovery must retain current local, remote and resolved copies plus the original
+checkpoint/outbox. Validate changes against the common base, honor remote tombstones, and
+acknowledge only explicitly reviewed paths. Preserve device/workspace identities and every
+other baseline. An uncertain submitted operation must be reconciled before changing its outbox.
+Resume through the existing client/CAS/journal flow and verify a second settled pass.
+
 ## Server and verification boundaries
 
 The independent `sync-server-v*` server release bundles a pinned version of

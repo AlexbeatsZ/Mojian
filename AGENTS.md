@@ -58,6 +58,10 @@
   Mojian's Syncthing folder stays paused. Never enable native sync on a Syncthing tree. Routes are
   tried in strict configured order; private certificate pins do not alter global trust. Preserve
   `.local/native-sync/connection.json` and never publish it or its access values.
+- **2026-11-08 OMEN sync recovery**: reviewed revision 288 conflicts and preserved 145 local added
+  practice strokes plus 5 disjoint tablet erasures. Existing client now matches server revision 666,
+  with no pending outbox/incoming/conflict. Homework5 matches the tablet/server's 2697 strokes.
+  Full local/remote/resolved recovery copies remain under the existing conflict's resolution-20261108.
 - ROG sync uses loopback 18742 and HTTPS 18743, composed Dayweave gateway 18781; subscription 18782,
   Dayweave 49732. Do not restart SakuraFrpService or overwrite the original gateway module.
 - User selected restored/tablet659 and declined 90 old editable pages and the phone's divergent
@@ -93,6 +97,10 @@
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
+- Sync prevention follow-up is identified: the initial OMEN conflict rewrote default stability/unit
+  fields on 1731 otherwise identical old strokes. Byte-hash conflict handling blocks the whole
+  library, including unrelated pages. Historical round-trip stability and a dependency-safe
+  conflict-resolution flow remain product work. Recovery evidence is in native-sync.md/November log.
 - iOS parity gaps and physical iPad/Pencil acceptance: `docs/design/ios-client.md`.
 
 # Build / Run / Test
