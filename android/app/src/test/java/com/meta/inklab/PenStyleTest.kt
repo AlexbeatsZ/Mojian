@@ -7,11 +7,17 @@ import org.junit.Test
 import kotlin.math.abs
 
 class PenStyleTest {
-    private fun config() = NamedPenStyle.defaults().single().configuration!!.toJson().put("id", "test").put("name", "测试笔触")
-    @Test fun onlyNoteinIsPreinstalledAndOriginalControlsStillWork() {
+    private fun canonical(value: Any?): Any? = when (value) {
+        is JSONObject -> value.keys().asSequence().sorted().associateWith { canonical(value.get(it)) }
+        is JSONArray -> (0 until value.length()).map { canonical(value.get(it)) }
+        is Number -> value.toDouble()
+        else -> value
+    }
+    private fun config() = NamedPenStyle.defaults().first { it.id == "notein" }.configuration!!.toJson().put("id", "test").put("name", "测试笔触")
+    @Test fun noteinAndOneNoteArePreinstalledAndOriginalControlsStillWork() {
         val old = ToolPreset("pen-black", DrawingToolKind.PEN, widthMm = .3f, pressurePercent = 78, inkFlowPercent = 20, stabilityPercent = 0)
         val shelf = ToolShelf.fromJson(JSONObject().put("tools", JSONArray().put(old.toJson())).toString())!!
-        assertEquals("Notein风格", shelf.penStyles.single().name); assertEquals("notein", shelf.selected.penStyleId)
+        assertEquals(listOf("Notein风格", "Onenote风格"), shelf.penStyles.map { it.name }); assertEquals("notein", shelf.selected.penStyleId)
         assertEquals(.3f, shelf.selected.widthMm, 0f); assertEquals(78, shelf.selected.pressurePercent); assertEquals(20, shelf.selected.inkFlowPercent); assertEquals(0, shelf.selected.stabilityPercent)
         assertTrue(PenStyle.fromLegacy(78, 20, 0).sameParameters(shelf.selected.penStyle!!))
         shelf.setPenParameter(shelf.selected, "pressure", 180.0); shelf.setPenParameter(shelf.selected, "flow", 150.0); shelf.setPenParameter(shelf.selected, "stability", 75.0)
@@ -19,11 +25,27 @@ class PenStyleTest {
         assertTrue(ToolShelf.fromJson(shelf.toJson())!!.selected.penStyle!!.sameParameters(shelf.selected.penStyle!!))
     }
     @Test fun noteinFunctionsMatchCalibratedV2AtAllControlExtremes() {
-        val config = NamedPenStyle.defaults().single().configuration!!
+        val config = NamedPenStyle.defaults().first { it.id == "notein" }.configuration!!
         for (pressure in listOf(0, 78, 200, 400)) for (flow in listOf(0, 20, 100, 200)) {
             val style = config.resolve(mapOf("pressure" to pressure.toDouble(), "flow" to flow.toDouble(), "stability" to 50.0))
             assertTrue(PenStyle.fromLegacy(pressure, flow, 50).sameParameters(style))
         }
+    }
+    @Test fun oneNoteConfigurationMatchesMeasuredEllipseTipPressureModel() {
+        // Desktop OneNote 16 synthetic pen probe: ellipse tip, raw points, width × (0.25 + 1.5p), no speed/taper.
+        val config = NamedPenStyle.defaults().single { it.id == "onenote" }.configuration!!
+        val example = JSONObject(requireNotNull(javaClass.getResourceAsStream("/onenote.json")).bufferedReader().use { it.readText() })
+        assertEquals("Onenote风格", config.name); assertEquals(canonical(example), canonical(config.toJson()))
+        val tool = ToolPreset("p", DrawingToolKind.PEN, widthMm = .35f, pressurePercent = 200, inkFlowPercent = 100, stabilityPercent = 50)
+        val style = config.resolve(config.valuesFor(tool))
+        assertTrue(style.pressureEnabled); assertEquals(0, style.stabilityPercent); assertEquals(0, style.pressureResponseMs)
+        assertFalse(style.speedEnabled || style.directionEnabled || style.startEnabled || style.endEnabled || style.tiltEnabled || style.turnEnabled)
+        for (p in listOf(0.0, .02, .1, .5, .73, 1.0)) assertEquals(.25 + 1.5 * p, PenStyle.evaluate(style.pressureCurve, p), 1e-9)
+        val flat = config.resolve(config.valuesFor(tool) + ("pressure" to 0.0))
+        for (p in listOf(0.0, .5, 1.0)) assertEquals(1.0, PenStyle.evaluate(flat.pressureCurve, p), 1e-9)
+        val shelf = ToolShelf(listOf(tool)); shelf.applyPenStyle(tool, shelf.penStyles.first { it.id == "onenote" })
+        assertEquals(listOf("pressure", "stability"), shelf.penControls(tool).map { it.parameter })
+        assertEquals(200, tool.pressurePercent); assertEquals(50, tool.stabilityPercent)
     }
     @Test fun importUpdatesByIdKeepsKnobsAndHistoricalSnapshots() {
         val shelf = ToolShelf(); val json = config(); val imported = shelf.importPenConfiguration(json.toString()); shelf.applyPenStyle(shelf.selected, imported)
@@ -68,7 +90,7 @@ class PenStyleTest {
     @Test fun oldGeneratedDefaultsAreRemovedButUserEditedConfigurationsAreKept() {
         val old = JSONArray(requireNotNull(javaClass.getResourceAsStream("/pen-style-legacy-migration.json")).bufferedReader().use { it.readText() })
         val root = JSONObject(ToolShelf().toJson()).put("penStyles", old); root.getJSONArray("tools").getJSONObject(0).put("penStyleId", "classic")
-        assertEquals("Notein风格", ToolShelf.fromJson(root.toString())!!.penStyles.single().name)
+        assertEquals(listOf("notein", "onenote"), ToolShelf.fromJson(root.toString())!!.penStyles.map { it.id })
         val changed = JSONObject(old.getJSONObject(0).toString()); changed.getJSONObject("style").put("endEnabled", true); old.put(changed)
         assertTrue(ToolShelf.fromJson(root.toString())!!.penStyles.any { it.id == "natural" && it.style.endEnabled })
     }

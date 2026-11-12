@@ -7,6 +7,10 @@
 
 # Current State
 
+- **0.7.29 (Windows/Android code34)**: built-in pen configurations are now `Notein风格` + `Onenote风格`
+  (id `onenote`), from shared/pen-style-presets.json. OneNote was measured on OMEN's desktop OneNote 16 via
+  synthetic pen injection + COM ISF readback: ellipse tip, raw points, width×(0.25+1.5p), no speed/taper.
+  Example docs/examples/pen-configurations/onenote.json must equal the preset. No device install this task.
 - **0.7.28 published (Windows/Android code33)**: PDF page-pane import creates one note per file,
   with vertically stacked immutable backgrounds and one original PDF asset. Both clients use the
   PDF original/invert/ask policy; physical output retains every source sheet and its size.
@@ -171,7 +175,7 @@
 
 # Docs Index
 
-- `docs/design/pen-style-presets.md`: JSON import, functions, dynamic parameter controls and immutable stroke snapshots.
+- `docs/design/pen-style-presets.md`: JSON import, functions, controls, snapshots, built-in Notein/OneNote evidence.
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
 

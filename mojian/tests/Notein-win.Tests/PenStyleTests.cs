@@ -19,14 +19,14 @@ namespace Notein_win.Tests;
 public sealed class PenStyleTests
 {
     private static JsonObject Config(string id = "test", string name = "测试笔触")
-    { var json = NamedPenStyle.Defaults().Single().Configuration!.ToJson(); json["id"] = id; json["name"] = name; return json; }
+    { var json = NamedPenStyle.Defaults().First(p => p.Id == "notein").Configuration!.ToJson(); json["id"] = id; json["name"] = name; return json; }
 
     [Fact]
-    public void OnlyNoteinIsPreinstalledAndOriginalPercentagesStillControlTheCurve()
+    public void NoteinAndOneNoteArePreinstalledAndOriginalPercentagesStillControlTheCurve()
     {
         var old = new ToolPreset("pen-black", DrawingToolKind.Pen) { WidthMm = .3f, PressurePercent = 78, InkFlowPercent = 20, StabilityPercent = 0 };
         var shelf = ToolShelf.FromJson(new JsonObject { ["tools"] = new JsonArray(old.ToJson()) }.ToJsonString())!;
-        Assert.Equal("Notein风格", Assert.Single(shelf.PenStyles).Name); Assert.Equal("notein", old.PenStyleId == "" ? shelf.Selected.PenStyleId : old.PenStyleId);
+        Assert.Equal(["Notein风格", "Onenote风格"], shelf.PenStyles.Select(p => p.Name)); Assert.Equal("notein", old.PenStyleId == "" ? shelf.Selected.PenStyleId : old.PenStyleId);
         var tool = shelf.Selected;
         Assert.Equal(.3f, tool.WidthMm); Assert.Equal(78, tool.PressurePercent); Assert.Equal(20, tool.InkFlowPercent); Assert.Equal(0, tool.StabilityPercent);
         var expected = PenStyle.FromLegacy(78, 20, 0);
@@ -41,7 +41,7 @@ public sealed class PenStyleTests
     [InlineData(0, 0, 0)] [InlineData(78, 20, 0)] [InlineData(200, 100, 50)] [InlineData(400, 200, 100)]
     public void NoteinConfigurationMatchesThePreviousActualV2Model(int pressure, int flow, int stability)
     {
-        var config = NamedPenStyle.Defaults().Single().Configuration!;
+        var config = NamedPenStyle.Defaults().First(p => p.Id == "notein").Configuration!;
         var tool = new ToolPreset("p", DrawingToolKind.Pen) { PressurePercent = pressure, InkFlowPercent = flow, StabilityPercent = stability };
         var stroke = new StrokeRecord { BrushProfile = FountainV2Model.Profile, WidthMm = .3f, PressurePercent = pressure, InkFlowPercent = flow, StabilityPercent = stability, StrokeUnitLengthCm = .015,
             Points = Enumerable.Range(0, 80).Select(i => new InkPoint(i * 2, 30 + (float)Math.Sin(i * .2) * 12, (float)(.3 + .3 * Math.Sin(i * .1)), elapsedMilliseconds: i * 7)).ToList() };
@@ -50,6 +50,30 @@ public sealed class PenStyleTests
         var resolved = FountainV2Model.Model(stroke);
         Assert.Equal(original.Count, resolved.Count);
         for (var i = 0; i < original.Count; i++) { Assert.Equal(original[i].Position, resolved[i].Position); Assert.Equal(original[i].Width, resolved[i].Width, 6); }
+    }
+
+    [Fact]
+    public void OneNoteConfigurationMatchesMeasuredEllipseTipPressureModel()
+    {
+        // Measured from desktop OneNote 16 synthetic pen strokes: ellipse tip, raw points, width × (0.25 + 1.5p).
+        using var example = typeof(PenStyleTests).Assembly.GetManifestResourceStream("PenConfiguration.OneNoteExample.json")!;
+        var config = NamedPenStyle.Defaults().Single(p => p.Id == "onenote").Configuration!;
+        Assert.Equal("Onenote风格", config.Name);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(example), config.ToJson()));
+        var tool = new ToolPreset("p", DrawingToolKind.Pen) { WidthMm = .35f, PressurePercent = 200, InkFlowPercent = 100, StabilityPercent = 50 };
+        var style = config.Resolve(config.ValuesFor(tool));
+        Assert.True(style.PressureEnabled); Assert.Equal(0, style.StabilityPercent); Assert.Equal(0, style.PressureResponseMs);
+        Assert.False(style.SpeedEnabled || style.DirectionEnabled || style.StartEnabled || style.EndEnabled || style.TiltEnabled || style.TurnEnabled);
+        foreach (var p in new[] { 0d, .02, .1, .5, .73, 1d }) Assert.Equal(.25 + 1.5 * p, PenStyle.Evaluate(style.PressureCurve, p), 9);
+        var flat = config.Resolve(new Dictionary<string, double>(config.ValuesFor(tool)) { ["pressure"] = 0 });
+        foreach (var p in new[] { 0d, .5, 1d }) Assert.Equal(1, PenStyle.Evaluate(flat.PressureCurve, p), 9);
+        foreach (var p in new[] { .1, .5, 1d })
+        {
+            var stroke = new StrokeRecord { BrushProfile = PenStyle.Profile, PenStyle = style, WidthMm = .35f, StrokeUnitLengthCm = .015,
+                Points = Enumerable.Range(0, 60).Select(i => new InkPoint(i * (i % 7 + 1), 40, (float)p, elapsedMilliseconds: i * 4)).ToList() };
+            Assert.All(FountainV2Model.Model(stroke), s => Assert.Equal(.35 * 96 / 25.4 * (.25 + 1.5 * (float)p), s.Width, 5));
+        }
+        Assert.Equal(200, tool.PressurePercent); Assert.Equal(50, tool.StabilityPercent);
     }
 
     [Fact]
@@ -117,7 +141,7 @@ public sealed class PenStyleTests
         var shelf = new ToolShelf(); var root = JsonNode.Parse(shelf.ToJson())!;
         root["penStyles"] = old.DeepClone(); root["tools"]![0]!["penStyleId"] = "classic";
         var migrated = ToolShelf.FromJson(root.ToJsonString())!;
-        Assert.Single(migrated.PenStyles); Assert.Equal("notein", migrated.Selected.PenStyleId);
+        Assert.Equal(["notein", "onenote"], migrated.PenStyles.Select(p => p.Id)); Assert.Equal("notein", migrated.Selected.PenStyleId);
         root["penStyles"]!.AsArray().Add(changed);
         Assert.Contains(ToolShelf.FromJson(root.ToJsonString())!.PenStyles, p => p.Id == "natural" && p.Style.EndEnabled);
     }
@@ -132,7 +156,7 @@ public sealed class PenStyleTests
         {
             var dialog = new PenStyleDialog(shelf, shelf.Selected); dialog.LoadFile(path); Assert.Equal(text, dialog.ConfigurationText); Assert.Equal(before, shelf.ToJson());
             dialog.ConfigurationText = "invalid"; dialog.Import(); Assert.Null(dialog.SavedPreset); Assert.Equal(before, shelf.ToJson());
-            dialog.ConfigurationText = NamedPenStyle.Defaults().Single().Configuration!.Text;
+            dialog.ConfigurationText = NamedPenStyle.Defaults().First(p => p.Id == "notein").Configuration!.Text;
             dialog.Show(); dialog.UpdateLayout(); Capture(dialog, "MOJIAN_PEN_STYLE_SCREENSHOT"); dialog.Close(); Assert.Equal(before, shelf.ToJson());
             var importing = new PenStyleDialog(shelf, shelf.Selected) { ConfigurationText = text };
             importing.Dispatcher.BeginInvoke(importing.Import, DispatcherPriority.Loaded); Assert.True(importing.ShowDialog());
@@ -154,13 +178,17 @@ public sealed class PenStyleTests
             window = new MainWindow(model); window.Show(); window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
             var popup = (Popup)window.FindName("ToolFlyoutPopup"); popup.PlacementTarget = window; model.IsToolFlyoutOpen = true;
             var selector = (ComboBox)window.FindName("PenStyleSelector"); selector.IsDropDownOpen = true; window.UpdateLayout(); window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
-            var item = (ComboBoxItem)selector.ItemContainerGenerator.ContainerFromIndex(1);
+            var testIndex = model.ToolShelf.PenStyles.ToList().FindIndex(p => p.Id == "test"); Assert.Equal(2, testIndex);
+            var item = (ComboBoxItem)selector.ItemContainerGenerator.ContainerFromIndex(testIndex);
             Assert.NotNull(item);
             var down = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Mouse.PreviewMouseDownEvent, Source = item };
             typeof(MainWindow).GetMethod("OnWindowPreviewMouseDown", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [window, down]);
             Assert.True(model.IsToolFlyoutOpen);
-            selector.SelectedIndex = 1; selector.IsDropDownOpen = false;
+            selector.SelectedIndex = testIndex; selector.IsDropDownOpen = false;
             Assert.Equal("test", model.SelectedTool.PenStyleId); Assert.True(model.SelectedTool.PenStyle!.EndEnabled);
+            selector.SelectedValue = "onenote"; Assert.Equal("onenote", model.SelectedTool.PenStyleId);
+            Assert.Equal(["pressure", "stability"], ((StackPanel)window.FindName("PenParameterPanel")).Children.OfType<Slider>().Select(s => (string)s.Tag));
+            Assert.Equal(1.75, PenStyle.Evaluate(model.SelectedTool.PenStyle!.PressureCurve, 1), 9);
             selector.SelectedIndex = 0; Assert.Equal("notein", model.SelectedTool.PenStyleId);
             var sliders = ((StackPanel)window.FindName("PenParameterPanel")).Children.OfType<Slider>().ToList(); Assert.Equal(3, sliders.Count);
             sliders.Single(s => Equals(s.Tag, "pressure")).Value = 78; sliders.Single(s => Equals(s.Tag, "flow")).Value = 20; sliders.Single(s => Equals(s.Tag, "stability")).Value = 0;

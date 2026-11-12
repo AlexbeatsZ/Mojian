@@ -1,0 +1,72 @@
+{
+  "format": "mojian-pen/v1",
+  "id": "onenote",
+  "name": "Onenote风格",
+  "parameters": {
+    "pressure": 100,
+    "stability": 0
+  },
+  "controls": [
+    {
+      "parameter": "pressure",
+      "label": "压感",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "unit": "%"
+    },
+    {
+      "parameter": "stability",
+      "label": "稳定性",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "unit": "%"
+    }
+  ],
+  "style": {
+    "pressureEnabled": true,
+    "pressureCurve": {
+      "samples": 0,
+      "function": {
+        "op": "add",
+        "args": [
+          1,
+          {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  "$pressure",
+                  100
+                ]
+              },
+              {
+                "op": "subtract",
+                "args": [
+                  {
+                    "op": "multiply",
+                    "args": [
+                      1.5,
+                      "x"
+                    ]
+                  },
+                  0.75
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "speedEnabled": false,
+    "directionEnabled": false,
+    "startEnabled": false,
+    "endEnabled": false,
+    "stabilityPercent": "$stability",
+    "tiltEnabled": false,
+    "turnEnabled": false,
+    "pressureResponseMs": 0
+  }
+}

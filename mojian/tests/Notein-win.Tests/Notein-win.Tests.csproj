@@ -23,6 +23,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <EmbeddedResource Include="../../../docs/examples/pen-configurations/legacy-android.json" LogicalName="PenConfiguration.LegacyExample.json" />
+    <EmbeddedResource Include="../../../docs/examples/pen-configurations/onenote.json" LogicalName="PenConfiguration.OneNoteExample.json" />
   </ItemGroup>
 
 </Project>
