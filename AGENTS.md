@@ -9,7 +9,7 @@
 
 # Current State
 
-- **0.7.30 (Windows/Android code35, source pending release)**: architecture repair from review
+- **0.7.30 published (Windows/Android code35, source `e37604f`)**: architecture repair from review
   `mac:claude:efdd324c`. Device-local navigation (selection/expansion/active notebook) moved out of
   library.json into Windows settings.json / Android prefs; autosave no longer rewrites the index.
   Shared contracts in `shared/`: workspace/page schemas, golden fixtures, sync decision table,
@@ -19,6 +19,9 @@
   back verbatim (`StrokeJsonConverter`); undo keeps frozen per-stroke versions, bitmap caches are LRU
   budgeted, PDF import stages previews on disk. Content IDs follow the sync path rule on all clients
   (ASCII `[A-Za-z0-9._-]`, no leading/trailing dot). macOS client + `shared/swift` core now on master.
+  Temporary Windows eraser switches update selection without rebuilding tool collections/pen controls.
+  v0.7.30 prerelease has EXE/APK uploaded; current artifacts refreshed on Mac and OMEN.
+  Release closeout reused completed tests/build/signature receipts; physical device acceptance is open.
 - **0.7.29 published (Windows/Android code34, source `b0a020f`)**: built-in pen configurations are now `Notein风格` + `Onenote风格`
   (id `onenote`), from shared/pen-style-presets.json. OneNote was measured on OMEN's desktop OneNote 16 via
   synthetic pen injection + COM ISF readback: ellipse tip, raw points, width×(0.25+1.5p), no speed/taper.
@@ -95,9 +98,10 @@
 - 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
   Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 282/283,
-  existing Hand-pan pixel failure mean 1.870 / shifted 4.546; final PDF/pagination checks 12/12 pass.
-  Preserve the original threshold. Android: 298 passed/1 opt-in skipped, APK/test APK/lint pass.
+- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 305/306,
+  existing Hand-pan pixel failure mean 1.870 / shifted 4.546. Preserve the original threshold.
+  Windows native sync 29 scenarios and sync integration 11/11 pass. Android: 306 passed/1 opt-in
+  skipped, APK/test APK/lint pass. Shared Swift 23/23 and macOS 20/20 pass.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
