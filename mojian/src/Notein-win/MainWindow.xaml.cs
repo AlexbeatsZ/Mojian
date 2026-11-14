@@ -1262,6 +1262,8 @@ public partial class MainWindow : Window
     private void RefreshPenStyleControls()
     {
         if (PenStyleSelector == null || _penStyleUiUpdating) return;
+        // A spring-loaded pen-button eraser is momentary; leave the pen's controls in place.
+        if (ViewModel.IsSpringLoadedEraserActive) return;
         _penStyleUiUpdating = true;
         try
         {

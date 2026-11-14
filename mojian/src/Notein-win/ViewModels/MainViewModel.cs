@@ -71,6 +71,7 @@ public sealed partial class MainViewModel : ObservableObject
     public ToolShelf ToolShelf => _toolShelf;
     public FullPageToolbarConfig FullPageConfig => _fullPageConfig;
     public ToolPreset SelectedTool => _springLoadedEraserTool ?? _toolShelf.Selected;
+    public bool IsSpringLoadedEraserActive => _springLoadedEraserTool != null;
     public ToolPreset PressureEraserTool =>
         _toolShelf.Tools.FirstOrDefault(tool =>
             tool.Kind == DrawingToolKind.Eraser &&
@@ -1500,7 +1501,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsToolFlyoutOpen = false;
         OnPropertyChanged(nameof(SingleFingerPanEnabled));
         OnPropertyChanged(nameof(InsertSpaceModeEnabled));
-        RefreshTools();
+        RefreshToolSelection();
         return _springLoadedEraserTool;
     }
 
@@ -1513,7 +1514,29 @@ public sealed partial class MainViewModel : ObservableObject
         _insertSpaceModeEnabled = _springLoadedRestoreInsertSpace;
         OnPropertyChanged(nameof(SingleFingerPanEnabled));
         OnPropertyChanged(nameof(InsertSpaceModeEnabled));
-        RefreshTools();
+        RefreshToolSelection();
+    }
+
+    // Spring-loaded tools change only which tool is active. Rebuilding the tool collections,
+    // full-page toolbar and shortcut catalogs here regenerated the whole ribbon on every
+    // pen-button erase contact and stalled the UI thread at pen-down and pen-up.
+    private void RefreshToolSelection()
+    {
+        var selectable = !SingleFingerPanEnabled && !InsertSpaceModeEnabled && !ReadingViewEnabled;
+        foreach (var tool in _toolShelf.Tools) tool.IsSelected = selectable && tool.Id == SelectedTool.Id;
+        bool Selected(string id) => id switch
+        {
+            "draw:pan" => SingleFingerPanEnabled,
+            "draw:reading" => ReadingViewEnabled,
+            "draw:insert_space" => InsertSpaceModeEnabled,
+            _ => id.StartsWith("tool:", StringComparison.Ordinal) && selectable && id == "tool:" + SelectedTool.Id,
+        };
+        foreach (var items in new[] { FullPageToolbarItems, FullPageToolbarAvailableItems })
+            for (var i = 0; i < items.Count; i++)
+                if (!items[i].Id.StartsWith("home:", StringComparison.Ordinal) && items[i].Id is not ("draw:undo" or "draw:redo" or "draw:add" or "draw:rule_lines" or "draw:clear") &&
+                    items[i].IsSelected != Selected(items[i].Id))
+                    items[i] = items[i] with { IsSelected = Selected(items[i].Id) };
+        NotifySelectedToolProperties();
     }
 
     private void CancelSpringLoadedTool()

@@ -260,6 +260,35 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void SpringLoadedEraserOnlyFlipsSelectionWithoutRebuildingToolCollections()
+    {
+        using var temp = new TemporaryDirectory();
+        var preferences = new PreferencesStore(Path.Combine(temp.Path, "preferences.json"));
+        var viewModel = new MainViewModel(Path.Combine(temp.Path, "workspace"), preferences);
+        var original = viewModel.SelectedTool;
+        var eraser = viewModel.PressureEraserTool;
+        var resets = 0;
+        foreach (var collection in new System.Collections.Specialized.INotifyCollectionChanged[]
+            { viewModel.Tools, viewModel.PenTools, viewModel.EraserTools, viewModel.HighlighterTools, viewModel.LassoTools, viewModel.ShapeTools })
+            collection.CollectionChanged += (_, args) => { if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset) resets++; };
+        var notified = new List<string>();
+        original.PropertyChanged += (_, args) => notified.Add("original:" + args.PropertyName);
+        eraser.PropertyChanged += (_, args) => notified.Add("eraser:" + args.PropertyName);
+
+        viewModel.BeginSpringLoadedTool(SpringLoadedToolKind.Eraser);
+        Assert.True(viewModel.IsSpringLoadedEraserActive);
+        Assert.True(eraser.IsSelected); Assert.False(original.IsSelected);
+        viewModel.EndSpringLoadedTool(SpringLoadedToolKind.Eraser);
+        Assert.False(viewModel.IsSpringLoadedEraserActive);
+        Assert.True(original.IsSelected); Assert.False(eraser.IsSelected);
+
+        Assert.Equal(0, resets);
+        Assert.Equal(new[] { "eraser:IsSelected", "original:IsSelected", "eraser:IsSelected", "original:IsSelected" }.Order(), notified.Order());
+        Assert.Contains(viewModel.FullPageToolbarItems.Concat(viewModel.FullPageToolbarAvailableItems), item => item.Id == "tool:" + original.Id && item.IsSelected);
+        Assert.DoesNotContain(viewModel.FullPageToolbarItems.Concat(viewModel.FullPageToolbarAvailableItems), item => item.Id == "tool:" + eraser.Id && item.IsSelected);
+    }
+
+    [Fact]
     public void ReadingViewIsExclusiveWithPenModesAndExitsOnToolOrTagSelection()
     {
         using var temp = new TemporaryDirectory();

@@ -60,8 +60,10 @@ public static class InkPaletteExtensions
     };
 }
 
-public class ToolPreset
+public class ToolPreset : System.ComponentModel.INotifyPropertyChanged
 {
+    private bool _isSelected;
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     public Dictionary<string, Dictionary<string, double>> PenParameterValues { get; set; } = [];
     public const float MinimumEraserRadiusMm = 0.25f;
     public const float MaximumEraserRadiusMm = 40f;
@@ -86,8 +88,19 @@ public class ToolPreset
     public bool HoldToStraightenEnabled { get; set; } = true;
     public int StraightenDelayMillis { get; set; } = 1000;
 
+    // Notifies so a selection change (e.g. a spring-loaded pen-button eraser) updates the existing
+    // ribbon buttons instead of rebuilding every tool collection.
     [JsonIgnore]
-    public bool IsSelected { get; set; }
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
 
     public ToolPreset(
         string id,
