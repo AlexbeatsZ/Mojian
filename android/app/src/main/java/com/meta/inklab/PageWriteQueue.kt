@@ -34,7 +34,7 @@ class PageWriteQueue {
                 synchronized(live) {
                     snapshot.diskStamp = live.diskStamp
                     snapshot.diskFingerprint = live.diskFingerprint
-                    snapshot.sharedSource.put("revision",revisions[key] ?: live.sharedSource.optLong("revision"))
+                    snapshot.sharedSource.put("revision",maxOf(revisions[key] ?: 0L, live.sharedSource.optLong("revision")))
                 }
                 val originalSource = snapshot.sharedSource
                 repository.save(snapshot)

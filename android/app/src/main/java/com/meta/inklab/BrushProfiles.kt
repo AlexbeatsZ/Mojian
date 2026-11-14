@@ -48,6 +48,20 @@ object BrushProfiles {
     fun storedProfile(clientBrushFamilyId: String): String =
         if (clientBrushFamilyId.startsWith(STYLE_PREFIX)) PenStyle.PROFILE else if (clientBrushFamilyId.startsWith(FOUNTAIN_V2_FAMILY_PREFIX)) FOUNTAIN_V2 else FOUNTAIN_V1
 
+    data class StoredParameters(val pressurePercent: Int = 200, val flowPercent: Int = 100, val stabilityPercent: Int = 50)
+
+    fun storedParameters(id: String): StoredParameters {
+        val match = Regex("^inklab-fountain-v[34]-p([0-9.]+)-s([0-9.]+)(?:-t([0-9]+))?$").matchEntire(id)
+            ?: return StoredParameters()
+        return StoredParameters(
+            ((match.groupValues[1].toFloatOrNull() ?: 2f) * 100).toInt(),
+            ((match.groupValues[2].toFloatOrNull() ?: 1f) * 100).toInt(),
+            match.groupValues[3].toIntOrNull()?.coerceIn(0, 100) ?: 50,
+        )
+    }
+
+    fun isHighlighter(id: String): Boolean = id == StockBrushes.highlighter().clientBrushFamilyId
+
     fun styleFromFamilyId(id: String): PenStyle? = if (!id.startsWith(STYLE_PREFIX)) null else runCatching {
         PenStyle.fromJson(org.json.JSONObject(String(java.util.Base64.getUrlDecoder().decode(id.removePrefix(STYLE_PREFIX)), Charsets.UTF_8)))
     }.getOrNull()
@@ -99,13 +113,13 @@ object BrushProfiles {
      * Width at full pressure and rest, relative to the nominal tool width. Calibrated against Notein
      * 2.1.48 (size 0.5 drew ≈0.71 mm at p=1), so the same number gives the same stroke weight.
      */
-    internal const val FULL_PRESSURE_WIDTH = 1.4f
+    internal val FULL_PRESSURE_WIDTH = FountainV2Contract.fullPressureWidth
     /** On-glass speed (cm/s) at which speed thinning reaches its cap. */
-    internal const val SPEED_CAP_CM_PER_SECOND = 64f
+    internal val SPEED_CAP_CM_PER_SECOND = FountainV2Contract.speedCap
     /** Thinning at [SPEED_CAP_CM_PER_SECOND] with 100% ink flow. */
-    internal const val SPEED_THINNING_CAP = 0.85f
+    internal val SPEED_THINNING_CAP = FountainV2Contract.thinningCap
     /** Measured Notein thinning g(v) at 100% ink flow, v in cm/s: width × (1 − s·g(v)). */
-    private val speedThinning = listOf(1f to 0f, 2f to 0.08f, 4f to 0.15f, 8f to 0.23f, 16f to 0.46f, 32f to 0.69f)
+    private val speedThinning = FountainV2Contract.speedCurve.drop(1).dropLast(1)
 
     internal data class FountainV2Spec(
         /** Interior points of the pressure response (x = pressure, y = p^γ); (0,0),(1,1) implied. */
@@ -130,7 +144,7 @@ object BrushProfiles {
                 // p^0 = 1: a discontinuity at x = 0 keeps the width constant for any contact.
                 listOf(0f to 1f)
             } else {
-                (1 until 16).map { i -> val x = i / 16f; x to Math.pow(x.toDouble(), gamma.toDouble()).toFloat() }
+                (1 until FountainV2Contract.pressureSegments).map { i -> val x = i.toFloat() / FountainV2Contract.pressureSegments; x to Math.pow(x.toDouble(), gamma.toDouble()).toFloat() }
             }
         val speedCurve = speedThinning.map { (v, g) -> v / SPEED_CAP_CM_PER_SECOND to g / SPEED_THINNING_CAP }
         val s = speedCorrect.coerceIn(0f, 2f)
@@ -150,7 +164,8 @@ object BrushProfiles {
      */
     internal fun stabilityWindowMillis(stabilityPercent: Int): Long {
         val p = stabilityPercent.coerceIn(0, 100)
-        val window = if (p <= 50) 20f * p / 50f else 20f + 80f * (p - 50) / 50f
+        val window = if (p <= 50) FountainV2Contract.stabilityMiddle * p / 50f else
+            FountainV2Contract.stabilityMiddle + (FountainV2Contract.stabilityMaximum - FountainV2Contract.stabilityMiddle) * (p - 50) / 50f
         return Math.round(window).toLong().coerceAtLeast(1L)
     }
 
@@ -166,7 +181,7 @@ object BrushProfiles {
         }
     }
 
-    private const val UPSAMPLING_HZ = 180
+    private val UPSAMPLING_HZ = FountainV2Contract.upsamplingHz
 
     /** Authoring brush: the Notein-calibrated fountain, stored as [FOUNTAIN_V2]. */
     fun create(
@@ -202,7 +217,7 @@ object BrushProfiles {
                         sourceOutOfRangeBehavior = BrushBehavior.OutOfRange.CLAMP,
                         responseCurve = EasingFunction.Linear(spec.speedCurve.map { (x, y) -> ImmutableVec(x, y) }),
                         // Notein's speed response settles ≈50 ms after a step, beyond the input window.
-                        responseTimeMillis = 25L,
+                        responseTimeMillis = FountainV2Contract.responseMilliseconds,
                         enabledToolTypes = setOf(InputToolType.STYLUS),
                     )
                 },
@@ -210,12 +225,12 @@ object BrushProfiles {
                 BrushBehavior(
                     source = BrushBehavior.Source.NORMALIZED_DIRECTION_Y,
                     target = BrushBehavior.Target.SIZE_MULTIPLIER,
-                    sourceValueRangeStart = 0.45f,
-                    sourceValueRangeEnd = 0.65f,
+                    sourceValueRangeStart = FountainV2Contract.directionMinimum,
+                    sourceValueRangeEnd = FountainV2Contract.directionMaximum,
                     targetModifierRangeStart = 1f,
-                    targetModifierRangeEnd = 1.17f,
+                    targetModifierRangeEnd = 1f + FountainV2Contract.directionAmount,
                     sourceOutOfRangeBehavior = BrushBehavior.OutOfRange.CLAMP,
-                    responseTimeMillis = 25L,
+                    responseTimeMillis = FountainV2Contract.responseMilliseconds,
                 ),
             )
         val family =

@@ -65,6 +65,7 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         using var temp = new TemporaryDirectory();
         var store = new WorkspaceStore(temp.Path);
         var path = store.GetPageDocumentPath("n", "p");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "{damaged");
         for (var i = 0; i < 2; i++) Assert.Throws<InvalidDataException>(() => store.LoadPage("n", "p"));
         Assert.Equal("{damaged", File.ReadAllText(path));

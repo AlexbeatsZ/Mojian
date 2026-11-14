@@ -538,6 +538,7 @@ class MainActivity : Activity() {
                 check(recovery.recoverIncoming()) { recovery.status }
             }
             notebookLibrary = pageContentRepository.loadLibrary()
+            WorkspaceNavigationPreferences.restore(notebookLibrary, prefs.getString(KEY_WORKSPACE_NAVIGATION, null))
             prefs.edit().putString("sharedWorkspaceRoot",root.absolutePath).apply()
             prefs.getString(KEY_ACTIVE_NOTEBOOK_ID,null)?.let { id -> if(notebookLibrary.notebooks.any { it.id==id }) notebookLibrary.selectNotebook(id) }
             val section = prefs.getString(KEY_FOCUSED_SECTION_ID,null)
@@ -567,8 +568,10 @@ class MainActivity : Activity() {
             val changed=force || pageContentRepository.libraryChanged() || (key!=null && pageContentRepository.pageChanged(key.notebookId,key.pageId))
             if(!changed) return
             if(contentDirty) { persistGeneratedShapes(); if(contentDirty) return }
+            val navigation = WorkspaceNavigationPreferences.encode(notebookLibrary)
             val location=notebookLibrary.captureLocation()
             notebookLibrary=pageContentRepository.loadLibrary()
+            WorkspaceNavigationPreferences.restore(notebookLibrary, navigation)
             notebookLibrary.restoreLocation(location)
             key?.let { pageViewports.remember(it, viewport.snapshot()) }
             pageSessions.forEach { (id, session) -> if (id != key) pageViewports.remember(id, session.viewport) }
@@ -2232,7 +2235,11 @@ class MainActivity : Activity() {
             .putBoolean(KEY_ZOOM_LOCKED, zoomLocked)
             .putString(KEY_KEYBOARD_SHORTCUTS, keyboardShortcutSettings.toJson())
             .putString(KEY_XIAOMI_PEN_SHORTCUTS, xiaomiPenShortcutSettings.toJson())
-            .putString(KEY_NOTEBOOK_LIBRARY, notebookLibrary.toJsonString())
+            .apply {
+                if (pageContentRepository.isShared) remove(KEY_NOTEBOOK_LIBRARY)
+                else putString(KEY_NOTEBOOK_LIBRARY, notebookLibrary.toJsonString())
+            }
+            .putString(KEY_WORKSPACE_NAVIGATION, WorkspaceNavigationPreferences.encode(notebookLibrary))
             .putString(KEY_ACTIVE_NOTEBOOK_ID, notebookLibrary.activeNotebookId)
             .putString(KEY_FOCUSED_SECTION_ID, workspace.focusedSectionId.orEmpty())
             .putString(KEY_SELECTED_PAGE_ID, workspace.selectedPageId)
@@ -8274,6 +8281,7 @@ class MainActivity : Activity() {
         private const val KEY_DARK_IMAGE_POLICY_VERSION = "dark-image-import-policy-version"
         private const val KEY_PDF_PRINTOUT_DISPLAY_MODE = "pdf-printout-display-mode"
         private const val KEY_NOTEBOOK_LIBRARY = "notebook-library"
+        private const val KEY_WORKSPACE_NAVIGATION = "workspace-navigation"
         private const val KEY_KEYBOARD_SHORTCUTS = "keyboard-shortcuts"
         private const val KEY_XIAOMI_PEN_SHORTCUTS = "xiaomi-pen-shortcuts"
         private const val REQUEST_ATTACHMENT = 4101

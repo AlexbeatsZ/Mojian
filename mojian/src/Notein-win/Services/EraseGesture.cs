@@ -72,6 +72,14 @@ internal sealed class EraseGesture
         _removed.Clear(); _removed.TrimExcess();
     }
 
+    public void Reapply(PageDocument document)
+    {
+        var strokes = Strokes.Select(entry => entry.Stroke.Id).ToHashSet();
+        var tags = Tags.Select(entry => entry.Tag.Id).ToHashSet();
+        document.Strokes.RemoveAll(stroke => strokes.Contains(stroke.Id));
+        document.Tags.RemoveAll(tag => tags.Contains(tag.Id));
+    }
+
     public void Restore(PageDocument document)
     {
         foreach (var (index, stroke) in Strokes.OrderBy(entry => entry.Index))

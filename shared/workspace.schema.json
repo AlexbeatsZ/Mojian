@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mojian:workspace:v2",
+  "title": "Mojian canonical workspace v2",
+  "type": "object",
+  "required": ["version", "notebooks"],
+  "properties": {
+    "version": {"const": 2},
+    "notebooks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/notebook"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 239, "pattern": "^[^/\\\\:]+$", "not": {"enum": [".", ".."]}},
+    "notebook": {
+      "type": "object", "required": ["id", "title", "sections"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "title": {"type": "string"}, "sections": {"type": "array", "items": {"$ref": "#/$defs/section"}}}
+    },
+    "section": {
+      "type": "object", "required": ["id", "title", "pages"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "title": {"type": "string"}, "pages": {"type": "array", "items": {"$ref": "#/$defs/page"}}, "children": {"type": "array", "items": {"$ref": "#/$defs/section"}}}
+    },
+    "page": {
+      "type": "object", "required": ["id", "title", "appearance"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"}, "title": {"type": "string"},
+        "appearance": {
+          "type": "object",
+          "properties": {
+            "paperKind": {"type": "integer"}, "theme": {"type": "integer"}, "background": {"type": "integer"},
+            "pageColor": {"type": "string"}, "showTitle": {"type": "boolean"}, "sheetCount": {"type": "integer", "minimum": 1},
+            "width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "exclusiveMinimum": 0},
+            "infiniteWidth": {"type": "number", "exclusiveMinimum": 0}, "infiniteHeight": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      }
+    }
+  }
+}

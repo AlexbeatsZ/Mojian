@@ -719,7 +719,12 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
-            var pages = await PdfImportService.RenderAsync(dialog.PdfPath);
+            var notebook = ViewModel.ActiveWorkspace.Id;
+            var section = ViewModel.ActiveWorkspace.FocusedSectionId;
+            using var prepared = await PdfImportService.PrepareAsync(dialog.PdfPath);
+            if (notebook != ViewModel.ActiveWorkspace.Id || section != ViewModel.ActiveWorkspace.FocusedSectionId)
+                throw new IOException("导入目标已切换，请重新选择 PDF。");
+            var pages = prepared.Pages;
             var baseTitle = Path.GetFileNameWithoutExtension(dialog.PdfPath);
             ViewModel.AddPdfDocument(baseTitle, pages, dialog.PdfPath, invert.Value);
         }
@@ -870,13 +875,18 @@ public partial class MainWindow : Window
         try
         {
             Mouse.OverrideCursor = Cursors.Wait;
+            var document = FocusedCanvas.Document;
+            var store = ViewModel.Store;
+            using var prepared = await PdfImportService.PrepareAsync(dialog.FileName);
+            if (document == null || !ReferenceEquals(document, FocusedCanvas.Document) || !ReferenceEquals(store, ViewModel.Store))
+                throw new IOException("导入目标已切换，请重新选择 PDF。");
             var sourceAsset = ViewModel.ImportAsset(dialog.FileName);
-            var pages = await PdfImportService.RenderAsync(dialog.FileName);
+            var pages = prepared.Pages;
             var point = InsertPoint(110);
             var y = (float)point.Y;
             foreach (var page in pages)
             {
-                var asset = ViewModel.WriteAsset(".png", page.PngBytes);
+                var asset = page.PreviewPath is { } preview ? ViewModel.ImportAsset(preview) : ViewModel.WriteAsset(".png", page.PngBytes);
                 var width = 620f;
                 var height = width * (float)(page.HeightPoints / Math.Max(1, page.WidthPoints));
                 FocusedCanvas.AddObject(new PageObject
@@ -1426,7 +1436,18 @@ public partial class MainWindow : Window
         catch (Exception error)
         {
             e.Cancel = true;
-            MessageBox.Show(this, $"笔记保存失败，窗口将保持打开。请重试保存。\n{error.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (MessageBox.Show(this, $"笔记保存失败。\n{error.Message}\n\n是否将未保存内容另存为恢复副本并关闭？", "墨笺",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            try
+            {
+                var recovery = ViewModel.PreserveUnsavedChanges();
+                MessageBox.Show(this, $"未保存内容已保留，请在解决文件冲突后恢复：\n{recovery}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Information);
+                e.Cancel = false;
+            }
+            catch (Exception recoveryError)
+            {
+                MessageBox.Show(this, $"恢复副本保存失败，窗口将保持打开。\n{recoveryError.Message}", "墨笺", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 

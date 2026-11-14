@@ -11,12 +11,13 @@ public static class FountainV2Model
     public const string Profile = "fountain-v2";
     private const double UnitsPerMm = 96d / 25.4;
     private static readonly (double Speed, double Thinning)[] SpeedCurve =
-        [(0, 0), (1, 0), (2, .08), (4, .15), (8, .23), (16, .46), (32, .69), (64, .85)];
+        FountainV2Contract.SpeedCurve;
 
     public static int StabilityWindowMillis(int percent)
     {
         var p = Math.Clamp(percent, 0, 100);
-        return Math.Max(1, (int)Math.Floor((p <= 50 ? .4 * p : 20 + 1.6 * (p - 50)) + .5));
+        return Math.Max(1, (int)Math.Floor((p <= 50 ? FountainV2Contract.StabilityMiddle * p / 50 : FountainV2Contract.StabilityMiddle +
+            (FountainV2Contract.StabilityMaximum - FountainV2Contract.StabilityMiddle) * (p - 50) / 50) + .5));
     }
 
     public static double SpeedThinning(double centimetersPerSecond)
@@ -29,23 +30,24 @@ public static class FountainV2Model
             return previous.Thinning + (thinning - previous.Thinning) *
                 Math.Clamp((centimetersPerSecond - previous.Speed) / (speed - previous.Speed), 0, 1);
         }
-        return .85;
+        return FountainV2Contract.ThinningCap;
     }
 
-    public static double DirectionMultiplier(double directionY) => 1 + .17 * Math.Clamp((directionY - .45) / .2, 0, 1);
+    public static double DirectionMultiplier(double directionY) => 1 + FountainV2Contract.DirectionAmount * Math.Clamp((directionY - FountainV2Contract.DirectionMinimum) / FountainV2Contract.DirectionRange, 0, 1);
 
     public static double WidthMultiplier(double pressure, int pressurePercent, double speedCmPerSecond, int flowPercent, double directionY)
     {
         var gamma = Math.Clamp(pressurePercent / 100d, 0, 4);
         var p = Math.Clamp(pressure, 0, 1);
         // AndroidX uses the same 16-segment pressure curve, including its p^0 contact step.
-        var part = Math.Min(15, (int)(p * 16));
+        var segments = FountainV2Contract.PressureSegments;
+        var part = Math.Min(segments - 1, (int)(p * segments));
         var pressureValue = gamma == 0 ? 1 :
-            Math.Pow(part / 16d, gamma) * (1 - (p * 16 - part)) +
-            Math.Pow((part + 1) / 16d, gamma) * (p * 16 - part);
+            Math.Pow(part / (double)segments, gamma) * (1 - (p * segments - part)) +
+            Math.Pow((part + 1) / (double)segments, gamma) * (p * segments - part);
         // Match Android's clamped endpoint (important above 100% flow), not a negative width.
-        var end = Math.Max(.05, 1 - .85 * Math.Clamp(flowPercent / 100d, 0, 2));
-        return 1.4 * pressureValue * (1 - (1 - end) * SpeedThinning(speedCmPerSecond) / .85) * DirectionMultiplier(directionY);
+        var end = Math.Max(FountainV2Contract.MinimumSpeedMultiplier, 1 - FountainV2Contract.ThinningCap * Math.Clamp(flowPercent / 100d, 0, 2));
+        return FountainV2Contract.FullPressureWidth * pressureValue * (1 - (1 - end) * SpeedThinning(speedCmPerSecond) / FountainV2Contract.ThinningCap) * DirectionMultiplier(directionY);
     }
 
     public readonly record struct Sample(Point Position, double Pressure, double Milliseconds, double Width);
@@ -100,7 +102,7 @@ public static class FountainV2Model
         Append(0);
         for (var i = 1; i < count; i++)
         {
-            var steps = (int)Math.Min(100, Math.Ceiling((times[i] - times[i - 1]) / (1000d / (stroke.PenStyle?.UpsamplingHz ?? 180))));
+            var steps = (int)Math.Min(100, Math.Ceiling((times[i] - times[i - 1]) / (1000d / (stroke.PenStyle?.UpsamplingHz ?? FountainV2Contract.UpsamplingHz))));
             for (var step = 1; step <= steps; step++)
                 Append(times[i - 1] + (times[i] - times[i - 1]) * step / steps);
         }
@@ -126,14 +128,14 @@ public static class FountainV2Model
             var delta = ModeledPositionAt(end, right) - ModeledPositionAt(start, left);
             var speed = end > start ? SpeedThinning(delta.Length * unitCm * 1000 / (end - start)) : 0;
             var direction = delta.Length > 1e-8 ? DirectionMultiplier(delta.Y / delta.Length) : directionResponse;
-            var alpha = i == 0 ? 1 : 1 - Math.Exp(-(input.Time - modeledInputs[i - 1].Time) / 25);
+            var alpha = i == 0 ? 1 : 1 - Math.Exp(-(input.Time - modeledInputs[i - 1].Time) / FountainV2Contract.ResponseMilliseconds);
             speedResponse += (speed - speedResponse) * alpha;
             directionResponse += (direction - directionResponse) * alpha;
             // Speed/direction targets have 25 ms damping; pressure has only input-window smoothing.
             var noSpeed = WidthMultiplier(input.Pressure, stroke.PressurePercent, 0, 0, 0);
-            var flowEnd = Math.Max(.05, 1 - .85 * Math.Clamp(stroke.InkFlowPercent / 100d, 0, 2));
+            var flowEnd = Math.Max(FountainV2Contract.MinimumSpeedMultiplier, 1 - FountainV2Contract.ThinningCap * Math.Clamp(stroke.InkFlowPercent / 100d, 0, 2));
             result.Add(new Sample(input.Position, input.Pressure, input.Time, stroke.WidthMm * UnitsPerMm * noSpeed *
-                (1 - (1 - flowEnd) * speedResponse / .85) * directionResponse));
+                (1 - (1 - flowEnd) * speedResponse / FountainV2Contract.ThinningCap) * directionResponse));
         }
         return result;
     }

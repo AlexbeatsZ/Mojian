@@ -1,12 +1,24 @@
 # Goal
 
 - Build 墨笺 (Mojian) as a persistent native Windows/Android note app with editable handwriting,
-  one canonical folder format and safe local-first synchronization; bring iOS/iPadOS to parity.
+  one canonical folder format and safe local-first synchronization across Windows, Android and macOS.
+- iOS/iPadOS is excluded from development, fixes, tests and releases by explicit user direction on
+  2026-11-13. Existing ios/ is historical. macOS uses the independent shared/swift package.
 - Preserve existing Notein/OneNote data. Notein research is clean-room behavioral interoperability;
   never publish proprietary application code, models, keys or private notes.
 
 # Current State
 
+- **0.7.30 (Windows/Android code35, source pending release)**: architecture repair from review
+  `mac:claude:efdd324c`. Device-local navigation (selection/expansion/active notebook) moved out of
+  library.json into Windows settings.json / Android prefs; autosave no longer rewrites the index.
+  Shared contracts in `shared/`: workspace/page schemas, golden fixtures, sync decision table,
+  `fountain-v2.json` constants (consumed by both engines). 409 `version_conflict` drops the outbox and
+  re-decides next pass; remote library.json deletion is refused. Missing page files are errors, not
+  empty pages; copy section/page publishes only after data copy; Windows unchanged strokes are written
+  back verbatim (`StrokeJsonConverter`); undo keeps frozen per-stroke versions, bitmap caches are LRU
+  budgeted, PDF import stages previews on disk. Content IDs follow the sync path rule on all clients
+  (ASCII `[A-Za-z0-9._-]`, no leading/trailing dot). macOS client + `shared/swift` core now on master.
 - **0.7.29 published (Windows/Android code34, source `b0a020f`)**: built-in pen configurations are now `Notein风格` + `Onenote风格`
   (id `onenote`), from shared/pen-style-presets.json. OneNote was measured on OMEN's desktop OneNote 16 via
   synthetic pen injection + COM ISF readback: ellipse tip, raw points, width×(0.25+1.5p), no speed/taper.
@@ -72,9 +84,8 @@
   replay AND repository reload finish. Conflicts require manual review; no automatic merge UI.
 - Global theme/new-page background/print choices are device-local (`settings-memory.md`). Imported
   Notein/OneNote presentation is display-only; preserve source coordinates, outlines and assets.
-- iOS is 0.1.1/build2; signing needs an Apple Team and physical Pencil acceptance remains open.
-  Native macOS development is separate chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; no Mac deployment
-  is authorized by the earlier Windows/Android deliveries. Feather branding remains in shared/branding.
+- Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac deployment needs its own
+  request. Feather branding remains in shared/branding.
 - Current output paths: `mojian/artifacts/release/Mojian.exe`,
   `android/artifacts/current/Mojian-debug.apk`, `ios/artifacts/current`.
   Historical version/deployment details have moved to `docs/log/2026-10.md` and `2026-11.md`.
@@ -90,11 +101,12 @@
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
-- Sync prevention follow-up is identified: the initial OMEN conflict rewrote default stability/unit
-  fields on 1731 otherwise identical old strokes. Byte-hash conflict handling blocks the whole
-  library, including unrelated pages. Historical round-trip stability and a dependency-safe
-  conflict-resolution flow remain product work. Recovery evidence is in native-sync.md/November log.
-- iOS parity gaps and physical iPad/Pencil acceptance: `docs/design/ios-client.md`.
+- Sync prevention: 0.7.30 fixes old-stroke default rewrites (verbatim write-back) and navigation in
+  library.json. Byte-hash conflicts still block the whole library; a dependency-safe resolution UI
+  remains product work. Recovery evidence is in native-sync.md/November log.
+- Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
+  assembly, unified sync state layout, recovery/conflict directory retention policy.
+- iOS/iPadOS maintenance is retired by user direction, 2026-11-13.
 
 # Build / Run / Test
 
@@ -120,7 +132,8 @@
 - Sync server: `npm ci && npm test && npm run test:integration && npm run package:server` from
   sync-server (Node22+). The .NET harness tests loopback HTTP, not public TLS or production notes.
 - Migration: `uv run --project tools/data-migration python -m unittest discover -s tools/data-migration/tests`.
-- Apple: `bash ios/tools/build.sh test|simulator|device`; signed device output needs `MOJIAN_APPLE_TEAM`.
+- macOS/Swift core: `bash macos/tools/build.sh test` (shared/swift + macos); `build.sh` packages the app.
+- CI `.github/workflows/clients.yml` runs Windows contract tests, Android full JVM/lint and macOS tests.
 
 # Durable Lessons
 
@@ -200,6 +213,7 @@
 - `docs/design/handwriting-engine.md`: clean-room pressure ink and reference evidence.
 - `docs/design/data-migration.md`: Notein/OneNote backup conversion and native imported assets.
 - `docs/design/sync-architecture.md`: original interoperability/storage investigation.
-- `docs/design/ios-client.md`: native UIKit/Pencil and parity gaps.
+- `docs/design/macos-client.md`: AppKit client, canonical store, local-only write boundary.
+- `docs/design/ios-client.md`: historical only (iOS retired 2026-11-13).
 - `docs/log/2026-10.md`: completed work, validation and historical entry-state archive.
 - `docs/log/2026-11.md`: November completed work.

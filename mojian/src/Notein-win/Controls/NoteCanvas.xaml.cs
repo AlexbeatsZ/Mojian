@@ -41,7 +41,6 @@ public partial class NoteCanvas : UserControl
     private Rect? _cropPreviewBounds;
     private bool _cropStylusGesture;
     private bool _drawingScreen;
-    private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private const double UnitsPerMillimeter = 96d / 25.4d;
 
     [DllImport("user32.dll")]
@@ -56,19 +55,19 @@ public partial class NoteCanvas : UserControl
 
     private readonly ViewportState _viewport = new();
     private Rect? _importedPaperBounds;
-    private sealed record UndoEntry(string? Json = null, string? AddedStrokeId = null, EraseGesture? Erased = null)
-    {
-        public static implicit operator UndoEntry(string json) => new(Json: json);
-    }
+    private readonly PageContentHistory _history = new();
+    private sealed record UndoEntry(PageContentHistory.Snapshot? Content = null, string? AddedStrokeId = null, EraseGesture? Erased = null,
+        (int Index, StrokeRecord Stroke)? RestoreStroke = null, bool ReapplyErase = false);
     private readonly Stack<UndoEntry> _undo = new();
-    private readonly Stack<string> _redo = new();
+    private readonly Stack<UndoEntry> _redo = new();
     private readonly List<Point> _lasso = new();
     private readonly List<StrokeRecord> _selectedStrokes = new();
     private readonly List<CanvasTag> _selectedTags = new();
     private readonly List<TextItem> _selectedTextItems = new();
     private readonly List<PageObject> _selectedObjects = new();
-    private readonly Dictionary<string, BitmapSource> _bitmapCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, BitmapSource> _pdfBitmapCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly BitmapMemoryCache _bitmapCache = new(64L * 1024 * 1024);
+    private readonly BitmapMemoryCache _pdfBitmapCache = new(128L * 1024 * 1024);
+    private static readonly SemaphoreSlim PdfRenderSlots = new(2, 2);
     private readonly HashSet<string> _pendingPdfRenders = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _failedPdfRenders = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<int> _activeTouchDevices = new();
@@ -343,16 +342,18 @@ public partial class NoteCanvas : UserControl
     {
         ExitImageCrop();
         if (Document == null || _undo.Count == 0) return;
-        _redo.Push(Snapshot(Document));
-        RestoreSnapshot(_undo.Pop());
+        var entry = _undo.Pop();
+        _redo.Push(InvertHistory(entry));
+        RestoreSnapshot(entry);
     }
 
     public void Redo()
     {
         ExitImageCrop();
         if (Document == null || _redo.Count == 0) return;
-        _undo.Push(Snapshot(Document));
-        RestoreSnapshot(_redo.Pop());
+        var entry = _redo.Pop();
+        _undo.Push(InvertHistory(entry));
+        RestoreSnapshot(entry);
     }
 
     public void ClearPage()
@@ -3490,6 +3491,7 @@ public partial class NoteCanvas : UserControl
 
     private BitmapSource? LoadBitmap(string assetName, bool inverted, bool adaptImported = false)
     {
+        if (string.IsNullOrWhiteSpace(assetName)) return null;
         var path = ResolveAssetPath?.Invoke(assetName);
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
         var key = $"{path}|{inverted}|{adaptImported}|{Appearance.Theme}|{File.GetLastWriteTimeUtc(path).Ticks}";
@@ -3532,8 +3534,10 @@ public partial class NoteCanvas : UserControl
 
     private async Task RenderAdaptivePdfBitmapAsync(string sourcePath, int pageNumber, uint targetWidth, bool inverted, string key, int generation)
     {
+        await PdfRenderSlots.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (!await Dispatcher.InvokeAsync(() => generation == _pdfRenderGeneration)) return;
             var rendered = await PdfImportService.RenderPageAsync(sourcePath, pageNumber, targetWidth).ConfigureAwait(false);
             var bitmap = BitmapFromBytes(rendered.PngBytes);
             bitmap = ApplyImageInversion(bitmap, inverted);
@@ -3555,7 +3559,8 @@ public partial class NoteCanvas : UserControl
         }
         finally
         {
-            await Dispatcher.InvokeAsync(() => _pendingPdfRenders.Remove(key));
+            try { await Dispatcher.InvokeAsync(() => _pendingPdfRenders.Remove(key)); }
+            finally { PdfRenderSlots.Release(); }
         }
     }
 
@@ -3686,54 +3691,6 @@ public partial class NoteCanvas : UserControl
         return extent;
     }
 
-    private void PushUndo()
-    {
-        if (Document == null) return;
-        PushHistory(new UndoEntry(Json: Snapshot(Document)));
-    }
-
-    private void PushInkUndo(string strokeId) => PushHistory(new UndoEntry(AddedStrokeId: strokeId));
-
-    private void PushHistory(UndoEntry entry)
-    {
-        _undo.Push(entry);
-        while (_undo.Count > 80)
-        {
-            var keep = _undo.Take(80).Reverse().ToArray();
-            _undo.Clear(); foreach (var item in keep) _undo.Push(item);
-        }
-        _redo.Clear();
-    }
-
-    private static string Snapshot(PageDocument document) => JsonSerializer.Serialize(document, SnapshotJson);
-
-    private void RestoreSnapshot(UndoEntry entry)
-    {
-        if (entry.Json != null) { RestoreSnapshot(entry.Json); return; }
-        if (Document == null) return;
-        if (entry.Erased != null) entry.Erased.Restore(Document);
-        else Document.Strokes.RemoveAll(stroke => stroke.Id == entry.AddedStrokeId);
-        ClearSelection();
-        MarkChanged(immediate: true);
-        InvalidateVisual();
-    }
-
-    private void RestoreSnapshot(string json)
-    {
-        if (Document == null) return;
-        var restored = JsonSerializer.Deserialize<PageDocument>(json, SnapshotJson);
-        if (restored == null) return;
-        Document.Strokes = restored.Strokes;
-        Document.Tags = restored.Tags;
-        Document.TextItems = restored.TextItems;
-        Document.Objects = restored.Objects;
-        Document.Layers = restored.Layers;
-        ClearSelection();
-        RebuildTextEditors();
-        MarkChanged(immediate: true);
-        InvalidateVisual();
-    }
-
     private void MarkChanged(bool immediate = false)
     {
         if (Document == null) return;
@@ -3820,65 +3777,29 @@ public partial class NoteCanvas : UserControl
         _selectedTextItems.Count > 0 ||
         _selectedObjects.Count > 0;
 
-    private static StrokeRecord CloneStroke(StrokeRecord source, float offset = 0) => new()
+    private static StrokeRecord CloneStroke(StrokeRecord source, float offset = 0)
     {
-        Id = IdFactory.New("stroke"),
-        Kind = source.Kind,
-        Color = source.Color,
-        WidthMm = source.WidthMm,
-        PressurePercent = source.PressurePercent,
-        InkFlowPercent = source.InkFlowPercent,
-        StabilityPercent = source.StabilityPercent,
-        PenStyle = source.PenStyle?.Copy(),
-        StrokeUnitLengthCm = source.StrokeUnitLengthCm,
-        OpacityPercent = source.OpacityPercent,
-        BrushProfile = source.BrushProfile,
-        SourceBrush = source.SourceBrush,
-        ColorHex = source.ColorHex,
-        LayerId = source.LayerId,
-        ZOrder = source.ZOrder,
-        VectorPath = source.VectorPath,
-        VectorBounds = source.VectorBounds?.ToArray(),
-        VectorTransform = source.VectorTransform.Select((value, index) => index >= 4 ? value + offset : value).ToArray(),
-        Points = source.Points.Select(point => new InkPoint {
-            X = point.X + offset, Y = point.Y + offset, Pressure = point.Pressure,
-            TiltX = point.TiltX, TiltY = point.TiltY, TiltRadians = point.TiltRadians, OrientationRadians = point.OrientationRadians, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList(),
-    };
+        var copy = source.CopyForSave();
+        copy.Id = IdFactory.New("stroke");
+        foreach (var point in copy.Points) { point.X += offset; point.Y += offset; }
+        copy.TransformVector(new Matrix(1, 0, 0, 1, offset, offset));
+        copy.InvalidateBounds();
+        return copy;
+    }
 
-    private static CanvasTag CloneTag(CanvasTag source, float offset = 0) => new()
+    private static CanvasTag CloneTag(CanvasTag source, float offset = 0)
     {
-        Id = IdFactory.New("tag"),
-        Kind = source.Kind,
-        DocumentX = source.DocumentX + offset,
-        DocumentY = source.DocumentY + offset,
-        Scale = source.Scale,
-    };
+        var copy = source.CopyForSave();
+        copy.Id = IdFactory.New("tag"); copy.DocumentX += offset; copy.DocumentY += offset;
+        return copy;
+    }
 
-    private static TextItem CloneText(TextItem source, float offset = 0) => new()
+    private static TextItem CloneText(TextItem source, float offset = 0)
     {
-        LayerId = source.LayerId,
-        ZOrder = source.ZOrder,
-        Id = IdFactory.New("text"),
-        X = source.X + offset,
-        Y = source.Y + offset,
-        Width = source.Width,
-        Height = source.Height,
-        Text = source.Text,
-        FontFamily = source.FontFamily,
-        FontSize = source.FontSize,
-        Bold = source.Bold,
-        Italic = source.Italic,
-        Underline = source.Underline,
-        Strikethrough = source.Strikethrough,
-        Subscript = source.Subscript,
-        Color = source.Color,
-        ForegroundHex = source.ForegroundHex,
-        BackgroundHex = source.BackgroundHex,
-        IndentLevel = source.IndentLevel,
-        Alignment = source.Alignment,
-        LineSpacing = source.LineSpacing,
-        StyleName = source.StyleName,
-    };
+        var copy = source.CopyForSave();
+        copy.Id = IdFactory.New("text"); copy.X += offset; copy.Y += offset;
+        return copy;
+    }
 
     private sealed record SelectionClipboardData(
         string NotebookId,

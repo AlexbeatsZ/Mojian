@@ -137,11 +137,11 @@ class NativeSyncClient(
                 val ours = local[path]
                 val base = checkpoint[path]?.hash
                 val theirs = remote.files[path]?.hash
-                when {
-                    ours == theirs -> remote.files[path]?.let { checkpoint[path] = it }
-                    ours != base && theirs != base -> conflicts += path
-                    ours != base -> changes += NativeSyncChange(path, remote.files[path]?.version ?: 0, ours)
-                    remote.files[path] != null -> incoming[path] = remote.files.getValue(path)
+                when (NativeSyncDecisions.decide(base, ours, theirs)) {
+                    NativeSyncDecision.Equal -> remote.files[path]?.let { checkpoint[path] = it }
+                    NativeSyncDecision.Conflict -> conflicts += path
+                    NativeSyncDecision.Upload -> changes += NativeSyncChange(path, remote.files[path]?.version ?: 0, ours)
+                    NativeSyncDecision.Receive -> remote.files[path]?.let { incoming[path] = it }
                 }
             }
             if (conflicts.isNotEmpty()) {

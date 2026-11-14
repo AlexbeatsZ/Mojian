@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Notein_win.Models;
 
 namespace Notein_win.Services;
@@ -9,6 +10,7 @@ public sealed class WorkspaceStore
     private readonly Dictionary<string, (long Length, long Modified)?> _observedFiles = new();
     private readonly object _sync;
     private string? _libraryJson;
+    private JsonObject? _librarySource;
     private readonly Dictionary<string, HashSet<string?>> _localVersions = new();
     private static string? PageStamp(string path) => Stamp(path) is { } stamp ? $"{stamp.Length}:{stamp.Modified}" : null;
     private static (long Length, long Modified)? Stamp(string path) => File.Exists(path)
@@ -38,6 +40,7 @@ public sealed class WorkspaceStore
     private static readonly JsonSerializerOptions PageJsonOptions = new(JsonOptions)
     {
         WriteIndented = false,
+        Converters = { new StrokeJsonConverter() },
     };
 
     public string RootDirectory { get; }
@@ -72,8 +75,8 @@ public sealed class WorkspaceStore
             // would hide those pages locally and be published over the shared index by sync.
             if (!IsNewWorkspace(RootDirectory)) throw new WorkspaceLibraryMissingException(RootDirectory);
             var created = NotebookLibrary.Sample();
-            SaveLibrary(created);
             SaveWelcomePage(created.ActiveNotebook);
+            SaveLibrary(created);
             return created;
         }
 
@@ -89,26 +92,70 @@ public sealed class WorkspaceStore
             if (parts.Length < 4 || parts[0] != "notebooks") return false;
             var notebook = library.Notebooks.FirstOrDefault(item => SafeId(item.Id) == parts[1]);
             if (notebook == null) return false;
-            var pageId = parts[2] == "pages" ? parts[3].Split('.')[0] : parts[3];
+            var pageId = parts[2] == "pages" ? parts[3].Replace(".json.previous", "").Replace(".json", "") : parts[3];
             return notebook.FindPage(pageId, out _) != null;
         });
         Observe(LibraryPath);
-        _libraryJson = JsonSerializer.Serialize(library, JsonOptions);
+        _librarySource = JsonNode.Parse(File.ReadAllText(LibraryPath))!.AsObject();
+        _libraryJson = SerializeLibrary(library);
         return library;
     }
 
     public bool SaveLibrary(NotebookLibrary library)
     {
+        var json = SerializeLibrary(library);
+        if (json == _libraryJson && File.Exists(LibraryPath)) return false;
         lock (_sync)
         {
             GuardExternalWrite(LibraryPath);
-            var json = JsonSerializer.Serialize(library, JsonOptions);
-            if (json == _libraryJson && File.Exists(LibraryPath)) return false;
             using var mutation = NativeSyncMutationEpoch.ForRoot(RootDirectory).BeginMutation();
             AtomicWrite(LibraryPath, json);
             _libraryJson = json;
+            _librarySource = JsonNode.Parse(json)!.AsObject();
             Observe(LibraryPath);
             return true;
+        }
+    }
+
+    public bool LibraryHasChanges(NotebookLibrary library) => SerializeLibrary(library) != _libraryJson;
+
+    public void ValidateLibraryUnchanged()
+    {
+        lock (_sync) GuardExternalWrite(LibraryPath);
+    }
+
+    // Retain historical local fields verbatim, while new libraries omit them. Navigation must
+    // never republish another device's selection, expansion state or active notebook.
+    private string SerializeLibrary(NotebookLibrary library)
+    {
+        var json = JsonSerializer.SerializeToNode(library, JsonOptions)!.AsObject();
+        PreserveLocalFields(json, _librarySource, "activeNotebookId");
+        var oldNotebooks = _librarySource?["notebooks"]?.AsArray();
+        foreach (var notebook in json["notebooks"]!.AsArray().OfType<JsonObject>())
+        {
+            var old = oldNotebooks?.OfType<JsonObject>().FirstOrDefault(item => item["id"]?.ToString() == notebook["id"]?.ToString());
+            PreserveLocalFields(notebook, old, "expanded", "focusedSectionId", "selectedPageSectionId", "selectedPageId");
+            PreserveSections(notebook["sections"]!.AsArray(), old?["sections"]?.AsArray());
+        }
+        return json.ToJsonString(JsonOptions);
+    }
+
+    private static void PreserveSections(JsonArray sections, JsonArray? previous)
+    {
+        foreach (var section in sections.OfType<JsonObject>())
+        {
+            var old = previous?.OfType<JsonObject>().FirstOrDefault(item => item["id"]?.ToString() == section["id"]?.ToString());
+            PreserveLocalFields(section, old, "expanded");
+            PreserveSections(section["children"]!.AsArray(), old?["children"]?.AsArray());
+        }
+    }
+
+    private static void PreserveLocalFields(JsonObject target, JsonObject? source, params string[] fields)
+    {
+        foreach (var field in fields)
+        {
+            if (source?.ContainsKey(field) == true) target[field] = source[field]?.DeepClone();
+            else target.Remove(field);
         }
     }
 
@@ -122,7 +169,7 @@ public sealed class WorkspaceStore
 
     public void SaveSettings(WorkspaceSettings settings)
     {
-        lock (_sync) AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        lock (WorkspaceFileGate.ForRoot(SettingsPath)) AtomicWrite(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
     }
 
     public PageDocument LoadPage(string notebookId, string pageId)
@@ -135,7 +182,7 @@ public sealed class WorkspaceStore
     {
         var path = GetPageDocumentPath(notebookId, pageId);
         RestoreMissingCurrent(path);
-        if (!File.Exists(path)) { Observe(path); return new PageDocument(notebookId, pageId); }
+        if (!File.Exists(path)) { Observe(path); throw new PageContentMissingException(notebookId, pageId); }
         var document = ReadRecoverable<PageDocument>(path, PageJsonOptions, recoveryRoot: RootDirectory);
         document.NotebookId = notebookId;
         document.PageId = pageId;
@@ -179,12 +226,10 @@ public sealed class WorkspaceStore
         }
     }
 
-    public string GetNotebookDirectory(string notebookId)
-    {
-        var path = Path.Combine(RootDirectory, "notebooks", SafeId(notebookId));
-        Directory.CreateDirectory(path);
-        return path;
-    }
+    internal static void WriteRecoverySnapshot(string path, PageDocument snapshot) =>
+        AtomicWrite(path, JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions));
+
+    public string GetNotebookDirectory(string notebookId) => Path.Combine(RootDirectory, "notebooks", SafeId(notebookId));
 
     public void DeleteNotebookData(string notebookId)
     {
@@ -210,7 +255,7 @@ public sealed class WorkspaceStore
         {
             GuardExternalWrite(LibraryPath);
             var directory = GetNotebookDirectory(notebookId);
-            var files = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Where(path =>
+            var files = (Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories) : []).Where(path =>
             {
                 if (pageIds == null) return true;
                 var parts = Path.GetRelativePath(directory, path).Replace('\\', '/').Split('/');
@@ -239,7 +284,6 @@ public sealed class WorkspaceStore
     public string GetPageDirectory(string notebookId, string pageId)
     {
         var path = Path.Combine(GetNotebookDirectory(notebookId), "pages");
-        Directory.CreateDirectory(path);
         return path;
     }
 
@@ -253,7 +297,7 @@ public sealed class WorkspaceStore
     public string GetPageDocumentPath(string notebookId, string pageId) => Path.Combine(GetPageDirectory(notebookId, pageId), $"{SafeId(pageId)}.json");
 
     public string ResolveAsset(string notebookId, string pageId, string assetName) =>
-        Path.Combine(GetAssetDirectory(notebookId, pageId), SafeAssetName(assetName));
+        Path.Combine(GetNotebookDirectory(notebookId), "assets", SafeId(pageId), SafeAssetName(assetName));
 
     public string ImportAsset(string notebookId, string pageId, string sourcePath)
     {
@@ -264,10 +308,17 @@ public sealed class WorkspaceStore
     private string ImportAssetCore(string notebookId, string pageId, string sourcePath)
     {
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("找不到要插入的文件。", sourcePath);
-        var extension = Path.GetExtension(sourcePath);
-        var assetName = $"asset-{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
+        var assetName = $"asset-{Guid.NewGuid():N}{SafeExtension(Path.GetExtension(sourcePath))}";
         var destination = ResolveAsset(notebookId, pageId, assetName);
-        File.Copy(sourcePath, destination, overwrite: false);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.Copy(sourcePath, temporary, overwrite: false);
+            using (var stream = new FileStream(temporary, FileMode.Open, FileAccess.Write, FileShare.None)) stream.Flush(true);
+            File.Move(temporary, destination);
+        }
+        finally { File.Delete(temporary); }
         return assetName;
     }
 
@@ -279,9 +330,8 @@ public sealed class WorkspaceStore
 
     private string WriteAssetCore(string notebookId, string pageId, string extension, ReadOnlySpan<byte> bytes)
     {
-        var normalizedExtension = extension.StartsWith('.') ? extension : $".{extension}";
-        var assetName = $"asset-{Guid.NewGuid():N}{normalizedExtension.ToLowerInvariant()}";
-        File.WriteAllBytes(ResolveAsset(notebookId, pageId, assetName), bytes.ToArray());
+        var assetName = $"asset-{Guid.NewGuid():N}{SafeExtension(extension)}";
+        AtomicWrite(ResolveAsset(notebookId, pageId, assetName), bytes);
         return assetName;
     }
 
@@ -293,21 +343,39 @@ public sealed class WorkspaceStore
 
     private void CopyPageDataCore(string sourceNotebookId, string sourcePageId, string targetNotebookId, string targetPageId)
     {
+        var targetPath = GetPageDocumentPath(targetNotebookId, targetPageId);
+        var targetAssets = Path.Combine(GetNotebookDirectory(targetNotebookId), "assets", SafeId(targetPageId));
+        if (File.Exists(targetPath) || File.Exists(targetPath + ".previous") || Directory.Exists(targetAssets))
+            throw new IOException("目标页面已存在，已停止复制。");
         var sourceDocument = LoadPage(sourceNotebookId, sourcePageId);
+        foreach (var name in sourceDocument.Objects.SelectMany(item => new[] { item.AssetName, item.SourceAssetName })
+            .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct())
+        {
+            var asset = ResolveAsset(sourceNotebookId, sourcePageId, name!);
+            if (!File.Exists(asset)) throw new FileNotFoundException("源页面附件尚未同步，已停止复制。", asset);
+        }
         sourceDocument.NotebookId = targetNotebookId;
         sourceDocument.PageId = targetPageId;
         sourceDocument.Revision = 0;
-
-        var sourceAssets = GetAssetDirectory(sourceNotebookId, sourcePageId);
-        var targetAssets = GetAssetDirectory(targetNotebookId, targetPageId);
-        foreach (var source in Directory.EnumerateFiles(sourceAssets, "*", SearchOption.AllDirectories))
+        sourceDocument.DiskStamp = null;
+        var sourceAssets = Path.Combine(GetNotebookDirectory(sourceNotebookId), "assets", SafeId(sourcePageId));
+        try
         {
-            var relative = Path.GetRelativePath(sourceAssets, source);
-            var destination = Path.Combine(targetAssets, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(source, destination, overwrite: false);
+            if (Directory.Exists(sourceAssets))
+                foreach (var source in Directory.EnumerateFiles(sourceAssets, "*", SearchOption.AllDirectories))
+                {
+                    var relative = Path.GetRelativePath(sourceAssets, source);
+                    var destination = Path.Combine(targetAssets, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(source, destination, overwrite: false);
+                }
+            SavePage(sourceDocument);
         }
-        SavePage(sourceDocument);
+        catch
+        {
+            DeletePageDataCore(targetNotebookId, targetPageId);
+            throw;
+        }
     }
 
     public void DeletePageData(string notebookId, string pageId)
@@ -321,20 +389,30 @@ public sealed class WorkspaceStore
         var documentPath = GetPageDocumentPath(notebookId, pageId);
         if (File.Exists(documentPath)) File.Delete(documentPath);
         if (File.Exists(documentPath + ".previous")) File.Delete(documentPath + ".previous");
-        var assetDirectory = GetAssetDirectory(notebookId, pageId);
+        var assetDirectory = Path.Combine(GetNotebookDirectory(notebookId), "assets", SafeId(pageId));
         if (Directory.Exists(assetDirectory)) Directory.Delete(assetDirectory, recursive: true);
     }
 
     public static string SafeId(string id)
     {
-        var safe = new string(id.Where(character => char.IsLetterOrDigit(character) || character is '-' or '_').ToArray());
-        return string.IsNullOrWhiteSpace(safe) ? "invalid" : safe;
+        // Same component rule as native sync (NativeSyncStorage.PathPattern) and Android safeId:
+        // an ID that cannot sync must not become a local file either.
+        if (string.IsNullOrEmpty(id) || id.Length >= 240 || id[0] == '.' || id[^1] == '.' ||
+            id.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '-' or '_')))
+            throw new ArgumentException("笔记标识无效。", nameof(id));
+        return id;
+    }
+
+    // Stored names must pass SafeId and native-sync paths, so a non-ASCII extension is dropped.
+    internal static string SafeExtension(string? extension)
+    {
+        var value = (extension ?? string.Empty).TrimStart('.').ToLowerInvariant();
+        return value.Length is >= 1 and <= 12 && value.All(char.IsAsciiLetterOrDigit) ? "." + value : string.Empty;
     }
 
     public static string SafeAssetName(string name)
     {
-        var file = Path.GetFileName(name);
-        return string.IsNullOrWhiteSpace(file) ? "missing.asset" : file;
+        return SafeId(name);
     }
 
     public static void AtomicWrite(string path, string content)
@@ -412,6 +490,8 @@ public sealed class WorkspaceStore
     {
         foreach (var notebook in library.Notebooks)
         {
+            if (notebook.FocusedSectionId == null && string.IsNullOrEmpty(notebook.SelectedPageId))
+                notebook.FocusedSectionId = notebook.FlattenAllSections().FirstOrDefault()?.Id;
             if (notebook.FocusedSectionId != null && notebook.FindSection(notebook.FocusedSectionId) == null)
             {
                 notebook.FocusedSectionId = notebook.FlattenAllSections().FirstOrDefault()?.Id;
@@ -475,6 +555,9 @@ public sealed class WorkspaceStore
         File.Copy(path, Path.Combine(directory, name), overwrite: false);
     }
 }
+
+public sealed class PageContentMissingException(string notebookId, string pageId)
+    : IOException($"页面文件尚未同步完成，请稍后重新加载：{notebookId}/{pageId}");
 
 public sealed class WorkspaceLibraryMissingException(string root, string? detail = null)
     : IOException(detail ?? $"笔记目录索引 library.json 缺失，但该位置不是新的空笔记库，已停止加载以免覆盖：{root}")

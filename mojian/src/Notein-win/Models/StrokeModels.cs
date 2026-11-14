@@ -6,6 +6,8 @@ namespace Notein_win.Models;
 
 public sealed class InkPoint
 {
+    [JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     public float X { get; set; }
     public float Y { get; set; }
     public float Pressure { get; set; } = 0.5f;
@@ -32,6 +34,7 @@ public sealed class InkPoint
 
 public sealed class StrokeRecord
 {
+    internal Notein_win.Services.StrokeSerializationSource? SerializationSource { get; set; }
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? AdditionalData { get; set; }
     private float _widthMm = 0.4f;
@@ -170,7 +173,8 @@ public sealed class StrokeRecord
     public StrokeRecord CopyForSave(Notein_win.Services.StrokePointSnapshotCache? pointCache = null)
     {
         var copy = (StrokeRecord)MemberwiseClone();
-        copy.Points = pointCache?.Get(this) ?? Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, TiltRadians = point.TiltRadians, OrientationRadians = point.OrientationRadians, ElapsedMilliseconds = point.ElapsedMilliseconds }).ToList();
+        copy.Points = pointCache?.Get(this) ?? Points.Select(point => new InkPoint { X = point.X, Y = point.Y, Pressure = point.Pressure, TiltX = point.TiltX, TiltY = point.TiltY, TiltRadians = point.TiltRadians, OrientationRadians = point.OrientationRadians, ElapsedMilliseconds = point.ElapsedMilliseconds, AdditionalData = point.AdditionalData?.ToDictionary(pair => pair.Key, pair => pair.Value.Clone()) }).ToList();
+        copy.AdditionalData = AdditionalData?.ToDictionary(pair => pair.Key, pair => pair.Value.Clone());
         copy.VectorBounds = VectorBounds?.ToArray();
         copy.PenStyle = PenStyle?.Copy();
         copy.VectorTransform = VectorTransform.ToArray();

@@ -105,9 +105,10 @@ class SharedWorkspaceTest {
             repository.save(document)
             assertTrue(File(file.parentFile,"page.json.previous").isFile)
             file.writeText("corrupt")
-            assertThrows(Exception::class.java) { repository.load("book","page") }
+            assertEquals(3, repository.load("book", "page").sharedSource.getLong("revision"))
+            assertTrue(root.resolve(".mojian-corrupt.previous").walkTopDown().any { it.isFile && it.readText() == "corrupt" })
             assertThrows(IllegalStateException::class.java) { repository.save(document) }
-            assertEquals("corrupt",file.readText())
+            assertEquals(3, JSONObject(file.readText()).getLong("revision"))
             file.writeText(page().put("remoteChange",true).toString())
             repository.load("book","page") // An export/read must not authorize an older document to overwrite this version.
             assertThrows(IllegalStateException::class.java) { repository.save(document) }

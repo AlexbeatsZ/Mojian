@@ -86,8 +86,9 @@ object SharedStrokeCodec {
         val color = stroke.brush.colorIntArgb
         val palette = InkPalette.entries.firstOrNull { (it.argb and 0xffffff)==(color and 0xffffff) } ?: InkPalette.BLACK
         val logicalBlack = (color and 0xffffff) in listOf(0xEFEFEF,0x101317,0x1B1B1F,0x202020)
+        val familyId = stroke.brush.family.clientBrushFamilyId
         val json = shape ?: JSONObject().put("id","stroke-${java.util.UUID.randomUUID()}")
-            .put("kind",if (Color.alpha(color)<240) 1 else 0).put("brushProfile",BrushProfiles.storedProfile(stroke.brush.family.clientBrushFamilyId))
+            .put("kind",if (BrushProfiles.isHighlighter(familyId)) 1 else 0).put("brushProfile",BrushProfiles.storedProfile(stroke.brush.family.clientBrushFamilyId))
             .put("color",palette.ordinal).put("colorHex",if(logicalBlack) "" else SharedWorkspaceCodec.hex(color))
             .put("widthMm",stroke.brush.size / DOCUMENT_UNITS_PER_MM)
             .put("opacityPercent",Color.alpha(color)*100/255)
@@ -99,17 +100,15 @@ object SharedStrokeCodec {
                         if (p.hasOrientation) put("orientationRadians",p.orientationRadians)
                     })
             } })
-        val familyId = stroke.brush.family.clientBrushFamilyId
         BrushProfiles.styleFromFamilyId(familyId)?.let { style ->
             json.put("penStyle", style.toJson()).put("stabilityPercent", style.stabilityPercent)
             if (stroke.inputs.size>0 && stroke.inputs.get(0).strokeUnitLengthCm>0)
                 json.put("strokeUnitLengthCm",stroke.inputs.get(0).strokeUnitLengthCm/unit)
         }
-        val pressure = Regex("-p([0-9.]+)-s([0-9.]+)").find(familyId)
-        json.put("pressurePercent",((pressure?.groupValues?.get(1)?.toFloatOrNull() ?: 2f)*100).toInt())
-            .put("inkFlowPercent",((pressure?.groupValues?.get(2)?.toFloatOrNull() ?: 1f)*100).toInt())
+        val parameters = BrushProfiles.storedParameters(familyId)
+        json.put("pressurePercent", parameters.pressurePercent).put("inkFlowPercent", parameters.flowPercent)
         if (BrushProfiles.storedProfile(familyId) == BrushProfiles.FOUNTAIN_V2)
-            json.put("stabilityPercent", Regex("-t([0-9]+)").find(familyId)?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0,100) ?: 50)
+            json.put("stabilityPercent", parameters.stabilityPercent)
         // Store the actual filled AndroidX outline, so the desktop uses the same brush result.
         val outline = StringBuilder()
         val position = MutableVec()

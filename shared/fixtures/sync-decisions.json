@@ -1,0 +1,16 @@
+[
+  {"base":null,"local":null,"remote":null,"decision":"Equal"},
+  {"base":"base","local":"base","remote":"base","decision":"Equal"},
+  {"base":null,"local":"new","remote":null,"decision":"Upload"},
+  {"base":null,"local":null,"remote":"new","decision":"Receive"},
+  {"base":"base","local":"edit","remote":"base","decision":"Upload"},
+  {"base":"base","local":"base","remote":"edit","decision":"Receive"},
+  {"base":"base","local":null,"remote":"base","decision":"Upload"},
+  {"base":"base","local":"base","remote":null,"decision":"Receive"},
+  {"base":"base","local":"same","remote":"same","decision":"Equal"},
+  {"base":"base","local":null,"remote":null,"decision":"Equal"},
+  {"base":"base","local":"ours","remote":"theirs","decision":"Conflict"},
+  {"base":"base","local":null,"remote":"edit","decision":"Conflict"},
+  {"base":"base","local":"edit","remote":null,"decision":"Conflict"},
+  {"base":null,"local":"ours","remote":"theirs","decision":"Conflict"}
+]

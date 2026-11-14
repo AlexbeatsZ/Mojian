@@ -1,3 +1,4 @@
+using System.IO;
 using Notein_win.Models;
 
 namespace Notein_win.Services;
@@ -90,5 +91,22 @@ public sealed class PageSaveQueue
         worker.GetAwaiter().GetResult();
         lock (_gate)
             if (_failed.Count != 0) throw new System.IO.IOException("笔记保存失败，请保留窗口并重试。", _failed.Values.First().Error);
+    }
+
+    public void PreserveFailedSnapshots(string directory)
+    {
+        Task worker;
+        lock (_gate) worker = _worker;
+        worker.GetAwaiter().GetResult();
+        Job[] failed;
+        lock (_gate) failed = _failed.Values.Select(value => value.Job).ToArray();
+        foreach (var job in failed)
+        {
+            var path = Path.Combine(directory, "queued", WorkspaceStore.SafeId(job.Page.NotebookId), WorkspaceStore.SafeId(job.Page.PageId) + ".json");
+            WorkspaceStore.WriteRecoverySnapshot(path, job.Page);
+            if (job.Library != null)
+                WorkspaceStore.AtomicWrite(path + ".library.json", System.Text.Json.JsonSerializer.Serialize(job.Library,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+        }
     }
 }

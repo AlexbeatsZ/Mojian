@@ -25,6 +25,49 @@ public sealed class WorkspaceSettings
     public PageAppearance LastPageAppearance { get; set; } = new();
     public Dictionary<string, string> ShortcutBindings { get; set; } = ShortcutActionCatalog.DefaultBindings();
     public Dictionary<string, PageViewport> PageViewports { get; set; } = new();
+    public WorkspaceNavigation? Navigation { get; set; }
+}
+
+public sealed class WorkspaceNavigation
+{
+    public string ActiveNotebookId { get; set; } = string.Empty;
+    public Dictionary<string, NotebookNavigation> Notebooks { get; set; } = new();
+
+    public static WorkspaceNavigation Capture(NotebookLibrary library) => new()
+    {
+        ActiveNotebookId = library.ActiveNotebookId,
+        Notebooks = library.Notebooks.ToDictionary(notebook => notebook.Id, notebook => new NotebookNavigation
+        {
+            Expanded = notebook.Expanded, FocusedSectionId = notebook.FocusedSectionId,
+            SelectedPageId = notebook.SelectedPageId, SelectedPageSectionId = notebook.SelectedPageSectionId,
+            ExpandedSections = notebook.FlattenAllSections().ToDictionary(section => section.Id, section => section.Expanded),
+        }),
+    };
+
+    public void Restore(NotebookLibrary library, PagePaneMode mode)
+    {
+        library.SelectNotebook(ActiveNotebookId);
+        foreach (var notebook in library.Notebooks)
+        {
+            if (!Notebooks.TryGetValue(notebook.Id, out var local)) continue;
+            notebook.Expanded = local.Expanded;
+            notebook.FocusedSectionId = local.FocusedSectionId == null || notebook.FindSection(local.FocusedSectionId) != null
+                ? local.FocusedSectionId : notebook.FlattenAllSections().FirstOrDefault()?.Id;
+            foreach (var section in notebook.FlattenAllSections())
+                if (local.ExpandedSections.TryGetValue(section.Id, out var expanded)) section.Expanded = expanded;
+            notebook.SelectFirstPage(mode);
+            notebook.SelectPage(local.SelectedPageSectionId, local.SelectedPageId, mode);
+        }
+    }
+}
+
+public sealed class NotebookNavigation
+{
+    public bool Expanded { get; set; } = true;
+    public string? FocusedSectionId { get; set; }
+    public string SelectedPageId { get; set; } = string.Empty;
+    public string SelectedPageSectionId { get; set; } = string.Empty;
+    public Dictionary<string, bool> ExpandedSections { get; set; } = new();
 }
 
 public sealed class AppPreferences

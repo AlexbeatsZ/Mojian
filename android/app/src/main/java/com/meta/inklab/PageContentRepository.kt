@@ -8,7 +8,9 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     private val observed = mutableMapOf<String, String?>()
     private val loadedPages = mutableMapOf<String, java.lang.ref.WeakReference<PageInsertDocument>>()
     private var librarySource: JSONObject? = null
-    private var libraryContent: String? = null
+    @Volatile private var libraryContent: String? = null
+    private data class LibraryIdentity(val content: String, val physical: String?, val stamp: String?)
+    @Volatile private var libraryIdentity: LibraryIdentity? = null
     private val receivedPages = mutableSetOf<String>()
     // Bytes this process last read or wrote, with every stamp observed for them. HyperOS FUSE
     // later rewrites a replaced file's mtime to the replaced file's old value, so a stamp change
@@ -28,10 +30,20 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     @Synchronized
     fun loadLibrary(): NotebookLibrary {
         val file = File(root,"library.json")
-        val text = file.readText(Charsets.UTF_8)
-        val source = JSONObject(text)
-        val library = SharedWorkspaceCodec.decodeLibrary(source)
+        var text: String
+        var source: JSONObject
+        val library = try {
+            text = file.readText(Charsets.UTF_8)
+            source = JSONObject(text)
+            SharedWorkspaceCodec.decodeLibrary(source)
+        } catch (error: Exception) {
+            restoreJson(file) { SharedWorkspaceCodec.decodeLibrary(it) }
+            text = file.readText(Charsets.UTF_8)
+            source = JSONObject(text)
+            SharedWorkspaceCodec.decodeLibrary(source)
+        }
         librarySource = source; libraryContent = text
+        libraryIdentity = LibraryIdentity(text, physical(file), stamp(file))
         receivedPages.clear()
         library.notebooks.forEach { notebook -> notebook.allSections().forEach { section ->
             section.pages.forEach { receivedPages += "${notebook.id}/${it.id}" }
@@ -39,21 +51,33 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         return library
     }
 
-    @Synchronized
     fun saveLibrary(library: NotebookLibrary): Boolean {
         val source = librarySource ?: return false
-        val next = SharedWorkspaceCodec.encodeLibrary(library,source)
+        val next = SharedWorkspaceCodec.encodeLibrary(library, source)
         if (next.toString() == source.toString()) return false
-        check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
-        val text = next.toString()
-        atomicWrite(File(root,"library.json"), beforeReplace = {
-            check(File(root,"library.json").readText(Charsets.UTF_8) == libraryContent) { "笔记库已在另一台设备更新，请重新加载后编辑" }
-        }) { it.write(text) }
-        librarySource = next; libraryContent = text
-        return true
+        synchronized(this) {
+            check(librarySource === source) { "笔记库已重新加载，请重试操作" }
+            val file = File(root, "library.json")
+            check(!libraryChanged()) { "笔记库已在另一台设备更新，请重新加载后编辑" }
+            val text = next.toString()
+            atomicWrite(file, beforeReplace = {
+                check(!libraryChanged()) { "笔记库已在另一台设备更新，请重新加载后编辑" }
+            }) { it.write(text) }
+            librarySource = next; libraryContent = text
+            libraryIdentity = LibraryIdentity(text, physical(file), stamp(file))
+            return true
+        }
     }
 
-    fun libraryChanged(): Boolean = libraryContent?.let { File(root,"library.json").readText(Charsets.UTF_8) != it } ?: false
+    fun libraryChanged(): Boolean {
+        val known = libraryIdentity ?: return false
+        val file = File(root, "library.json")
+        if (!file.isFile) return true
+        // Shared writers publish by rename. Stable inode + size avoids whole-index UI reads.
+        val identity = physical(file)
+        if (identity != null && identity == known.physical) return false
+        return file.readText(Charsets.UTF_8) != known.content
+    }
     @Synchronized
     fun pageChanged(notebookId: String,pageId: String): Boolean {
         val file = pageFile(notebookId,pageId)
@@ -100,13 +124,27 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     @Synchronized
     fun load(notebookId: String, pageId: String): PageInsertDocument {
         val file = pageFile(notebookId, pageId)
+        if (!file.isFile) restoreJson(file) { json ->
+            val restored = SharedWorkspaceCodec.decodeDocument(json)
+            require(restored.notebookId == notebookId && restored.pageId == pageId) { "Page identity mismatch" }
+        }
         check(file.isFile || "$notebookId/$pageId" !in receivedPages) { "页面文件尚未同步完成，请稍后重新加载" }
-        val generation=stamp(file)
+        var generation=stamp(file)
         loadedPages[file.path]?.get()?.takeIf { it.diskStamp==generation }?.let { return it }
         removeStaleTemporaries(file)
         val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val source = if(file.isFile) JSONObject(java.security.DigestInputStream(file.inputStream(), digest)
-            .reader(Charsets.UTF_8).use { it.readText() }) else null
+        val source = if (file.isFile) try {
+            JSONObject(java.security.DigestInputStream(file.inputStream(), digest).reader(Charsets.UTF_8).use { it.readText() })
+                .also { SharedWorkspaceCodec.decodeDocument(it) }
+        } catch (error: Exception) {
+            restoreJson(file) { json ->
+                val restored = SharedWorkspaceCodec.decodeDocument(json)
+                require(restored.notebookId == notebookId && restored.pageId == pageId) { "Page identity mismatch" }
+            }
+            digest.reset()
+            generation = stamp(file)
+            JSONObject(java.security.DigestInputStream(file.inputStream(), digest).reader(Charsets.UTF_8).use { it.readText() })
+        } else null
         val readHash = source?.let { hex(digest.digest()) }
         val document = source?.let(SharedWorkspaceCodec::decodeDocument) ?: PageInsertDocument(notebookId,pageId)
         require(document.notebookId == notebookId && document.pageId == pageId) { "Page identity mismatch" }
@@ -183,7 +221,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     private fun atomicWrite(file: File,json: JSONObject,expectedStamp: String?,cache: StrokeTextCache?) = atomicWrite(file,
         beforeReplace={ check(unchanged(file, expectedStamp)) { "页面已在另一台设备更新，已阻止覆盖；请重新加载" } }) { WorkspaceJson.write(json,it,cache) }
     /** Returns the SHA-256 of the bytes published at [file]. */
-    private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},write: (java.io.Writer)->Unit): String {
+    private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},rotatePrevious: Boolean = true,write: (java.io.Writer)->Unit): String {
         localMutations.begin().use {
             check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs()) { "Unable to create workspace directory" }
             val temp = File(file.parentFile,"${file.name}.${java.util.UUID.randomUUID()}.tmp")
@@ -196,10 +234,48 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
                     write(writer);writer.flush();stream.fd.sync()
                 }
                 beforeReplace()
-                if (file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
+                if (rotatePrevious && file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
                 java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             } finally { temp.delete() }
             return hex(digest.digest())
+        }
+    }
+
+    private fun restoreJson(file: File, validate: (JSONObject) -> Unit) {
+        fun read(source: File): JSONObject = JSONObject(source.readText(Charsets.UTF_8)).also(validate)
+        if (file.isFile) {
+            try { read(file); return }
+            catch (error: Exception) {
+                val previous = File(file.path + ".previous")
+                val restored = try { read(previous) } catch (_: Exception) { throw error }
+                val corrupt = File(root, ".mojian-corrupt.previous/${file.relativeTo(root).path}.${java.util.UUID.randomUUID()}")
+                corrupt.parentFile!!.mkdirs()
+                file.copyTo(corrupt, overwrite = false)
+                atomicWrite(file, rotatePrevious = false) { it.write(restored.toString()) }
+            }
+        } else {
+            val previous = File(file.path + ".previous")
+            if (previous.isFile) {
+                val restored = read(previous)
+                atomicWrite(file, rotatePrevious = false) { it.write(restored.toString()) }
+            }
+        }
+    }
+
+    /** Publish asset bytes only after the complete stream is durable. */
+    fun writeAsset(notebookId: String, pageId: String, name: String, write: (java.io.OutputStream) -> Unit): File {
+        localMutations.begin().use {
+            val target = File(assetDirectory(notebookId, pageId), safeId(name))
+            check(!target.exists()) { "Asset already exists" }
+            val temporary = File(target.path + ".${java.util.UUID.randomUUID()}.tmp")
+            try {
+                java.io.FileOutputStream(temporary).use { stream ->
+                    val buffered = java.io.BufferedOutputStream(stream, 256 * 1024)
+                    write(buffered); buffered.flush(); stream.fd.sync()
+                }
+                java.nio.file.Files.move(temporary.toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+            } finally { temporary.delete() }
+            return target
         }
     }
 
@@ -215,7 +291,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     @Synchronized
     fun deleteNotebookData(notebookId: String) {
         localMutations.begin().use {
-            if (isShared && libraryChanged()) return
+            check(!isShared || !libraryChanged()) { "笔记库已更新，删除清理待重新加载后重试" }
             if (isShared && currentLibrary().notebooks.any { it.id == notebookId }) return
             val directory = notebookDirectory(notebookId).canonicalFile
             require(directory.parentFile == File(root, "notebooks").canonicalFile) {
@@ -228,11 +304,14 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     @Synchronized
     fun deletePageData(notebookId: String, pageId: String) {
         localMutations.begin().use {
-            if (isShared && libraryChanged()) return
+            check(!isShared || !libraryChanged()) { "笔记库已更新，删除清理待重新加载后重试" }
             if (isShared && currentLibrary().notebooks.firstOrNull { it.id == notebookId }?.allSections()
                     ?.flatMap { it.pages }?.any { it.id == pageId || it.pdfPage?.sourceOwnerPageId == pageId } == true) return
             val page = pageFile(notebookId, pageId)
             check(!page.exists() || page.delete()) { "Unable to delete page data" }
+            val previous = File(page.path + ".previous")
+            check(!previous.exists() || previous.delete()) { "Unable to delete page recovery data" }
+            observed.remove(page.path); identities.remove(page.path); loadedPages.remove(page.path)
             val assets = assetDirectory(notebookId, pageId)
             check(assets.deleteRecursively()) { "Unable to delete page assets" }
         }
@@ -286,7 +365,9 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         internal const val STALE_TEMPORARY_MS = 60 * 60 * 1000L
 
         fun safeId(value: String): String {
-            require(value.isNotBlank() && value != "." && value != ".." && value.matches(Regex("[A-Za-z0-9._-]+"))) { "Invalid workspace ID" }
+            // Same component rule as native sync and Windows WorkspaceStore.SafeId.
+            require(value.isNotEmpty() && value.length < 240 && value.first() != '.' && value.last() != '.' &&
+                value.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it in "._-" }) { "Invalid workspace ID" }
             return value
         }
     }

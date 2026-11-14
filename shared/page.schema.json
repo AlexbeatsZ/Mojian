@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mojian:page:v2",
+  "title": "Mojian canonical page v2",
+  "type": "object", "required": ["version", "notebookId", "pageId"],
+  "properties": {
+    "version": {"const": 2}, "notebookId": {"type": "string", "minLength": 1}, "pageId": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "updatedAt": {"type": "string"},
+    "strokes": {"type": "array", "items": {"$ref": "#/$defs/stroke"}},
+    "textItems": {"$ref": "#/$defs/objects"}, "objects": {"$ref": "#/$defs/objects"}, "tags": {"$ref": "#/$defs/objects"}, "layers": {"$ref": "#/$defs/objects"}
+  },
+  "$defs": {
+    "objects": {"type": "array", "items": {"type": "object"}},
+    "stroke": {
+      "type": "object", "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "kind": {"type": "integer"}, "color": {"type": "integer"},
+        "widthMm": {"type": "number", "exclusiveMinimum": 0}, "brushProfile": {"type": "string"},
+        "vectorPath": {"type": "string"}, "vectorBounds": {"type": ["array", "null"], "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+        "vectorTransform": {"type": "array", "items": {"type": "number"}, "minItems": 6, "maxItems": 6},
+        "points": {"type": "array", "items": {"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "pressure": {"type": "number"}, "elapsedMilliseconds": {"type": "integer"}}}}
+      }
+    }
+  }
+}

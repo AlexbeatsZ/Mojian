@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.Windows;
 
 namespace Notein_win.Models;
 
@@ -101,9 +100,11 @@ public sealed class NotePage
     }
 
     [JsonIgnore]
-    public string Subtitle => UpdatedAt.ToLocalTime().Date == DateTime.Today
-        ? UpdatedAt.ToLocalTime().ToString("HH:mm")
-        : UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd");
+    public DateTime? ContentUpdatedAt { get; set; }
+    [JsonIgnore]
+    public string Subtitle => (ContentUpdatedAt ?? UpdatedAt).ToLocalTime().Date == DateTime.Today
+        ? (ContentUpdatedAt ?? UpdatedAt).ToLocalTime().ToString("HH:mm")
+        : (ContentUpdatedAt ?? UpdatedAt).ToLocalTime().ToString("yyyy-MM-dd");
 }
 
 public sealed class SectionNode
@@ -133,74 +134,6 @@ public sealed class SectionNode
         Pages = pages.ToList();
         Children = children?.ToList() ?? new List<SectionNode>();
     }
-}
-
-public interface INotebookTreeRow;
-
-public sealed class SectionRow : INotebookTreeRow
-{
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
-
-    public SectionNode Section { get; }
-    public int Depth { get; }
-    public Thickness Indent => new(14 + Depth * 15, 0, 7, 0);
-    public bool HasChildren => Section.Children.Count > 0;
-    public bool IsExpanded => HasChildren && Section.Expanded;
-    public bool IsSelected { get; }
-    public string SectionColorHex => SectionColors[Math.Abs(Depth + 1) % SectionColors.Length];
-    public System.Windows.Media.Brush SectionColorBrush => new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SectionColorHex));
-
-    public SectionRow(SectionNode section, int depth, bool isSelected = false)
-    {
-        Section = section;
-        Depth = depth;
-        IsSelected = isSelected;
-    }
-}
-
-public sealed class NotebookPaneRow : INotebookTreeRow
-{
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
-
-    public NotebookWorkspace Notebook { get; }
-    public string Id => Notebook.Id;
-    public string Title => Notebook.Title;
-    public bool IsExpanded => Notebook.Expanded;
-    public bool IsActive { get; }
-    public bool IsFocused { get; }
-    public string AccentHex { get; }
-    public System.Windows.Media.Brush AccentBrush { get; }
-
-    public NotebookPaneRow(NotebookWorkspace notebook, int index, bool isActive)
-    {
-        Notebook = notebook;
-        IsActive = isActive;
-        IsFocused = isActive && notebook.FocusedSectionId == null;
-        AccentHex = SectionColors[Math.Abs(index) % SectionColors.Length];
-        AccentBrush = new System.Windows.Media.SolidColorBrush(
-            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(AccentHex));
-    }
-}
-
-public sealed class PagePaneRow
-{
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
-
-    public bool IsHeader { get; init; }
-    public string Title { get; init; } = string.Empty;
-    public string Subtitle { get; init; } = string.Empty;
-    public string SectionId { get; init; } = string.Empty;
-    public NotePage? Page { get; init; }
-    public int Depth { get; init; }
-    public Thickness Indent => IsHeader
-        ? new Thickness(9 + Depth * 13, 0, 8, 0)
-        : new Thickness(13 + Depth * 13, 7, 10, 6);
-    public Thickness Margin => IsHeader ? new Thickness(6, 5, 6, 0) : new Thickness(6, 1, 6, 1);
-    public bool IsSelected { get; init; }
-    public bool IsPdf => Page?.IsPdfPage == true;
-    public string SectionColorHex => SectionColors[Math.Abs(Depth + 1) % SectionColors.Length];
-    public System.Windows.Media.Brush SectionColorBrush => new System.Windows.Media.SolidColorBrush(
-        (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SectionColorHex));
 }
 
 public sealed class NotebookWorkspace
@@ -406,7 +339,7 @@ public sealed class NotebookWorkspace
         return true;
     }
 
-    public SectionNode? DeleteSection(string sectionId)
+    public SectionNode? DeleteSection(string sectionId, PagePaneMode mode = PagePaneMode.CurrentSection)
     {
         var position = FindSectionPosition(sectionId);
         if (position == null) return null;
@@ -415,8 +348,8 @@ public sealed class NotebookWorkspace
         if (Contains(removed, FocusedSectionId ?? string.Empty))
         {
             FocusedSectionId = Sections.FirstOrDefault()?.Id;
-            SelectFirstPage(PagePaneMode.CurrentSection);
         }
+        if (SelectedPage() == null) SelectFirstPage(mode);
         return removed;
     }
 
@@ -489,14 +422,14 @@ public sealed class NotebookWorkspace
         return true;
     }
 
-    public NotePage? DeletePage(string sectionId, string pageId)
+    public NotePage? DeletePage(string sectionId, string pageId, PagePaneMode mode = PagePaneMode.CurrentSection)
     {
         var section = FindSection(sectionId);
         var index = section?.Pages.FindIndex(page => page.Id == pageId) ?? -1;
         if (section == null || index < 0) return null;
         var removed = section.Pages[index];
         section.Pages.RemoveAt(index);
-        if (SelectedPageId == pageId) SelectFirstPage(PagePaneMode.CurrentSection);
+        if (SelectedPageId == pageId) SelectFirstPage(mode);
         return removed;
     }
 
@@ -582,7 +515,7 @@ public sealed class NotebookWorkspace
 
     private static SectionNode CloneSection(SectionNode source, Dictionary<string, string> pageIds)
     {
-        var copy = new SectionNode(IdFactory.New("section"), $"{source.Title} - 副本") { Expanded = source.Expanded };
+        var copy = new SectionNode(IdFactory.New("section"), $"{source.Title} - 副本") { Expanded = source.Expanded, AdditionalData = source.AdditionalData };
         foreach (var page in source.Pages)
         {
             var pageCopy = ClonePage(page);
@@ -593,19 +526,14 @@ public sealed class NotebookWorkspace
         return copy;
     }
 
-    private static NotePage ClonePage(NotePage source) => new(IdFactory.New("page"), $"{source.Title} - 副本")
+    private static NotePage ClonePage(NotePage source)
     {
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow,
-        Appearance = source.Appearance.Clone(),
-        IsPdfPage = source.IsPdfPage,
-        PdfPageNumber = source.PdfPageNumber,
-        PdfPageCount = source.PdfPageCount,
-        PdfWidthPoints = source.PdfWidthPoints,
-        PdfHeightPoints = source.PdfHeightPoints,
-        PdfSourceAssetName = source.PdfSourceAssetName,
-        PdfSourceDocumentName = source.PdfSourceDocumentName,
-    };
+        var copy = source.CopyForSave();
+        copy.Id = IdFactory.New("page");
+        copy.Title = $"{source.Title} - 副本";
+        copy.CreatedAt = copy.UpdatedAt = DateTime.UtcNow;
+        return copy;
+    }
 
     private static (SectionNode Section, NotePage Page)? FirstPage(IEnumerable<SectionNode> roots)
     {

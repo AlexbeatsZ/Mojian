@@ -48,12 +48,12 @@ public sealed record PenStyle
     public static PenStyle FromLegacy(int pressure = 200, int flow = 100, int stability = 50)
     {
         var gamma = Math.Clamp(pressure / 100d, 0, 4);
-        var end = Math.Max(.05, 1 - .85 * Math.Clamp(flow / 100d, 0, 2));
+        var end = Math.Max(FountainV2Contract.MinimumSpeedMultiplier, 1 - FountainV2Contract.ThinningCap * Math.Clamp(flow / 100d, 0, 2));
         return new()
         {
-            PressureCurve = Enumerable.Range(0, 17).Select(i => new CurvePoint(i / 16d, gamma == 0 ? 1.4 : 1.4 * Math.Pow(i / 16d, gamma))).ToList(),
-            SpeedCurve = new (double V, double G)[] { (0, 0), (1, 0), (2, .08), (4, .15), (8, .23), (16, .46), (32, .69), (64, .85) }
-                .Select(p => new CurvePoint(p.V, 1 - (1 - end) * p.G / .85)).ToList(),
+            PressureCurve = Enumerable.Range(0, FountainV2Contract.PressureSegments + 1).Select(i => new CurvePoint(i / (double)FountainV2Contract.PressureSegments, gamma == 0 ? FountainV2Contract.FullPressureWidth : FountainV2Contract.FullPressureWidth * Math.Pow(i / (double)FountainV2Contract.PressureSegments, gamma))).ToList(),
+            SpeedCurve = FountainV2Contract.SpeedCurve
+                .Select(p => new CurvePoint(p.Speed, 1 - (1 - end) * p.Thinning / FountainV2Contract.ThinningCap)).ToList(),
             StabilityPercent = Math.Clamp(stability, 0, 100),
         };
     }

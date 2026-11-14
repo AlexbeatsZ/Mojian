@@ -75,7 +75,9 @@ public class PreferenceMemoryUiTests
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
                 var saved = new WorkspaceStore(root).LoadPage(document.NotebookId, document.PageId);
                 Assert.Single(saved.Objects);
-                Assert.True(new WorkspaceStore(root).LoadLibrary().ActiveNotebook.SelectedPage()!.Appearance.SheetCount > 1);
+                // Selection is device-local (settings.json), so look the page up by ID in the shared index.
+                Assert.True(new WorkspaceStore(root).LoadLibrary().Notebooks.Single(item => item.Id == document.NotebookId)
+                    .FindPage(document.PageId, out _)!.Appearance.SheetCount > 1);
                 Assert.Equal(1f, saved.LegacyViewport.Scale);
                 Assert.Equal(0f, saved.LegacyViewport.TranslationY);
                 Assert.Equal(expected.Scale, restored.PrimaryDocument.Viewport.Scale);

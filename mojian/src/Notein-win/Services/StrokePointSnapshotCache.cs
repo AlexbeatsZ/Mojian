@@ -24,6 +24,7 @@ public sealed class StrokePointSnapshotCache
             {
                 X = p.X, Y = p.Y, Pressure = p.Pressure, TiltX = p.TiltX, TiltY = p.TiltY, ElapsedMilliseconds = p.ElapsedMilliseconds,
                 TiltRadians = p.TiltRadians, OrientationRadians = p.OrientationRadians,
+                AdditionalData = p.AdditionalData?.ToDictionary(pair => pair.Key, pair => pair.Value.Clone()),
             }).ToList();
             entry.Source = stroke.Points;
             entry.Version = stroke.RenderVersion;

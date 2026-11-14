@@ -5,7 +5,14 @@ plugins {
 
 android {
     namespace = "com.meta.inklab"
-    sourceSets.getByName("main").resources.srcDir("../../shared")
+    sourceSets.getByName("main").resources.apply {
+        srcDir("../../shared")
+        include("page-backgrounds.json", "pen-style-presets.json", "pen-style-legacy-migration.json", "fountain-v2.json")
+    }
+    sourceSets.getByName("test").resources.apply {
+        srcDir("../../shared")
+        include("fixtures/**", "*.json")
+    }
     sourceSets.getByName("test").resources.srcDir("../../docs/examples/pen-configurations")
     compileSdk = 36
 
@@ -13,8 +20,8 @@ android {
         applicationId = "com.meta.inklab"
         minSdk = 29
         targetSdk = 36
-        versionCode = 34
-        versionName = "0.7.29"
+        versionCode = 35
+        versionName = "0.7.30"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

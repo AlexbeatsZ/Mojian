@@ -8,7 +8,7 @@ namespace Notein_win.ViewModels;
 
 public enum CanvasSlot { Left, Right }
 
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject
 {
     public const double MinimumPanoramaSensitivity = 0.25d;
     public const double MaximumPanoramaSensitivity = 3d;
@@ -122,7 +122,6 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             RestoreLocalViewport(value);
-            PrepareInfinitePage(value);
             if (!SetField(ref _primaryDocument, value)) return;
             OnPropertyChanged(nameof(PrimaryPageAppearance));
             OnPropertyChanged(nameof(PrimaryPageTitle));
@@ -135,7 +134,6 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             RestoreLocalViewport(value);
-            PrepareInfinitePage(value);
             if (!SetField(ref _secondaryDocument, value)) return;
             OnPropertyChanged(nameof(SecondaryPageAppearance));
             OnPropertyChanged(nameof(SecondaryPageTitle));
@@ -558,7 +556,7 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (!SetField(ref _searchQuery, value)) return;
-            RunSearch(value);
+            _ = RunSearchAsync(value);
             OnPropertyChanged(nameof(IsSearchOpen));
         }
     }
@@ -621,6 +619,7 @@ public sealed class MainViewModel : ObservableObject
         RecoverNativeSyncBeforeOpen(_store.RootDirectory);
         _library = _store.LoadLibrary();
         _settings = _store.LoadSettings();
+        _settings.Navigation?.Restore(_library, _settings.PagePaneMode);
         if (_preferences.PageTheme is not { } theme || !Enum.IsDefined(theme))
             _preferences.PageTheme = _library.ActiveNotebook.SelectedPage()?.Appearance.Theme ?? PageTheme.Dark;
         if (_preferences.DefaultPageBackground is not { } background || !Enum.IsDefined(background))
@@ -678,7 +677,8 @@ public sealed class MainViewModel : ObservableObject
         SaveFocusedDocument();
         var notebook = _library.AddNotebook(title);
         notebook.AddSection("未归档");
-        notebook.AddPage("无标题页", LastPageAppearance);
+        var page = notebook.AddPage("无标题页", LastPageAppearance);
+        _store.SavePage(new PageDocument(notebook.Id, page.Id));
         SaveLibrary();
         LoadSelectedIntoFocusedSlot();
         RefreshNavigation();
@@ -788,7 +788,9 @@ public sealed class MainViewModel : ObservableObject
                     X = 0, Y = y,
                     Width = (float)(source.WidthPoints * 96d / 72d), Height = height,
                     DisplayName = $"{Path.GetFileName(sourcePath)} · {source.PageNumber}/{source.PageCount}",
-                    AssetName = _store.WriteAsset(document.NotebookId, document.PageId, ".png", source.PngBytes),
+                    AssetName = source.PreviewPath is { } preview
+                        ? _store.ImportAsset(document.NotebookId, document.PageId, preview)
+                        : _store.WriteAsset(document.NotebookId, document.PageId, ".png", source.PngBytes),
                     MimeType = "image/png", ViewInverted = invert,
                     SourceAssetName = sourceAsset, SourcePageNumber = source.PageNumber,
                     IsPageBackground = true,
@@ -830,7 +832,7 @@ public sealed class MainViewModel : ObservableObject
         if (section == null) return false;
         var pageIds = PagesInTree(section).Select(page => page.Id).ToList();
         var candidate = _library.CopyForSave();
-        if (candidate.FindNotebookForSection(sectionId)?.DeleteSection(sectionId) == null) return false;
+        if (candidate.FindNotebookForSection(sectionId)?.DeleteSection(sectionId, PagePaneMode) == null) return false;
         CommitDeletion(candidate, notebook.Id, pageIds);
         FinishDeletionMutation(notebook.Id);
         return true;
@@ -849,10 +851,10 @@ public sealed class MainViewModel : ObservableObject
     {
         SaveFocusedDocument();
         using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
-        var notebook = _library.FindNotebookForSection(sectionId);
+        var candidate = _library.CopyForSave();
+        var notebook = candidate.FindNotebookForSection(sectionId);
         if (notebook == null || notebook.CopySectionToParent(sectionId, targetParentId, out var pageIds) == null) return false;
-        foreach (var (sourcePageId, targetPageId) in pageIds)
-            _store.CopyPageData(notebook.Id, sourcePageId, notebook.Id, targetPageId);
+        CommitCopies(candidate, notebook.Id, pageIds);
         FinishNavigationMutation(notebook);
         return true;
     }
@@ -889,7 +891,7 @@ public sealed class MainViewModel : ObservableObject
     {
         SaveAll();
         var candidate = _library.CopyForSave();
-        if (candidate.ActiveNotebook.DeletePage(sectionId, pageId) == null) return false;
+        if (candidate.ActiveNotebook.DeletePage(sectionId, pageId, PagePaneMode) == null) return false;
         CommitDeletion(candidate, ActiveWorkspace.Id, new[] { pageId });
         FinishDeletionMutation();
         return true;
@@ -915,11 +917,51 @@ public sealed class MainViewModel : ObservableObject
     {
         SaveFocusedDocument();
         using var mutation = NativeSyncMutationEpoch.ForRoot(_store.RootDirectory).BeginMutation();
-        var copy = ActiveWorkspace.CopyPage(sourceSectionId, pageId, targetSectionId, targetIndex);
+        var candidate = _library.CopyForSave();
+        var copy = candidate.ActiveNotebook.CopyPage(sourceSectionId, pageId, targetSectionId, targetIndex);
         if (copy == null) return null;
-        _store.CopyPageData(ActiveWorkspace.Id, pageId, ActiveWorkspace.Id, copy.Id);
+        CommitCopies(candidate, candidate.ActiveNotebook.Id, new Dictionary<string, string> { [pageId] = copy.Id });
         FinishNavigationMutation();
         return copy;
+    }
+
+    private void CommitCopies(NotebookLibrary candidate, string notebookId, IReadOnlyDictionary<string, string> pageIds)
+    {
+        var copied = new List<string>();
+        try
+        {
+            foreach (var (source, target) in pageIds)
+            {
+                _store.CopyPageData(notebookId, source, notebookId, target);
+                copied.Add(target);
+            }
+            _store.SaveLibrary(candidate);
+        }
+        catch
+        {
+            foreach (var target in copied) _store.DeletePageData(notebookId, target);
+            throw;
+        }
+        var published = candidate.Notebooks.Single(notebook => notebook.Id == notebookId);
+        var live = _library.Notebooks.Single(notebook => notebook.Id == notebookId);
+        live.Sections = ReconcileCopiedSections(live.Sections, published.Sections);
+        live.SelectedPageId = published.SelectedPageId;
+        live.SelectedPageSectionId = published.SelectedPageSectionId;
+        LocalSaveCompleted?.Invoke();
+    }
+
+    private static List<SectionNode> ReconcileCopiedSections(List<SectionNode> existing, List<SectionNode> published)
+    {
+        var byId = existing.ToDictionary(section => section.Id);
+        return published.Select(section =>
+        {
+            if (!byId.TryGetValue(section.Id, out var live)) return section;
+            live.Expanded = section.Expanded;
+            live.Children = ReconcileCopiedSections(live.Children, section.Children);
+            var pages = live.Pages.ToDictionary(page => page.Id);
+            live.Pages = section.Pages.Select(page => pages.GetValueOrDefault(page.Id) ?? page).ToList();
+            return live;
+        }).ToList();
     }
 
     public void FocusCanvas(CanvasSlot slot)
@@ -979,6 +1021,7 @@ public sealed class MainViewModel : ObservableObject
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
         var page = notebook?.FindPage(document.PageId, out _);
         if (page == null) return;
+        UpdatePageExtent(document, AppearanceForDocument(document));
         SaveStateText = "正在保存…";
         try
         {
@@ -986,8 +1029,8 @@ public sealed class MainViewModel : ObservableObject
             lock (WorkspaceFileGate.ForRoot(_store.RootDirectory))
             {
                 _store.SavePage(document);
-                page.UpdatedAt = document.UpdatedAt;
-                _store.SaveLibrary(_library);
+                page.ContentUpdatedAt = document.UpdatedAt;
+                // Content timestamps belong to the page, so autosave leaves library.json alone.
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -1009,13 +1052,14 @@ public sealed class MainViewModel : ObservableObject
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
         var page = notebook?.FindPage(document.PageId, out _);
         if (page == null) return;
-        document.UpdatedAt = page.UpdatedAt = DateTime.UtcNow;
+        document.UpdatedAt = DateTime.UtcNow;
+        page.ContentUpdatedAt = document.UpdatedAt;
         document.Revision++;
         var snapshotClock = System.Diagnostics.Stopwatch.StartNew();
         var snapshot = document.CopyForSave(_strokePointSnapshots);
         System.Diagnostics.Trace.TraceInformation($"MojianSave snapshot {snapshotClock.Elapsed.TotalMilliseconds:F1} ms, {snapshot.Strokes.Count} strokes");
         SaveStateText = "正在保存…";
-        _pageSaves.Enqueue(_store, snapshot, _library.CopyForSave());
+        _pageSaves.Enqueue(_store, snapshot);
         document.HasPendingContentChanges = false;
     }
 
@@ -1048,6 +1092,8 @@ public sealed class MainViewModel : ObservableObject
                 .GroupBy(document => $"{document!.NotebookId}/{document.PageId}")
                 .Select(group => group.First());
             foreach (var document in documents) SaveDocumentIfChanged(document);
+            _pageSaves.Flush();
+            _store.ValidateLibraryUnchanged();
             SaveSettings();
             SaveLibrary();
             _preferences.WorkspaceRoot = _store.RootDirectory;
@@ -1058,6 +1104,18 @@ public sealed class MainViewModel : ObservableObject
             SaveStateText = "保存失败，请重试";
             throw;
         }
+    }
+
+    public string PreserveUnsavedChanges()
+    {
+        var directory = Path.Combine(_store.RootDirectory, ".mojian-unsaved.previous", Guid.NewGuid().ToString("N"));
+        _pageSaves.PreserveFailedSnapshots(directory);
+        foreach (var document in new[] { PrimaryDocument, SecondaryDocument }.OfType<PageDocument>())
+            WorkspaceStore.WriteRecoverySnapshot(Path.Combine(directory, "current", WorkspaceStore.SafeId(document.NotebookId),
+                WorkspaceStore.SafeId(document.PageId) + ".json"), document.CopyForSave());
+        WorkspaceStore.AtomicWrite(Path.Combine(directory, "library.json"), System.Text.Json.JsonSerializer.Serialize(_library,
+            new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+        return directory;
     }
 
     public void SaveToolSettings()
@@ -1078,6 +1136,8 @@ public sealed class MainViewModel : ObservableObject
     public void SwitchWorkspace(string rootDirectory)
     {
         SaveAll();
+        _searchCancellation?.Cancel();
+        SearchResults.Clear();
         var nextStore = new WorkspaceStore(rootDirectory);
         RecoverNativeSyncBeforeOpen(nextStore.RootDirectory);
         var nextLibrary = nextStore.LoadLibrary();
@@ -1085,6 +1145,7 @@ public sealed class MainViewModel : ObservableObject
         _store = nextStore;
         _library = nextLibrary;
         _settings = nextSettings;
+        _settings.Navigation?.Restore(_library, _settings.PagePaneMode);
         _settings.ShortcutBindings ??= ShortcutActionCatalog.DefaultBindings();
         _toolShelf = ToolShelf.FromJson(_settings.ToolShelfJson) ?? new ToolShelf();
         var settingsMigrated = MigrateWorkspaceSettings();
@@ -1104,8 +1165,7 @@ public sealed class MainViewModel : ObservableObject
     private void RecoverNativeSyncBeforeOpen(string root)
     {
         if (!File.Exists(Path.Combine(root, ".mojian-sync", "incoming.json"))) return;
-        var configuration = NativeSyncConfiguration.Load(root);
-        using var client = new NativeSyncClient(root, configuration.Endpoint, configuration.Token);
+        using var client = NativeSyncClient.ForLocalRecovery(root);
         if (!_workspaceUiGate.Run(client.RecoverPendingIncoming) || client.HasPendingIncoming)
             throw new IOException("接收恢复尚未完成，已阻止打开此副本。请保留 .mojian-sync 恢复目录：" + client.Status);
     }
@@ -1119,7 +1179,9 @@ public sealed class MainViewModel : ObservableObject
         var secondaryId = SecondaryDocument?.PageId;
         var primaryNotebookId = PrimaryDocument?.NotebookId;
         var secondaryNotebookId = SecondaryDocument?.NotebookId;
+        var localNavigation = WorkspaceNavigation.Capture(_library);
         var fresh = _store.LoadLibrary();
+        localNavigation.Restore(fresh, PagePaneMode);
         _library = fresh;
         if (fresh.Notebooks.Any(item => item.Id == notebookId)) fresh.ActiveNotebookId = notebookId;
         if (primaryId != null && fresh.Notebooks.FirstOrDefault(item => item.Id == primaryNotebookId)?.FindPage(primaryId, out _) != null)
@@ -1504,50 +1566,23 @@ public sealed class MainViewModel : ObservableObject
         NotifyAllWorkspaceProperties();
     }
 
-    private void RunSearch(string query)
-    {
-        SearchResults.Clear();
-        var normalized = query?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length < 2) return;
-        foreach (var notebook in _library.Notebooks)
-        {
-            foreach (var section in notebook.FlattenAllSections())
-            {
-                foreach (var page in section.Pages)
-                {
-                    var context = string.Empty;
-                    var titleMatch = page.Title.Contains(normalized, StringComparison.CurrentCultureIgnoreCase);
-                    if (!titleMatch)
-                    {
-                        var document = _store.LoadPage(notebook.Id, page.Id);
-                        context = document.TextItems.Select(item => item.Text)
-                            .FirstOrDefault(text => text.Contains(normalized, StringComparison.CurrentCultureIgnoreCase)) ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(context)) continue;
-                        context = context.ReplaceLineEndings(" ").Trim();
-                        if (context.Length > 48) context = context[..48] + "…";
-                    }
-                    SearchResults.Add(new SearchResult
-                    {
-                        NotebookId = notebook.Id,
-                        SectionId = section.Id,
-                        PageId = page.Id,
-                        PageTitle = page.Title,
-                        Context = context,
-                    });
-                    if (SearchResults.Count >= 50) return;
-                }
-            }
-        }
-    }
-
     private void LoadSelectedIntoFocusedSlot()
     {
         var page = ActiveWorkspace.SelectedPage();
         var other = FocusedSlot == CanvasSlot.Right ? PrimaryDocument : SecondaryDocument;
-        var document = page == null ? null :
-            other?.NotebookId == ActiveWorkspace.Id && other.PageId == page.Id ? other :
-            _store.LoadPage(ActiveWorkspace.Id, page.Id);
-        AssignFocusedDocument(document);
+        try
+        {
+            var document = page == null ? null :
+                other?.NotebookId == ActiveWorkspace.Id && other.PageId == page.Id ? other :
+                _store.LoadPage(ActiveWorkspace.Id, page.Id);
+            if (page != null && document != null) page.ContentUpdatedAt = document.UpdatedAt;
+            AssignFocusedDocument(document);
+        }
+        catch (PageContentMissingException error)
+        {
+            AssignFocusedDocument(null);
+            SaveStateText = error.Message;
+        }
         RefreshPageAppearance();
         OnPropertyChanged(nameof(HasActivePage));
         CommandManager.InvalidateRequerySuggested();
@@ -1582,7 +1617,7 @@ public sealed class MainViewModel : ObservableObject
         _pageSaves.Flush();
         if (document == null) return;
         RememberViewport(document);
-        if (document.HasPendingContentChanges || !File.Exists(_store.GetPageDocumentPath(document.NotebookId, document.PageId))) SaveDocument(document);
+        if (document.HasPendingContentChanges) SaveDocument(document);
     }
 
     private void SaveFocusedDocument()
@@ -1746,7 +1781,14 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedLassoIsRectangle));
     }
 
-    private void SaveLibrary() { RequireRecoveredWorkspace(); _pageSaves.Flush(); if (_store.SaveLibrary(_library)) LocalSaveCompleted?.Invoke(); }
+    private void SaveLibrary()
+    {
+        RequireRecoveredWorkspace();
+        SaveSettings();
+        if (!_store.LibraryHasChanges(_library)) return;
+        _pageSaves.Flush();
+        if (_store.SaveLibrary(_library)) LocalSaveCompleted?.Invoke();
+    }
 
     private bool MigrateWorkspaceSettings()
     {
@@ -1783,6 +1825,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SaveSettings()
     {
+        _settings.Navigation = WorkspaceNavigation.Capture(_library);
         _settings.ToolShelfJson = _toolShelf.ToJson();
         _settings.QuickToolbarIds = _fullPageConfig.Ids.ToList();
         _store.SaveSettings(_settings);
@@ -1814,14 +1857,6 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SecondaryPageTitle));
     }
 
-    private void PrepareInfinitePage(PageDocument? document)
-    {
-        if (document == null) return;
-        var appearance = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId)?.FindPage(document.PageId, out _)?.Appearance;
-        if (appearance == null) return;
-        if (InfinitePageLayout.EnsureCapacity(appearance, document)) SaveLibrary();
-    }
-
     public void UpdatePageExtent(PageDocument? document, PageAppearance display)
     {
         if (document == null) return;
@@ -1830,13 +1865,20 @@ public sealed class MainViewModel : ObservableObject
         source.SheetCount = Math.Max(source.SheetCount, display.SheetCount);
         source.InfiniteWidth = Math.Max(source.InfiniteWidth, display.InfiniteWidth);
         source.InfiniteHeight = Math.Max(source.InfiniteHeight, display.InfiniteHeight);
+        if (source.PaperKind == PaperKind.A4)
+        {
+            var bottom = InfinitePageLayout.ContentBounds(document).Select(bounds => bounds.Bottom).DefaultIfEmpty(0).Max();
+            source.SheetCount = A4PageLayout.RequiredSheetCount(bottom, source.SheetCount, source.Height);
+        }
     }
 
     private PageAppearance AppearanceForDocument(PageDocument? document)
     {
         if (document == null) return DisplayAppearance(new PageAppearance());
         var notebook = _library.Notebooks.FirstOrDefault(item => item.Id == document.NotebookId);
-        return DisplayAppearance(notebook?.FindPage(document.PageId, out _)?.Appearance ?? new PageAppearance());
+        var appearance = DisplayAppearance(notebook?.FindPage(document.PageId, out _)?.Appearance ?? new PageAppearance());
+        InfinitePageLayout.EnsureCapacity(appearance, document);
+        return appearance;
     }
 
     private string TitleForDocument(PageDocument? document)

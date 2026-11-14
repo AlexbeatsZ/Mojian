@@ -46,8 +46,8 @@ class NavigationMutationTest {
             library.deleteNotebook(notebook.id)
             repository.saveLibrary(library)
             root.resolve("library.json").writeText(source.toString())
-            repository.deletePageData(notebook.id, page.id)
-            repository.deleteNotebookData(notebook.id)
+            assertThrows(IllegalStateException::class.java) { repository.deletePageData(notebook.id, page.id) }
+            assertThrows(IllegalStateException::class.java) { repository.deleteNotebookData(notebook.id) }
             assertTrue(repository.pageFile(notebook.id, page.id).isFile)
         } finally { root.deleteRecursively() }
     }

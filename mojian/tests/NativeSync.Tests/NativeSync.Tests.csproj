@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../src/Notein-win/Services/NativeSync*.cs" Link="Services/%(Filename)%(Extension)" />
     <Compile Include="../../src/Notein-win/Services/WorkspaceFileGate.cs" Link="Services/WorkspaceFileGate.cs" />
+    <None Include="../../../shared/fixtures/sync-decisions.json" Link="sync-decisions.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../sync-server/test/fixtures/v1-wire.json" Link="v1-wire.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

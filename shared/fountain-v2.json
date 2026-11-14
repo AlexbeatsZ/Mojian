@@ -1,0 +1,16 @@
+{
+  "profile": "fountain-v2",
+  "fullPressureWidth": 1.4,
+  "pressureSegments": 16,
+  "speedCapCmPerSecond": 64,
+  "speedThinningCap": 0.85,
+  "minimumSpeedMultiplier": 0.05,
+  "speedCurve": [[0, 0], [1, 0], [2, 0.08], [4, 0.15], [8, 0.23], [16, 0.46], [32, 0.69], [64, 0.85]],
+  "directionMinimum": 0.45,
+  "directionMaximum": 0.65,
+  "directionAmount": 0.17,
+  "responseMilliseconds": 25,
+  "stabilityMiddleMilliseconds": 20,
+  "stabilityMaximumMilliseconds": 100,
+  "upsamplingHz": 180
+}

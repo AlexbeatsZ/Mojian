@@ -1,0 +1,49 @@
+name: Mojian client contracts
+
+on:
+  push:
+    branches: [master]
+    paths: ['android/**', 'mojian/**', 'macos/**', 'shared/**', '.github/workflows/clients.yml']
+  pull_request:
+    paths: ['android/**', 'mojian/**', 'macos/**', 'shared/**', '.github/workflows/clients.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: dotnet test mojian/Notein-win.slnx -c Release --filter "FullyQualifiedName~ArchitectureRepairTests|FullyQualifiedName~SharedWorkspaceTests|FullyQualifiedName~PageSaveQueueTests|FullyQualifiedName~WorkspaceStoreTests|FullyQualifiedName~FountainV2Tests"
+      - run: npm ci
+        working-directory: sync-server
+      - run: npm run test:integration
+        working-directory: sync-server
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+        working-directory: sync-server
+      - run: bash gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
+        working-directory: android
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash macos/tools/build.sh test

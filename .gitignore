@@ -11,3 +11,5 @@ captures/
 .vs/
 *.user
 .local/
+shared/swift/.build/
+shared/swift/.swiftpm/

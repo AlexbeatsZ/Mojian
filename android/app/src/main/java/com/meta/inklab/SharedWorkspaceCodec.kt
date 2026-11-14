@@ -91,10 +91,13 @@ object SharedWorkspaceCodec {
     }
 
     fun encodeAppearance(settings: PageViewSettings, source: JSONObject?): JSONObject {
+        if (source != null && PageViewSettings.fromJson(decodeAppearance(source).toJson()).toJson().toString() == settings.toJson().toString()) return source
         val result = source?.let(::copy) ?: JSONObject()
         val old = source?.let(::decodeAppearance)
-        result.put("paperKind", settings.paperSize.ordinal).put("theme", if (settings.darkBackground) 0 else 1)
-            .put("background", backgrounds.indexOf(settings.backgroundFormat)).put("showTitle",settings.pageTitleVisible).put("sheetCount",settings.a4PageCount)
+        if (old == null || old.paperSize != settings.paperSize) result.put("paperKind", settings.paperSize.ordinal)
+        if (old == null || old.backgroundFormat != settings.backgroundFormat) result.put("background", backgrounds.indexOf(settings.backgroundFormat))
+        result.put("theme", if (settings.darkBackground) 0 else 1)
+            .put("showTitle",settings.pageTitleVisible).put("sheetCount",settings.a4PageCount)
         if (old == null || old.pageColor != settings.pageColor || old.darkBackground != settings.darkBackground)
             result.put("pageColor",hex(settings.pageColor.displayArgb(settings.darkBackground)))
         fun dimension(key: String, value: Float) {

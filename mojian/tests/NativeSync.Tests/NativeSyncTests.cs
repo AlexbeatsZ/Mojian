@@ -34,6 +34,10 @@ await Run("epoch rejects intervening and nested mutations without locking scan w
 await Run("network allows local edits while immutable outgoing snapshots remain consistent", SnapshotAfterNetworkMutation);
 await Run("unsupported canonical content is refused by scan and clone without a marker", UnsupportedContentPaths);
 await Run("ordered addresses restart from first and replay lost commit receipt across routes", OrderedAddresses);
+await Run("CAS rejection retries without a permanent conflict and other 409s retain the outbox", RejectedCommit);
+await Run("remote index deletion and incoming index tombstones preserve the local library", DeletedLibrary);
+await Run("offline incoming recovery needs no endpoint credential configuration", RecoveryWithoutCredentials);
+await Run("shared three-way decision table covers edits, deletions and equal concurrent changes", DecisionFixture);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
 async Task Run(string name, Func<Task> scenario)
@@ -759,6 +763,69 @@ async Task OrderedAddresses()
     Check(client.Snapshot.Phase == NativeSyncPhase.Error && !requests.Any(r => r == "second POST") && !requests.Any(r => r.StartsWith("unused")), "Different workspace identity was treated as a route failure");
 }
 
+Task DecisionFixture()
+{
+    using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "sync-decisions.json")));
+    foreach (var row in json.RootElement.EnumerateArray())
+    {
+        string? Value(string key) => row.GetProperty(key).ValueKind == JsonValueKind.Null ? null : row.GetProperty(key).GetString();
+        Check(NativeSyncDecisions.Decide(Value("base"), Value("local"), Value("remote")).ToString() == Value("decision"), "Decision table diverged");
+    }
+    return Task.CompletedTask;
+}
+
+async Task RejectedCommit()
+{
+    using var root = new TestWorkspace();
+    // Earlier scenarios changed the shared server index; start from it so only the CAS is under test.
+    using (var initial = new HttpClient())
+    {
+        initial.DefaultRequestHeaders.Authorization = new("Bearer", token);
+        root.Write("library.json", await initial.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files["library.json"].Hash));
+    }
+    var fault = new TransportFault { RejectCommitCode = "version_conflict" };
+    using var client = new NativeSyncClient(root.Root, endpoint, token, fault);
+    var page = NewPage(); root.Write(page, "racing edit");
+    await client.SyncAsync(Idle);
+    Check(client.Snapshot.Phase == NativeSyncPhase.Pending && !File.Exists(root.Private("outbox.json")), $"Rejected CAS became a permanent conflict: {client.Snapshot.Phase} {client.Status} outbox={File.Exists(root.Private("outbox.json"))}");
+    Check(!Directory.Exists(root.Private("conflicts")), "Rejected CAS captured unrelated paths");
+    await client.SyncAsync(Idle); AssertSynced(client);
+    root.Write(page, "uncertain identity"); fault.RejectCommitCode = "operation_id_reused";
+    await client.SyncAsync(Idle);
+    Check(client.Snapshot.Phase == NativeSyncPhase.Error && File.Exists(root.Private("outbox.json")), "Non-CAS rejection discarded the original operation");
+    var operation = NativeSyncStorage.Read<NativeSyncOutbox>(root.Private("outbox.json")).OperationId;
+    await client.SyncAsync(Idle); AssertSynced(client);
+    Check((await Remote()).Files[page].Hash == HashText("uncertain identity"), "Retried operation lost local data");
+}
+
+async Task DeletedLibrary()
+{
+    using var root = new TestWorkspace();
+    using (var client = new NativeSyncClient(root.Root, endpoint, token, new TransportFault
+    {
+        ChangeManifest = manifest => manifest with { Files = new(manifest.Files) { ["library.json"] = new(null, manifest.Revision) } }
+    }))
+    {
+        await client.SyncAsync(Idle);
+        Check(client.Snapshot.Phase == NativeSyncPhase.Error && root.Read("library.json") == "{}", "Remote tombstone removed the local index");
+    }
+    StageIncoming(root, new() { ["library.json"] = null });
+    using var recovery = NativeSyncClient.ForLocalRecovery(root.Root);
+    Check(!await recovery.RecoverPendingIncomingAsync(Idle) && recovery.HasPendingIncoming, "Unsafe incoming tombstone was accepted");
+    Check(root.Read("library.json") == "{}", "Offline replay removed the local index");
+}
+
+async Task RecoveryWithoutCredentials()
+{
+    using var root = new TestWorkspace();
+    var page = NewPage(); StageIncoming(root, new() { [page] = "downloaded page" });
+    using var recovery = NativeSyncClient.ForLocalRecovery(root.Root);
+    Check(await recovery.RecoverPendingIncomingAsync(Idle), "Credential-free recovery failed");
+    Check(root.Read(page) == "downloaded page", "Recovery lost the staged page");
+    try { await recovery.SyncAsync(Idle); throw new Exception("Recovery client permitted networking"); }
+    catch (InvalidOperationException) { }
+}
+
 sealed class AddressForwarder : IDisposable
 {
     private readonly System.Net.HttpListener listener = new();
@@ -837,6 +904,7 @@ sealed class TestWorkspace : IDisposable
 sealed class TransportFault : HttpMessageHandler
 {
     private readonly HttpMessageInvoker _inner = new(new HttpClientHandler { AllowAutoRedirect = false });
+    public string? RejectCommitCode { get; set; }
     public bool Offline { get; set; }
     public bool DropCommitReply { get; set; }
     public int Requests { get; private set; }
@@ -848,6 +916,11 @@ sealed class TransportFault : HttpMessageHandler
     {
         if (BeforeSend != null) await BeforeSend();
         Requests++;
+        if (RejectCommitCode is { } rejected && request.Method == HttpMethod.Post)
+        {
+            RejectCommitCode = null;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.Conflict) { Content = JsonContent.Create(new { error = rejected }) };
+        }
         if (Offline) throw new HttpRequestException("Simulated offline transport");
         if (request.Method == HttpMethod.Put) Uploads++;
         if (request.Method == HttpMethod.Post) CommitBodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));

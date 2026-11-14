@@ -20,6 +20,7 @@ public sealed class NativeSyncClient : IDisposable
     private readonly FileSystemWatcher _watcher;
     private readonly NativeSyncState _state;
     private readonly NativeSyncAddressHandler? _addresses;
+    private readonly bool _recoveryOnly;
     public NativeSyncStatus Snapshot { get; private set; } = new(NativeSyncPhase.Pending, "本地已保存，等待同步");
     public string Status => Snapshot.Message;
     public event Action<string>? StatusChanged;
@@ -41,7 +42,17 @@ public sealed class NativeSyncClient : IDisposable
         : this(root, configuration.Endpoint, configuration.Token, new NativeSyncAddressHandler(configuration)) { }
 
     public NativeSyncClient(string root, string endpoint, string token, HttpMessageHandler? handler = null)
+        : this(root, endpoint, token, handler, recoveryOnly: false) { }
+
+    public static NativeSyncClient ForLocalRecovery(string root)
     {
+        var state = NativeSyncStorage.Read<NativeSyncState>(Path.Combine(root, ".mojian-sync", "state.json"));
+        return new NativeSyncClient(root, state.Endpoint, "", null, recoveryOnly: true);
+    }
+
+    private NativeSyncClient(string root, string endpoint, string token, HttpMessageHandler? handler, bool recoveryOnly)
+    {
+        _recoveryOnly = recoveryOnly;
         _addresses = handler as NativeSyncAddressHandler;
         _root = Path.GetFullPath(root);
         _localMutations = NativeSyncMutationEpoch.ForRoot(_root);
@@ -49,7 +60,7 @@ public sealed class NativeSyncClient : IDisposable
         var uri = new Uri(endpoint.TrimEnd('/') + "/", UriKind.Absolute);
         if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) throw new ArgumentException("同步地址必须使用 HTTPS");
         if (!string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) throw new ArgumentException("同步地址不能包含凭据或查询参数");
-        if (string.IsNullOrWhiteSpace(token) || token.Contains('\r') || token.Contains('\n')) throw new ArgumentException("请配置同步令牌");
+        if (!recoveryOnly && (string.IsNullOrWhiteSpace(token) || token.Contains('\r') || token.Contains('\n'))) throw new ArgumentException("请配置同步令牌");
         _directory = Path.Combine(_root, ".mojian-sync");
         Directory.CreateDirectory(Path.Combine(_directory, "blobs"));
         _writerLock = new FileStream(Path.Combine(_directory, "client.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -65,7 +76,7 @@ public sealed class NativeSyncClient : IDisposable
             _http = handler == null ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) : new HttpClient(handler);
             _http.Timeout = TimeSpan.FromMinutes(10);
             _http.BaseAddress = uri;
-            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (!recoveryOnly) _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             _watcher = new FileSystemWatcher(_root) { IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime };
             _watcher.Changed += Invalidate;
@@ -238,6 +249,8 @@ public sealed class NativeSyncClient : IDisposable
         response.EnsureSuccessStatusCode();
         var manifest = await response.Content.ReadFromJsonAsync<SyncManifest>(NativeSyncStorage.Json, cancellation).ConfigureAwait(false) ?? throw new IOException("同步清单为空");
         NativeSyncStorage.ValidateEntries(manifest.Files, manifest.Revision);
+        if (manifest.Files.TryGetValue("library.json", out var library) && library.Hash == null)
+            throw new IOException("远端 library.json 已删除，已停止同步并保留本地库");
         if (string.IsNullOrEmpty(manifest.WorkspaceId) || (_state.WorkspaceId.Length > 0 && _state.WorkspaceId != manifest.WorkspaceId)) throw new IOException("服务器身份变化，已暂停同步，请检查备份");
         if (manifest.Revision < _state.Revision) throw new IOException("服务器版本回退，已暂停同步，请检查备份");
         foreach (var pair in _state.Files)
@@ -268,6 +281,7 @@ public sealed class NativeSyncClient : IDisposable
 
     public async Task SyncAsync(Func<Action, Task<bool>> applyOnIdle, CancellationToken cancellation = default)
     {
+        if (_recoveryOnly) throw new InvalidOperationException("本地恢复客户端仅允许重放已下载的接收记录");
         if (!await _running.WaitAsync(0, cancellation).ConfigureAwait(false)) return;
         try
         {
@@ -312,14 +326,17 @@ public sealed class NativeSyncClient : IDisposable
                 var localHash = local.GetValueOrDefault(path)?.Hash;
                 var baseHash = Hash(_state.Files, path);
                 var remoteHash = Hash(remote.Files, path);
-                if (localHash == remoteHash)
+                switch (NativeSyncDecisions.Decide(baseHash, localHash, remoteHash))
                 {
-                    if (remote.Files.TryGetValue(path, out var equal)) _state.Files[path] = equal;
-                    continue;
+                    case NativeSyncDecision.Equal:
+                        if (remote.Files.TryGetValue(path, out var equal)) _state.Files[path] = equal;
+                        break;
+                    case NativeSyncDecision.Conflict: conflicts.Add(path); break;
+                    case NativeSyncDecision.Upload: changes.Add(new(path, remote.Files.GetValueOrDefault(path)?.Version ?? 0, localHash)); break;
+                    case NativeSyncDecision.Receive:
+                        if (remote.Files.TryGetValue(path, out var entry)) incoming[path] = new(localHash, entry);
+                        break;
                 }
-                if (localHash != baseHash && remoteHash != baseHash) conflicts.Add(path);
-                else if (localHash != baseHash) changes.Add(new(path, remote.Files.GetValueOrDefault(path)?.Version ?? 0, localHash));
-                else if (remote.Files.TryGetValue(path, out var entry)) incoming[path] = new(localHash, entry);
             }
             if (conflicts.Count > 0) { await PreserveConflicts(conflicts, remote, cancellation).ConfigureAwait(false); return false; }
             outbox.WorkspaceId = remote.WorkspaceId;
@@ -380,7 +397,7 @@ public sealed class NativeSyncClient : IDisposable
     {
         if (outbox.WorkspaceId != _state.WorkspaceId || outbox.DeviceId != _state.DeviceId || !NativeSyncStorage.ValidId(outbox.OperationId) ||
             outbox.Changes == null || outbox.Changes.Count is < 1 or > 20000 ||
-            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L) ||
+            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L || change.Path == "library.json" && change.Hash == null) ||
             outbox.Changes.Select(change => change.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != outbox.Changes.Count)
             throw new IOException("同步待提交记录损坏，请保留恢复目录");
     }
@@ -405,8 +422,16 @@ public sealed class NativeSyncClient : IDisposable
         using var result = await _http.PostAsJsonAsync("commit", new { outbox.WorkspaceId, outbox.DeviceId, outbox.OperationId, outbox.Changes }, NativeSyncStorage.Json, cancellation).ConfigureAwait(false);
         if (result.StatusCode == HttpStatusCode.Conflict)
         {
-            var remote = await Manifest(cancellation).ConfigureAwait(false);
-            await PreserveConflicts(outbox.Changes.Select(change => change.Path).ToList(), remote, cancellation).ConfigureAwait(false);
+            using var error = JsonDocument.Parse(await result.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false));
+            if (error.RootElement.TryGetProperty("error", out var code) && code.GetString() == "version_conflict")
+            {
+                // This response proves the CAS was rejected atomically. Recompute the three-way
+                // decision next pass. Lost responses and other 409s must keep the original outbox.
+                File.Delete(OutboxPath);
+                SetStatus(NativeSyncPhase.Pending, "远端已更新，下次同步重新检查；本地修改已保留", outbox.Changes.Count);
+                return false;
+            }
+            SetStatus(NativeSyncPhase.Error, "同步提交被拒绝，原操作已保留，请检查服务器身份或操作记录", outbox.Changes.Count);
             return false;
         }
         result.EnsureSuccessStatusCode();
@@ -450,6 +475,8 @@ public sealed class NativeSyncClient : IDisposable
             plan.Files.Any(pair => !ValidPath(pair.Key) || pair.Value == null || pair.Value.Target == null || !NativeSyncStorage.ValidHash(pair.Value.ExpectedHash)))
             throw new IOException("接收恢复记录损坏");
         NativeSyncStorage.ValidateEntries(plan.Files.ToDictionary(pair => pair.Key, pair => pair.Value.Target), plan.Revision);
+        if (plan.Files.TryGetValue("library.json", out var library) && library.Target.Hash == null)
+            throw new IOException("禁止接收 library.json 删除操作，已保留本地库和接收记录");
         foreach (var hash in plan.Files.Values.Select(entry => entry.Target.Hash).OfType<string>().Distinct())
             if (NativeSyncStorage.Hash(BlobPath(hash)) != hash) throw new IOException("接收恢复快照缺失，请保留目录");
         SetStatus(NativeSyncPhase.Receiving, $"正在接收 {plan.Files.Count} 项");

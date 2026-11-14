@@ -48,8 +48,9 @@ public partial class App : Application
         {
             if (!OpenChosenWorkspace(missing)) Shutdown(-1);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        catch (Exception error)
         {
+            WriteCrashLog("Startup", error);
             ShowLoadFailure(error);
             Shutdown(-1);
         }
@@ -66,7 +67,7 @@ public partial class App : Application
         var dialog = new OpenFolderDialog { Title = "选择墨笺工作区", Multiselect = false };
         if (dialog.ShowDialog() != true) return false;
         try { new MainWindow(new MainViewModel(dialog.FolderName, null)).Show(); return true; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        catch (Exception error)
         {
             ShowLoadFailure(error);
             return false;
@@ -79,11 +80,16 @@ public partial class App : Application
     {
         WriteCrashLog("Dispatcher", e.Exception);
         e.Handled = true;
+        if (Windows.Count == 0) { Shutdown(-1); return; }
         if (_crashNoticeShown) return;
         _crashNoticeShown = true;
-        Dispatcher.BeginInvoke(() => MessageBox.Show(
-            $"墨笺遇到一个错误，已阻止闪退。\n{e.Exception.Message}\n\n详细信息已记录到：\n{CrashLogPath}",
-            "墨笺", MessageBoxButton.OK, MessageBoxImage.Warning));
+        Dispatcher.BeginInvoke(() =>
+        {
+            try { MessageBox.Show(
+                $"墨笺遇到一个错误，已阻止闪退。\n{e.Exception.Message}\n\n详细信息已记录到：\n{CrashLogPath}",
+                "墨笺", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            finally { _crashNoticeShown = false; }
+        });
     }
 
     private static void WriteCrashLog(string source, Exception? error)

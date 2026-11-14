@@ -21,15 +21,16 @@ class AssetStore(
 ) {
     fun importUri(notebookId: String, pageId: String, uri: Uri): ImportedAsset {
         val metadata = queryMetadata(uri)
-        val extension = metadata.displayName.substringAfterLast('.', "").takeIf { it.length in 1..12 }
+        val extension = safeExtension(metadata.displayName)
         val storedName = buildString {
             append(UUID.randomUUID().toString())
             if (extension != null) append('.').append(extension.lowercase())
         }
-        val destination = File(repository.assetDirectory(notebookId, pageId), storedName)
-        context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "Cannot open selected file" }
-            destination.outputStream().buffered().use(input::copyTo)
+        val destination = repository.writeAsset(notebookId, pageId, storedName) { output ->
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { "Cannot open selected file" }
+                input.copyTo(output)
+            }
         }
         return ImportedAsset(
             storedName = storedName,
@@ -41,13 +42,14 @@ class AssetStore(
     }
 
     fun copyFile(notebookId: String, pageId: String, source: File, displayName: String, mimeType: String): ImportedAsset {
-        val extension = displayName.substringAfterLast('.', "").takeIf { it.length in 1..12 }
+        val extension = safeExtension(displayName)
         val storedName = buildString {
             append(UUID.randomUUID().toString())
             if (extension != null) append('.').append(extension.lowercase())
         }
-        val destination = File(repository.assetDirectory(notebookId, pageId), storedName)
-        source.copyTo(destination, overwrite = true)
+        val destination = repository.writeAsset(notebookId, pageId, storedName) { output ->
+            source.inputStream().use { it.copyTo(output) }
+        }
         return ImportedAsset(storedName, displayName, mimeType, destination.length(), destination)
     }
 
@@ -116,4 +118,8 @@ class AssetStore(
         }
 
     private data class AssetMetadata(val displayName: String, val mimeType: String, val sizeBytes: Long)
+
+    // Stored names must satisfy PageContentRepository.safeId and native-sync paths (ASCII only).
+    private fun safeExtension(displayName: String): String? = displayName.substringAfterLast('.', "")
+        .takeIf { it.length in 1..12 && it.all { c -> c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' } }
 }
