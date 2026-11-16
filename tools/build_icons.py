@@ -1,4 +1,4 @@
-"""Package the supplied Mojian artwork without redrawing the brand.
+"""Package the Mojian pen-nib artwork (Pixel 2026 style) without redrawing the brand.
 
 Run from any directory:
     uv run --no-project --with pillow python tools/build_icons.py
@@ -15,34 +15,22 @@ from PIL import Image, ImageChops, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ROOT / "shared" / "branding"
-BACKGROUND = "#1C2453"
+BACKGROUND = "#FFFFFF"
 ADAPTIVE_SIZE = 432  # 108 dp at xxxhdpi.
 SAFE_RADIUS = 132  # Android's central 66 dp safe circle.
 DENSITIES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 
 def adaptive_foreground():
-    artwork = Image.open(SOURCES / "Mojian_Windows_1024.png").convert("RGBA")
-    # Fit the supplied alpha silhouette inside the safe circle, without clipping
-    # its diagonal feather tip or flourish under circular/squircle launcher masks.
-    center_x, center_y = artwork.width / 2, artwork.height / 2
-    radius = max(
-        math.hypot(x + 0.5 - center_x, y + 0.5 - center_y)
-        for y in range(artwork.height)
-        for x in range(artwork.width)
-        if artwork.getpixel((x, y))[3]
-    )
-    # Leave two pixels for Lanczos's antialiasing fringe.
-    scale = (SAFE_RADIUS - 2) / radius
-    artwork = artwork.resize(
-        (round(artwork.width * scale), round(artwork.height * scale)),
-        Image.Resampling.LANCZOS,
-    )
+    # Mojian_Android_1024.png is the 72 dp visible viewport of the Pixel-style
+    # launcher design (pen nib on white). Keep its proportions: scale to 72 dp and
+    # centre it in the 108 dp canvas; the nib already sits inside the 66 dp safe circle.
+    artwork = Image.open(SOURCES / "Mojian_Android_1024.png").convert("RGBA")
+    viewport = 72 * 4
+    artwork = artwork.resize((viewport, viewport), Image.Resampling.LANCZOS)
     foreground = Image.new("RGBA", (ADAPTIVE_SIZE, ADAPTIVE_SIZE))
-    foreground.alpha_composite(
-        artwork,
-        ((ADAPTIVE_SIZE - artwork.width) // 2, (ADAPTIVE_SIZE - artwork.height) // 2),
-    )
+    offset = (ADAPTIVE_SIZE - viewport) // 2
+    foreground.alpha_composite(artwork, (offset, offset))
     return foreground
 
 
@@ -75,9 +63,9 @@ def generated_images():
         round_icon.putalpha(mask.resize(icon.size, Image.Resampling.LANCZOS))
         yield folder / "ic_launcher_round.png", round_icon
 
-    # iOS applies its own rounded mask. Fill only the supplied macOS PNG's
-    # transparent outer corners with the exact supplied background color.
-    apple = Image.open(SOURCES / "Mojian_macOS_1024.png").convert("RGBA")
+    # iOS applies its own rounded mask: use the full-bleed Android viewport
+    # artwork on the white background (the macOS tile already has its own frame).
+    apple = Image.open(SOURCES / "Mojian_Android_1024.png").convert("RGBA")
     ios_icon = Image.new("RGBA", apple.size, BACKGROUND)
     ios_icon.alpha_composite(apple)
     yield ROOT / "ios/App/Assets.xcassets/AppIcon.appiconset/Icon.png", ios_icon.convert("RGB")

@@ -3,7 +3,7 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.meta.mojian.macos</string>
 <key>CFBundleName</key><string>Mojian</string>
-<key>CFBundleDisplayName</key><string>墨笺</string>
+<key>CFBundleDisplayName</key><string>Mojian</string>
 <key>CFBundleExecutable</key><string>Mojian</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.2.1</string>

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="shared/branding/Mojian_macOS_256.png" alt="墨笺 Mojian 当前羽毛应用图标" width="120" />
+  <img src="shared/branding/Mojian_macOS_256.png" alt="墨笺 Mojian 当前钢笔尖应用图标" width="120" />
 
 # 墨笺 · Mojian
 
@@ -131,12 +131,12 @@ node server.mjs
 | `android/` | Android 应用及 Gradle 构建 |
 | `ios/` | UIKit 客户端与可移植 `MojianCore` |
 | `macos/` | macOS AppKit 客户端（独立开发分支） |
-| `shared/branding/` | 当前各平台羽毛图标的原始素材 |
+| `shared/branding/` | 当前各平台钢笔尖图标的原始素材 |
 | `sync-server/` | 原生 HTTPS 同步服务及协议 |
 | `tools/data-migration/` | 历史数据迁移工具与测试 |
 | `docs/design/` | 手写、存储、跨平台及同步的设计依据 |
 
-**品牌图标**：本页使用仓库中现行 macOS 羽毛图标；Windows 使用[同系列透明图标](shared/branding/Mojian_Windows_256.png)。构建时应使用平台资源，避免继续引用早期测试版图形。
+**品牌图标**：本页使用仓库中现行 macOS 钢笔尖图标（Pixel 2026 渐变风格）；Windows 使用[同系列透明图标](shared/branding/Mojian_Windows_256.png)。构建时应使用平台资源，避免继续引用早期测试版图形。
 
 ## 许可与来源
 

@@ -8,8 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>Mojian</AssemblyName>
-    <Product>墨笺</Product>
-    <Version>0.7.30</Version>
+    <Product>Mojian</Product>
+    <Version>0.7.31</Version>
     <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
 
