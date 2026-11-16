@@ -9,6 +9,11 @@
 
 # Current State
 
+- **2026-11-16 brand 0.7.31 (Windows/Android code36), macOS 0.2.1**: installed display name is now English
+  `Mojian` (Pixel 2026 white-tile icons); package `com.meta.inklab(.debug)`, macOS bundle ID, data roots
+  and signers unchanged. Installed in place: Mac `/Applications/Mojian.app` 0.2.1, OMEN and ROG
+  `mojian/artifacts/release/Mojian.exe` 0.7.31 (no running process), K70 code36 (first install time kept).
+  No Release and no UI/sync acceptance by user direction. Tablet offline, not updated.
 - **0.7.30 published (Windows/Android code35, source `e37604f`)**: architecture repair from review
   `mac:claude:efdd324c`. Device-local navigation (selection/expansion/active notebook) moved out of
   library.json into Windows settings.json / Android prefs; autosave no longer rewrites the index.
