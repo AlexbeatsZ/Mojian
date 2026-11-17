@@ -9,6 +9,10 @@
 
 # Current State
 
+- **Android 0.7.32/code37**: deploy the signed Release variant (`Mojian.apk`), with version name
+  `0.7.32` and `debuggable=false`. Retain legacy package `com.meta.inklab.debug` and OMEN's original
+  signer for in-place updates preserving notes/settings/sync. The package suffix is compatibility,
+  not a build mode. User explicitly requires release installations on phone and tablet.
 - **2026-11-16 brand 0.7.31 (Windows/Android code36), macOS 0.2.1**: installed display name is now English
   `Mojian` (Pixel 2026 white-tile icons); package `com.meta.inklab(.debug)`, macOS bundle ID, data roots
   and signers unchanged. Installed in place: Mac `/Applications/Mojian.app` 0.2.1, OMEN and ROG
@@ -95,7 +99,7 @@
 - Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac deployment needs its own
   request. Feather branding remains in shared/branding.
 - Current output paths: `mojian/artifacts/release/Mojian.exe`,
-  `android/artifacts/current/Mojian-debug.apk`, `ios/artifacts/current`.
+  `android/artifacts/current/Mojian.apk`. Historical iOS artifacts are not maintained.
   Historical version/deployment details have moved to `docs/log/2026-10.md` and `2026-11.md`.
 
 # Active Work
@@ -126,9 +130,12 @@
   --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
   -o mojian/artifacts/release`. Check no real Mojian process runs before replacement; never force-close.
   Keep one current output and clean project-local bin/obj after delivery; retain dependency caches.
-- Android (Java17/SDK36/Gradle8.13), from `android`:
-  `gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug
-  :app:assembleDebugAndroidTest :app:lintDebug`. Copy APK to `artifacts/current` before `gradlew clean`.
+- Android (Java17/SDK36/Gradle8.13), from `android`: product packaging uses
+  `gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease`.
+  Copy `app/build/outputs/apk/release/app-release.apk` to `artifacts/current/Mojian.apk` before clean.
+  Use `:app:testDebugUnitTest :app:assembleDebugAndroidTest :app:lintDebug` for contract checks only;
+  do not install a debug artifact as the user's product. Check merged manifest `debuggable=false`,
+  version and signer before deployment. CI's generated debug keystore is not OMEN's product signer.
   On Mac set JDK17/ANDROID_HOME and `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=<real nonsymlink path>`;
   run `npm ci` in sync-server first for `NativeSyncWireContractTest`.
 - Preserve `com.meta.inklab.debug` and OMEN's `~/.android/debug.keystore` signer. Mac builds need

@@ -45,8 +45,8 @@ remain explicit later-feature shells.
 
 ## Safety boundary
 
-- release application ID: `com.meta.inklab`;
-- debug package installed by this project: `com.meta.inklab.debug`;
+- deployed release application ID: `com.meta.inklab.debug` (legacy identity kept for in-place updates);
+- install only the signed Release variant; `android:debuggable` must be false;
 - no Internet permission;
 - no broad external-storage permission; import/export uses Android's system document picker;
 - session-only strokes, with persistent inserted page objects and embedded private assets;
@@ -57,13 +57,16 @@ remain explicit later-feature shells.
 Use the repository-local Gradle wrapper:
 
 ```powershell
-cd C:\Users\Meta\Project\Workspaces\Notein\android
-.\gradlew.bat :app:assembleDebug :app:lintDebug
+cd C:\Users\Meta\Project\Workspaces\mojian\android
+.\gradlew.bat :app:assembleRelease :app:lintRelease
 ```
 
-The APK is written to `app\build\outputs\apk\debug\app-debug.apk`.
+The APK is written to `app\build\outputs\apk\release\app-release.apk`. Its version name has no
+`-debug` suffix. Release uses the existing OMEN signing identity so it can update both deployed
+devices without uninstalling or changing their private data directory. Verify the signer before
+installation; a fresh machine's generated debug keystore does not match the deployed certificate.
 
-Before cleanup, copy the current APK to `artifacts\current\Mojian-debug.apk`, then run
+Before cleanup, copy the current APK to `artifacts\current\Mojian.apk`, then run
 `.\gradlew.bat clean`. Do not retain an old `app\build` tree or parallel APK candidate directories.
 
 ## Install and launch

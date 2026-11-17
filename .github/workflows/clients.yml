@@ -40,7 +40,7 @@ jobs:
           node-version: '24'
       - run: npm ci
         working-directory: sync-server
-      - run: bash gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
+      - run: bash gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease :app:lintRelease :app:assembleDebugAndroidTest :app:lintDebug
         working-directory: android
   macos:
     runs-on: macos-latest
