@@ -13,6 +13,8 @@ internal class StylusShortcutLayout(
         // ViewGroup forwards pre-IME events only along its focus chain. Keep a canvas-only
         // screen in that chain too; an editor can still request focus normally.
         isFocusableInTouchMode = true
+        // Hardware-key focus on this routing container would highlight the entire workspace.
+        defaultFocusHighlightEnabled = false
     }
 
     override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean =

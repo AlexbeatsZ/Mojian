@@ -9,6 +9,10 @@
 
 # Current State
 
+- **Android 0.7.33/code38** fixes whole-workspace focus highlighting after Xiaomi pen keys on
+  liuqin PixelOS 17. StylusShortcutLayout keeps pre-IME focus routing with default focus highlight
+  disabled. Release installed in place on the tablet, user confirmed physical pen presses retain
+  normal colors. JVM 305 pass/2 skipped, Release/native-test APK/lint passed.
 - **Android 0.7.32/code37**: deploy the signed Release variant (`Mojian.apk`), with version name
   `0.7.32` and `debuggable=false`. Retain legacy package `com.meta.inklab.debug` and OMEN's original
   signer for in-place updates preserving notes/settings/sync. The package suffix is compatibility,
@@ -197,6 +201,9 @@
   Nested PopupWindows must anchor to the host window, not a row inside a dismissed root popup.
 - Keep mixed-selection chrome above semantic content layers. Page patterns stay below inserted
   images/PDFs; their rules must not paint over opaque images. A4 is a monotonic multi-sheet policy.
+- Focusable Android routing containers need defaultFocusHighlightEnabled=false when they have no
+  visual focus state. On PixelOS17, a hardware key otherwise highlights the full root after leaving
+  touch mode. Compare focus/touch mode with screenshots before attributing washed colors to display HAL.
 - Pen/mouse promoted streams require ownership-aware deduplication. Xiaomi pen keys are exact-device
   PageUp/PageDown; HyperOS intercepts long presses, so essential functions cannot depend on them.
   Evaluate physical pen noise unplugged; don't confuse charger effects with prediction quality.
