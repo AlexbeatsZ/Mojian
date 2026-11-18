@@ -57,6 +57,47 @@ final class ArchitectureRepairTests: XCTestCase {
         let files = FileManager.default.enumerator(at: root.appendingPathComponent(".mojian-corrupt.previous"), includingPropertiesForKeys: nil)!
         XCTAssertTrue(files.allObjects.compactMap { $0 as? URL }.contains { (try? String(contentsOf: $0)) == "broken" })
     }
+    func testPackedPointsMatchGoldenVectorsAndRoundTripThroughTheStore() throws {
+        let shared = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let cases = try JSON.read(Data(contentsOf: shared.appendingPathComponent("fixtures/points-coded.json")))["cases"].array
+        let scales = Dictionary(uniqueKeysWithValues: zip(InkPoints.names, InkPoints.scales))
+        for item in cases {
+            let name = item["name"].string, points = item["points"].array
+            let coded: String? = item["coded"] == .null ? nil : item["coded"].string
+            XCTAssertEqual(InkPoints.encode(points), coded, name)
+            guard let coded else { continue }
+            let decoded = try InkPoints.decode(coded)
+            XCTAssertEqual(decoded.count, points.count, name)
+            for (expected, actual) in zip(points, decoded) {
+                XCTAssertEqual(Set(expected.dictionary.keys), Set(actual.dictionary.keys), name)
+                for (key, value) in expected.dictionary {
+                    XCTAssertEqual(value.number(), actual[key].number(), accuracy: 0.5 / scales[key]! + 1e-12, "\(name).\(key)")
+                }
+            }
+            XCTAssertEqual(InkPoints.encode(decoded), coded, name)
+        }
+        XCTAssertThrowsError(try InkPoints.decode("1:AQ=="))
+        XCTAssertThrowsError(try InkPoints.decode("2:AA=="))
+
+        let root = try scratch()
+        try fixture("library").write(to: root.appendingPathComponent("library.json"))
+        try Data().write(to: root.appendingPathComponent(".mojian-macos-library"))
+        let page = root.appendingPathComponent("notebooks/book.dot/pages/page.dot.json")
+        try FileManager.default.createDirectory(at: page.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fixture("page").write(to: page)
+        let store = try CanonicalStore(root: root, writable: true)
+        var document = try store.loadPage(notebook: "book.dot", page: "page.dot")
+        document.strokes.append(Settings().completedStroke((0..<30).map { InkSample(x: Double($0) * 1.3, y: 7, pressure: 0.4, elapsed: Double($0 * 4)) }))
+        let returned = try store.writePage(document)
+        XCTAssertEqual(returned.strokes[1]["points"].array.count, 30)
+        let disk = try JSON.read(Data(contentsOf: page))["strokes"].array
+        XCTAssertNotEqual(disk[0]["points"], .null) // per-point extension field keeps the array
+        XCTAssertEqual(disk[1]["points"], .null)
+        XCTAssertTrue(disk[1]["pointsCoded"].string.hasPrefix(InkPoints.prefix))
+        let reloaded = try CanonicalStore(root: root, writable: true).loadPage(notebook: "book.dot", page: "page.dot")
+        XCTAssertEqual(reloaded.strokes[1]["points"].array.last?["x"].number() ?? 0, 29 * 1.3, accuracy: 0.0006)
+        XCTAssertEqual(reloaded.strokes[1]["pointsCoded"], .null)
+    }
     func testCompletedInkIncludesPortableFilledOutline() throws {
         let record = Settings().completedStroke([InkSample(x: 10, y: 20), InkSample(x: 40, y: 60, elapsed: 8)])
         XCTAssertTrue(record["vectorPath"].string.hasPrefix("F1 "))

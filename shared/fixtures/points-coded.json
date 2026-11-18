@@ -1,0 +1,129 @@
+{
+ "spec": "shared/ink-points.md v1",
+ "cases": [
+  {
+   "name": "windows",
+   "points": [
+    {
+     "x": 19.208673,
+     "y": 107.88872,
+     "pressure": 0.024664225,
+     "tiltX": 0,
+     "tiltY": 0,
+     "elapsedMilliseconds": 0
+    },
+    {
+     "x": 19.30132,
+     "y": 107.93988,
+     "pressure": 0.31,
+     "tiltX": 12.5,
+     "tiltY": -3.25,
+     "elapsedMilliseconds": 4
+    },
+    {
+     "x": -12.3455,
+     "y": 0.0004,
+     "pressure": 1,
+     "tiltX": -0.005,
+     "tiltY": 0.005,
+     "elapsedMilliseconds": 1234567
+    }
+   ],
+   "coded": "1:Aw+SrAK4Ab3uA+KVDWbHlg3uA8os6GsACIbalgEAxBPFEwCJBYwF"
+  },
+  {
+   "name": "android",
+   "points": [
+    {
+     "x": 501.75,
+     "y": 2201.125,
+     "pressure": 0.5,
+     "elapsedMilliseconds": 0,
+     "tiltRadians": 0.7853982,
+     "orientationRadians": 3.1415927
+    },
+    {
+     "x": 503.0,
+     "y": 2199.5,
+     "pressure": 0.62,
+     "elapsedMilliseconds": 8,
+     "tiltRadians": 0.79,
+     "orientationRadians": 6.2831
+    },
+    {
+     "x": 503.0,
+     "y": 2199.5,
+     "pressure": 0,
+     "elapsedMilliseconds": 9,
+     "tiltRadians": 0,
+     "orientationRadians": 0
+    }
+   ],
+   "coded": "1:AzPsnz3EEwDK2IwCsRkAkE7gEu9gABAC3Hpct3vw6gPu6gPd1Qc="
+  },
+  {
+   "name": "xyOnly",
+   "points": [
+    {
+     "x": 10,
+     "y": 20
+    },
+    {
+     "x": 30,
+     "y": 40
+    }
+   ],
+   "coded": "1:AgCgnAHAuALAuALAuAI="
+  },
+  {
+   "name": "large",
+   "points": [
+    {
+     "x": 99999.999,
+     "y": -99999.999,
+     "elapsedMilliseconds": 9007199254
+    }
+   ],
+   "coded": "1:AQL+g69f/YOvX6zQ941D"
+  },
+  {
+   "name": "extensionField",
+   "points": [
+    {
+     "x": 12.5,
+     "y": -2,
+     "pressure": 0.5,
+     "elapsedMilliseconds": 0,
+     "futureSample": "retained"
+    }
+   ],
+   "coded": null
+  },
+  {
+   "name": "mixedChannels",
+   "points": [
+    {
+     "x": 1,
+     "y": 2,
+     "pressure": 0.5
+    },
+    {
+     "x": 3,
+     "y": 4
+    }
+   ],
+   "coded": null
+  },
+  {
+   "name": "fractionalTime",
+   "points": [
+    {
+     "x": 1,
+     "y": 2,
+     "elapsedMilliseconds": 1.5
+    }
+   ],
+   "coded": null
+  }
+ ]
+}

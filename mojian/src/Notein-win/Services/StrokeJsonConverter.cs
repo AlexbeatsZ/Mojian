@@ -31,7 +31,17 @@ public sealed class StrokeJsonConverter : JsonConverter<StrokeRecord>
             writer.WriteRawValue(source.Json, skipInputValidation: true);
             return;
         }
-        JsonSerializer.Serialize(writer, value, ModelOptions);
+        // Changed/new strokes store packed samples (shared/ink-points.md) when every point is plain.
+        if (InkPointCodec.TryEncode(value.Points) is not { } coded)
+        {
+            JsonSerializer.Serialize(writer, value, ModelOptions);
+            return;
+        }
+        var node = JsonSerializer.SerializeToNode(value, ModelOptions)!.AsObject();
+        var index = node.Select(pair => pair.Key).ToList().IndexOf("points");
+        node.Remove("points");
+        node.Insert(Math.Max(0, index), "pointsCoded", coded);
+        node.WriteTo(writer);
     }
 
     internal static bool SameMetadata(StrokeRecord first, StrokeRecord second) =>

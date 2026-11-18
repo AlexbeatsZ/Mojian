@@ -229,16 +229,19 @@ public final class CanonicalStore: @unchecked Sendable {
         let url = try checked(relative)
         let current = fm.fileExists(atPath: url.path) ? try Stamp(url) : nil
         guard observed[relative] == current else { throw MojianError.invalid("文件已被外部修改，已阻止覆盖。请重新打开笔记库。") }
+        // Disk form packs eligible point arrays (shared/ink-points.md); the returned document is expanded.
+        let packed = InkPoints.pack(document.json)
         if incrementRevision, validated[relative] == current, let previous = cachedJSON[relative] {
             func content(_ json: JSON) -> JSON { .object(json.dictionary.filter { $0.key != "revision" && $0.key != "updatedAt" }) }
-            if content(previous) == content(document.json) { return try PageDocument(previous) }
+            if content(previous) == content(packed) { return try PageDocument(previous) }
         }
         var d = document
+        d.json = packed
         if incrementRevision {
             d.json["revision"] = .number(max(d.json["revision"].number(), pageRevisions["\(d.notebookID)/\(d.pageID)"] ?? 0) + 1)
             d.json["updatedAt"] = .string(ISO8601DateFormatter().string(from: Date()))
         }
-        try write(d.json, relative: relative) { _ = try PageDocument($0) }; pageRevisions["\(d.notebookID)/\(d.pageID)"] = d.json["revision"].number(); return d
+        try write(d.json, relative: relative) { _ = try PageDocument($0) }; pageRevisions["\(d.notebookID)/\(d.pageID)"] = d.json["revision"].number(); return try PageDocument(d.json)
     }
     public func writeAsset(_ data: Data, notebook: String, page: String, name: String) throws {
         mutex.lock(); defer { mutex.unlock() }

@@ -82,6 +82,8 @@ public struct PageDocument: Equatable, Sendable {
             "strokes": .array([]), "objects": .array([]), "tags": .array([]), "textItems": .array([]), "layers": .array([])])
     }
     public init(_ json: JSON) throws {
+        // Packed samples (shared/ink-points.md) are edited as point objects; CanonicalStore packs on write.
+        let json = try InkPoints.expand(json)
         guard !json["pageId"].string.isEmpty, case .object = json,
               (1...2).contains(Int(json["version"].number(1))) else { throw MojianError.invalid("页面格式无效或版本不受支持") }
         for key in ["strokes","objects","tags","textItems","layers"] where json[key] != .null {

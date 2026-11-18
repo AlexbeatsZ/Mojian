@@ -110,6 +110,19 @@ public sealed class StrokeRecord
         VectorTransform = [current.M11, current.M12, current.M21, current.M22, current.OffsetX, current.OffsetY];
         InvalidateBounds();
     }
+    /// <summary>
+    /// Packed samples (shared/ink-points.md). Read-only on the wire: every reader decodes it into
+    /// <see cref="Points"/>; only the page store writes it (StrokeJsonConverter), so other
+    /// serializers (clipboard, history, .mjn) keep plain point arrays.
+    /// </summary>
+    [JsonPropertyName("pointsCoded")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PointsCoded
+    {
+        get => null;
+        set { if (!string.IsNullOrEmpty(value)) Points = Services.InkPointCodec.Decode(value); }
+    }
+
     public List<InkPoint> Points
     {
         get => _points;

@@ -49,7 +49,8 @@ object SharedStrokeCodec {
                 Color.argb(opacity*255/100,Color.red(argb),Color.green(argb),Color.blue(argb)))
         }
         val batch = MutableStrokeInputBatch()
-        val inputs = json.getJSONArray("points")
+        // `pointsCoded` stays packed in the page tree; this decodes only this stroke, transiently.
+        val inputs = InkPoints.read(json)
         // Imported outlines already contain pressure geometry. A two-point native proxy avoids
         // rebuilding hundreds of thousands of mesh samples just to display that existing geometry.
         if (json.optString("vectorPath").isNotBlank()) {
@@ -126,6 +127,7 @@ object SharedStrokeCodec {
         if (outline.isNotEmpty() && bounds.left.isFinite()) json.put("vectorPath","F1 " + outline)
             .put("vectorBounds",JSONArray(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom)))
             .put("vectorTransform",JSONArray(listOf(1,0,0,1,0,0)))
+        if (shape == null) InkPoints.pack(json)
         records[stroke] = Record(json)
         return json
     }
@@ -173,10 +175,13 @@ object SharedStrokeCodec {
         val m=(0..5).map { t.getDouble(it) }
         value.put("vectorTransform",JSONArray(listOf(a*m[0]+c*m[1],b*m[0]+d*m[1],a*m[2]+c*m[3],b*m[2]+d*m[3],
             a*m[4]+c*m[5]+origin.x*unit,b*m[4]+d*m[5]+origin.y*unit)))
-        SharedWorkspaceCodec.items(value.optJSONArray("points")).forEach { p ->
+        val packed = !value.has(InkPoints.POINTS) && value.has(InkPoints.CODED)
+        val points = InkPoints.read(value)
+        SharedWorkspaceCodec.items(points).forEach { p ->
             val mapped=transform(p.getDouble("x").toFloat()/unit,p.getDouble("y").toFloat()/unit)
             p.put("x",mapped.x*unit).put("y",mapped.y*unit)
         }
+        if (packed) { value.remove(InkPoints.CODED); value.put(InkPoints.POINTS, points); InkPoints.pack(value) }
         value.put("widthMm",next.brush.size / DOCUMENT_UNITS_PER_MM)
         records[next]=Record(value,visible=visible(old))
     }

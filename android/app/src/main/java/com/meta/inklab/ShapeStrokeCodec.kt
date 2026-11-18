@@ -65,7 +65,7 @@ object ShapeStrokeCodec {
         if (json.optString("brushProfile") != "shape-v1") return null
         return runCatching {
             val color = if (json.opt("color") is Number) InkPalette.entries[json.optInt("color",0).coerceIn(0,2)] else InkPalette.valueOf(json.optString("color", "Black").uppercase())
-            val array = json.getJSONArray("points")
+            val array = InkPoints.read(json)
             val points = (0 until array.length()).map { val p=array.getJSONObject(it); ShapePoint(p.getDouble("x").toFloat()/SCALE,p.getDouble("y").toFloat()/SCALE) }
             if (points.size < 2) return null
             create(points,color,json.optDouble("widthMm",.4).toFloat().coerceAtLeast(.01f),json.optInt("opacityPercent",100).coerceIn(1,100),displayColor(color),json.optString("id", "shape-${java.util.UUID.randomUUID()}"))
