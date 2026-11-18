@@ -94,7 +94,7 @@ final class ArchitectureRepairTests: XCTestCase {
         XCTAssertNotEqual(disk[0]["points"], .null) // per-point extension field keeps the array
         XCTAssertEqual(disk[1]["points"], .null)
         XCTAssertTrue(disk[1]["pointsCoded"].string.hasPrefix(InkPoints.prefix))
-        let reloaded = try CanonicalStore(root: root, writable: true).loadPage(notebook: "book.dot", page: "page.dot")
+        let reloaded = try store.loadPage(notebook: "book.dot", page: "page.dot")
         XCTAssertEqual(reloaded.strokes[1]["points"].array.last?["x"].number() ?? 0, 29 * 1.3, accuracy: 0.0006)
         XCTAssertEqual(reloaded.strokes[1]["pointsCoded"], .null)
     }
