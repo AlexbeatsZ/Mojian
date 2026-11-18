@@ -16,6 +16,10 @@
   re-encoded by `tools/outline-compaction` only after confirming every device has synced them
   unchanged (`--skip` others). Win 312/312, Android JVM 310 (2 opt-in skipped), Release/lint pass.
   Deployment/compaction status is in `docs/log/2026-11.md`. Read handwriting-engine.md "Outline size".
+- **0.7.36 (Windows/Android code41), macOS 0.2.3**: strokes may store `pointsCoded` instead of
+  `points` (`shared/ink-points.md`); all readers since these versions accept both, so never deploy
+  an older client against the migrated library. Library packed on 2026-11-18 (3150 -> 1774 MB).
+  Rewrite library files only after the all-device hash/base check in `ink-storage-format.md`.
 - **Android 0.7.35/code40**: `StreamingJson` shares repeated names/short values; 作业 4 (70 MB) now
   opens on the tablet at 177 MB Java heap. Points as JSON objects remain the main memory cost;
   Notein/OneNote research and the packed-points proposal are in `ink-storage-format.md`.

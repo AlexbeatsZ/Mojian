@@ -29,7 +29,20 @@ formats are public, so study them directly:
 - Measured on 作业 4 (same strokes): Mojian points JSON 26.8 MB = 92.6 B/point; WPF ISF of
   x/y/pressure 0.7 MB = 2.4 B/point; gzip of the whole compacted page 11.5 MB.
 
-## Implications for Mojian
+## Implemented (0.7.36 / macOS 0.2.3)
+
+`pointsCoded` (`shared/ink-points.md`, golden vectors `shared/fixtures/points-coded.json` from an
+independent Python implementation): per-channel zigzag LEB128 deltas, x/y 0.001 DIP, pressure 1e-4,
+exact ms. Windows decodes via `StrokeRecord.PointsCoded` on every read path and writes it only in
+the page store (unchanged strokes stay verbatim; clipboard/history/.mjn keep arrays). Android keeps
+the packed string in the tree and decodes per stroke on use. Swift expands on load, packs on write.
+Strokes with per-point extension fields or mixed channels keep `points`. The library was migrated
+with `tools/outline-compaction --pack-points` after every device ran 0.7.36 and all 444 pages
+>= 0.5 MB were proven unchanged on every device: 3150 -> 1774 MB, 587,276 strokes, worst error
+0.5 quantum on 1.26M checked points. Imported OneNote outlines (`vectorPath` from ISF geometry)
+are now the largest remaining field on imported pages.
+
+## Implications for Mojian (original analysis)
 
 1. Points are the next bottleneck, not outlines. A packed per-stroke channel encoding (delta
    varints/zigzag at fixed quanta: 0.01 DIP, pressure 1/4096, ms) would cut ~27 MB to ~1-2 MB and
