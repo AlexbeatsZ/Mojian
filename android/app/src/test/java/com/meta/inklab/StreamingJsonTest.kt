@@ -46,6 +46,19 @@ class StreamingJsonTest {
     }
 
     @Test
+    fun sharesRepeatedNamesAndShortValuesWithoutMixingTypes() {
+        val source = """{"a":[{"x":0,"s":"#0","t":"0"},{"x":0,"s":"#0","t":"0"}]}"""
+        val actual = StreamingJson.readObject(StringReader(source))
+        val first = actual.getJSONArray("a").getJSONObject(0)
+        val second = actual.getJSONArray("a").getJSONObject(1)
+        assertEquals(JSONObject(source).toString(), actual.toString())
+        assertTrue(first.get("x") is Number)
+        assertEquals("#0", second.get("s"))
+        assertEquals("0", second.get("t"))
+        assertTrue(first.get("s") === second.get("s"))
+    }
+
+    @Test
     fun readsStringsLongerThanTheBuffer() {
         val outline = "F1" + (0 until 40_000).joinToString("") { "M$it.5,${it % 97}.25c.1,.2 .3,.4 .5,.6z" }
         val source = JSONObject().put("strokes", org.json.JSONArray().put(JSONObject().put("vectorPath", outline))).toString()

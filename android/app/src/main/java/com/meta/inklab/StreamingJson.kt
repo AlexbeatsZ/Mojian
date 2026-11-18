@@ -18,8 +18,24 @@ internal class StreamingJson private constructor(private val reader: Reader) {
     private var position = 0
     // Reused for every string/literal; grows only to the longest single value (one outline).
     private val text = StringBuilder()
+    // A dense page repeats the same names (290k points x 6 keys) and short values ("", profile names,
+    // 0, small integers). Sharing those immutable instances saved ~80 MB on a 9k-stroke page;
+    // values are identical to JSONObject(String), only allocation differs. Bounded so unique ids
+    // and coordinates never fill it.
+    private val sharedStrings = HashMap<String, String>()
+    private val sharedLiterals = HashMap<String, Any>()
+
+    private fun <T : Any> share(table: HashMap<String, T>, token: String, value: () -> T): T {
+        table[token]?.let { return it }
+        val created = value()
+        if (table.size < SHARED_LIMIT) table[token] = created
+        return created
+    }
 
     companion object {
+        private const val SHARED_LENGTH = 24
+        private const val SHARED_LIMIT = 8192
+
         fun readObject(reader: Reader): JSONObject {
             val parser = StreamingJson(reader)
             val value = parser.value()
@@ -108,7 +124,10 @@ internal class StreamingJson private constructor(private val reader: Reader) {
             position = end
             if (position == length) continue
             when (next()) {
-                '"' -> return text.toString()
+                '"' -> return if (text.length > SHARED_LENGTH) text.toString() else {
+                    val key = text.toString()
+                    share(sharedStrings, key) { key }
+                }
                 else -> when (val escaped = next()) {
                     '"', '\\', '/' -> text.append(escaped)
                     'b' -> text.append('\b')
@@ -139,7 +158,8 @@ internal class StreamingJson private constructor(private val reader: Reader) {
             "true" -> true
             "false" -> false
             "null" -> JSONObject.NULL
-            else -> JSONTokener(token).nextValue()
+            // Short literals (0, 1, small ints) repeat millions of times; boxed values are immutable.
+            else -> if (token.length <= 4) share(sharedLiterals, token) { JSONTokener(token).nextValue() } else JSONTokener(token).nextValue()
         }
     }
 }

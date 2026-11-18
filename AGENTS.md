@@ -16,6 +16,9 @@
   re-encoded by `tools/outline-compaction` only after confirming every device has synced them
   unchanged (`--skip` others). Win 312/312, Android JVM 310 (2 opt-in skipped), Release/lint pass.
   Deployment/compaction status is in `docs/log/2026-11.md`. Read handwriting-engine.md "Outline size".
+- **Android 0.7.35/code40**: `StreamingJson` shares repeated names/short values; 作业 4 (70 MB) now
+  opens on the tablet at 177 MB Java heap. Points as JSON objects remain the main memory cost;
+  Notein/OneNote research and the packed-points proposal are in `ink-storage-format.md`.
 - **Android 0.7.33/code38** fixes whole-workspace focus highlighting after Xiaomi pen keys on
   liuqin PixelOS 17. StylusShortcutLayout keeps pre-IME focus routing with default focus highlight
   disabled. Release installed in place on the tablet, user confirmed physical pen presses retain
@@ -225,6 +228,7 @@
 
 # Docs Index
 
+- `docs/design/ink-storage-format.md`: stroke/point/outline storage size, Notein (AndroidX Ink) and OneNote (ISF) encodings.
 - `docs/design/pen-style-presets.md`: JSON import, functions, controls, snapshots, built-in Notein/OneNote evidence.
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.
 - `docs/design/imported-page-presentation.md`: negative-coordinate legacy paper and coordinated image/ink contrast.
