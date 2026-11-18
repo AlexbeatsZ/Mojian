@@ -64,4 +64,28 @@ final class ArchitectureRepairTests: XCTestCase {
         XCTAssertFalse(path.boundingBoxOfPath.isNull)
         XCTAssertEqual(record["vectorBounds"].array.count, 4)
     }
+    func testCompletedInkOutlineIsCompactAndKeepsItsShape() throws {
+        let samples = (0..<120).map { i -> InkSample in
+            let t = Double(i) / 119
+            return InkSample(x: 20 + t * 140 + 12 * sin(t * 19), y: 50 + 18 * sin(t * 7), pressure: 0.2 + 0.75 * abs(sin(t * 5)), elapsed: Double(i * 4))
+        }
+        let record = Settings().completedStroke(samples)
+        let text = record["vectorPath"].string
+        let source = InkPath.make(Settings().stroke(samples))
+        var full = 0
+        source.applyWithBlock { _ in full += 1 }
+        // Old form: one full-precision element ~ 40+ characters; compact stays well under 18 per element.
+        XCTAssertLessThan(text.count, full * 18)
+        XCTAssertNil(text.range(of: "\\.\\.|[eE]|[0-9]\\.[0-9]{3}", options: .regularExpression), text.prefix(200).description)
+        let parsed = try InkPath.parse(text)
+        let a = parsed.boundingBoxOfPath, b = source.boundingBoxOfPath
+        XCTAssertEqual(a.minX, b.minX, accuracy: 0.02); XCTAssertEqual(a.maxY, b.maxY, accuracy: 0.02)
+        // Interior and exterior probes agree with the full-precision geometry.
+        for i in stride(from: 0, to: samples.count, by: 7) {
+            let p = CGPoint(x: samples[i].x, y: samples[i].y)
+            XCTAssertEqual(parsed.contains(p, using: .winding), source.contains(p, using: .winding))
+            let outside = CGPoint(x: p.x, y: p.y + 30)
+            XCTAssertEqual(parsed.contains(outside, using: .winding), source.contains(outside, using: .winding))
+        }
+    }
 }
