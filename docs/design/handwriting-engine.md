@@ -225,7 +225,24 @@ justification for inventing a per-device correction curve.
 
 New Windows pen strokes use `fountain-v2`, opaque pen ink, and a filled nonzero `vectorPath` with
 `vectorBounds` and an identity `vectorTransform`. Circles use cubic Beziers because the iOS parser
-does not support SVG A commands. The saved outline is the rendered shape; raw points, pressure,
+does not support SVG A commands.
+
+Outline size (0.7.34): 0.7.21-0.7.33 wrote one disc plus one normal-offset quad per 180 Hz modeled
+sample via `StreamGeometry.ToString()` (17-digit doubles, ~600 bytes per sample; 26 raw points ->
+27 KB). A 8,966-stroke homework page reached 358 MB (vectorPath 90%) and Android OOMed reading it.
+The 0.7.26 note "每笔约 45 KB，保存体积另行评估" was never followed up. Now `CreateGeometry` and
+`StoreOutline` share one figure list: Douglas-Peucker over (x, y, radius) keeps the swept-disc
+boundary within `OutlineTolerance` 0.02 DIP; consecutive kept discs are joined by their exact outer
+tangent hull (equal radii reduce to the old quad, same winding), so dropped samples remain covered;
+points sit on a 0.01 DIP grid and are written as absolute `M` + relative `c`/`l` with no leading
+zeros (all readers: WPF `Geometry.Parse`, Android `PathParser`, Swift `InkPath.parse`). Wet ink and
+the stored outline are the same geometry, so pen-up does not move pixels. Real pages shrink ~5x in
+total (outlines ~10x). Do not return to per-sample discs or `ToString()` serialization.
+`OutlineCompaction` + `tools/outline-compaction` re-encode existing legacy outlines in their own
+coordinate space (moved strokes keep `vectorTransform`), only when the recovered discs regenerate
+every stored number within 1e-9; anything else is left byte-identical.
+
+The saved outline is the rendered shape; raw points, pressure,
 timing and parameters remain for editing. Move/scale compose `vectorTransform`; recolor, native
 copy, undo/redo, erasing, `.mjn` and output retain the outline. Existing v1 ink and shapes keep
 their renderers. The timestamp/smoothing/outline and native WPF edit/handoff regressions cover

@@ -142,6 +142,10 @@ native sync cannot publish an intermediate index/assets snapshot.
 - 插入空间预览、非硬件画布或带斜切的矩阵走矢量直绘。预取可见区外一圈只在手势期间进行，
   每帧预算 6 ms，超出则下一帧继续；离开保留范围的瓦片丢弃显示列表并复用。
 - 图片解码缓存为最大堆的 1/5（24–160 MiB），避免平移时反复同步解码大图；描边轮廓按线程复用 Paint。
+- 页面读取（0.7.34）用 `StreamingJson` 从 Reader 直接构建 org.json 树，标量交给平台 `JSONTokener`，
+  数值类型与 `JSONObject(String)` 一致。禁止 `readText()` 后再解析：UTF-16 StringBuilder 倍增扩容让
+  130 MB 以上的页面需要 537 MB 单次分配，超过平板 512 MB largeHeap 上限（2026-11-18 作业 4 页 OOM）。
+  读取失败为 OutOfMemoryError 时提示“页面数据过大”。
 
 ## 验证边界
 

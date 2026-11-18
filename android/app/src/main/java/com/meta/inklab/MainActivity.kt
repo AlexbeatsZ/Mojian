@@ -4640,7 +4640,8 @@ class MainActivity : Activity() {
                 }
                 runCatching { installLoadedPage(nextKey, session, result.getOrThrow()) }.onFailure { error ->
                     android.util.Log.e("MojianSync", "Page load failed", error)
-                    Toast.makeText(this, "页面暂时无法读取：${error.message}", Toast.LENGTH_LONG).show()
+                    val reason = if (error is OutOfMemoryError) "页面数据过大，超出本机可用内存" else error.message
+                    Toast.makeText(this, "页面暂时无法读取：$reason", Toast.LENGTH_LONG).show()
                     if (restoreBoundPageSelection()) {
                         showPageLoading(false)
                         renderWorkspace()

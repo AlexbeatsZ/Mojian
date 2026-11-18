@@ -9,6 +9,13 @@
 
 # Current State
 
+- **0.7.34 (Windows/Android code39, branch `fix/compact-ink-outline`)**: tablet "页面暂时无法读取"
+  was Android OOM on a 358 MB page (作业 4); 90% was Windows pen `vectorPath` written since 0.7.21 as
+  one full-precision disc per modeled sample. Windows now writes simplified, 0.01 DIP, relative
+  outlines (wet == stored geometry); Android streams page JSON (`StreamingJson`). Existing pages are
+  re-encoded by `tools/outline-compaction` only after confirming every device has synced them
+  unchanged (`--skip` others). Win 312/312, Android JVM 310 (2 opt-in skipped), Release/lint pass.
+  Deployment/compaction status is in `docs/log/2026-11.md`. Read handwriting-engine.md "Outline size".
 - **Android 0.7.33/code38** fixes whole-workspace focus highlighting after Xiaomi pen keys on
   liuqin PixelOS 17. StylusShortcutLayout keeps pre-IME focus routing with default focus highlight
   disabled. Release installed in place on the tablet, user confirmed physical pen presses retain
@@ -156,6 +163,12 @@
 - CI `.github/workflows/clients.yml` runs Windows contract tests, Android full JVM/lint and macOS tests.
 
 # Durable Lessons
+
+- Stored-format size is a correctness property: a per-sample outline that "only" costs 45 KB/stroke
+  made dense pages exceed Android's 512 MB heap. Check bytes per stroke on a real dense page whenever
+  an outline/serialization changes, and never parse whole pages via `readText()` on Android.
+- Before rewriting library files on one device, compare each file's hash with every other device and
+  its `.mojian-sync/state.json` base; a device with sync paused may hold unsynced edits.
 
 - WPF cost hides on its render thread: measure per-thread CPU in a real window at the user's stored
   viewport, never only UI-thread timings at 100%. RDP/disconnected sessions invalidate timings.

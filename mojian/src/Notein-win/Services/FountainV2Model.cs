@@ -191,9 +191,213 @@ public static class FountainV2Model
         return result;
     }
 
-    public static StreamGeometry CreateGeometry(StrokeRecord stroke)
+    // The stored outline is a union of discs and their tangent hulls. 0.7.21-0.7.33 wrote one disc per
+    // 180 Hz modeled sample with full double precision (~600 bytes per sample); dense pages reached
+    // 358 MB and Android could not load them. Samples whose disc is reproduced by interpolation
+    // within OutlineTolerance are dropped, and points are written on a 0.01 DIP grid (2.6 µm).
+    public const double OutlineTolerance = .02;
+    private const double OutlineGrid = 100;
+    private const double CircleK = .5522847498307936;
+
+    private readonly record struct OutlineFigure(Point Start, Point[] Points, bool Curves);
+
+    /// <summary>Indexes of samples kept by Douglas-Peucker on (x, y, radius).</summary>
+    internal static List<int> OutlineSampleIndexes(IReadOnlyList<Sample> samples, double tolerance = OutlineTolerance)
     {
-        var samples = Model(stroke);
+        var count = samples.Count;
+        if (count <= 2) return Enumerable.Range(0, count).ToList();
+        var keep = new bool[count];
+        keep[0] = keep[count - 1] = true;
+        var stack = new Stack<(int Start, int End)>();
+        stack.Push((0, count - 1));
+        while (stack.Count > 0)
+        {
+            var (start, end) = stack.Pop();
+            if (end - start < 2) continue;
+            var a = samples[start]; var b = samples[end];
+            var chord = b.Position - a.Position;
+            var length2 = chord.LengthSquared;
+            var worst = -1d; var index = -1;
+            for (var i = start + 1; i < end; i++)
+            {
+                var s = samples[i];
+                var t = length2 <= 1e-16 ? 0 : Math.Clamp(((s.Position - a.Position) * chord) / length2, 0, 1);
+                // Boundary deviation of the disc against the interpolated disc at the same position.
+                var error = (s.Position - (a.Position + chord * t)).Length + Math.Abs(s.Width - (a.Width + (b.Width - a.Width) * t)) / 2;
+                if (error > worst) { worst = error; index = i; }
+            }
+            if (worst <= tolerance) continue;
+            keep[index] = true;
+            stack.Push((start, index));
+            stack.Push((index, end));
+        }
+        var result = new List<int>();
+        for (var i = 0; i < count; i++) if (keep[i]) result.Add(i);
+        return result;
+    }
+
+    private static double Grid(double value) => Math.Round(value * OutlineGrid, MidpointRounding.AwayFromZero) / OutlineGrid;
+    private static Point Grid(Point point) => new(Grid(point.X), Grid(point.Y));
+
+    private static List<OutlineFigure> OutlineFigures(StrokeRecord stroke) => OutlineFigures(Model(stroke));
+
+    private static List<OutlineFigure> OutlineFigures(IReadOnlyList<Sample> all)
+    {
+        var samples = OutlineSampleIndexes(all).Select(index => all[index]).ToList();
+        var figures = new List<OutlineFigure>(samples.Count * 2);
+        for (var i = 0; i < samples.Count; i++)
+        {
+            var sample = samples[i];
+            var radius = sample.Width / 2;
+            var p = sample.Position;
+            if (radius > 1e-8)
+            {
+                // Cubic circles are supported by all three shared-outline readers (iOS lacks A).
+                const double k = CircleK;
+                figures.Add(new(Grid(p + new Vector(radius, 0)),
+                [
+                    Grid(p + new Vector(radius, radius * k)), Grid(p + new Vector(radius * k, radius)), Grid(p + new Vector(0, radius)),
+                    Grid(p + new Vector(-radius * k, radius)), Grid(p + new Vector(-radius, radius * k)), Grid(p + new Vector(-radius, 0)),
+                    Grid(p + new Vector(-radius, -radius * k)), Grid(p + new Vector(-radius * k, -radius)), Grid(p + new Vector(0, -radius)),
+                    Grid(p + new Vector(radius * k, -radius)), Grid(p + new Vector(radius, -radius * k)), Grid(p + new Vector(radius, 0)),
+                ], true));
+            }
+            if (i == 0) continue;
+            var previous = samples[i - 1];
+            var previousRadius = previous.Width / 2;
+            var delta = p - previous.Position;
+            var distance = delta.Length;
+            // A disc inside its neighbour needs no hull; a zero-length hull has no area.
+            if (distance <= 1e-8 || distance <= Math.Abs(previousRadius - radius) || previousRadius + radius <= 1e-8) continue;
+            var along = delta / distance;
+            var normal = new Vector(along.Y, -along.X);
+            // Outer tangents of both discs, so dropped intermediate samples are still covered exactly.
+            // Equal radii reduce to the previous normal-offset quad and keep its winding (same as discs).
+            var cos = (previousRadius - radius) / distance;
+            var sin = Math.Sqrt(Math.Max(0, 1 - cos * cos));
+            var first = along * cos + normal * sin;
+            var second = along * cos - normal * sin;
+            figures.Add(new(Grid(previous.Position + first * previousRadius),
+                [Grid(p + first * radius), Grid(p + second * radius), Grid(previous.Position + second * previousRadius)], false));
+        }
+        return figures;
+    }
+
+    private static StreamGeometry Geometry(IReadOnlyList<OutlineFigure> figures)
+    {
+        var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
+        using (var context = geometry.Open())
+        {
+            foreach (var figure in figures)
+            {
+                context.BeginFigure(figure.Start, true, true);
+                if (figure.Curves)
+                    for (var i = 0; i < figure.Points.Length; i += 3)
+                        context.BezierTo(figure.Points[i], figure.Points[i + 1], figure.Points[i + 2], true, false);
+                else
+                    foreach (var point in figure.Points) context.LineTo(point, true, false);
+            }
+        }
+        geometry.Freeze();
+        return geometry;
+    }
+
+    public static StreamGeometry CreateGeometry(StrokeRecord stroke) => Geometry(OutlineFigures(stroke));
+
+    private static void AppendNumber(System.Text.StringBuilder text, double value)
+    {
+        value = Grid(value);
+        if (value == 0) { text.Append('0'); return; }
+        var formatted = value.ToString("0.##", CultureInfo.InvariantCulture);
+        if (formatted.StartsWith("0.", StringComparison.Ordinal)) text.Append(formatted, 1, formatted.Length - 1);
+        else if (formatted.StartsWith("-0.", StringComparison.Ordinal)) text.Append('-').Append(formatted, 2, formatted.Length - 2);
+        else text.Append(formatted);
+    }
+
+    /// <summary>Compact shared outline: absolute figure starts, relative c/l segments, 0.01 DIP grid.</summary>
+    internal static string OutlineText(StrokeRecord stroke) => OutlineText(OutlineFigures(stroke));
+
+    private static string OutlineText(IReadOnlyList<OutlineFigure> figures)
+    {
+        var text = new System.Text.StringBuilder(16 + figures.Count * 64);
+        text.Append("F1");
+        foreach (var figure in figures)
+        {
+            text.Append('M'); AppendNumber(text, figure.Start.X); text.Append(','); AppendNumber(text, figure.Start.Y);
+            text.Append(figure.Curves ? 'c' : 'l');
+            for (var i = 0; i < figure.Points.Length; i++)
+            {
+                if (i > 0) text.Append(' ');
+                // All three points of a c segment are relative to that segment's start; l is chained.
+                var previous = figure.Curves ? i - i % 3 - 1 : i - 1;
+                var origin = previous < 0 ? figure.Start : figure.Points[previous];
+                AppendNumber(text, figure.Points[i].X - origin.X); text.Append(',');
+                AppendNumber(text, figure.Points[i].Y - origin.Y);
+            }
+            text.Append('z');
+        }
+        return text.ToString();
+    }
+
+    public static void StoreOutline(StrokeRecord stroke)
+    {
+        var figures = OutlineFigures(stroke);
+        var geometry = Geometry(figures);
+        stroke.VectorPath = OutlineText(figures);
+        var bounds = geometry.Bounds;
+        stroke.VectorBounds = bounds.IsEmpty ? null : [bounds.Left, bounds.Top, bounds.Right, bounds.Bottom];
+        stroke.VectorTransform = [1, 0, 0, 1, 0, 0];
+        stroke.InvalidateBounds();
+    }
+
+    /// <summary>
+    /// The 0.7.21-0.7.33 outline text (one disc per modeled sample, full precision). Used only to prove
+    /// that a stored outline is still exactly this stroke's own generated outline before compacting it.
+    /// </summary>
+    internal static string LegacyOutlineText(StrokeRecord stroke) => LegacyOutlineText(Model(stroke));
+
+    /// <summary>
+    /// Re-encodes a stored 0.7.21-0.7.33 outline in the compact form, in the outline's own coordinate
+    /// space (vectorTransform is unchanged). Returns null unless the text is exactly a legacy disc/hull
+    /// outline: the recovered discs must regenerate every stored number within 1e-9 DIP.
+    /// </summary>
+    internal static (string Text, Rect Bounds)? CompactLegacyOutline(string text)
+    {
+        if (!text.StartsWith("F1M", StringComparison.Ordinal) || text.Contains('c') || text.Contains('l')) return null;
+        var stored = LegacyNumbers(text);
+        var samples = new List<Sample>();
+        foreach (var figure in text[2..].Split('M', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!figure.Contains('C')) continue;
+            var n = LegacyNumbers(figure);
+            if (n.Count != 26) return null;
+            // Disc start is p + (r, 0); its third point is p + (0, r).
+            var x = n[6]; var y = n[1]; var radius = n[0] - x;
+            if (!(radius > 1e-8)) return null;
+            samples.Add(new Sample(new Point(x, y), 1, samples.Count, radius * 2));
+        }
+        if (samples.Count == 0) return null;
+        var regenerated = LegacyNumbers(LegacyOutlineText(samples));
+        if (regenerated.Count != stored.Count) return null;
+        for (var i = 0; i < stored.Count; i++)
+            if (Math.Abs(stored[i] - regenerated[i]) > 1e-9) return null;
+        var figures = OutlineFigures(samples);
+        return (OutlineText(figures), Geometry(figures).Bounds);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex LegacyNumber =
+        new(@"-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static List<double> LegacyNumbers(string text)
+    {
+        var values = new List<double>();
+        foreach (System.Text.RegularExpressions.Match match in LegacyNumber.Matches(text))
+            values.Add(double.Parse(match.ValueSpan, NumberStyles.Float, CultureInfo.InvariantCulture));
+        return values;
+    }
+
+    private static string LegacyOutlineText(IReadOnlyList<Sample> samples)
+    {
         var geometry = new StreamGeometry { FillRule = FillRule.Nonzero };
         using (var context = geometry.Open())
         {
@@ -202,8 +406,7 @@ public static class FountainV2Model
                 var sample = samples[i];
                 var radius = sample.Width / 2;
                 if (radius <= 1e-8) continue;
-                // Cubic circles are supported by all three shared-outline readers (iOS lacks A).
-                const double k = .5522847498307936;
+                const double k = CircleK;
                 var p = sample.Position;
                 context.BeginFigure(p + new Vector(radius, 0), true, true);
                 context.BezierTo(p + new Vector(radius, radius * k), p + new Vector(radius * k, radius), p + new Vector(0, radius), true, false);
@@ -215,7 +418,6 @@ public static class FountainV2Model
                 var delta = p - previous.Position;
                 if (delta.Length <= 1e-8) continue;
                 var normal = new Vector(delta.Y, -delta.X) / delta.Length;
-                // Same clockwise winding as the circles, including retraces and self crossings.
                 context.BeginFigure(previous.Position + normal * (previous.Width / 2), true, true);
                 context.LineTo(p + normal * radius, true, false);
                 context.LineTo(p - normal * radius, true, false);
@@ -223,16 +425,6 @@ public static class FountainV2Model
             }
         }
         geometry.Freeze();
-        return geometry;
-    }
-
-    public static void StoreOutline(StrokeRecord stroke)
-    {
-        var geometry = CreateGeometry(stroke);
-        stroke.VectorPath = geometry.ToString(CultureInfo.InvariantCulture);
-        var bounds = geometry.Bounds;
-        stroke.VectorBounds = bounds.IsEmpty ? null : [bounds.Left, bounds.Top, bounds.Right, bounds.Bottom];
-        stroke.VectorTransform = [1, 0, 0, 1, 0, 0];
-        stroke.InvalidateBounds();
+        return geometry.ToString(CultureInfo.InvariantCulture);
     }
 }

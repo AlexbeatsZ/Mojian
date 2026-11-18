@@ -36,7 +36,8 @@ it in `PageScene.OrderedContent` painter order (or tags exist); new ink normally
 top layer, so it uses the wet overlay. Covered ink keeps the canonical in-scene path.
 
 Erasing: the eraser tested fountain-v2/pen-style strokes with `FillContainsWithDetail` against the
-stored outline (about 45,000 path characters, one disc per modeled sample plus trapezoids);
+stored outline (about 45,000 path characters, one disc per modeled sample plus trapezoids; 0.7.34
+simplifies and compacts this, see handwriting-engine.md "Outline size");
 8.3-8.5 ms per candidate per sample, plus 0.6 ms to parse the path on first touch.
 `StrokeEraserHitTest` tests the same disc/trapezoid union from `FountainV2Model.Model` samples,
 cached per stroke `RenderVersion`. On 40 real strokes it took 6.3 ms for 1,494 checks vs 4,303 ms;

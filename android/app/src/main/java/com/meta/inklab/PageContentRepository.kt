@@ -134,8 +134,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         removeStaleTemporaries(file)
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val source = if (file.isFile) try {
-            JSONObject(java.security.DigestInputStream(file.inputStream(), digest).reader(Charsets.UTF_8).use { it.readText() })
-                .also { SharedWorkspaceCodec.decodeDocument(it) }
+            readJson(file, digest).also { SharedWorkspaceCodec.decodeDocument(it) }
         } catch (error: Exception) {
             restoreJson(file) { json ->
                 val restored = SharedWorkspaceCodec.decodeDocument(json)
@@ -143,7 +142,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
             }
             digest.reset()
             generation = stamp(file)
-            JSONObject(java.security.DigestInputStream(file.inputStream(), digest).reader(Charsets.UTF_8).use { it.readText() })
+            readJson(file, digest)
         } else null
         val readHash = source?.let { hex(digest.digest()) }
         val document = source?.let(SharedWorkspaceCodec::decodeDocument) ?: PageInsertDocument(notebookId,pageId)
@@ -241,8 +240,15 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         }
     }
 
+    /** Streams a page into org.json; dense pages must never be materialized as one String first. */
+    private fun readJson(file: File, digest: java.security.MessageDigest? = null): JSONObject {
+        val bytes = java.io.BufferedInputStream(file.inputStream(), 256 * 1024)
+        val input = if (digest == null) bytes else java.security.DigestInputStream(bytes, digest)
+        return input.reader(Charsets.UTF_8).use(StreamingJson::readObject)
+    }
+
     private fun restoreJson(file: File, validate: (JSONObject) -> Unit) {
-        fun read(source: File): JSONObject = JSONObject(source.readText(Charsets.UTF_8)).also(validate)
+        fun read(source: File): JSONObject = readJson(source).also(validate)
         if (file.isFile) {
             try { read(file); return }
             catch (error: Exception) {
