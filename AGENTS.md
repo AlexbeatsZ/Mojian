@@ -9,6 +9,14 @@
 
 # Current State
 
+- **2026-11-22 tablet pen dropout diagnosis (Android 0.7.39 / liuqin PixelOS17)**: while the user
+  continuously attempted writing, a 60 s raw capture received 0 pen events versus 433 finger frames;
+  kernel reported Bluetooth connected, pen-charge detected, and pen input disabled (`pen_active=0`).
+  Hall4 was 0; recovery changed Hall4 to 1, charge detection off and `pen_active=1`, followed by
+  real pen events and user-confirmed writing. Initial recovery followed moving the tablet, not
+  removing the case. User subsequently explicitly confirmed the magnet as the cause and closed
+  the investigation. This occurrence is below app routing; preserve the two-finger/palm behavior.
+  Reuse `~/.agents/liuqin--stylus-input/AGENTS.md`; no app/system settings were changed.
 - **0.7.40 (Windows/Android code44, source only)**: native sync three-way merges JSON pages/library per
   key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
   survive, volatile-only resaves receive the server page. Not released or installed. Read native-sync.md.
