@@ -12,6 +12,8 @@ public sealed partial class MainViewModel : ObservableObject
 {
     public const double MinimumPanoramaSensitivity = 0.25d;
     public const double MaximumPanoramaSensitivity = 3d;
+    public const int MinimumUndoDoubleTapIntervalMillis = 150;
+    public const int MaximumUndoDoubleTapIntervalMillis = 800;
 
     private readonly PreferencesStore _preferencesStore;
     private readonly PageSaveQueue _pageSaves = new();
@@ -317,7 +319,21 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Two quick taps on an undo button redo (device-local).</summary>
+    /// <summary>Window for the second undo-shortcut press that turns it into redo (device-local).</summary>
+    public int UndoDoubleTapIntervalMillis
+    {
+        get => Math.Clamp(_settings.UndoDoubleTapIntervalMillis, MinimumUndoDoubleTapIntervalMillis, MaximumUndoDoubleTapIntervalMillis);
+        set
+        {
+            var normalized = Math.Clamp(value, MinimumUndoDoubleTapIntervalMillis, MaximumUndoDoubleTapIntervalMillis);
+            if (_settings.UndoDoubleTapIntervalMillis == normalized) return;
+            _settings.UndoDoubleTapIntervalMillis = normalized;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    /// <summary>Two quick presses of the undo shortcut (e.g. a tablet express key) redo (device-local).</summary>
     public bool UndoDoubleTapRedoEnabled
     {
         get => _settings.UndoDoubleTapRedoEnabled;
@@ -1889,6 +1905,7 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(PredictionEnabled));
         OnPropertyChanged(nameof(UndoDoubleTapRedoEnabled));
         OnPropertyChanged(nameof(UndoDoubleTapRedoButtonText));
+        OnPropertyChanged(nameof(UndoDoubleTapIntervalMillis));
         OnPropertyChanged(nameof(ImageDisplayMode));
         OnPropertyChanged(nameof(PdfDisplayMode));
         OnPropertyChanged(nameof(PanoramaSensitivity));

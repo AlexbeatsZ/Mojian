@@ -181,7 +181,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => syncTimer.Stop();
         ConfigureCanvas(LeftCanvas);
         ConfigureCanvas(RightCanvas);
-        ViewModel.RequestUndo += () => UndoTap.Tap();
+        ViewModel.RequestUndo += () => FocusedCanvas.Undo();
         ViewModel.RequestRedo += () => FocusedCanvas.Redo();
         ViewModel.RequestClearPage += () => FocusedCanvas.ClearPage();
         ViewModel.RequestZoom += scale => FocusedCanvas.SetZoom(scale ?? 1f);
@@ -612,23 +612,27 @@ public partial class MainWindow : Window
     }
 
     private UndoTapGesture UndoTap => _undoTap ??= new UndoTapGesture(
-        () => FocusedCanvas.Undo(), () => FocusedCanvas.Redo(), () => ViewModel.UndoDoubleTapRedoEnabled, Dispatcher);
+        () => FocusedCanvas.Undo(), () => FocusedCanvas.Redo(), () => ViewModel.UndoDoubleTapRedoEnabled, Dispatcher,
+        () => TimeSpan.FromMilliseconds(ViewModel.UndoDoubleTapIntervalMillis));
 
-    private bool IsUndoButtonSource(object? source)
+    // A pending single-press undo must apply before any other input can edit or navigate.
+    private void FlushPendingUndo()
     {
-        for (var current = source as DependencyObject; current != null; current = current is Visual ? VisualTreeHelper.GetParent(current) ?? LogicalTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
-            if (ReferenceEquals(current, RibbonUndoButton) || current is ButtonBase { Tag: "draw:undo" }) return true;
-        return false;
+        if (_undoTap is { IsPending: true } gesture) gesture.Flush();
     }
 
-    // A pending single-tap undo must apply before any other input can edit or navigate.
-    private void FlushPendingUndo(object? source)
+    /// <summary>
+    /// The undo shortcut (default Ctrl+Z, which tablet express keys send) redoes when pressed twice
+    /// within <see cref="UndoTapGesture.DoubleTapInterval"/>. Held-key auto-repeat keeps undoing.
+    /// </summary>
+    internal void HandleUndoShortcut(bool isRepeat)
     {
-        if (_undoTap is { IsPending: true } gesture && !IsUndoButtonSource(source)) gesture.Flush();
+        if (isRepeat) { UndoTap.Flush(); FocusedCanvas.Undo(); return; }
+        UndoTap.Tap();
     }
 
-    private void OnWindowPreviewStylusDown(object sender, StylusDownEventArgs e) => FlushPendingUndo(e.OriginalSource);
-    private void OnWindowPreviewTouchDown(object sender, TouchEventArgs e) => FlushPendingUndo(e.OriginalSource);
+    private void OnWindowPreviewStylusDown(object sender, StylusDownEventArgs e) => FlushPendingUndo();
+    private void OnWindowPreviewTouchDown(object sender, TouchEventArgs e) => FlushPendingUndo();
 
     private void QueueToolFlyoutAnchorRepair() =>
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(RepairToolFlyoutAnchor));
@@ -662,7 +666,7 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        FlushPendingUndo(e.OriginalSource);
+        FlushPendingUndo();
         if (e.ChangedButton != MouseButton.Left) return;
         if (!ToolFlyoutPopup.IsOpen && !ViewModel.IsToolFlyoutOpen)
         {
@@ -748,7 +752,7 @@ public partial class MainWindow : Window
         }
         switch (id)
         {
-            case "draw:undo": UndoTap.Tap(); break;
+            case "draw:undo": FocusedCanvas.Undo(); break;
             case "draw:redo": FocusedCanvas.Redo(); break;
             case "draw:add": OnAddToolMenuClick(button, e); break;
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; break;
@@ -1378,15 +1382,23 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        FlushPendingUndo(null);
+        var gesture = ShortcutGesture.FromEvent(e);
+        // Modifier-only presses (the Ctrl of a second Ctrl+Z) must not flush a pending undo.
+        if (!gesture.IsValid) return;
+        var shortcutAction = ViewModel.FindShortcutAction(gesture);
+        if (shortcutAction == "draw:undo")
+        {
+            HandleUndoShortcut(e.IsRepeat);
+            e.Handled = true;
+            return;
+        }
+        FlushPendingUndo();
         if (e.Key == Key.Escape && FocusedCanvas.ExitImageCrop()) { e.Handled = true; return; }
         if (FocusedTextBox() == null && DirectInputPolicy.IsSelectionDeleteKey(e.Key, Keyboard.Modifiers) && FocusedCanvas.DeleteSelection())
         {
             e.Handled = true;
             return;
         }
-        var gesture = ShortcutGesture.FromEvent(e);
-        var shortcutAction = ViewModel.FindShortcutAction(gesture);
         if (shortcutAction != null && ExecuteShortcutAction(shortcutAction))
         {
             e.Handled = true;

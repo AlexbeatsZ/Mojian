@@ -9,6 +9,7 @@ public sealed class WorkspaceSettings
     public bool ZoomLocked { get; set; }
     public bool PredictionEnabled { get; set; } = true;
     public bool UndoDoubleTapRedoEnabled { get; set; } = true;
+    public int UndoDoubleTapIntervalMillis { get; set; } = 300;
     public string ToolShelfJson { get; set; } = string.Empty;
     public string PressureEraserToolId { get; set; } = "eraser-stroke";
     public double PanoramaSensitivity { get; set; } = 1d;

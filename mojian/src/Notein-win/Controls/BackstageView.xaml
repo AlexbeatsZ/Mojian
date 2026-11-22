@@ -196,7 +196,25 @@
                                     Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="双击撤销重做" Foreground="{StaticResource TextPrimary}" FontSize="14" />
-                                <TextBlock Text="快速点击两次撤销按钮执行重做；开启后单击撤销会在 0.3 秒后执行。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                <TextBlock Text="在下方时间内连按两次撤销快捷键（默认 Ctrl+Z，数位板撤销键）执行重做；开启后单按撤销会等这段时间再执行，按住仍连续撤销。界面上的撤销按钮不受影响。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Row 1c: 双击判定时间 -->
+                    <Border MinHeight="56" Padding="0,8" IsEnabled="{Binding UndoDoubleTapRedoEnabled}">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                                <Slider x:Name="UndoDoubleTapIntervalSlider" Width="180" VerticalAlignment="Center"
+                                        Minimum="150" Maximum="800"
+                                        SmallChange="10" LargeChange="50" TickFrequency="10" IsSnapToTickEnabled="True"
+                                        Value="{Binding UndoDoubleTapIntervalMillis, Mode=TwoWay}" />
+                                <TextBlock Width="64" TextAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource TextPrimary}" FontSize="14"
+                                           Text="{Binding UndoDoubleTapIntervalMillis, StringFormat={}{0} ms}" />
+                            </StackPanel>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="双击判定时间" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="两次按下撤销的最长间隔。按得慢就调大；调小则单次撤销等待更短。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                             </StackPanel>
                         </DockPanel>
                     </Border>

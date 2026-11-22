@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Notein_win.Controls;
 using Notein_win.Models;
 using Notein_win.Services;
 using Notein_win.ViewModels;
@@ -35,6 +36,18 @@ public sealed class ToolbarGestureTests
     });
 
     [Fact]
+    public void UndoDoubleTapUsesTheConfiguredInterval() => WpfTestExecutor.Run(() =>
+    {
+        var undo = 0; var redo = 0; var interval = TimeSpan.FromMilliseconds(600);
+        var gesture = new UndoTapGesture(() => undo++, () => redo++, () => true, null, () => interval);
+        gesture.Tap(); Wait(TimeSpan.FromMilliseconds(400));
+        Assert.True(gesture.IsPending); gesture.Tap(); Assert.Equal((0, 1), (undo, redo));
+        interval = TimeSpan.FromMilliseconds(150);
+        gesture.Tap(); Wait(TimeSpan.FromMilliseconds(400));
+        Assert.False(gesture.IsPending); Assert.Equal((1, 1), (undo, redo));
+    });
+
+    [Fact]
     public void UndoDoubleTapSettingDefaultsOnAndPersists() => WpfTestExecutor.Run(() =>
     {
         var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-undo-tap", "fixture-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
@@ -43,11 +56,80 @@ public sealed class ToolbarGestureTests
             var prefs = new PreferencesStore(Path.Combine(root, "preferences.json"));
             var model = new MainViewModel(root, prefs);
             Assert.True(model.UndoDoubleTapRedoEnabled); Assert.Equal("开启", model.UndoDoubleTapRedoButtonText);
-            model.ToggleUndoDoubleTapRedoCommand.Execute(null); model.SaveAll();
-            Assert.False(new MainViewModel(root, prefs).UndoDoubleTapRedoEnabled);
+            Assert.Equal(300, model.UndoDoubleTapIntervalMillis);
+            model.ToggleUndoDoubleTapRedoCommand.Execute(null); model.UndoDoubleTapIntervalMillis = 5000; model.SaveAll();
+            Assert.Equal(MainViewModel.MaximumUndoDoubleTapIntervalMillis, model.UndoDoubleTapIntervalMillis);
+            model.UndoDoubleTapIntervalMillis = 420; model.SaveAll();
+            var reloaded = new MainViewModel(root, prefs);
+            Assert.False(reloaded.UndoDoubleTapRedoEnabled); Assert.Equal(420, reloaded.UndoDoubleTapIntervalMillis);
         }
         finally { try { Directory.Delete(root, true); } catch (IOException) { } }
     });
+
+    [Fact]
+    public void UndoShortcutDoublePressRedoesWhileUndoButtonsStayImmediate() => WpfTestExecutor.Run(() =>
+    {
+        foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" })
+            Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
+        var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-undo-shortcut", "fixture-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        MainWindow? window = null;
+        try
+        {
+            var model = new MainViewModel(root, new PreferencesStore(Path.Combine(root, "preferences.json")));
+            window = new MainWindow(model); window.Show(); Idle(window);
+            // Keyboard.Modifiers cannot be faked, so bind undo to a plain key; Ctrl+Z takes the same path.
+            model.SetShortcut("draw:undo", new ShortcutGesture(Key.F9, ModifierKeys.None));
+            model.UndoDoubleTapIntervalMillis = 200;
+            var canvas = (NoteCanvas)window.FindName("LeftCanvas");
+            canvas.SelectedTool = new ToolPreset("shape-default", DrawingToolKind.Shape) { ShapeKind = ShapeKind.Rectangle };
+            for (var i = 0; i < 3; i++) DrawShape(canvas, 40 + i * 120);
+            var strokes = canvas.Document!.Strokes;
+            Assert.Equal(3, strokes.Count);
+
+            Press(window, Key.F9);
+            Assert.Equal(3, strokes.Count); // single press waits for a possible second press
+            Wait(TimeSpan.FromMilliseconds(500));
+            Assert.Equal(2, strokes.Count);
+
+            Press(window, Key.F9); Press(window, Key.LeftCtrl); Press(window, Key.F9);
+            Assert.Equal(3, strokes.Count); // undo + redo within the window
+
+            Press(window, Key.F9); Press(window, Key.F9, isRepeat: true);
+            Assert.Single(strokes); // holding the key keeps undoing
+
+            Press(window, Key.F9); Press(window, Key.Escape);
+            Assert.Empty(strokes); // other input applies the pending undo first
+
+            canvas.Redo(); canvas.Redo();
+            model.UndoCommand.Execute(null);
+            Assert.Single(strokes); // the ribbon undo button stays immediate
+            window.Close(); window = null;
+        }
+        finally { window?.Close(); try { Directory.Delete(root, true); } catch (IOException) { } }
+    });
+
+    private static void DrawShape(NoteCanvas canvas, double x)
+    {
+        void Call(string name, params object[] args) => typeof(NoteCanvas).GetMethod(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(canvas, args);
+        Call("BeginDirectPointer", new Point(x, 50), false);
+        Call("ContinuePointer", new Point(x + 80, 110), .5f, 0f, 0f, false);
+        Call("EndPointer", false);
+    }
+
+    private static void Press(Window window, Key key, bool isRepeat = false)
+    {
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window)!, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        if (isRepeat) typeof(KeyEventArgs).GetMethod("SetRepeat", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(args, [true]);
+        window.RaiseEvent(args);
+    }
+
+    private static void Wait(TimeSpan duration)
+    {
+        var frame = new DispatcherFrame();
+        var deadline = new DispatcherTimer { Interval = duration };
+        deadline.Tick += (_, _) => { deadline.Stop(); frame.Continue = false; };
+        deadline.Start(); Dispatcher.PushFrame(frame);
+    }
 
     [Fact]
     public void PenTapFeedbackIsDisabledForEveryElement() => WpfTestExecutor.Run(() =>

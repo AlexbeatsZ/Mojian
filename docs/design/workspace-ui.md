@@ -192,11 +192,15 @@ selected tool's current button (`RepairToolFlyoutAnchor`) after selection and be
 controls change its height; otherwise WPF repositions the popup against a detached target and it
 jumps to an unrelated screen position (0.7.37 fix).
 
-Undo buttons (both clients, ribbon and full-page toolbar) support `双击撤销重做`, a device-local
-setting that defaults on: two taps within 300 ms redo once; a single tap undoes after 300 ms. Any
-other pointer/key input or leaving the activity applies a pending undo first, so it never lands after
-a later edit. Ctrl+Z/Y and pen-key Undo/Redo bindings stay immediate. Turning it off restores
-immediate undo.
+`双击撤销重做` (device-local, default on) exists for the user's **graphics tablet express key**, which
+sends the undo shortcut (default Ctrl+Z). Windows 0.7.38+: two presses of the `draw:undo` shortcut
+within `双击判定时间` (settings.json `UndoDoubleTapIntervalMillis`, 150–800 ms, default 300) redo
+once; a single press undoes after that interval; key auto-repeat (held key) keeps undoing
+immediately. Modifier-only key-downs (the Ctrl of the second Ctrl+Z) must not flush the pending
+press; any other key, pointer, pen or touch input applies the pending undo first. Windows on-screen
+undo buttons are immediate again (the user explicitly did not want the button variant, 2026-11-21).
+Android 0.7.37 still applies the 300 ms rule to its toolbar undo buttons (prefs
+`undo-double-tap-redo`); the user said other surfaces do not matter, so it was left unchanged.
 
 Follow the desktop OneNote grouping rhythm: undo/redo, a hairline divider, lasso,
 another hairline divider, eraser and ink tools, add-tool, a divider, stylus panorama hand, a divider,
