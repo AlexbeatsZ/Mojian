@@ -9,6 +9,12 @@
 
 # Current State
 
+- **Android 0.7.41/code45**: invisible ink after opening/foreground return: cached `RenderNode`
+  entries may survive HWUI display-list eviction. Visible/prefetch paths now check `hasDisplayList`,
+  re-record invalid tiles, release tiles while the window is hidden and request a frame on return.
+  liuqin native regression: 0.7.39 fails, 0.7.41 passes partial/full eviction, page binding and window
+  visibility; JVM 323 pass/1 skipped, Release/native-test APK/lint pass. Installed in place on tablet
+  with original signer; firstInstallTime preserved, launch shows ink. See android-page-navigation.md.
 - **2026-11-22 tablet thin ink**: PixelOS 17 on liuqin reports `xdpi≈30.9` (real ≈309), so AndroidX Ink
   speed is 10× too high and Notein风格 thins too much; pen pressure is unchanged. Vector module
   `com.meta.liuqin.dpifix` (scope Mojian + Notein) corrects it; verified on a test page. See handwriting-engine.md.
@@ -23,9 +29,9 @@
   charge=1 still delivered 161 contacts/26129 frames. APModule installed for next normal boot;
   first boot autoload remains unverified. Source: `/Users/meta/Project/Workspaces/liuqin-pen-charge-bypass`.
   Reuse `~/.agents/liuqin--stylus-input/AGENTS.md`; Mojian application code was unchanged.
-- **0.7.40 (Windows/Android code44, source only)**: native sync three-way merges JSON pages/library per
+- **0.7.40 (Windows source only; Android included in 0.7.41/code45)**: native sync three-way merges JSON pages/library per
   key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
-  survive, volatile-only resaves receive the server page. Not released or installed. Read native-sync.md.
+  survive, volatile-only resaves receive the server page. Windows not released/installed. Read native-sync.md.
 - **Android 0.7.39/code43**: pen-style curves compile to AndroidX `Linear` via `curveMapping` so the
   response is exactly 1 at x=1 (Ink's implicit end point). 0.7.26–0.7.37 snapped the Notein speed curve
   back to full width at >=64 cm/s (blunt fast tails). Notein preset values never changed. Windows unaffected.
@@ -199,6 +205,9 @@
 
 # Durable Lessons
 
+- A cached Android `RenderNode` can outlive its display list after HWUI resource/tree cleanup.
+  Check `hasDisplayList()` before reuse (including prefetch); map membership alone can retain blank
+  ink until a zoom/edit. Window visibility and native display-list eviction need rendering regressions.
 - AndroidX `EasingFunction.Linear` always returns its implicit (1,1) at x=1 and CLAMP pins every
   out-of-range source there. Any compiled response must equal 1 at x=1; check equivalence over and
   beyond the source range against google/ink's Linear semantics, not only inside it.

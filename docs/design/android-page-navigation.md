@@ -1,6 +1,6 @@
 # Android 页面加载与视图恢复
 
-Last verified: 2026-10-28
+Last verified: 2026-11-22
 
 ## Save and mutation safety (2026-10-28)
 
@@ -148,6 +148,24 @@ native sync cannot publish an intermediate index/assets snapshot.
   读取失败为 OutOfMemoryError 时提示“页面数据过大”。
 
 ## 验证边界
+
+### 瓦片绘制内容回收后的恢复（0.7.41）
+
+2026-11-22 用户报告启动、切页或从后台切回时，偶尔已有笔画不显示，缩放或写一笔才恢复。
+`sceneTiles` 中仍有 `RenderNode` 不代表其 display list 有效：HWUI 会在销毁硬件资源或移出渲染树时
+回收 display list，而 Kotlin map 可以继续持有节点。原来的 `getOrPut` 直接复用这个空节点；
+缩放重新锚定或笔迹编辑才会碰巧重录。这是已在平板独立进程复现的失效路径，不表示已捕获了
+用户每次空白的原始现场。
+
+- 可见瓦片和手势预取均检查 `hasDisplayList()`；无效时复用原节点并重录，完整瓦片继续复用。
+- 窗口不再可见时释放瓦片；重新可见时主动请求动画帧。页面加载仍沿用原有 revision、异步绑定和
+  viewport 恢复，不借助缩放或内容修改来刷新，也不引入整页常态重绘。
+- `DryInkTileLifecycleIntegrationTest` 用硬件 RecordingCanvas 和真实 RenderNode 覆盖首次绘制、
+  有效缓存复用、部分/全部 display list 回收、重新绑定和窗口隐藏/重现。平板 PixelOS17 的独立
+  `app_process` 直接加载产品 APK 与测试 APK 执行两项回归，不安装测试包、不进入真实笔记库。
+  0.7.39 在 `Discarded tile remained blank` 失败；0.7.41 全部通过。
+- Android JVM 324 项（323 通过、1 opt-in 跳过），Release APK、native-test APK、lintRelease
+  通过（0 errors / 136 warnings）。自然使用中的间歇性复现仍需用户反馈。
 
 2026-10-28 最终 0.7.0 构建通过 228/228 单元测试、APK、native-test APK 和 lint
 （0 errors / 136 warnings），新增覆盖空页导航保存失败、缺失源 PDF 和复制前资产预检。

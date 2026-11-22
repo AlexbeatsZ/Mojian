@@ -726,7 +726,7 @@ class DryInkView(context: Context) : View(context) {
         canvas.translate(originX, originY)
         canvas.scale(ratio, ratio)
         for (row in visible.firstRow..visible.lastRow) for (column in visible.firstColumn..visible.lastColumn) {
-            canvas.drawRenderNode(sceneTiles.getOrPut(ViewportSceneCache.key(column, row)) { recordSceneTile(column, row) })
+            canvas.drawRenderNode(sceneTile(column, row))
         }
         canvas.restore()
         if (!viewportGestureActive) return true
@@ -735,8 +735,8 @@ class DryInkView(context: Context) : View(context) {
         var pending = false
         retained.forEachNearest(visible) { column, row ->
             val key = ViewportSceneCache.key(column, row)
-            if (key in sceneTiles) return@forEachNearest
-            if (SystemClock.elapsedRealtimeNanos() < deadline) sceneTiles[key] = recordSceneTile(column, row) else pending = true
+            if (sceneTiles[key]?.hasDisplayList() == true) return@forEachNearest
+            if (SystemClock.elapsedRealtimeNanos() < deadline) sceneTile(column, row) else pending = true
         }
         if (pending) postInvalidateOnAnimation()
         return true
@@ -753,9 +753,19 @@ class DryInkView(context: Context) : View(context) {
         }
     }
 
-    private fun recordSceneTile(column: Int, row: Int): RenderNode {
+    private fun sceneTile(column: Int, row: Int): RenderNode {
+        val key = ViewportSceneCache.key(column, row)
+        val cached = sceneTiles[key]
+        // HWUI may discard a node's display list while its Kotlin cache entry survives, e.g.
+        // when the window stops. A map hit alone would keep drawing an empty tile until an edit
+        // or zoom happened to invalidate it. Re-record only the missing display list.
+        if (cached != null && cached.hasDisplayList()) return cached
+        return recordSceneTile(column, row, cached).also { sceneTiles[key] = it }
+    }
+
+    private fun recordSceneTile(column: Int, row: Int, recycled: RenderNode? = null): RenderNode {
         val size = ViewportSceneCache.TILE_SIZE
-        val node = spareTiles.removeFirstOrNull() ?: RenderNode("MojianSceneTile").apply { setUseCompositingLayer(true, null) }
+        val node = recycled ?: spareTiles.removeFirstOrNull() ?: RenderNode("MojianSceneTile").apply { setUseCompositingLayer(true, null) }
         node.setPosition(column * size, row * size, (column + 1) * size, (row + 1) * size)
         val tileToScreen = Matrix().apply {
             setScale(tileScale, tileScale)
@@ -785,6 +795,11 @@ class DryInkView(context: Context) : View(context) {
     override fun onDetachedFromWindow() {
         releaseSceneTiles()
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) releaseSceneTiles() else postInvalidateOnAnimation()
     }
 
     private fun drawInsertSpaceGuide(canvas: Canvas) {
