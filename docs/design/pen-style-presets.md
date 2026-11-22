@@ -160,6 +160,11 @@ Windows 使用能解释相同节点的实现或共享原生内核。完成形状
   JSON Schema 校验不能代替函数与当前工具实际参数的求值检查。
 - 新笔画仍保存完整 resolved `pen-style-v1` 和规范填充轮廓，绘制过程不查可变配置定义。
   保存、复制、导出、移动/缩放、擦除继续使用现有 owner；改文件/配置不能改变历史墨迹。
+- Android 把曲线编译成 AndroidX `EasingFunction.Linear` 时，响应在 x=1 必须正好为 1：Ink 总在
+  末尾隐含 (1,1)，x=1 时返回它，而 CLAMP 会把超出量程的输入都钉在 x=1。`BrushProfiles.curveMapping`
+  用 `target = (末值 − 跨度, 末值)` 仿射映射（目标插值不夹取，响应可大于 1）。0.7.26–0.7.37 按
+  最小/最大归一化，递减的速度曲线在 ≥64 cm/s 跳回满宽，快速收笔变钝（0.7.39 修复）。
+  `PenStyleCurveMappingTest` 按 google/ink 的 Linear 语义逐点比对 `PenStyle.evaluate` 与 fountain-v2。
 - Windows 用临时库检查导入/取消/选文件、嵌套 dropdown 点击、参数实际变化、重启恢复和
   v2 逐样本等价；Android 检查同一函数/实例与旧参数对照，编译 native fixture、运行 JVM/lint。
   未运行 native fixture、未做实体笔验收时必须明确说明。更新需服从当次用户授权与设备状态。

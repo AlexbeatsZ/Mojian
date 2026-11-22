@@ -9,6 +9,10 @@
 
 # Current State
 
+- **Android 0.7.39/code43**: pen-style curves compile to AndroidX `Linear` via `curveMapping` so the
+  response is exactly 1 at x=1 (Ink's implicit end point). 0.7.26–0.7.37 snapped the Notein speed curve
+  back to full width at >=64 cm/s (blunt fast tails). Notein preset values never changed. Windows unaffected.
+  Release v0.7.39 (APK); OMEN/Mac current APK replaced; not installed on devices.
 - **Windows 0.7.38**: `双击撤销重做` targets the graphics-tablet undo key: two presses of the undo
   shortcut (default Ctrl+Z) within the adjustable `双击判定时间` (150–800 ms, default 300) redo;
   Windows undo buttons are immediate again. Android stays 0.7.37/code42 (button variant unchanged).
@@ -179,6 +183,9 @@
 
 # Durable Lessons
 
+- AndroidX `EasingFunction.Linear` always returns its implicit (1,1) at x=1 and CLAMP pins every
+  out-of-range source there. Any compiled response must equal 1 at x=1; check equivalence over and
+  beyond the source range against google/ink's Linear semantics, not only inside it.
 - Stored-format size is a correctness property: a per-sample outline that "only" costs 45 KB/stroke
   made dense pages exceed Android's 512 MB heap. Check bytes per stroke on a real dense page whenever
   an outline/serialization changes, and never parse whole pages via `readText()` on Android.

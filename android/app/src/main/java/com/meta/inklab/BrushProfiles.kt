@@ -66,20 +66,38 @@ object BrushProfiles {
         PenStyle.fromJson(org.json.JSONObject(String(java.util.Base64.getUrlDecoder().decode(id.removePrefix(STYLE_PREFIX)), Charsets.UTF_8)))
     }.getOrNull()
 
+    internal data class CurveMapping(val targetStart: Float, val targetEnd: Float, val response: List<Pair<Float, Float>>)
+
+    /**
+     * Width curve -> AndroidX `Linear` response plus target range, such that
+     * `lerp(targetStart, targetEnd, response(x / end)) == curve(x)` for every x, including x >= end.
+     *
+     * AndroidX Ink always appends an implicit (1, 1) to `EasingFunction.Linear` and returns it for
+     * x == 1 (google/ink easing_implementation.cc), and CLAMP pins every source beyond the range end
+     * to exactly x == 1. The response therefore has to equal 1 at the curve end. Normalising min..max
+     * (as 0.7.26-0.7.38 did) broke falling curves: the Notein speed curve 1 -> 0.15 snapped back to
+     * full width at >= 64 cm/s, so fast tails were blunt instead of hairline. Target lerp is not
+     * clamped, so responses above 1 are valid. Null when the curve is constantly 1 (no behavior).
+     */
+    internal fun curveMapping(points: List<CurvePoint>): CurveMapping? {
+        val lo = points.minOf { it.y }.toFloat(); val hi = points.maxOf { it.y }.toFloat()
+        if (kotlin.math.abs(hi - lo) < 1e-5f && kotlin.math.abs(lo - 1f) < 1e-5f) return null
+        if (kotlin.math.abs(hi - lo) < 1e-5f) return CurveMapping(1f, lo, listOf(0f to 1f))
+        val span = hi - lo
+        val end = points.last().y.toFloat()
+        val xEnd = points.last().x
+        return CurveMapping(end - span, end, points.map { (it.x / xEnd).toFloat() to (1f + (it.y.toFloat() - end) / span) })
+    }
+
     /** Compile the same persisted style model into the pinned AndroidX behavior graph. */
     fun createStyle(sizePx: Float, style: PenStyle, colorArgb: Int): Brush {
         fun curve(source: BrushBehavior.Source, points: List<CurvePoint>, ms: Int, stylusOnly: Boolean = true): BrushBehavior? {
-            val lo = points.minOf { it.y }.toFloat(); val hi = points.maxOf { it.y }.toFloat()
-            if (kotlin.math.abs(hi - lo) < 1e-5f && kotlin.math.abs(lo - 1f) < 1e-5f) return null
-            val constant = kotlin.math.abs(hi - lo) < 1e-5f
-            val response = if (constant) listOf(ImmutableVec(0f, 1f)) else points.map {
-                ImmutableVec((it.x / points.last().x).toFloat(), ((it.y - lo) / (hi - lo)).toFloat())
-            }
+            val mapping = curveMapping(points) ?: return null
             return BrushBehavior(
                 source = source, target = BrushBehavior.Target.SIZE_MULTIPLIER,
                 sourceValueRangeStart = 0f, sourceValueRangeEnd = points.last().x.toFloat(),
-                targetModifierRangeStart = if (constant) 1f else lo, targetModifierRangeEnd = if (constant) lo else hi,
-                responseCurve = EasingFunction.Linear(response), responseTimeMillis = ms.toLong(),
+                targetModifierRangeStart = mapping.targetStart, targetModifierRangeEnd = mapping.targetEnd,
+                responseCurve = EasingFunction.Linear(mapping.response.map { (x, y) -> ImmutableVec(x, y) }), responseTimeMillis = ms.toLong(),
                 enabledToolTypes = if (stylusOnly) setOf(InputToolType.STYLUS) else BrushBehavior.ALL_TOOL_TYPES,
             )
         }
