@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
 
 namespace Notein_win.Services;
@@ -338,6 +339,15 @@ public sealed class NativeSyncClient : IDisposable
                         break;
                 }
             }
+            foreach (var path in conflicts.ToList())
+            {
+                var entry = remote.Files.GetValueOrDefault(path);
+                if (entry == null) continue;
+                var merged = await MergeConflict(path, Hash(_state.Files, path), local.GetValueOrDefault(path)?.Hash, entry.Hash, cancellation).ConfigureAwait(false);
+                if (merged == null) continue;
+                conflicts.Remove(path);
+                incoming[path] = new(local.GetValueOrDefault(path)?.Hash, entry, merged == RemoteMerge ? null : merged);
+            }
             if (conflicts.Count > 0) { await PreserveConflicts(conflicts, remote, cancellation).ConfigureAwait(false); return false; }
             outbox.WorkspaceId = remote.WorkspaceId;
             outbox.Changes = changes;
@@ -349,7 +359,7 @@ public sealed class NativeSyncClient : IDisposable
             else File.Delete(OutboxPath);
             if (incoming.Count > 0)
             {
-                foreach (var entry in incoming.Values.Where(entry => entry.Target.Hash != null))
+                foreach (var entry in incoming.Values.Where(entry => entry.Target.Hash != null && entry.Content == null))
                     await Download(entry.Target.Hash!, cancellation).ConfigureAwait(false);
                 NativeSyncStorage.Save(IncomingPath, new NativeSyncIncoming(remote.WorkspaceId, remote.Revision, incoming));
                 if (!await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return false;
@@ -477,7 +487,8 @@ public sealed class NativeSyncClient : IDisposable
         NativeSyncStorage.ValidateEntries(plan.Files.ToDictionary(pair => pair.Key, pair => pair.Value.Target), plan.Revision);
         if (plan.Files.TryGetValue("library.json", out var library) && library.Target.Hash == null)
             throw new IOException("禁止接收 library.json 删除操作，已保留本地库和接收记录");
-        foreach (var hash in plan.Files.Values.Select(entry => entry.Target.Hash).OfType<string>().Distinct())
+        if (plan.Files.Values.Any(entry => entry.Content != null && !NativeSyncStorage.ValidHash(entry.Content))) throw new IOException("接收恢复记录损坏");
+        foreach (var hash in plan.Files.Values.Select(entry => entry.Content ?? entry.Target.Hash).OfType<string>().Distinct())
             if (NativeSyncStorage.Hash(BlobPath(hash)) != hash) throw new IOException("接收恢复快照缺失，请保留目录");
         SetStatus(NativeSyncPhase.Receiving, $"正在接收 {plan.Files.Count} 项");
         var conflicts = new List<string>();
@@ -494,13 +505,14 @@ public sealed class NativeSyncClient : IDisposable
                 var before = IncomingStamp(target);
                 var actual = NativeSyncStorage.Hash(target);
                 if (IncomingStamp(target) != before) throw new IOException("接收准备期间本地文件发生变化，请稍后重试");
-                if (actual != pair.Value.ExpectedHash && actual != pair.Value.Target.Hash) conflicts.Add(pair.Key);
-                var replacement = actual == pair.Value.Target.Hash || pair.Value.Target.Hash == null
+                var wanted = pair.Value.Content ?? pair.Value.Target.Hash;
+                if (actual != pair.Value.ExpectedHash && actual != wanted) conflicts.Add(pair.Key);
+                var replacement = actual == wanted || wanted == null
                     ? null : target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                prepared.Add(new(pair.Key, target, before, actual != pair.Value.Target.Hash, replacement));
-                if (actual == pair.Value.Target.Hash) continue;
+                prepared.Add(new(pair.Key, target, before, actual != wanted, replacement));
+                if (actual == wanted) continue;
                 if (actual != null) NativeSyncStorage.CopyDurable(target, Path.Combine(_directory, "incoming-backups", pair.Key));
-                if (replacement != null) NativeSyncStorage.CopyDurable(BlobPath(pair.Value.Target.Hash!), replacement);
+                if (replacement != null) NativeSyncStorage.CopyDurable(BlobPath(wanted!), replacement);
                 if (IncomingStamp(target) != before) throw new IOException("接收准备期间本地文件发生变化，请稍后重试");
             }
             if (conflicts.Count > 0)
@@ -558,6 +570,46 @@ public sealed class NativeSyncClient : IDisposable
                 if (item.Replacement != null) File.Delete(item.Replacement);
             File.Delete(stagedState);
         }
+    }
+
+    private const string RemoteMerge = "remote";
+    private const long MergeLimit = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Three-way merges a JSON page/library conflict. Returns <see cref="RemoteMerge"/> when the local file only differed in
+    /// volatile fields, the staged merged blob hash, or null to keep the conflict for manual review.
+    /// </summary>
+    private async Task<string?> MergeConflict(string path, string? baseHash, string? localHash, string? remoteHash, CancellationToken cancellation)
+    {
+        if (!path.EndsWith(".json", StringComparison.Ordinal) || baseHash == null || localHash == null || remoteHash == null) return null;
+        var localFile = LocalPath(path);
+        if (!File.Exists(localFile) || new FileInfo(localFile).Length > MergeLimit) return null;
+        await Download(baseHash, cancellation).ConfigureAwait(false);
+        await Download(remoteHash, cancellation).ConfigureAwait(false);
+        return await Task.Run(() =>
+        {
+            if (new FileInfo(BlobPath(baseHash)).Length > MergeLimit || new FileInfo(BlobPath(remoteHash)).Length > MergeLimit) return null;
+            try
+            {
+                var ours = File.ReadAllBytes(localFile);
+                if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ours)) != localHash) return null;
+                JsonObject? Read(byte[] bytes) => JsonNode.Parse(bytes) as JsonObject;
+                var (b, l, r) = (Read(File.ReadAllBytes(BlobPath(baseHash))), Read(ours), Read(File.ReadAllBytes(BlobPath(remoteHash))));
+                if (b == null || l == null || r == null) return null;
+                switch (NativeSyncMerge.Merge(b, l, r))
+                {
+                    case NativeSyncMerge.Result.Remote: return RemoteMerge;
+                    case NativeSyncMerge.Result.Merged merged:
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(merged.Document.ToJsonString(NativeSyncMerge.Output));
+                        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+                        Directory.CreateDirectory(Path.Combine(_directory, "blobs"));
+                        NativeSyncStorage.Write(BlobPath(hash), bytes);
+                        return hash;
+                    default: return null;
+                }
+            }
+            catch (JsonException) { return null; }
+        }, cancellation).ConfigureAwait(false);
     }
 
     private sealed record PreparedIncoming(string Path, string Target, (long Length, long Modified, long Created)? Stamp, bool Changed, string? Replacement);

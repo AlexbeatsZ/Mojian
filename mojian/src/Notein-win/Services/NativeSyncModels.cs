@@ -74,5 +74,6 @@ internal sealed class NativeSyncOutbox
     public bool Submitted { get; set; }
 }
 
-internal sealed record NativeSyncIncomingFile(string? ExpectedHash, SyncEntry Target);
+/// <summary>Content, when set, is a merge result published instead of Target's bytes; the checkpoint still records Target.</summary>
+internal sealed record NativeSyncIncomingFile(string? ExpectedHash, SyncEntry Target, string? Content = null);
 internal sealed record NativeSyncIncoming(string WorkspaceId, long Revision, Dictionary<string, NativeSyncIncomingFile> Files);

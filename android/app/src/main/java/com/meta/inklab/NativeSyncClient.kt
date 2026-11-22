@@ -144,6 +144,17 @@ class NativeSyncClient(
                     NativeSyncDecision.Receive -> remote.files[path]?.let { incoming[path] = it }
                 }
             }
+            // Merged content to publish on top of the remote entry; it is uploaded by the next pass.
+            val contents = linkedMapOf<String, String>()
+            conflicts.toList().forEach { path ->
+                checkCancelled(cancelled)
+                val entry = remote.files[path] ?: return@forEach
+                when (val merged = mergeConflict(path, checkpoint[path]?.hash, local[path], entry.hash, cancelled)) {
+                    null -> {}
+                    REMOTE -> { conflicts -= path; incoming[path] = entry }
+                    else -> { conflicts -= path; incoming[path] = entry; contents[path] = merged }
+                }
+            }
             if (conflicts.isNotEmpty()) {
                 preserveConflicts(local, remote, conflicts, cancelled, expectedEpoch = scanEpoch)
                 setStatus("同步冲突 ${conflicts.size} 项，双方内容已保留在 .mojian-sync/conflicts")
@@ -166,7 +177,8 @@ class NativeSyncClient(
                 incoming.values.mapNotNull { it.hash }.distinct().forEach { ensureBlob(it, cancelled) }
                 val journal = JSONObject().put("workspaceId", workspaceId).put("files", JSONObject().apply {
                     incoming.forEach { (path, entry) ->
-                        put(path, JSONObject().put("entry", entry.json()).put("expectedHash", local[path] ?: JSONObject.NULL))
+                        put(path, JSONObject().put("entry", entry.json()).put("expectedHash", local[path] ?: JSONObject.NULL)
+                            .apply { contents[path]?.let { put("content", it) } })
                     }
                 })
                 check(localMutations.publishIfUnchanged(scanEpoch) { NativeSyncFiles.atomicJson(incomingFile, journal) }) { "本地笔记在接收准备期间发生变化，下一轮重试" }
@@ -236,7 +248,10 @@ class NativeSyncClient(
             require(version in 1..serverRevision)
             NativeSyncEntry(hash, version)
         }
-        entries.values.mapNotNull { it.hash }.distinct().forEach {
+        val contents = paths.associateWith { path ->
+            files.getJSONObject(path).optString("content").takeIf(String::isNotEmpty)?.also { require(NativeSyncFiles.validHash(it)) }
+        }
+        (entries.values.mapNotNull { it.hash } + contents.values.filterNotNull()).distinct().forEach {
             checkCancelled(cancelled)
             check(NativeSyncFiles.hash(blob(it)) == it) { "本地接收快照缺失，禁止打开未恢复的笔记库" }
         }
@@ -250,13 +265,14 @@ class NativeSyncClient(
             val item = files.getJSONObject(path)
             val expected = if (item.isNull("expectedHash")) null else item.getString("expectedHash")
             val entry = entries.getValue(path)
-            if (actual != expected && actual != entry.hash) changed += path
+            val wanted = contents[path] ?: entry.hash
+            if (actual != expected && actual != wanted) changed += path
             val key = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it.toInt() and 255) }
-            val replacement = if (actual != entry.hash && entry.hash != null) File(target.parentFile, ".mojian-incoming-$key.tmp").also {
-                NativeSyncFiles.copyVerified(blob(entry.hash), it, entry.hash)
+            val replacement = if (actual != wanted && wanted != null) File(target.parentFile, ".mojian-incoming-$key.tmp").also {
+                NativeSyncFiles.copyVerified(blob(wanted), it, wanted)
             } else null
-            val backup = if (actual != entry.hash && actual != null) File(target.parentFile, ".mojian-previous-$key.tmp").also {
+            val backup = if (actual != wanted && actual != null) File(target.parentFile, ".mojian-previous-$key.tmp").also {
                 NativeSyncFiles.copyVerified(target, it, actual)
             } else null
             PreparedIncoming(path, target, before, actual, entry, replacement, backup)
@@ -316,6 +332,36 @@ class NativeSyncClient(
         Files.move(source.toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
 
+    /**
+     * Three-way merges a JSON page/library conflict (shared/fixtures/json-merge.json). Returns [REMOTE]
+     * when the local file only differed in volatile fields, the staged merged blob hash, or null.
+     */
+    private fun mergeConflict(path: String, base: String?, local: String?, remote: String?, cancelled: () -> Boolean): String? {
+        if (!path.endsWith(".json") || base == null || local == null || remote == null) return null
+        val localFile = NativeSyncFiles.safeFile(root, path)
+        if (localFile.length() > MERGE_LIMIT) return null
+        return try {
+            ensureBlob(base, cancelled); ensureBlob(remote, cancelled)
+            if (blob(base).length() > MERGE_LIMIT || blob(remote).length() > MERGE_LIMIT) return null
+            fun read(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
+            val ours = read(localFile)
+            check(NativeSyncFiles.hash(localFile) == local) { "本地文件在合并期间发生变化" }
+            when (val result = NativeSyncMerge.merge(read(blob(base)), ours, read(blob(remote)))) {
+                null -> null
+                NativeSyncMerge.Result.Remote -> REMOTE
+                is NativeSyncMerge.Result.Merged -> {
+                    val bytes = result.document.toString().toByteArray(Charsets.UTF_8)
+                    val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+                    NativeSyncFiles.atomic(blob(hash)) { it.writeBytes(bytes) }
+                    check(NativeSyncFiles.hash(blob(hash)) == hash) { "合并结果写入失败" }
+                    hash
+                }
+            }
+        } catch (error: CancellationException) { throw error }
+        catch (_: OutOfMemoryError) { null }
+        catch (_: org.json.JSONException) { null }
+    }
+
     private fun preserveConflicts(local: Map<String, String>, remote: NativeSyncManifest, paths: List<String>, cancelled: () -> Boolean, offline: Boolean = false, expectedEpoch: Long? = null) {
         val conflictEpoch = expectedEpoch ?: localMutations.capture() ?: error("本地写入中，下一轮重新检查冲突")
         check(localMutations.publishIfUnchanged(conflictEpoch) { }) { "本地内容已变化，下一轮重新检查冲突" }
@@ -359,6 +405,8 @@ class NativeSyncClient(
     }
 
     companion object {
+        private const val REMOTE = "remote"
+        private const val MERGE_LIMIT = 24L * 1024 * 1024
         fun validPath(path: String) = NativeSyncFiles.validPath(path)
         fun requireDedicatedWorkspace(root: File) = NativeSyncConfiguration.requireDedicatedWorkspace(root)
         fun cloneWorkspace(source: File, target: File) = NativeSyncConfiguration.cloneWorkspace(source, target)

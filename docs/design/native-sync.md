@@ -145,8 +145,28 @@ network access, before loading an editable library**. A failure during an existi
 locks editing until complete local recovery. Do not continue with a partially refreshed model.
 
 Both sides of a conflict and deletion metadata are retained under `.mojian-sync/conflicts`.
-Conflicts block synchronization across restart. V1 has no automatic resolution UI or CRDT merge;
-preserve the complete clone and recovery directory for reviewed resolution. Deleting checkpoint
+Conflicts block synchronization across restart. Before a path becomes a conflict, both clients
+try the JSON three-way merge below; anything it cannot merge is preserved for reviewed resolution.
+
+### JSON three-way merge (0.7.40)
+
+Byte hashes alone turned re-encodings into conflicts: materialized default fields (11-08),
+`points` versus `pointsCoded` (11-22) and resaves that only bump `revision`/`updatedAt`.
+For a `.json` path with base, local and remote bytes (each ≤ 24 MiB Android, 64 MiB Windows),
+`NativeSyncMerge` (Kotlin/C#, same rules, `shared/fixtures/json-merge.json`) merges the parsed
+documents against the base blob downloaded from the server:
+- Objects merge per key; arrays whose items all have unique string ids merge per item (strokes,
+  textItems, notebooks/sections/pages), so each device's added strokes are kept. Order follows the
+  remote array; a local addition is inserted after its nearest local predecessor.
+- In `strokes`, an item removed on one side stays removed even if the other side re-encoded it
+  (erasing wins). Elsewhere delete-versus-edit is a conflict.
+- `revision`, `sheetCount`, `infiniteWidth/Height` take the larger value; `updatedAt` the later.
+  Numbers compare by value. Arrays without ids (points) compare whole.
+- If the result equals the remote document apart from `revision`/`updatedAt`, the device simply
+  receives the remote bytes. Otherwise the result gets revision+1 and a new `updatedAt`, is staged
+  as a blob and written through the incoming journal (`content` field) with the remote entry as the
+  new base; the next pass uploads it through normal CAS.
+Same-field edits of the same item and malformed/oversized JSON remain manual conflicts. Deleting checkpoint
 or journal files to clear a warning is not a supported recovery procedure.
 
 ### Historical default fields and conflict recovery

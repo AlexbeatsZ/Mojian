@@ -289,6 +289,37 @@ class NativeSyncClientTest {
         assertEquals(1, File(root, ".mojian-sync/conflicts").listFiles()!!.size)
     }
 
+    @Test fun strokesWrittenOnBothDevicesMergeAndUploadWithoutConflict() = isolated { _, root, server ->
+        File(root, "library.json").writeText("library")
+        val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"strokes":[{"id":"a"}]}""") }
+        client(root, server).sync(idle)
+        page.writeText("""{"revision":2,"strokes":[{"id":"a"},{"id":"local"}]}""")
+        server.update("notebooks/n/pages/p.json", """{"revision":2,"strokes":[{"id":"a"},{"id":"remote"}]}""")
+        val engine = client(root, server)
+        engine.sync(idle)
+        assertFalse(engine.status, File(root, ".mojian-sync/conflict.json").exists())
+        val merged = JSONObject(page.readText())
+        assertEquals(listOf("a", "local", "remote"), (0 until 3).map { merged.getJSONArray("strokes").getJSONObject(it).getString("id") })
+        assertEquals(3L, merged.getLong("revision"))
+        engine.sync(idle)
+        val uploaded = server.remote.files.getValue("notebooks/n/pages/p.json").hash!!
+        assertEquals(page.readText(), String(server.blobs.getValue(uploaded)))
+    }
+
+    @Test fun pageResavedWithoutRealEditsTakesTheServerVersion() = isolated { _, root, server ->
+        File(root, "library.json").writeText("library")
+        val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"updatedAt":"1","strokes":[{"id":"a"}]}""") }
+        client(root, server).sync(idle)
+        page.writeText("""{"revision":2,"updatedAt":"2","strokes":[{"id":"a"}]}""")
+        val remote = """{"revision":2,"updatedAt":"3","strokes":[{"id":"a"},{"id":"b"}]}"""
+        server.update("notebooks/n/pages/p.json", remote)
+        val commits = server.commits
+        client(root, server).sync(idle)
+        assertEquals(remote, page.readText())
+        client(root, server).sync(idle)
+        assertEquals(commits, server.commits)
+    }
+
     @Test fun cancelledSyncDoesNotUploadOrApply() = isolated { _, root, server ->
         File(root, "library.json").writeText("local")
         client(root, server).sync(idle) { true }
