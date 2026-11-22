@@ -12,7 +12,8 @@
 - **Windows 0.7.38**: `双击撤销重做` targets the graphics-tablet undo key: two presses of the undo
   shortcut (default Ctrl+Z) within the adjustable `双击判定时间` (150–800 ms, default 300) redo;
   Windows undo buttons are immediate again. Android stays 0.7.37/code42 (button variant unchanged).
-  Read workspace-ui.md before changing undo input. Physical tablet acceptance open.
+  Read workspace-ui.md before changing undo input. Release v0.7.38 (EXE); OMEN artifacts EXE replaced.
+  Physical tablet acceptance open.
 - **0.7.37 (Windows/Android code42)**: Windows pen tap/press circle feedback removed (`PenFeedback`).
   Windows tool flyout re-anchors after toolbar rebuilds, fixing the jump when switching pen style.
   Tablet/phone not installed; physical acceptance open.
