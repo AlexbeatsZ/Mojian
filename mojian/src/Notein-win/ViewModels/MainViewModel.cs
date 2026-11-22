@@ -1238,12 +1238,14 @@ public sealed partial class MainViewModel : ObservableObject
     public string ImportAsset(string sourcePath)
     {
         var document = FocusedDocument ?? throw new InvalidOperationException("请先打开一个页面。");
+        if (SyncConflictFor(document) != null) throw new InvalidOperationException("请先处理该页的同步冲突。");
         return _store.ImportAsset(document.NotebookId, document.PageId, sourcePath);
     }
 
     public string WriteAsset(string extension, ReadOnlySpan<byte> bytes)
     {
         var document = FocusedDocument ?? throw new InvalidOperationException("请先打开一个页面。");
+        if (SyncConflictFor(document) != null) throw new InvalidOperationException("请先处理该页的同步冲突。");
         return _store.WriteAsset(document.NotebookId, document.PageId, extension, bytes);
     }
 
@@ -1730,12 +1732,15 @@ public sealed partial class MainViewModel : ObservableObject
             if (notebook.Expanded)
                 foreach (var row in notebook.FlattenSections(isActive)) NotebookTreeRows.Add(row);
         }
+        RebuildSyncConflictRows();
     }
 
     private void RefreshPagePaneRows()
     {
         PagePaneRows.Clear();
-        foreach (var row in ActiveWorkspace.GetPagePaneRows(PagePaneMode)) PagePaneRows.Add(row);
+        var rows = ActiveWorkspace.GetPagePaneRows(PagePaneMode).ToList();
+        MarkPageConflicts(rows);
+        foreach (var row in rows) PagePaneRows.Add(row);
     }
 
     private void RefreshTools()

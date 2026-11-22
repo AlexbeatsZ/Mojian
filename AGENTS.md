@@ -12,6 +12,8 @@
 - **0.7.40 (Windows/Android code44, source only)**: native sync three-way merges JSON pages/library per
   key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
   survive, volatile-only resaves receive the server page. Not released or installed. Read native-sync.md.
+  Windows conflict review UI (同步冲突 group, M/A/D colors, review bar, read-only red/green/yellow preview,
+  笔记目录 dialog) on branch `claude/peaceful-volhard-6ccfbc`; WPF test screenshots only, not installed.
 - **Android 0.7.39/code43**: pen-style curves compile to AndroidX `Linear` via `curveMapping` so the
   response is exactly 1 at x=1 (Ink's implicit end point). 0.7.26–0.7.37 snapped the Notein speed curve
   back to full width at >=64 cm/s (blunt fast tails). Notein preset values never changed. Windows unaffected.
@@ -148,7 +150,7 @@
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
 - Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
-  whole library and have no review UI yet (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
+  whole library; the per-file review UI exists on unmerged branches (Android/Windows), not released (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
 - iOS/iPadOS maintenance is retired by user direction, 2026-11-13.

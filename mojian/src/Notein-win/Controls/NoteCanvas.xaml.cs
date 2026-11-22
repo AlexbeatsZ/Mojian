@@ -29,6 +29,18 @@ public sealed class CanvasWetInkOverlay : FrameworkElement
     protected override void OnRender(DrawingContext context) => Owner?.DrawWetInk(context);
 }
 
+public sealed class CanvasConflictOverlay : FrameworkElement
+{
+    internal NoteCanvas? Owner { get; set; }
+    protected override void OnRender(DrawingContext context) => Owner?.DrawConflictPreview(context);
+}
+
+/// <summary>Sync conflict preview of one page: server-only strokes green, strokes the server lacks red, both changed yellow.</summary>
+public sealed record SyncConflictPreview(string NotebookId, string PageId, StrokeDiff Diff)
+{
+    public bool Matches(PageDocument? document) => document != null && document.NotebookId == NotebookId && document.PageId == PageId;
+}
+
 public sealed class PageObjectEventArgs(PageObject value) : EventArgs
 {
     public PageObject Value { get; } = value;
@@ -198,6 +210,8 @@ public partial class NoteCanvas : UserControl
         nameof(PredictionEnabled), typeof(bool), typeof(NoteCanvas), new PropertyMetadata(true));
     public static readonly DependencyProperty PanoramaSensitivityProperty = DependencyProperty.Register(
         nameof(PanoramaSensitivity), typeof(double), typeof(NoteCanvas), new PropertyMetadata(1d));
+    public static readonly DependencyProperty ConflictPreviewProperty = DependencyProperty.Register(
+        nameof(ConflictPreview), typeof(SyncConflictPreview), typeof(NoteCanvas), new PropertyMetadata(null, OnConflictPreviewChanged));
 
     public PageDocument? Document { get => (PageDocument?)GetValue(DocumentProperty); set => SetValue(DocumentProperty, value); }
     public PageAppearance Appearance { get => (PageAppearance)GetValue(AppearanceProperty); set => SetValue(AppearanceProperty, value); }
@@ -210,6 +224,11 @@ public partial class NoteCanvas : UserControl
     public bool ZoomLocked { get => (bool)GetValue(ZoomLockedProperty); set => SetValue(ZoomLockedProperty, value); }
     public bool PredictionEnabled { get => (bool)GetValue(PredictionEnabledProperty); set => SetValue(PredictionEnabledProperty, value); }
     public double PanoramaSensitivity { get => (double)GetValue(PanoramaSensitivityProperty); set => SetValue(PanoramaSensitivityProperty, value); }
+    /// <summary>A page under sync conflict review is a read-only preview (pan/zoom only) until a version is chosen.</summary>
+    public SyncConflictPreview? ConflictPreview { get => (SyncConflictPreview?)GetValue(ConflictPreviewProperty); set => SetValue(ConflictPreviewProperty, value); }
+    public bool IsReviewLocked => ConflictPreview?.Matches(Document) == true;
+    /// <summary>Reading view and conflict review both turn pointer input into navigation.</summary>
+    private bool NavigationOnly => ReadingViewEnabled || IsReviewLocked;
     public ViewportState Viewport => _viewport;
     public Func<string, string>? ResolveAssetPath { get; set; }
     public Func<string, string>? ImportAssetPath { get; set; }
@@ -227,6 +246,7 @@ public partial class NoteCanvas : UserControl
         InitializeComponent();
         PointerOverlay.Owner = this;
         WetInkOverlay.Owner = this;
+        ConflictOverlay.Owner = this;
         SceneLayer.Owner = this;
         SceneLayer.CacheMode = StaticSceneCache;
         Focusable = true;
@@ -315,6 +335,14 @@ public partial class NoteCanvas : UserControl
         canvas.InvalidateVisual();
     }
 
+    private static void OnConflictPreviewChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
+    {
+        var canvas = (NoteCanvas)source;
+        canvas._conflictDrawing = null;
+        if (canvas.IsReviewLocked) OnReadingViewChanged(source, args);
+        canvas.ConflictOverlay.InvalidateVisual();
+    }
+
     private static void OnReadingViewChanged(DependencyObject source, DependencyPropertyChangedEventArgs args)
     {
         var canvas = (NoteCanvas)source;
@@ -341,7 +369,7 @@ public partial class NoteCanvas : UserControl
     public void Undo()
     {
         ExitImageCrop();
-        if (Document == null || _undo.Count == 0) return;
+        if (Document == null || _undo.Count == 0 || IsReviewLocked) return;
         var entry = _undo.Pop();
         _redo.Push(InvertHistory(entry));
         RestoreSnapshot(entry);
@@ -350,7 +378,7 @@ public partial class NoteCanvas : UserControl
     public void Redo()
     {
         ExitImageCrop();
-        if (Document == null || _redo.Count == 0) return;
+        if (Document == null || _redo.Count == 0 || IsReviewLocked) return;
         var entry = _redo.Pop();
         _undo.Push(InvertHistory(entry));
         RestoreSnapshot(entry);
@@ -358,7 +386,7 @@ public partial class NoteCanvas : UserControl
 
     public void ClearPage()
     {
-        if (Document == null) return;
+        if (Document == null || IsReviewLocked) return;
         PushUndo();
         Document.Strokes.Clear();
         Document.Tags.Clear();
@@ -372,7 +400,7 @@ public partial class NoteCanvas : UserControl
 
     public bool DeleteSelection()
     {
-        if (Document == null || (_selectedStrokes.Count == 0 && _selectedTags.Count == 0 && _selectedTextItems.Count == 0 && _selectedObjects.Count == 0)) return false;
+        if (Document == null || IsReviewLocked || (_selectedStrokes.Count == 0 && _selectedTags.Count == 0 && _selectedTextItems.Count == 0 && _selectedObjects.Count == 0)) return false;
         PushUndo();
         foreach (var stroke in _selectedStrokes) Document.Strokes.Remove(stroke);
         foreach (var tag in _selectedTags) Document.Tags.Remove(tag);
@@ -412,7 +440,7 @@ public partial class NoteCanvas : UserControl
     public bool PasteSelection(Point? insertionPoint = null)
     {
         var clipboard = _selectionClipboard;
-        if (Document == null || clipboard == null || !HasNativeClipboard) return false;
+        if (Document == null || IsReviewLocked || clipboard == null || !HasNativeClipboard) return false;
         var target = insertionPoint ?? PasteInsertionPoint;
         var dx = (float)(target.X - clipboard.Bounds.Left);
         var dy = (float)(target.Y - clipboard.Bounds.Top);
@@ -544,7 +572,7 @@ public partial class NoteCanvas : UserControl
 
     public bool SelectAllContent()
     {
-        if (Document == null || ReadingViewEnabled) return false;
+        if (Document == null || NavigationOnly) return false;
         ClearSelection();
         _selectedStrokes.AddRange(Document.Strokes.Where(item => PageScene.IsVisible(Document, item.LayerId)));
         _selectedTags.AddRange(Document.Tags);
@@ -619,7 +647,7 @@ public partial class NoteCanvas : UserControl
 
     public void AddObject(PageObject item)
     {
-        if (Document == null) return;
+        if (Document == null || IsReviewLocked) return;
         PushUndo();
         Document.Objects.Add(item);
         if (!item.IsPageBackground) SelectOnlyObject(item);
@@ -964,7 +992,7 @@ public partial class NoteCanvas : UserControl
             e.Handled = true;
             return;
         }
-        if (ReadingViewEnabled && DirectInputPolicy.ReadingViewPointerIntent(DirectInputDevice.Mouse, e.ChangedButton) == ReadingViewPointerIntent.Block)
+        if (NavigationOnly && DirectInputPolicy.ReadingViewPointerIntent(DirectInputDevice.Mouse, e.ChangedButton) == ReadingViewPointerIntent.Block)
         {
             e.Handled = true;
             return;
@@ -997,7 +1025,7 @@ public partial class NoteCanvas : UserControl
         if (e.ChangedButton != MouseButton.Left) return;
         Focus();
         var point = e.GetPosition(this);
-        if (ReadingViewEnabled)
+        if (NavigationOnly)
         {
             BeginReadingPan(point, isStylus: false);
             e.Handled = true;
@@ -1158,7 +1186,7 @@ public partial class NoteCanvas : UserControl
         _hoverViewPoint = point.ToPoint();
         UpdatePointerCursor();
         var barrelButtonPressedInSnapshot = HasPressedBarrelButton(e.StylusDevice);
-        var rightGestureIntent = !ReadingViewEnabled && CanvasPointerFeedback.RightButtonGestureIntent(
+        var rightGestureIntent = !NavigationOnly && CanvasPointerFeedback.RightButtonGestureIntent(
             _rightLassoArmed,
             _stylusBarrelButtonDown,
             barrelButtonPressedInSnapshot);
@@ -1180,7 +1208,7 @@ public partial class NoteCanvas : UserControl
             e.Handled = true;
             return;
         }
-        if (ReadingViewEnabled)
+        if (NavigationOnly)
         {
             _stylusEraserActive = false;
             BeginReadingPan(point.ToPoint(), isStylus: true);
@@ -1276,7 +1304,7 @@ public partial class NoteCanvas : UserControl
     {
         if (!IsBarrelButton(e.StylusButton)) return;
         _stylusBarrelButtonDown = true;
-        if (Document == null || ReadingViewEnabled || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
+        if (Document == null || NavigationOnly || e.StylusDevice.TabletDevice.Type == TabletDeviceType.Touch) return;
         Focus();
         if (_stylusActive) CancelStylusToolActionForNavigation();
         BeginRightButtonLasso(
@@ -1394,7 +1422,7 @@ public partial class NoteCanvas : UserControl
         }
         if (_activeTouchDevices.Count != 1) return;
         var touchPoint = e.GetTouchPoint(this).Position;
-        if (ReadingViewEnabled)
+        if (NavigationOnly)
         {
             BeginReadingPan(touchPoint, isStylus: false);
             _touchReadingPanActive = true;
@@ -2970,6 +2998,7 @@ public partial class NoteCanvas : UserControl
         base.OnRender(dc);
         PointerOverlay.InvalidateVisual();
         WetInkOverlay.InvalidateVisual();
+        ConflictOverlay.InvalidateVisual();
         SceneLayer.InvalidateVisual();
         if (Document == null)
         {
@@ -3076,6 +3105,7 @@ public partial class NoteCanvas : UserControl
         _panTranslate.Y = _panOffset.Y;
         UpdateTextEditorPositions();
         PointerOverlay.InvalidateVisual();
+        ConflictOverlay.InvalidateVisual();
     }
 
     private void BeginPanCache()
@@ -3320,10 +3350,44 @@ public partial class NoteCanvas : UserControl
         }
     }
 
-    private void DrawStroke(DrawingContext dc, StrokeRecord stroke, bool lightExport)
+    private DrawingGroup? _conflictDrawing;
+
+    internal void DrawConflictPreview(DrawingContext dc)
     {
-            var brush = TextBrush(stroke.Color, Appearance.Theme == PageTheme.Dark, lightExport);
-            if (!string.IsNullOrEmpty(stroke.ColorHex))
+        if (ConflictPreview is not { } preview || !preview.Matches(Document)) return;
+        if (_conflictDrawing == null)
+        {
+            var group = new DrawingGroup();
+            using (var context = group.Open())
+            {
+                // Red/yellow cover this device's strokes; green adds what only the server has.
+                foreach (var (strokes, color) in new[] { (preview.Diff.Local, ConflictRed), (preview.Diff.Changed, ConflictYellow), (preview.Diff.Remote, ConflictGreen) })
+                {
+                    var tint = new SolidColorBrush(color); tint.Freeze();
+                    foreach (var stroke in strokes)
+                        try { DrawStrokeWith(context, stroke, lightExport: false, tint); }
+                        catch (Exception error) when (error is ArgumentException or InvalidOperationException or FormatException) { }
+                }
+            }
+            group.Freeze();
+            _conflictDrawing = group;
+        }
+        dc.PushTransform(new MatrixTransform(_viewport.DocumentToViewMatrix()));
+        dc.DrawDrawing(_conflictDrawing);
+        dc.Pop();
+    }
+
+    internal static readonly Color ConflictGreen = Color.FromArgb(0xD0, 0x73, 0xC9, 0x91);
+    internal static readonly Color ConflictRed = Color.FromArgb(0xE6, 0xF1, 0x4C, 0x4C);
+    internal static readonly Color ConflictYellow = Color.FromArgb(0xE6, 0xE2, 0xC0, 0x8D);
+
+    private void DrawStroke(DrawingContext dc, StrokeRecord stroke, bool lightExport) => DrawStrokeWith(dc, stroke, lightExport, tint: null);
+
+    /// <summary>Draws a stroke's geometry; a tint replaces its color (conflict preview).</summary>
+    private void DrawStrokeWith(DrawingContext dc, StrokeRecord stroke, bool lightExport, Brush? tint)
+    {
+            var brush = tint ?? TextBrush(stroke.Color, Appearance.Theme == PageTheme.Dark, lightExport);
+            if (tint == null && !string.IsNullOrEmpty(stroke.ColorHex))
             {
                 var sourceColor = (Color)ColorConverter.ConvertFromString(stroke.ColorHex);
                 // Only logical black adapts to dark paper. Whites and arbitrary
@@ -3486,7 +3550,7 @@ public partial class NoteCanvas : UserControl
     }
 
     private CanvasPointerCursorMode CurrentPointerCursorMode() =>
-        ReadingViewEnabled ? CanvasPointerCursorMode.Hand :
+        NavigationOnly ? CanvasPointerCursorMode.Hand :
         CanvasPointerFeedback.Resolve(SingleFingerPanEnabled, _stylusInRange, SelectedTool?.Kind);
 
     private BitmapSource? LoadBitmap(string assetName, bool inverted, bool adaptImported = false)
