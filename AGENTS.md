@@ -9,6 +9,9 @@
 
 # Current State
 
+- **2026-11-22 tablet thin ink**: PixelOS 17 on liuqin reports `xdpi≈30.9` (real ≈309), so AndroidX Ink
+  speed is 10× too high and Notein风格 thins too much; pen pressure is unchanged. Vector module
+  `com.meta.liuqin.dpifix` (scope Mojian + Notein) corrects it; verified on a test page. See handwriting-engine.md.
 - **2026-11-22 tablet pen dropout diagnosis (Android 0.7.39 / liuqin PixelOS17)**: while the user
   continuously attempted writing, a 60 s raw capture received 0 pen events versus 433 finger frames;
   kernel reported Bluetooth connected, pen-charge detected, and pen input disabled (`pen_active=0`).
