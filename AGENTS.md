@@ -14,7 +14,8 @@
   re-record invalid tiles, release tiles while the window is hidden and request a frame on return.
   liuqin native regression: 0.7.39 fails, 0.7.41 passes partial/full eviction, page binding and window
   visibility; JVM 323 pass/1 skipped, Release/native-test APK/lint pass. Installed in place on tablet
-  with original signer; firstInstallTime preserved, launch shows ink. See android-page-navigation.md.
+  with original signer; firstInstallTime preserved, launch/foreground return show ink. Release v0.7.41
+  published (APK); Mac/OMEN current APK refreshed. See android-page-navigation.md.
 - **2026-11-22 tablet thin ink**: PixelOS 17 on liuqin reports `xdpi≈30.9` (real ≈309), so AndroidX Ink
   speed is 10× too high and Notein风格 thins too much; pen pressure is unchanged. Vector module
   `com.meta.liuqin.dpifix` (scope Mojian + Notein) corrects it; verified on a test page. See handwriting-engine.md.
