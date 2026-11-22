@@ -225,7 +225,15 @@ class MainActivity : Activity() {
     private val pageViewports = PageViewportMemory<PageSessionKey>()
     private val pageLoadExecutor = Executors.newSingleThreadExecutor()
     private val pageLoads = LatestPageLoader<PageSessionKey?, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
-    private var pageLoadingOverlay: View? = null
+    private var pageLoadingOverlay: FrameLayout? = null
+    private var pageLoadingProgress: View? = null
+    private var pageLoadingFailure: View? = null
+    private val pageLoadingFeedback = PageLoadingFeedback(
+        schedule = { delay, task -> mainHandler.postDelayed(task, delay) },
+        cancel = { task -> mainHandler.removeCallbacks(task) },
+        render = { visual -> renderPageLoading(visual) },
+    )
+    private val removePageLoadingOverlay = Runnable { detachPageLoadingOverlay() }
     private val fullPageToolbarConfig by lazy { FullPageToolbarConfig(loadFullPageToolbarIds()) }
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private var nativeSyncStatusView: TextView? = null
@@ -475,6 +483,8 @@ class MainActivity : Activity() {
         mainHandler.removeCallbacks(saveSharedContent)
         ioExecutor.shutdown()
         pageLoads.cancel()
+        pageLoadingFeedback.finished()
+        mainHandler.removeCallbacks(removePageLoadingOverlay)
         pageLoadExecutor.shutdown()
         pageWrites.close()
         super.onDestroy()
@@ -827,7 +837,7 @@ class MainActivity : Activity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!workspaceLoaded) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) flushPendingUndo()
-        if (pageLoadingOverlay != null) return true
+        if (pageLoadingFeedback.active) return true
         if (::selectionOverlay.isInitialized) {
             val control = when (event.keyCode) {
                 KeyEvent.KEYCODE_CTRL_LEFT -> event.action == KeyEvent.ACTION_DOWN || event.metaState and KeyEvent.META_CTRL_RIGHT_ON != 0
@@ -868,7 +878,7 @@ class MainActivity : Activity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) flushPendingUndo(event)
-        if (pageLoadingOverlay != null) {
+        if (pageLoadingFeedback.active) {
             // Keep notebook/page navigation responsive while content is being prepared. Editing
             // controls must not mutate the outgoing document under the destination page header.
             fun inside(view: View): Boolean {
@@ -881,7 +891,7 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (pageLoadingOverlay != null) return true
+        if (pageLoadingFeedback.active) return true
         if (
             event.action == MotionEvent.ACTION_SCROLL &&
             event.isFromSource(InputDevice.SOURCE_MOUSE) &&
@@ -967,7 +977,7 @@ class MainActivity : Activity() {
     }
 
     private fun dispatchXiaomiPenKey(event: KeyEvent, route: String): Boolean {
-        if (!workspaceLoaded || pageLoadingOverlay != null) return false
+        if (!workspaceLoaded || pageLoadingFeedback.active) return false
         val handled = shortcutDispatcher.dispatch(event)
         if (handled) {
             android.util.Log.i("MojianPenKey", "received route=$route key=${event.keyCode} action=${event.action} repeat=${event.repeatCount}")
@@ -2177,7 +2187,7 @@ class MainActivity : Activity() {
     }
 
     private fun toggleGlobalPageTheme() {
-        if (activeStrokes.isNotEmpty() || pageLoadingOverlay != null) return
+        if (activeStrokes.isNotEmpty() || pageLoadingFeedback.active) return
         appearancePreferences = appearancePreferences.copy(darkBackground = !appearancePreferences.darkBackground)
         persistAppearancePreferences()
         applySelectedPageAppearance()
@@ -4614,7 +4624,7 @@ class MainActivity : Activity() {
         if (pageLoads.isLoading && pageLoads.loadingKey == nextKey) return
         if (nextKey == boundPageKey && pageLoads.isLoading) {
             pageLoads.cancel()
-            showPageLoading(false)
+            endPageLoading()
         }
         if (nextKey != boundPageKey) {
             if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
@@ -4632,7 +4642,7 @@ class MainActivity : Activity() {
             val session = nextKey?.let(pageSessions::get)?.copy(strokes = null, tags = null, textBoxes = null)
             val repository = pageContentRepository
             val dark = appearancePreferences.darkBackground
-            showPageLoading(true)
+            beginPageLoading()
             pageLoads.load(nextKey, prepare = { isCurrent ->
                 pageWrites.flush()
                 check(isCurrent()) { "Page request superseded" }
@@ -4668,9 +4678,9 @@ class MainActivity : Activity() {
                     val reason = if (error is OutOfMemoryError) "页面数据过大，超出本机可用内存" else error.message
                     Toast.makeText(this, "页面暂时无法读取：$reason", Toast.LENGTH_LONG).show()
                     if (restoreBoundPageSelection()) {
-                        showPageLoading(false)
+                        endPageLoading()
                         renderWorkspace()
-                    } else showPageLoading(true, "页面暂时无法读取，请重新选择页面")
+                    } else failPageLoading()
                 }
             }
             return
@@ -4694,7 +4704,7 @@ class MainActivity : Activity() {
         } finally { restoringPageInk = false; contentDirty = false }
         val remembered = key?.let(pageViewports::recall) ?: session?.viewport
         if (remembered == null) viewport.reset() else viewport.restore(remembered)
-        showPageLoading(false)
+        endPageLoading()
         applySelectedPageAppearance()
         applyViewportToLayers()
         finishPageBinding()
@@ -4726,23 +4736,107 @@ class MainActivity : Activity() {
         } finally { restoringPageInk = false }
     }
 
-    private fun showPageLoading(loading: Boolean, message: String = "正在打开页面…") {
+    /** Blocks editing at once; progress fades in only if the read outlasts the reveal delay. */
+    private fun beginPageLoading() {
+        MojianCommandMenu.dismissActive()
+        ensurePageLoadingOverlay()
+        pageLoadingFeedback.loading()
+    }
+
+    /** Failure stays visible and keeps editing blocked until another page is chosen. */
+    private fun failPageLoading() {
+        MojianCommandMenu.dismissActive()
+        ensurePageLoadingOverlay()
+        pageLoadingFeedback.failed()
+    }
+
+    private fun endPageLoading() {
+        val wasVisible = pageLoadingFeedback.visual != PageLoadingFeedback.Visual.HIDDEN
+        pageLoadingFeedback.finished()
+        val overlay = pageLoadingOverlay ?: return
+        overlay.isClickable = false
+        mainHandler.removeCallbacks(removePageLoadingOverlay)
+        if (wasVisible) mainHandler.postDelayed(removePageLoadingOverlay, PageLoadingFeedback.FADE_OUT_MS + 40)
+        else detachPageLoadingOverlay()
+    }
+
+    private fun detachPageLoadingOverlay() {
+        if (pageLoadingFeedback.active) return
         pageLoadingOverlay?.let { (it.parent as? ViewGroup)?.removeView(it) }
         pageLoadingOverlay = null
-        if (!loading) return
-        MojianCommandMenu.dismissActive()
-        pageLoadingOverlay = LinearLayout(this).apply {
+        pageLoadingProgress = null
+        pageLoadingFailure = null
+    }
+
+    /**
+     * Transparent layer over the paper: the page surface and its background stay visible, with a
+     * thin accent progress line along the top edge instead of a navigation-colored block.
+     */
+    private fun ensurePageLoadingOverlay() {
+        mainHandler.removeCallbacks(removePageLoadingOverlay)
+        pageLoadingOverlay?.let { overlay ->
+            overlay.isClickable = true
+            overlay.bringToFront()
+            return
+        }
+        val progress = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            indeterminateTintList = ColorStateList.valueOf(ACCENT_PURPLE)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            alpha = 0f
+            visibility = View.INVISIBLE
+        }
+        val failure = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(NAV_BACKGROUND)
-            isClickable = true
-            addView(android.widget.ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(32), dp(32)))
+            background = rounded(Color.argb(240, 35, 35, 35), dp(12).toFloat(), BORDER_COLOR)
+            setPadding(dp(22), dp(14), dp(22), dp(14))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             addView(TextView(this@MainActivity).apply {
-                text = message
-                setTextColor(TEXT_SECONDARY)
-                setPadding(0, dp(12), 0, 0)
+                text = "页面暂时无法读取"
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                gravity = Gravity.CENTER
             })
-        }.also { paperContainer.addView(it, FrameLayout.LayoutParams(MATCH, MATCH)) }
+            addView(TextView(this@MainActivity).apply {
+                text = "请重新选择页面"
+                setTextColor(TEXT_SECONDARY)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(0, dp(4), 0, 0)
+            })
+            alpha = 0f
+            visibility = View.INVISIBLE
+        }
+        val overlay = FrameLayout(this).apply {
+            isClickable = true
+            contentDescription = "正在打开页面"
+            addView(progress, FrameLayout.LayoutParams(MATCH, dp(3), Gravity.TOP))
+            addView(failure, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        }
+        paperContainer.addView(overlay, FrameLayout.LayoutParams(MATCH, MATCH))
+        pageLoadingOverlay = overlay
+        pageLoadingProgress = progress
+        pageLoadingFailure = failure
+    }
+
+    private fun renderPageLoading(visual: PageLoadingFeedback.Visual) {
+        fun fade(view: View?, visible: Boolean) {
+            view ?: return
+            view.animate().cancel()
+            if (visible) {
+                view.visibility = View.VISIBLE
+                view.animate().alpha(1f).setDuration(PageLoadingFeedback.FADE_IN_MS).start()
+            } else if (view.visibility == View.VISIBLE) {
+                view.animate().alpha(0f).setDuration(PageLoadingFeedback.FADE_OUT_MS)
+                    .withEndAction { view.visibility = View.INVISIBLE }.start()
+            }
+        }
+        fade(pageLoadingProgress, visual == PageLoadingFeedback.Visual.PROGRESS)
+        fade(pageLoadingFailure, visual == PageLoadingFeedback.Visual.FAILED)
+        pageLoadingOverlay?.contentDescription =
+            if (visual == PageLoadingFeedback.Visual.FAILED) "页面暂时无法读取，请重新选择页面" else "正在打开页面"
     }
 
     private fun finishPageBinding() {
@@ -6359,7 +6453,7 @@ class MainActivity : Activity() {
     }
 
     private fun applySelectedPageAppearance() {
-        if (pageLoadingOverlay != null) return
+        if (pageLoadingFeedback.active) return
         if (!::pageSurfaceBackground.isInitialized) return
         val page = workspace.selectedPage()
         val settings = ImportedPagePresentation.display(appearancePreferences.display(page?.viewSettings ?: PageViewSettings()),
