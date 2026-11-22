@@ -248,6 +248,23 @@ copy, undo/redo, erasing, `.mjn` and output retain the outline. Existing v1 ink 
 their renderers. The timestamp/smoothing/outline and native WPF edit/handoff regressions cover
 this contract; Android native stability/shape tests are compile-only pending device acceptance.
 
+### Pen pressure after flashing PixelOS (2026-11-22)
+
+Same Xiaomi Pad 6 Pro and pen; `NVTCapacitivePen` still reports `ABS_PRESSURE` 0..4095. What changed is
+the pressure apps receive for the same handwriting:
+
+- HyperOS 3 / Android 15 (before 2026-11-16): 2341 Android-authored strokes in the library (stroke ids
+  with UUID dashes; fountain-v1/v2) have per-stroke median pressure p25/p50/p75 = 0.5–0.6 / 0.59–0.68 /
+  0.66–0.74 and per-stroke peaks ≈0.67–0.75. The distribution is narrow and rarely reaches 1.
+- PixelOS 17 (CP2A.260605.016): 141 strokes of normal writing captured from `MotionEvent`
+  (`/tmp/.agents/liuqin-stylus-research`, Mac) give p25/p50/p75 = 0.35 / 0.48 / 0.56, light strokes
+  0.1–0.3, deliberate heavy strokes up to 1.0 (raw 4095).
+- Quantile fit: HyperOS ≈ 0.35 + 0.65 × PixelOS. HyperOS evidently lifted and compressed pressure
+  somewhere below apps (layer not yet identified); PixelOS passes raw/4095 linearly.
+- With Notein's `1.4·p²` a normal stroke drops from ≈0.59× to ≈0.32× nominal width and light strokes to
+  ≈0.1×, in Notein and Mojian alike. The 2026-11-07 Notein calibration injected exact pressure through
+  uinput, so it measured Notein's mapping, not the pen's; it remains valid.
+
 ### Android tablet latency diagnosis (2026-11-07)
 
 `dumpsys gfxinfo` on the tablet: Mojian 90/95/99th frame percentiles 53/65/113 ms with 90 of 500
