@@ -38,6 +38,8 @@ await Run("CAS rejection retries without a permanent conflict and other 409s ret
 await Run("remote index deletion and incoming index tombstones preserve the local library", DeletedLibrary);
 await Run("offline incoming recovery needs no endpoint credential configuration", RecoveryWithoutCredentials);
 await Run("shared three-way decision table covers edits, deletions and equal concurrent changes", DecisionFixture);
+await Run("shared JSON merge fixtures match Android", MergeFixture);
+await Run("strokes written on two devices merge and a volatile-only resave takes the server page", StrokeMerge);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
 async Task Run(string name, Func<Task> scenario)
@@ -772,6 +774,61 @@ Task DecisionFixture()
         Check(NativeSyncDecisions.Decide(Value("base"), Value("local"), Value("remote")).ToString() == Value("decision"), "Decision table diverged");
     }
     return Task.CompletedTask;
+}
+
+Task MergeFixture()
+{
+    var cases = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "json-merge.json")))!.AsArray();
+    string Canonical(JsonNode? node) => node switch
+    {
+        JsonObject o => "{" + string.Join(",", o.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => JsonSerializer.Serialize(p.Key) + ":" + Canonical(p.Value))) + "}",
+        JsonArray a => "[" + string.Join(",", a.Select(Canonical)) + "]",
+        JsonValue v when v.GetValueKind() == JsonValueKind.Number => decimal.Parse(v.ToJsonString(), System.Globalization.CultureInfo.InvariantCulture).ToString("0.############################", System.Globalization.CultureInfo.InvariantCulture),
+        null => "null",
+        _ => node.ToJsonString(),
+    };
+    foreach (var item in cases)
+    {
+        var name = item!["name"]!.GetValue<string>();
+        var result = NativeSyncMerge.Merge(item["base"]!.AsObject(), item["local"]!.AsObject(), item["remote"]!.AsObject());
+        var expected = item["result"];
+        if (expected == null) Check(result == null, name);
+        else if (expected is JsonValue text && text.GetValueKind() == JsonValueKind.String) Check(result is NativeSyncMerge.Result.Remote, name);
+        else Check(result is NativeSyncMerge.Result.Merged merged && Canonical(merged.Document) == Canonical(expected), name + ": " + (result as NativeSyncMerge.Result.Merged)?.Document.ToJsonString());
+    }
+    return Task.CompletedTask;
+}
+
+async Task StrokeMerge()
+{
+    using var first = new TestWorkspace(); using var second = new TestWorkspace();
+    using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+    async Task<string> Blob(string path) => await http.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files[path].Hash);
+    first.Write("library.json", await Blob("library.json")); second.Write("library.json", await Blob("library.json"));
+    var page = NewPage();
+    first.Write(page, "{\"revision\":1,\"updatedAt\":\"1\",\"strokes\":[{\"id\":\"a\"}]}");
+    using var one = new NativeSyncClient(first.Root, endpoint, token); using var two = new NativeSyncClient(second.Root, endpoint, token);
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    first.Write(page, "{\"revision\":2,\"updatedAt\":\"2\",\"strokes\":[{\"id\":\"a\"},{\"id\":\"pc\"}]}");
+    second.Write(page, "{\"revision\":2,\"updatedAt\":\"3\",\"strokes\":[{\"id\":\"a\"},{\"id\":\"tablet\"}]}");
+    await one.SyncAsync(Idle);
+    await two.SyncAsync(Idle);
+    Check(two.Snapshot.Phase != NativeSyncPhase.Conflict, "Disjoint stroke additions became a conflict: " + two.Status);
+    var merged = JsonNode.Parse(second.Read(page))!;
+    Check(string.Join(",", merged["strokes"]!.AsArray().Select(s => s!["id"]!.GetValue<string>())) == "a,tablet,pc", "Merged page lost strokes: " + second.Read(page));
+    await two.SyncAsync(Idle); await one.SyncAsync(Idle);
+    Check(first.Read(page) == second.Read(page), "Merged page did not propagate");
+    // A resave that only bumps revision/updatedAt takes the server page without an upload.
+    var server = first.Read(page);
+    var resaved = JsonNode.Parse(server)!.AsObject();
+    resaved["revision"] = resaved["revision"]!.GetValue<long>() + 1; resaved["updatedAt"] = "9";
+    second.Write(page, resaved.ToJsonString());
+    var later = JsonNode.Parse(server)!.AsObject();
+    later["strokes"]!.AsArray().Add(new JsonObject { ["id"] = "later" }); later["revision"] = later["revision"]!.GetValue<long>() + 1;
+    first.Write(page, later.ToJsonString());
+    await one.SyncAsync(Idle);
+    await two.SyncAsync(Idle);
+    Check(two.Snapshot.Phase != NativeSyncPhase.Conflict && second.Read(page) == first.Read(page), "Volatile-only resave did not fast-forward: " + two.Status);
 }
 
 async Task RejectedCommit()

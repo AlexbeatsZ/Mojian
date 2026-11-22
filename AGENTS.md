@@ -9,6 +9,9 @@
 
 # Current State
 
+- **0.7.40 (Windows/Android code44, source only)**: native sync three-way merges JSON pages/library per
+  key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
+  survive, volatile-only resaves receive the server page. Not released or installed. Read native-sync.md.
 - **Windows 0.7.38**: `双击撤销重做` targets the graphics-tablet undo key: two presses of the undo
   shortcut (default Ctrl+Z) within the adjustable `双击判定时间` (150–800 ms, default 300) redo;
   Windows undo buttons are immediate again. Android stays 0.7.37/code42 (button variant unchanged).
@@ -119,7 +122,7 @@
   never silently recreated. Old migration-path recovery and historical counts are in monthly logs.
 - Windows deletion recovery lives in `.mojian-deletions.previous`; corrupt JSON copies live outside
   `notebooks/` in `.mojian-corrupt.previous`. Incoming partial sync locks editing until journal
-  replay AND repository reload finish. Conflicts require manual review; no automatic merge UI.
+  replay AND repository reload finish. Unmergeable conflicts require manual review; no review UI yet.
 - Global theme/new-page background/print choices are device-local (`settings-memory.md`). Imported
   Notein/OneNote presentation is display-only; preserve source coordinates, outlines and assets.
 - Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac deployment needs its own
@@ -140,9 +143,8 @@
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
-- Sync prevention: 0.7.30 fixes old-stroke default rewrites (verbatim write-back) and navigation in
-  library.json. Byte-hash conflicts still block the whole library; a dependency-safe resolution UI
-  remains product work. Recovery evidence is in native-sync.md/November log.
+- Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
+  whole library and have no review UI yet (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
 - iOS/iPadOS maintenance is retired by user direction, 2026-11-13.
