@@ -186,6 +186,11 @@ UI contract (both clients): conflicted pages are colored in navigation with an M
 the sync status opens it. An open conflicted page shows a review bar (summary counts plus
 保留本机 / 采用服务器 / 两边都要) and the canvas previews the difference: server-only strokes green,
 strokes the server lacks red. Keep explanatory text minimal.
+Android (SyncConflictReview/SyncConflictViews): strokes changed on both sides are marked yellow (local
+version); the reviewed page is read-only except two-finger/wheel navigation; library.json and non-page
+files are reviewed in a list dialog. Taking the server's deletion of a page that the local library.json
+still lists is refused while library.json is conflicted: the deleted page file would be restored from
+`.previous` on reload and uploaded again. Resolve the library first.
 
 ### Historical default fields and conflict recovery
 

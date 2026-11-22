@@ -12,6 +12,8 @@
 - **0.7.40 (Windows/Android code44, source only)**: native sync three-way merges JSON pages/library per
   key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
   survive, volatile-only resaves receive the server page. Not released or installed. Read native-sync.md.
+  Android conflict review UI (navigation 同步冲突 group, M/A/D colors, review bar, red/green/yellow
+  canvas preview) on branch `claude/epic-solomon-61a32e`; emulator screenshots only, not installed.
 - **Android 0.7.39/code43**: pen-style curves compile to AndroidX `Linear` via `curveMapping` so the
   response is exactly 1 at x=1 (Ink's implicit end point). 0.7.26–0.7.37 snapped the Notein speed curve
   back to full width at >=64 cm/s (blunt fast tails). Notein preset values never changed. Windows unaffected.
