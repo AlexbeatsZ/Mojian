@@ -169,6 +169,24 @@ documents against the base blob downloaded from the server:
 Same-field edits of the same item and malformed/oversized JSON remain manual conflicts. Deleting checkpoint
 or journal files to clear a warning is not a supported recovery procedure.
 
+### Conflict review (0.7.40)
+
+What the JSON merge cannot settle is reviewed per file, like Shale's sync review (VS Code style).
+Engine API, same on both clients and covered by `shared/fixtures/json-review.json`:
+- `conflictReview()` / `ConflictReview()`: each conflicted path with the action taking the server's
+  version would have here (add/delete/modify), the preserved local/remote copies, and for JSON an
+  id-item summary (only local / only server / changed on both: strokes, or pages for library.json).
+- `resolveConflicts(choices)` / `ResolveConflictsAsync`: per path LOCAL (keep this device's file,
+  uploaded next pass), REMOTE (publish the server's copy through the incoming journal) or BOTH
+  (`NativeSyncMerge.union`: every id item of both versions, same item keeps local; revision+1).
+  A subset may be resolved; the rest stay in the conflict. Refused if the local file changed after
+  the conflict was recorded. When nothing remains the conflict marker is cleared and sync resumes.
+UI contract (both clients): conflicted pages are colored in navigation with an M/A/D letter
+(M yellow, A green, D red) and a 同步冲突 group lists every conflicted file (library.json as 笔记目录);
+the sync status opens it. An open conflicted page shows a review bar (summary counts plus
+保留本机 / 采用服务器 / 两边都要) and the canvas previews the difference: server-only strokes green,
+strokes the server lacks red. Keep explanatory text minimal.
+
 ### Historical default fields and conflict recovery
 
 The 2026-11-08 OMEN incident demonstrated that a save can materialize default stability/unit

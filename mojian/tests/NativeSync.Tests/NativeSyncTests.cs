@@ -40,6 +40,8 @@ await Run("offline incoming recovery needs no endpoint credential configuration"
 await Run("shared three-way decision table covers edits, deletions and equal concurrent changes", DecisionFixture);
 await Run("shared JSON merge fixtures match Android", MergeFixture);
 await Run("strokes written on two devices merge and a volatile-only resave takes the server page", StrokeMerge);
+await Run("shared keep-both and summary fixtures match Android", ReviewFixture);
+await Run("reviewed conflicts resolve per file, keep both and resume sync", ConflictReviewFlow);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
 async Task Run(string name, Func<Task> scenario)
@@ -829,6 +831,52 @@ async Task StrokeMerge()
     await one.SyncAsync(Idle);
     await two.SyncAsync(Idle);
     Check(two.Snapshot.Phase != NativeSyncPhase.Conflict && second.Read(page) == first.Read(page), "Volatile-only resave did not fast-forward: " + two.Status);
+}
+
+string CanonicalJson(JsonNode? node) => node switch
+{
+    JsonObject o => "{" + string.Join(",", o.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => JsonSerializer.Serialize(p.Key) + ":" + CanonicalJson(p.Value))) + "}",
+    JsonArray a => "[" + string.Join(",", a.Select(CanonicalJson)) + "]",
+    null => "null",
+    _ => node.ToJsonString(),
+};
+
+Task ReviewFixture()
+{
+    foreach (var item in JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "json-review.json")))!.AsArray())
+    {
+        var name = item!["name"]!.GetValue<string>();
+        var (local, remote) = (item["local"]!.AsObject(), item["remote"]!.AsObject());
+        Check(CanonicalJson(NativeSyncMerge.Union(local, remote)) == CanonicalJson(item["union"]), name + ": " + NativeSyncMerge.Union(local, remote).ToJsonString());
+        var summary = NativeSyncMerge.Summarize(local, remote); var expected = item["summary"]!;
+        Check(summary == new NativeSyncMerge.Summary(expected["localOnly"]!.GetValue<int>(), expected["remoteOnly"]!.GetValue<int>(), expected["changed"]!.GetValue<int>()), name + ": " + summary);
+    }
+    return Task.CompletedTask;
+}
+
+async Task ConflictReviewFlow()
+{
+    using var first = new TestWorkspace(); using var second = new TestWorkspace();
+    using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+    var library = await http.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files["library.json"].Hash);
+    first.Write("library.json", library); second.Write("library.json", library);
+    var (p, q) = (NewPage(), NewPage());
+    first.Write(p, "{\"revision\":1,\"strokes\":[{\"id\":\"a\",\"color\":1}]}"); first.Write(q, "{\"revision\":1,\"strokes\":[{\"id\":\"b\",\"color\":1}]}");
+    using var one = new NativeSyncClient(first.Root, endpoint, token); using var two = new NativeSyncClient(second.Root, endpoint, token);
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    first.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":3},{\"id\":\"theirs\"}]}"); first.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":3}]}");
+    second.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":2},{\"id\":\"mine\"}]}"); second.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":2}]}");
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    var review = two.ConflictReview().ToDictionary(item => item.Path);
+    Check(two.Snapshot.Phase == NativeSyncPhase.Conflict && review.Count == 2, "Expected two reviewed conflicts: " + two.Status);
+    Check(review[p] is { Action: "modify", LocalOnly: 1, RemoteOnly: 1, Changed: 1 }, "Wrong summary: " + review[p]);
+    Check(await two.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [p] = NativeSyncChoice.Both }, Idle), "Keep both failed: " + two.Status);
+    Check(string.Join(",", JsonNode.Parse(second.Read(p))!["strokes"]!.AsArray().Select(s => s!["id"]!.GetValue<string>())) == "a,mine,theirs", "Keep both lost strokes: " + second.Read(p));
+    Check(two.ConflictReview().Select(item => item.Path).SequenceEqual([q]) && two.Snapshot.Phase == NativeSyncPhase.Conflict, "Partial resolution dropped the other conflict");
+    Check(await two.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [q] = NativeSyncChoice.Remote }, Idle), "Remote choice failed: " + two.Status);
+    Check(second.Read(q) == first.Read(q) && two.ConflictReview().Count == 0, "Remote choice did not take the server page");
+    await two.SyncAsync(Idle); await one.SyncAsync(Idle);
+    Check(two.Snapshot.Phase != NativeSyncPhase.Conflict && first.Read(p) == second.Read(p), "Resolved page did not upload: " + two.Status);
 }
 
 async Task RejectedCommit()

@@ -6,6 +6,9 @@ using System.IO;
 namespace Notein_win.Services;
 
 public sealed record SyncEntry(string? Hash, long Version);
+public enum NativeSyncChoice { Local, Remote, Both }
+/// <summary>One conflicted file; Action is what taking the server's version does here: add, delete or modify.</summary>
+public sealed record NativeSyncConflictItem(string Path, string Action, string? LocalFile, string? RemoteFile, int? LocalOnly, int? RemoteOnly, int? Changed);
 public sealed record SyncManifest(string WorkspaceId, long Revision, Dictionary<string, SyncEntry> Files);
 public sealed record SyncChange(string Path, long ExpectedVersion, string? Hash);
 public sealed record SyncReceipt(string WorkspaceId, string OperationId, long Revision, Dictionary<string, SyncEntry> Files);

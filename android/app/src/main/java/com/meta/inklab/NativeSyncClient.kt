@@ -8,6 +8,11 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 
+enum class NativeSyncChoice { LOCAL, REMOTE, BOTH }
+
+/** One conflicted file; [action] is what taking the server's version does here: add, delete or modify. */
+data class NativeSyncConflictItem(val path: String, val action: String, val local: File?, val remote: File?, val summary: NativeSyncMerge.Summary?)
+
 class NativeSyncClient(
     root: File,
     endpoint: String,
@@ -200,6 +205,79 @@ class NativeSyncClient(
         }
     }
 
+    /** The files of the current conflict, as this device would see them after taking the server's version. */
+    fun conflictReview(): List<NativeSyncConflictItem> {
+        val (folder, paths) = conflictMarker() ?: return emptyList()
+        return paths.map { path ->
+            val local = NativeSyncFiles.safeFile(File(folder, "local"), path).takeIf(File::isFile)
+            val remote = NativeSyncFiles.safeFile(File(folder, "remote"), path).takeIf(File::isFile)
+            val summary = if (path.endsWith(".json") && local != null && remote != null && local.length() <= MERGE_LIMIT && remote.length() <= MERGE_LIMIT)
+                runCatching { NativeSyncMerge.summarize(readJson(local), readJson(remote)) }.getOrNull() else null
+            NativeSyncConflictItem(path, when { local == null -> "add"; remote == null -> "delete"; else -> "modify" }, local, remote, summary)
+        }
+    }
+
+    /**
+     * Resolves some conflicted paths: LOCAL keeps this device's file (uploaded next pass), REMOTE takes the
+     * server's, BOTH keeps every id item of both JSON versions. Unchosen paths stay in the conflict.
+     */
+    fun resolveConflicts(choices: Map<String, NativeSyncChoice>, applyOnIdle: (() -> Unit) -> Boolean, cancelled: () -> Boolean = { false }): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        try {
+            java.io.RandomAccessFile(File(directory, "client.lock"), "rw").use { stream ->
+                val lock = stream.channel.tryLock() ?: return false
+                try {
+                    loadState()
+                    val (folder, paths) = conflictMarker() ?: return true
+                    require(choices.isNotEmpty() && choices.keys.all { it in paths }) { "请选择冲突文件保留的版本" }
+                    val remote = NativeSyncManifest.parse(NativeSyncFiles.read(File(folder, "conflicts.json")).getJSONObject("remote"))
+                    val incoming = JSONObject()
+                    choices.forEach { (path, choice) ->
+                        val preserved = NativeSyncFiles.safeFile(File(folder, "local"), path).takeIf(File::isFile)
+                        check(NativeSyncFiles.hash(NativeSyncFiles.safeFile(root, path)) == preserved?.let(NativeSyncFiles::hash)) { "$path 在冲突后又改过，请先同步重新比较" }
+                        val entry = remote.files[path]
+                        val remoteFile = NativeSyncFiles.safeFile(File(folder, "remote"), path).takeIf(File::isFile)
+                        entry?.hash?.let { hash -> if (NativeSyncFiles.hash(blob(hash)) != hash) NativeSyncFiles.copyVerified(requireNotNull(remoteFile) { "冲突快照缺失" }, blob(hash), hash) }
+                        when (choice) {
+                            NativeSyncChoice.LOCAL -> if (entry == null) checkpoint.remove(path) else checkpoint[path] = entry
+                            NativeSyncChoice.REMOTE -> incoming.put(path, JSONObject().put("entry", requireNotNull(entry) { "服务器没有该文件的版本" }.json())
+                                .put("expectedHash", preserved?.let(NativeSyncFiles::hash) ?: JSONObject.NULL))
+                            NativeSyncChoice.BOTH -> {
+                                check(entry != null && preserved != null && remoteFile != null && path.endsWith(".json")) { "只有两边都存在的笔记文件可以保留两边" }
+                                val bytes = NativeSyncMerge.union(readJson(preserved), readJson(remoteFile)).toString().toByteArray(Charsets.UTF_8)
+                                val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+                                NativeSyncFiles.atomic(blob(hash)) { it.writeBytes(bytes) }
+                                incoming.put(path, JSONObject().put("entry", entry.json()).put("expectedHash", NativeSyncFiles.hash(preserved)).put("content", hash))
+                            }
+                        }
+                    }
+                    persistState()
+                    if (incoming.length() > 0) NativeSyncFiles.atomicJson(incomingFile, JSONObject().put("workspaceId", workspaceId).put("files", incoming))
+                    val remaining = paths - choices.keys
+                    if (remaining.isEmpty()) check(conflictFile.delete()) { "无法清理冲突标记" }
+                    else NativeSyncFiles.atomicJson(conflictFile, NativeSyncFiles.read(conflictFile).put("paths", JSONArray(remaining)))
+                    if (incoming.length() > 0 && !replayIncoming(applyOnIdle, cancelled)) return false
+                    setStatus(if (remaining.isEmpty()) "冲突已处理，下一轮同步继续" else "还有 ${remaining.size} 个冲突待处理")
+                    return true
+                } finally { lock.release() }
+            }
+        } catch (error: Exception) {
+            setStatus("冲突处理未完成，本地内容已保留：${error.message}")
+            return false
+        } finally { running.set(false) }
+    }
+
+    private fun conflictMarker(): Pair<File, List<String>>? {
+        if (!conflictFile.exists()) return null
+        val marker = NativeSyncFiles.read(conflictFile)
+        val folder = File(directory, "conflicts/${marker.getString("directory")}")
+        val paths = marker.getJSONArray("paths").let { array -> (0 until array.length()).map { array.getString(it) } }
+        paths.forEach { require(NativeSyncFiles.validPath(it)) }
+        return folder to paths
+    }
+
+    private fun readJson(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
+
     private fun retryOutbox(cancelled: () -> Boolean) {
         val request = NativeSyncFiles.read(outboxFile)
         check(request.getString("workspaceId") == workspaceId) { "同步发件箱身份不匹配" }
@@ -343,10 +421,9 @@ class NativeSyncClient(
         return try {
             ensureBlob(base, cancelled); ensureBlob(remote, cancelled)
             if (blob(base).length() > MERGE_LIMIT || blob(remote).length() > MERGE_LIMIT) return null
-            fun read(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
-            val ours = read(localFile)
+            val ours = readJson(localFile)
             check(NativeSyncFiles.hash(localFile) == local) { "本地文件在合并期间发生变化" }
-            when (val result = NativeSyncMerge.merge(read(blob(base)), ours, read(blob(remote)))) {
+            when (val result = NativeSyncMerge.merge(readJson(blob(base)), ours, readJson(blob(remote)))) {
                 null -> null
                 NativeSyncMerge.Result.Remote -> REMOTE
                 is NativeSyncMerge.Result.Merged -> {

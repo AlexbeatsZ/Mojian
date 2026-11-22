@@ -572,6 +572,88 @@ public sealed class NativeSyncClient : IDisposable
         }
     }
 
+    /// <summary>The files of the current conflict, as this device would see them after taking the server's version.</summary>
+    public IReadOnlyList<NativeSyncConflictItem> ConflictReview()
+    {
+        if (_state.ConflictDirectory is not { } folder || !File.Exists(Path.Combine(folder, "conflicts.json"))) return [];
+        var record = JsonNode.Parse(File.ReadAllBytes(Path.Combine(folder, "conflicts.json")))!.AsObject();
+        return record["paths"]!.AsArray().Select(node => node!.GetValue<string>()).Where(ValidPath).Select(path =>
+        {
+            var local = Path.Combine(folder, "local", path); var remote = Path.Combine(folder, "remote", path);
+            string? l = File.Exists(local) ? local : null, r = File.Exists(remote) ? remote : null;
+            NativeSyncMerge.Summary? summary = null;
+            if (path.EndsWith(".json", StringComparison.Ordinal) && l != null && r != null && new FileInfo(l).Length <= MergeLimit && new FileInfo(r).Length <= MergeLimit)
+                try { if (JsonNode.Parse(File.ReadAllBytes(l)) is JsonObject lo && JsonNode.Parse(File.ReadAllBytes(r)) is JsonObject ro) summary = NativeSyncMerge.Summarize(lo, ro); }
+                catch (JsonException) { }
+            return new NativeSyncConflictItem(path, l == null ? "add" : r == null ? "delete" : "modify", l, r, summary?.LocalOnly, summary?.RemoteOnly, summary?.Changed);
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Resolves some conflicted paths: Local keeps this device's file (uploaded next pass), Remote takes the server's,
+    /// Both keeps every id item of both JSON versions. Unchosen paths stay in the conflict.
+    /// </summary>
+    public async Task<bool> ResolveConflictsAsync(IReadOnlyDictionary<string, NativeSyncChoice> choices, Func<Action, Task<bool>> applyOnIdle, CancellationToken cancellation = default)
+    {
+        if (!await _running.WaitAsync(0, cancellation).ConfigureAwait(false)) return false;
+        try
+        {
+            if (_state.ConflictDirectory is not { } folder) return true;
+            var recordPath = Path.Combine(folder, "conflicts.json");
+            var record = JsonNode.Parse(File.ReadAllBytes(recordPath))!.AsObject();
+            var paths = record["paths"]!.AsArray().Select(node => node!.GetValue<string>()).ToList();
+            if (choices.Count == 0 || choices.Keys.Any(path => !paths.Contains(path))) throw new ArgumentException("请选择冲突文件保留的版本");
+            var remote = record["remote"]!.Deserialize<SyncManifest>(NativeSyncStorage.Json)!;
+            var incoming = new Dictionary<string, NativeSyncIncomingFile>(StringComparer.Ordinal);
+            foreach (var (path, choice) in choices)
+            {
+                var preserved = Path.Combine(folder, "local", path);
+                var preservedHash = File.Exists(preserved) ? NativeSyncStorage.Hash(preserved) : null;
+                if (NativeSyncStorage.Hash(LocalPath(path)) != preservedHash) throw new IOException(path + " 在冲突后又改过，请先同步重新比较");
+                var entry = remote.Files.GetValueOrDefault(path);
+                var remoteFile = Path.Combine(folder, "remote", path);
+                if (entry?.Hash is { } hash && NativeSyncStorage.Hash(BlobPath(hash)) != hash)
+                {
+                    if (!File.Exists(remoteFile)) throw new IOException("冲突快照缺失，请保留目录");
+                    NativeSyncStorage.CopyDurable(remoteFile, BlobPath(hash));
+                }
+                switch (choice)
+                {
+                    case NativeSyncChoice.Local:
+                        if (entry == null) _state.Files.Remove(path); else _state.Files[path] = entry;
+                        break;
+                    case NativeSyncChoice.Remote:
+                        incoming[path] = new(preservedHash, entry ?? throw new IOException("服务器没有该文件的版本"));
+                        break;
+                    default:
+                        if (entry == null || preservedHash == null || !File.Exists(remoteFile) || !path.EndsWith(".json", StringComparison.Ordinal) ||
+                            JsonNode.Parse(File.ReadAllBytes(preserved)) is not JsonObject ours || JsonNode.Parse(File.ReadAllBytes(remoteFile)) is not JsonObject theirs)
+                            throw new IOException("只有两边都存在的笔记文件可以保留两边");
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(NativeSyncMerge.Union(ours, theirs).ToJsonString(NativeSyncMerge.Output));
+                        var merged = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+                        Directory.CreateDirectory(Path.Combine(_directory, "blobs"));
+                        NativeSyncStorage.Write(BlobPath(merged), bytes);
+                        incoming[path] = new(preservedHash, entry, merged);
+                        break;
+                }
+            }
+            var remaining = paths.Where(path => !choices.ContainsKey(path)).ToList();
+            record["paths"] = new JsonArray(remaining.Select(path => (JsonNode)path).ToArray());
+            NativeSyncStorage.Write(recordPath, System.Text.Encoding.UTF8.GetBytes(record.ToJsonString()));
+            if (remaining.Count == 0) _state.ConflictDirectory = null;
+            PersistState();
+            if (incoming.Count > 0)
+            {
+                NativeSyncStorage.Save(IncomingPath, new NativeSyncIncoming(remote.WorkspaceId, remote.Revision, incoming));
+                if (!await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return false;
+            }
+            if (remaining.Count == 0) SetStatus(NativeSyncPhase.Pending, "冲突已处理，下一轮同步继续");
+            else SetStatus(NativeSyncPhase.Conflict, $"还有 {remaining.Count} 个冲突待处理", remaining.Count);
+            return true;
+        }
+        finally { _running.Release(); }
+    }
+
     private const string RemoteMerge = "remote";
     private const long MergeLimit = 64L * 1024 * 1024;
 

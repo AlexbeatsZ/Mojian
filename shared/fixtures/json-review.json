@@ -1,0 +1,12 @@
+[
+  {"name": "keep both: strokes from both sides, same stroke keeps local, revision bumps",
+   "local":  {"revision": 4, "strokes": [{"id": "a", "color": 2}, {"id": "l"}]},
+   "remote": {"revision": 6, "strokes": [{"id": "a", "color": 3}, {"id": "r"}]},
+   "union":  {"revision": 7, "strokes": [{"id": "a", "color": 2}, {"id": "l"}, {"id": "r"}]},
+   "summary": {"localOnly": 1, "remoteOnly": 1, "changed": 1}},
+  {"name": "keep both on the library keeps pages added in either section",
+   "local":  {"notebooks": [{"id": "n", "sections": [{"id": "s", "pages": [{"id": "p", "title": "mine"}, {"id": "q"}]}]}]},
+   "remote": {"notebooks": [{"id": "n", "sections": [{"id": "s", "pages": [{"id": "p", "title": "theirs"}]}, {"id": "t", "pages": [{"id": "x"}, {"id": "y"}]}]}]},
+   "union":  {"notebooks": [{"id": "n", "sections": [{"id": "s", "pages": [{"id": "p", "title": "mine"}, {"id": "q"}]}, {"id": "t", "pages": [{"id": "x"}, {"id": "y"}]}]}]},
+   "summary": {"localOnly": 1, "remoteOnly": 2, "changed": 1}}
+]

@@ -320,6 +320,32 @@ class NativeSyncClientTest {
         assertEquals(commits, server.commits)
     }
 
+    @Test fun reviewedConflictsResolvePerFileIncludingKeepBoth() = isolated { _, root, server ->
+        File(root, "library.json").writeText("library")
+        val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"strokes":[{"id":"a","color":1}]}""") }
+        val note = File(root, "notebooks/n/pages/q.json").apply { writeText("""{"revision":1,"strokes":[{"id":"b","color":1}]}""") }
+        client(root, server).sync(idle)
+        page.writeText("""{"revision":2,"strokes":[{"id":"a","color":2},{"id":"mine"}]}""")
+        note.writeText("""{"revision":2,"strokes":[{"id":"b","color":2}]}""")
+        server.update("notebooks/n/pages/p.json", """{"revision":2,"strokes":[{"id":"a","color":3},{"id":"theirs"}]}""")
+        server.update("notebooks/n/pages/q.json", """{"revision":2,"strokes":[{"id":"b","color":3}]}""")
+        val engine = client(root, server)
+        engine.sync(idle)
+        val review = engine.conflictReview().associateBy { it.path }
+        assertEquals(setOf("notebooks/n/pages/p.json", "notebooks/n/pages/q.json"), review.keys)
+        assertEquals(NativeSyncMerge.Summary(1, 1, 1), review.getValue("notebooks/n/pages/p.json").summary)
+        assertEquals("modify", review.getValue("notebooks/n/pages/q.json").action)
+        assertTrue(engine.resolveConflicts(mapOf("notebooks/n/pages/p.json" to NativeSyncChoice.BOTH), idle))
+        assertEquals(listOf("a", "mine", "theirs"), JSONObject(page.readText()).getJSONArray("strokes").let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("id") } })
+        assertEquals(listOf("notebooks/n/pages/q.json"), engine.conflictReview().map { it.path })
+        assertTrue(engine.resolveConflicts(mapOf("notebooks/n/pages/q.json" to NativeSyncChoice.REMOTE), idle))
+        assertEquals("""{"revision":2,"strokes":[{"id":"b","color":3}]}""", note.readText())
+        assertTrue(engine.conflictReview().isEmpty())
+        engine.sync(idle)
+        assertEquals(page.readText(), String(server.blobs.getValue(server.remote.files.getValue("notebooks/n/pages/p.json").hash!!)))
+        assertFalse(File(root, ".mojian-sync/conflict.json").exists())
+    }
+
     @Test fun cancelledSyncDoesNotUploadOrApply() = isolated { _, root, server ->
         File(root, "library.json").writeText("local")
         client(root, server).sync(idle) { true }

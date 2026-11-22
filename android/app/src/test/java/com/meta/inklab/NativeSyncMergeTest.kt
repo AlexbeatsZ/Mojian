@@ -39,3 +39,18 @@ class NativeSyncMergeTest {
         assertEquals(listOf("l", "r"), (0 until 2).map { merged.getJSONArray("strokes").getJSONObject(it).getString("id") })
     }
 }
+
+class NativeSyncReviewTest {
+    @Test fun sharedReviewFixtures() {
+        val text = requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/json-review.json")).bufferedReader().use { it.readText() }
+        val cases = JSONArray(text)
+        val canonical = NativeSyncMergeTest()::class.java.getDeclaredMethod("canonical", Any::class.java).apply { isAccessible = true }
+        for (index in 0 until cases.length()) {
+            val case = cases.getJSONObject(index); val name = case.getString("name")
+            val local = case.getJSONObject("local"); val remote = case.getJSONObject("remote")
+            assertEquals(name, canonical.invoke(NativeSyncMergeTest(), case.getJSONObject("union")), canonical.invoke(NativeSyncMergeTest(), NativeSyncMerge.union(local, remote)))
+            val summary = case.getJSONObject("summary")
+            assertEquals(name, NativeSyncMerge.Summary(summary.getInt("localOnly"), summary.getInt("remoteOnly"), summary.getInt("changed")), NativeSyncMerge.summarize(local, remote))
+        }
+    }
+}

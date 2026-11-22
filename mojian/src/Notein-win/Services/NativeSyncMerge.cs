@@ -37,6 +37,90 @@ internal static class NativeSyncMerge
         return new Result.Merged(merged);
     }
 
+    /// <summary>"Keep both" for a reviewed conflict: every id item of either side survives; a value changed on both sides keeps the local one.</summary>
+    public static JsonObject Union(JsonObject local, JsonObject remote, string? now = null)
+    {
+        var merged = (JsonObject)UnionValue(local, remote)!;
+        if (merged.ContainsKey("revision"))
+            merged["revision"] = Math.Max(local["revision"]?.GetValue<long>() ?? 0, remote["revision"]?.GetValue<long>() ?? 0) + 1;
+        if (merged.ContainsKey("updatedAt")) merged["updatedAt"] = now ?? DateTimeOffset.UtcNow.ToString("O");
+        return merged;
+    }
+
+    private static JsonNode? UnionValue(JsonNode? local, JsonNode? remote)
+    {
+        if (IsAbsent(local)) return remote?.DeepClone();
+        if (IsAbsent(remote) || Equal(local, remote)) return local?.DeepClone();
+        if (local is JsonObject lo && remote is JsonObject ro)
+        {
+            var result = new JsonObject();
+            foreach (var key in ro.Select(p => p.Key).Concat(lo.Select(p => p.Key)).Distinct())
+                result[key] = UnionValue(Value(lo, key), Value(ro, key));
+            return result;
+        }
+        if (local is JsonArray la && remote is JsonArray ra && Identified(la) && Identified(ra))
+        {
+            var ours = ById(la); var theirs = ById(ra);
+            var kept = ours.Keys.Concat(theirs.Keys).Distinct().ToDictionary(id => id,
+                id => UnionValue(ours.GetValueOrDefault(id) ?? Absent, theirs.GetValueOrDefault(id) ?? Absent), StringComparer.Ordinal);
+            return new JsonArray(Order(ours.Keys, theirs.Keys, kept.Keys.ToHashSet()).Select(id => kept[id]).ToArray());
+        }
+        return local?.DeepClone();
+    }
+
+    private static List<string> Order(IEnumerable<string> local, IEnumerable<string> remote, IReadOnlySet<string> kept)
+    {
+        var order = remote.Where(kept.Contains).ToList();
+        var placed = new HashSet<string>(order, StringComparer.Ordinal);
+        var anchor = -1;
+        foreach (var id in local)
+        {
+            if (!kept.Contains(id)) continue;
+            if (placed.Contains(id)) { anchor = order.IndexOf(id); continue; }
+            order.Insert(anchor + 1, id); placed.Add(id); anchor++;
+        }
+        return order;
+    }
+
+    /// <summary>Id items (strokes, pages) only on this device, only on the server, or on both but different.</summary>
+    internal sealed record Summary(int LocalOnly, int RemoteOnly, int Changed);
+
+    public static Summary Summarize(JsonObject local, JsonObject remote)
+    {
+        int localOnly = 0, remoteOnly = 0, changed = 0;
+        void Walk(JsonNode? left, JsonNode? right)
+        {
+            if (left is JsonObject lo && right is JsonObject ro)
+                foreach (var key in lo.Select(p => p.Key).Union(ro.Select(p => p.Key))) Walk(Value(lo, key), Value(ro, key));
+            else if (left is JsonArray la && right is JsonArray ra && Identified(la) && Identified(ra))
+            {
+                var ours = ById(la); var theirs = ById(ra);
+                foreach (var (id, item) in ours)
+                {
+                    if (!theirs.TryGetValue(id, out var other)) localOnly += Count(item);
+                    else if (!Equal(item, other))
+                    {
+                        if (item is JsonObject io && other is JsonObject oo && HasIdentified(io)) Walk(io, oo); else changed++;
+                    }
+                }
+                foreach (var id in theirs.Keys.Where(id => !ours.ContainsKey(id))) remoteOnly += Count(theirs[id]);
+            }
+            else if (IsAbsent(left) && !IsAbsent(right)) remoteOnly += CountNested(right);
+            else if (IsAbsent(right) && !IsAbsent(left)) localOnly += CountNested(left);
+        }
+        Walk(local, remote);
+        return new(localOnly, remoteOnly, changed);
+    }
+
+    private static int Count(JsonNode? item) => Math.Max(1, CountNested(item));
+    private static int CountNested(JsonNode? item) => item switch
+    {
+        JsonObject o => o.Sum(p => CountNested(p.Value)),
+        JsonArray a when Identified(a) => a.Sum(Count),
+        _ => 0,
+    };
+    private static bool HasIdentified(JsonObject item) => item.Any(p => p.Value is JsonArray a && a.Count > 0 && Identified(a));
+
     private static bool SameIgnoringVolatile(JsonObject left, JsonObject right) =>
         left.Select(pair => pair.Key).Union(right.Select(pair => pair.Key)).Except(VolatileKeys)
             .All(key => Equal(Value(left, key), Value(right, key)));
@@ -101,16 +185,7 @@ internal static class NativeSyncMerge
             else merged = MergeValue(null, before, mine, other);
             if (!IsAbsent(merged)) kept[id] = merged;
         }
-        var order = theirs.Keys.Where(kept.ContainsKey).ToList();
-        var placed = new HashSet<string>(order, StringComparer.Ordinal);
-        var anchor = -1;
-        foreach (var id in ours.Keys)
-        {
-            if (!kept.ContainsKey(id)) continue;
-            if (placed.Contains(id)) { anchor = order.IndexOf(id); continue; }
-            order.Insert(anchor + 1, id); placed.Add(id); anchor++;
-        }
-        return new JsonArray(order.Select(id => kept[id]?.DeepClone()).ToArray());
+        return new JsonArray(Order(ours.Keys, theirs.Keys, kept.Keys.ToHashSet()).Select(id => kept[id]?.DeepClone()).ToArray());
     }
 
     private static decimal? Number(JsonNode? node) =>
