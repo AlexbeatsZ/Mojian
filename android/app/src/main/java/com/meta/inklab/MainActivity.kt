@@ -299,6 +299,17 @@ class MainActivity : Activity() {
     private var splitViewButton: View? = null
 
     private var predictionEnabled = true
+    private var undoDoubleTapRedoEnabled = true
+    private val undoButtons = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+    private val undoTap by lazy {
+        UndoTapGesture(
+            schedule = { delay, action -> mainHandler.postDelayed(action, delay) },
+            cancel = { action -> mainHandler.removeCallbacks(action) },
+            undo = { clearContentSelection(); dryInkView.undo() },
+            redo = { clearContentSelection(); dryInkView.redo() },
+            enabled = { undoDoubleTapRedoEnabled },
+        )
+    }
     private var transformGestureActive = false
     private var lastGestureFocusX = 0f
     private var lastGestureFocusY = 0f
@@ -815,6 +826,7 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!workspaceLoaded) return super.dispatchKeyEvent(event)
+        if (event.action == KeyEvent.ACTION_DOWN) flushPendingUndo()
         if (pageLoadingOverlay != null) return true
         if (::selectionOverlay.isInitialized) {
             val control = when (event.keyCode) {
@@ -855,6 +867,7 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) flushPendingUndo(event)
         if (pageLoadingOverlay != null) {
             // Keep notebook/page navigation responsive while content is being prepared. Editing
             // controls must not mutate the outgoing document under the destination page header.
@@ -905,6 +918,7 @@ class MainActivity : Activity() {
         nativeSyncForeground = false
         nativeSyncController.pause()
         if(!::dryInkView.isInitialized) { super.onPause();return }
+        flushPendingUndo()
         if (::selectionOverlay.isInitialized) selectionOverlay.cancelDirectGesture()
         if (::paperContainer.isInitialized) paperContainer.cancelPointerSequence()
         mainHandler.removeCallbacks(syncRefresh)
@@ -1533,6 +1547,15 @@ class MainActivity : Activity() {
                     }
                     addView(settingsRow("笔迹预测", "使用预测触点降低快速书写时的视觉延迟。", predictionValue), LinearLayout.LayoutParams(MATCH, dp(72)))
 
+                    val undoTapValue = settingsValueButton(if (undoDoubleTapRedoEnabled) "开启" else "关闭")
+                    undoTapValue.setOnClickListener {
+                        undoTap.flush()
+                        undoDoubleTapRedoEnabled = !undoDoubleTapRedoEnabled
+                        undoTapValue.text = if (undoDoubleTapRedoEnabled) "开启" else "关闭"
+                        persistWorkspacePreferences()
+                    }
+                    addView(settingsRow("双击撤销重做", "快速点击两次撤销按钮执行重做；开启后单击撤销会在 0.3 秒后执行。", undoTapValue), LinearLayout.LayoutParams(MATCH, dp(72)))
+
                     val pageModeValue = settingsValueButton(if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) "本层" else "递归")
                     pageModeValue.setOnClickListener {
                         val mode = if (workspace.pagePaneMode == PagePaneMode.CURRENT_SECTION) PagePaneMode.RECURSIVE else PagePaneMode.CURRENT_SECTION
@@ -1741,6 +1764,7 @@ class MainActivity : Activity() {
             ?.let(NotebookLibrary::fromJson)
             ?.let { notebookLibrary = it }
         predictionEnabled = prefs.getBoolean(KEY_PREDICTION_ENABLED, true)
+        undoDoubleTapRedoEnabled = prefs.getBoolean(KEY_UNDO_DOUBLE_TAP_REDO, true)
         imageImportDisplayMode =
             runCatching { ImageImportDisplayMode.valueOf(prefs.getString(KEY_IMAGE_IMPORT_DISPLAY_MODE, "") ?: "") }
                 .getOrDefault(ImageImportDisplayMode.INVERT)
@@ -2225,6 +2249,7 @@ class MainActivity : Activity() {
         getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_PREDICTION_ENABLED, predictionEnabled)
+            .putBoolean(KEY_UNDO_DOUBLE_TAP_REDO, undoDoubleTapRedoEnabled)
             .putString(KEY_IMAGE_IMPORT_DISPLAY_MODE, imageImportDisplayMode.name)
             .putString(KEY_PDF_PRINTOUT_DISPLAY_MODE, pdfPrintoutDisplayMode.name)
             .putInt(KEY_DARK_IMAGE_POLICY_VERSION, 1)
@@ -4835,11 +4860,7 @@ class MainActivity : Activity() {
             return toolButton(tool)
         }
         return when (id) {
-            "draw:undo" ->
-                commandButton("arrow_undo", "撤销", false) {
-                    clearContentSelection()
-                    dryInkView.undo()
-                }
+            "draw:undo" -> undoCommandButton()
             "draw:redo" ->
                 commandButton("arrow_redo", "重做", false) {
                     clearContentSelection()
@@ -4865,13 +4886,7 @@ class MainActivity : Activity() {
 
     private fun populateToolShelf(row: LinearLayout) {
         row.removeAllViews()
-        row.addView(
-            commandButton("arrow_undo", "撤销", selected = false) {
-                clearContentSelection()
-                dryInkView.undo()
-            },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
-        )
+        row.addView(undoCommandButton(), LinearLayout.LayoutParams(dp(40), dp(42)))
         row.addView(
             commandButton("arrow_redo", "重做", selected = false) {
                 clearContentSelection()
@@ -6787,6 +6802,20 @@ class MainActivity : Activity() {
             setDarkTooltip(this, label)
         }
 
+    private fun undoCommandButton(): View =
+        commandButton("arrow_undo", "撤销（快速点击两次重做）", selected = false) { undoTap.tap() }.also { undoButtons += it }
+
+    /** A pending single-tap undo must apply before any other input can edit or navigate. */
+    private fun flushPendingUndo(event: MotionEvent? = null) {
+        if (!undoTap.isPending) return
+        if (event != null) {
+            val bounds = android.graphics.Rect()
+            val onUndoButton = undoButtons.any { it.isShown && it.getGlobalVisibleRect(bounds) && bounds.contains(event.rawX.toInt(), event.rawY.toInt()) }
+            if (onUndoButton) return
+        }
+        undoTap.flush()
+    }
+
     private fun railToggleButton(icon: String, label: String, action: () -> Unit): View =
         FrameLayout(this).apply {
             addView(
@@ -8263,6 +8292,7 @@ class MainActivity : Activity() {
         private const val KEY_TOOL_SHELF = "tool-shelf"
         private const val KEY_LAST_PEN_TOOL_ID = "last-pen-tool-id"
         private const val KEY_PREDICTION_ENABLED = "prediction-enabled"
+        private const val KEY_UNDO_DOUBLE_TAP_REDO = "undo-double-tap-redo"
         private const val KEY_SECTION_PANE_VISIBLE = "section-pane-visible"
         private const val KEY_PAGE_PANE_VISIBLE = "page-pane-visible"
         private const val KEY_PAGE_PANE_MODE = "page-pane-mode"

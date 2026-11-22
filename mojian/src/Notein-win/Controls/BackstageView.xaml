@@ -189,6 +189,18 @@
                         </DockPanel>
                     </Border>
 
+                    <!-- Row 1b: 双击撤销重做 -->
+                    <Border MinHeight="56" Padding="0,8">
+                        <DockPanel LastChildFill="True">
+                            <Button DockPanel.Dock="Right" Content="{Binding UndoDoubleTapRedoButtonText}" Command="{Binding ToggleUndoDoubleTapRedoCommand}"
+                                    Style="{StaticResource ActionCard}" Width="100" Height="36" HorizontalContentAlignment="Center" VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="双击撤销重做" Foreground="{StaticResource TextPrimary}" FontSize="14" />
+                                <TextBlock Text="快速点击两次撤销按钮执行重做；开启后单击撤销会在 0.3 秒后执行。" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
                     <!-- Row 2: 页面栏显示范围 -->
                     <Border MinHeight="56" Padding="0,8">
                         <DockPanel LastChildFill="True">

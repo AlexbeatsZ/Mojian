@@ -186,6 +186,18 @@ tool may open its flyout. Windows must preserve the popup state observed at poin
 outside-click dismissal must not clear `IsOpen` first and make the following `Click` look like a
 second click.
 
+Windows tool selection rebuilds the ribbon/full-page tool collections (tool colors do not notify),
+so the button a flyout was opened from is detached afterwards. The flyout must be re-anchored to the
+selected tool's current button (`RepairToolFlyoutAnchor`) after selection and before pen-style
+controls change its height; otherwise WPF repositions the popup against a detached target and it
+jumps to an unrelated screen position (0.7.37 fix).
+
+Undo buttons (both clients, ribbon and full-page toolbar) support `双击撤销重做`, a device-local
+setting that defaults on: two taps within 300 ms redo once; a single tap undoes after 300 ms. Any
+other pointer/key input or leaving the activity applies a pending undo first, so it never lands after
+a later edit. Ctrl+Z/Y and pen-key Undo/Redo bindings stay immediate. Turning it off restores
+immediate undo.
+
 Follow the desktop OneNote grouping rhythm: undo/redo, a hairline divider, lasso,
 another hairline divider, eraser and ink tools, add-tool, a divider, stylus panorama hand, a divider,
 insert space and background format (rule lines/grid styles), then low-frequency page clearing

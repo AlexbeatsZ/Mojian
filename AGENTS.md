@@ -9,6 +9,10 @@
 
 # Current State
 
+- **0.7.37 (Windows/Android code42)**: Windows pen tap/press circle feedback removed (`PenFeedback`);
+  undo buttons on both clients redo on a double tap within 300 ms (device-local `双击撤销重做`, default
+  on; other input flushes a pending undo). Windows tool flyout re-anchors after toolbar rebuilds, fixing
+  the jump when switching pen style. Not yet installed on any device; physical acceptance open.
 - **0.7.34 (Windows/Android code39, branch `fix/compact-ink-outline`)**: tablet "页面暂时无法读取"
   was Android OOM on a 358 MB page (作业 4); 90% was Windows pen `vectorPath` written since 0.7.21 as
   one full-precision disc per modeled sample. Windows now writes simplified, 0.01 DIP, relative

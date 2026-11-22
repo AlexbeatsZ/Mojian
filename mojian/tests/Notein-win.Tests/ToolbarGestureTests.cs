@@ -1,0 +1,129 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Notein_win.Models;
+using Notein_win.Services;
+using Notein_win.ViewModels;
+
+namespace Notein_win.Tests;
+
+public sealed class ToolbarGestureTests
+{
+    [Fact]
+    public void UndoDoubleTapRedoesAndSingleTapUndoesOnlyAfterFlushOrTimeout() => WpfTestExecutor.Run(() =>
+    {
+        var undo = 0; var redo = 0; var enabled = true;
+        var gesture = new UndoTapGesture(() => undo++, () => redo++, () => enabled);
+        gesture.Tap(); Assert.True(gesture.IsPending); Assert.Equal((0, 0), (undo, redo));
+        gesture.Tap(); Assert.False(gesture.IsPending); Assert.Equal((0, 1), (undo, redo));
+        gesture.Tap(); gesture.Flush(); Assert.Equal((1, 1), (undo, redo));
+        gesture.Flush(); Assert.Equal((1, 1), (undo, redo));
+
+        gesture.Tap();
+        var frame = new DispatcherFrame();
+        var deadline = new DispatcherTimer { Interval = UndoTapGesture.DoubleTapInterval * 4 };
+        deadline.Tick += (_, _) => { deadline.Stop(); frame.Continue = false; };
+        deadline.Start(); Dispatcher.PushFrame(frame);
+        Assert.False(gesture.IsPending); Assert.Equal((2, 1), (undo, redo));
+
+        enabled = false;
+        gesture.Tap(); gesture.Tap(); Assert.False(gesture.IsPending); Assert.Equal((4, 1), (undo, redo));
+    });
+
+    [Fact]
+    public void UndoDoubleTapSettingDefaultsOnAndPersists() => WpfTestExecutor.Run(() =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-undo-tap", "fixture-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        try
+        {
+            var prefs = new PreferencesStore(Path.Combine(root, "preferences.json"));
+            var model = new MainViewModel(root, prefs);
+            Assert.True(model.UndoDoubleTapRedoEnabled); Assert.Equal("开启", model.UndoDoubleTapRedoButtonText);
+            model.ToggleUndoDoubleTapRedoCommand.Execute(null); model.SaveAll();
+            Assert.False(new MainViewModel(root, prefs).UndoDoubleTapRedoEnabled);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } }
+    });
+
+    [Fact]
+    public void PenTapFeedbackIsDisabledForEveryElement() => WpfTestExecutor.Run(() =>
+    {
+        PenFeedback.Install(); PenFeedback.Install();
+        var item = new ComboBoxItem(); var popup = new Popup { Child = new Border { Child = item } };
+        var window = new Window { Content = new Grid { Children = { popup } }, ShowInTaskbar = false, WindowStyle = WindowStyle.None, Width = 10, Height = 10 };
+        var menu = new ContextMenu { Items = { new MenuItem { Header = "x" } } };
+        try
+        {
+            window.Show(); window.UpdateLayout();
+            Assert.False(Stylus.GetIsTapFeedbackEnabled(window));
+            Assert.False(Stylus.GetIsTapFeedbackEnabled(item));
+            Assert.True(Stylus.GetIsPressAndHoldEnabled(item));
+            menu.PlacementTarget = window; menu.IsOpen = true;
+            Assert.False(Stylus.GetIsTapFeedbackEnabled((MenuItem)menu.Items[0]!));
+        }
+        finally { menu.IsOpen = false; window.Close(); }
+    });
+
+    [Fact]
+    public void ToolFlyoutStaysAnchoredToTheRebuiltToolButtonWhenPenStyleChanges() => WpfTestExecutor.Run(() =>
+    {
+        foreach (var name in new[] { "DarkColors", "IconResources", "ControlStyles" })
+            Application.Current.Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri($"/Mojian;component/Themes/{name}.xaml", UriKind.Relative)));
+        var root = Path.Combine(Path.GetTempPath(), ".agents", "mojian-flyout-anchor", "fixture-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        MainWindow? window = null;
+        try
+        {
+            var prefs = new PreferencesStore(Path.Combine(root, "preferences.json")); var model = new MainViewModel(root, prefs); model.AddPage("fixture", new PageAppearance()); model.SaveAll();
+            window = new MainWindow(model); window.Show(); Idle(window);
+            var pen = model.PenTools.First(); model.SelectToolFromToolbar(pen.Id, false); Idle(window);
+            var button = RibbonButton(window, pen.Id);
+            button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, button));
+            var popup = (Popup)window.FindName("ToolFlyoutPopup");
+            Assert.True(model.IsToolFlyoutOpen);
+            // Selecting rebuilt the toolbar collections, so the clicked button is no longer in the tree.
+            Assert.Null(PresentationSource.FromVisual(button));
+            Idle(window);
+            AssertAnchoredTo(popup, pen.Id);
+
+            var selector = (ComboBox)window.FindName("PenStyleSelector");
+            selector.SelectedValue = "onenote"; Idle(window);
+            Assert.Equal("onenote", model.SelectedTool.PenStyleId);
+            AssertAnchoredTo(popup, pen.Id);
+            selector.SelectedValue = "notein"; Idle(window);
+            AssertAnchoredTo(popup, pen.Id);
+            window.Close(); window = null;
+        }
+        finally { window?.Close(); try { Directory.Delete(root, true); } catch (IOException) { } }
+    });
+
+    private static void AssertAnchoredTo(Popup popup, string toolId)
+    {
+        var target = Assert.IsAssignableFrom<FrameworkElement>(popup.PlacementTarget);
+        Assert.NotNull(PresentationSource.FromVisual(target));
+        Assert.True(target.IsVisible);
+        Assert.Equal(toolId, Assert.IsType<ToolPreset>(target.DataContext).Id);
+    }
+
+    private static ToggleButton RibbonButton(DependencyObject root, string toolId)
+    {
+        foreach (var button in Descendants<ToggleButton>(root))
+            if (button.IsVisible && button.DataContext is ToolPreset tool && tool.Id == toolId) return button;
+        throw new InvalidOperationException("ribbon tool button not found");
+    }
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
+    }
+
+    private static void Idle(Window window) { window.UpdateLayout(); window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle); }
+}

@@ -317,6 +317,20 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Two quick taps on an undo button redo (device-local).</summary>
+    public bool UndoDoubleTapRedoEnabled
+    {
+        get => _settings.UndoDoubleTapRedoEnabled;
+        set
+        {
+            if (_settings.UndoDoubleTapRedoEnabled == value) return;
+            _settings.UndoDoubleTapRedoEnabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(UndoDoubleTapRedoButtonText));
+            SaveSettings();
+        }
+    }
+
     public ImageImportDisplayMode ImageDisplayMode
     {
         get => _settings.ImageDisplayMode;
@@ -360,6 +374,7 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     public string PredictionButtonText => PredictionEnabled ? "开启" : "关闭";
+    public string UndoDoubleTapRedoButtonText => UndoDoubleTapRedoEnabled ? "开启" : "关闭";
     public string PagePaneModeButtonText => PagePaneMode == PagePaneMode.CurrentSection ? "本层" : "递归";
     public string ImageDisplayModeButtonText => ImageDisplayMode switch
     {
@@ -379,6 +394,8 @@ public sealed partial class MainViewModel : ObservableObject
         PredictionEnabled = !PredictionEnabled;
         OnPropertyChanged(nameof(PredictionButtonText));
     });
+
+    public ICommand ToggleUndoDoubleTapRedoCommand => new RelayCommand(() => UndoDoubleTapRedoEnabled = !UndoDoubleTapRedoEnabled);
 
     public ICommand TogglePagePaneModeCommand => new RelayCommand(() =>
     {
@@ -1870,6 +1887,8 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsPagePaneOpen));
         OnPropertyChanged(nameof(ZoomLocked));
         OnPropertyChanged(nameof(PredictionEnabled));
+        OnPropertyChanged(nameof(UndoDoubleTapRedoEnabled));
+        OnPropertyChanged(nameof(UndoDoubleTapRedoButtonText));
         OnPropertyChanged(nameof(ImageDisplayMode));
         OnPropertyChanged(nameof(PdfDisplayMode));
         OnPropertyChanged(nameof(PanoramaSensitivity));

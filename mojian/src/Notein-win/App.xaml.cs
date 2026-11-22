@@ -43,6 +43,7 @@ public partial class App : Application
             return;
         }
         base.OnStartup(e);
+        PenFeedback.Install();
         try { new MainWindow().Show(); }
         catch (WorkspaceLibraryMissingException missing)
         {

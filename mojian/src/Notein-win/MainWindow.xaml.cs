@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private PageNavigationClipboard? _pageNavigationClipboard;
     private bool _toolFlyoutWasOpenAtPointerDown;
     private string? _toolFlyoutPointerToolId;
+    private bool _toolFlyoutAnchorInFullPageToolbar;
+    private UndoTapGesture? _undoTap;
     private MainViewModel ViewModel => (MainViewModel)DataContext;
     private NoteCanvas FocusedCanvas => ViewModel.FocusedSlot == CanvasSlot.Right ? RightCanvas : LeftCanvas;
 
@@ -179,7 +181,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => syncTimer.Stop();
         ConfigureCanvas(LeftCanvas);
         ConfigureCanvas(RightCanvas);
-        ViewModel.RequestUndo += () => FocusedCanvas.Undo();
+        ViewModel.RequestUndo += () => UndoTap.Tap();
         ViewModel.RequestRedo += () => FocusedCanvas.Redo();
         ViewModel.RequestClearPage += () => FocusedCanvas.ClearPage();
         ViewModel.RequestZoom += scale => FocusedCanvas.SetZoom(scale ?? 1f);
@@ -596,7 +598,9 @@ public partial class MainWindow : Window
     {
         if (sender is not ToggleButton button || button.DataContext is not ToolPreset tool) return;
         ToolFlyoutPopup.PlacementTarget = button;
+        _toolFlyoutAnchorInFullPageToolbar = false;
         ViewModel.SelectToolFromToolbar(tool.Id, ConsumeToolFlyoutPointerDown(tool.Id));
+        QueueToolFlyoutAnchorRepair();
     }
 
     private void OnToolPresetPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -607,8 +611,58 @@ public partial class MainWindow : Window
         _toolFlyoutWasOpenAtPointerDown = ToolFlyoutPopup.IsOpen || ViewModel.IsToolFlyoutOpen;
     }
 
+    private UndoTapGesture UndoTap => _undoTap ??= new UndoTapGesture(
+        () => FocusedCanvas.Undo(), () => FocusedCanvas.Redo(), () => ViewModel.UndoDoubleTapRedoEnabled, Dispatcher);
+
+    private bool IsUndoButtonSource(object? source)
+    {
+        for (var current = source as DependencyObject; current != null; current = current is Visual ? VisualTreeHelper.GetParent(current) ?? LogicalTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current))
+            if (ReferenceEquals(current, RibbonUndoButton) || current is ButtonBase { Tag: "draw:undo" }) return true;
+        return false;
+    }
+
+    // A pending single-tap undo must apply before any other input can edit or navigate.
+    private void FlushPendingUndo(object? source)
+    {
+        if (_undoTap is { IsPending: true } gesture && !IsUndoButtonSource(source)) gesture.Flush();
+    }
+
+    private void OnWindowPreviewStylusDown(object sender, StylusDownEventArgs e) => FlushPendingUndo(e.OriginalSource);
+    private void OnWindowPreviewTouchDown(object sender, TouchEventArgs e) => FlushPendingUndo(e.OriginalSource);
+
+    private void QueueToolFlyoutAnchorRepair() =>
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(RepairToolFlyoutAnchor));
+
+    /// <summary>
+    /// Tool selection rebuilds the toolbar collections, detaching the button the flyout was opened
+    /// from. A later size change (e.g. switching pen style) then repositions the popup against a
+    /// detached target, so it jumps. Re-anchor to the selected tool's current toolbar button.
+    /// </summary>
+    private void RepairToolFlyoutAnchor()
+    {
+        if (ToolFlyoutPopup.PlacementTarget is not FrameworkElement current || IsLiveAnchor(current)) return;
+        var id = ViewModel.SelectedTool.Id;
+        var replacement = FindVisualDescendants<ToggleButton>(this).FirstOrDefault(button =>
+            IsLiveAnchor(button) && ToolIdForToolbarElement(button) == id && (button.DataContext is ToolPreset) != _toolFlyoutAnchorInFullPageToolbar);
+        if (replacement != null) ToolFlyoutPopup.PlacementTarget = replacement;
+    }
+
+    private static bool IsLiveAnchor(FrameworkElement element) => element.IsVisible && PresentationSource.FromVisual(element) != null;
+
+    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (var nested in FindVisualDescendants<T>(child)) yield return nested;
+        }
+    }
+
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        FlushPendingUndo(e.OriginalSource);
         if (e.ChangedButton != MouseButton.Left) return;
         if (!ToolFlyoutPopup.IsOpen && !ViewModel.IsToolFlyoutOpen)
         {
@@ -677,8 +731,10 @@ public partial class MainWindow : Window
         if (id.StartsWith("tool:", StringComparison.Ordinal))
         {
             ToolFlyoutPopup.PlacementTarget = button;
+            _toolFlyoutAnchorInFullPageToolbar = true;
             var toolId = id[5..];
             ViewModel.SelectToolFromToolbar(toolId, ConsumeToolFlyoutPointerDown(toolId));
+            QueueToolFlyoutAnchorRepair();
             return;
         }
         if (id.StartsWith("home:", StringComparison.Ordinal))
@@ -692,7 +748,7 @@ public partial class MainWindow : Window
         }
         switch (id)
         {
-            case "draw:undo": FocusedCanvas.Undo(); break;
+            case "draw:undo": UndoTap.Tap(); break;
             case "draw:redo": FocusedCanvas.Redo(); break;
             case "draw:add": OnAddToolMenuClick(button, e); break;
             case "draw:pan": ViewModel.SingleFingerPanEnabled = !ViewModel.SingleFingerPanEnabled; break;
@@ -1264,6 +1320,7 @@ public partial class MainWindow : Window
         if (PenStyleSelector == null || _penStyleUiUpdating) return;
         // A spring-loaded pen-button eraser is momentary; leave the pen's controls in place.
         if (ViewModel.IsSpringLoadedEraserActive) return;
+        RepairToolFlyoutAnchor();
         _penStyleUiUpdating = true;
         try
         {
@@ -1321,6 +1378,7 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        FlushPendingUndo(null);
         if (e.Key == Key.Escape && FocusedCanvas.ExitImageCrop()) { e.Handled = true; return; }
         if (FocusedTextBox() == null && DirectInputPolicy.IsSelectionDeleteKey(e.Key, Keyboard.Modifiers) && FocusedCanvas.DeleteSelection())
         {

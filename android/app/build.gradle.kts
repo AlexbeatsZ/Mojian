@@ -20,8 +20,8 @@ android {
         applicationId = "com.meta.inklab"
         minSdk = 29
         targetSdk = 36
-        versionCode = 41
-        versionName = "0.7.36"
+        versionCode = 42
+        versionName = "0.7.37"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
