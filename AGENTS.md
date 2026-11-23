@@ -127,10 +127,15 @@
   Device-local append journal is not implemented. Read `android-page-navigation.md`.
 - Independent sync-server **0.1.0** pins `@alexbeatsz/file-sync-core@0.1.0`; its `sync-server-v*`
   tags/releases never replace product latest. ROG `MojianNativeSync` runs `Programs/MojianSyncServer`
-  using the original checkout `.local/native-sync/server.json` and data. Preserve config/data,
+  using `%LOCALAPPDATA%/MojianServices/.local/native-sync/server.json` and its data. Preserve config/data,
   gateway module paths, and service state. See `sync-server/README.md` and `native-sync.md`.
-- Native sync is opt-in on dedicated `Documents/Mojian-native` clones on OMEN, tablet and phone;
-  Mojian's Syncthing folder stays paused. Never enable native sync on a Syncthing tree. Routes are
+- **2026-11-23 native-only libraries**: OMEN, K70 and liuqin now retain only `Documents/Mojian`;
+  the former Syncthing libraries were deleted and `Mojian-native` renamed in place. Selected-root
+  preferences and path-keyed native credentials moved together; native identities/checkpoints,
+  journals and conflicts remain. K70/liuqin match server revision1348/1923 entries after reopening.
+  OMEN retains an existing conflict and incoming journal; see native-sync.md. Mac already uses
+  `Documents/Mojian` as a read-only copied library, without native HTTPS support. ROG is backend-only.
+  Never register these native libraries with Syncthing. Routes are
   tried in strict configured order; private certificate pins do not alter global trust. Preserve
   `.local/native-sync/connection.json` and never publish it or its access values.
 - **2026-11-08 OMEN sync recovery**: reviewed revision 288 conflicts and preserved 145 local added
@@ -142,8 +147,8 @@
 - User selected restored/tablet659 and declined 90 old editable pages and the phone's divergent
   version. Do not reintroduce them or generated `page-notein-summary-*` PDF backup pages (removed
   with the native deletion transaction). Keep actual annotated PDF backgrounds and original assets.
-- Windows selected root is `C:\Users\Meta\Documents\Mojian-native`; Android clients select
-  `/storage/emulated/0/Documents/Mojian-native`. Missing remembered libraries must be refused,
+- Windows selected root is `C:\Users\Meta\Documents\Mojian`; Android clients select
+  `/storage/emulated/0/Documents/Mojian`. Missing remembered libraries must be refused,
   never silently recreated. Old migration-path recovery and historical counts are in monthly logs.
 - Windows deletion recovery lives in `.mojian-deletions.previous`; corrupt JSON copies live outside
   `notebooks/` in `.mojian-corrupt.previous`. Incoming partial sync locks editing until journal

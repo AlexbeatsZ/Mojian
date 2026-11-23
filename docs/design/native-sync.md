@@ -1,8 +1,9 @@
 # Native HTTPS synchronization
 
 Implementation baseline: 2026-10-28. This is an opt-in Windows/Android transport for the
-canonical folder format, not a replacement automatically applied to the deployed Syncthing
-library. The iOS client does not implement this transport. See `sync-server/PROTOCOL.md` for
+canonical folder format. The user retired the old Syncthing Mojian libraries on 2026-11-23;
+current client libraries use native sync under `Documents/Mojian`. The Mac client remains
+a read-only copied-library viewer without this transport. iOS/iPadOS is retired. See `sync-server/PROTOCOL.md` for
 the exact v1 wire contract and `sync-server/README.md` for operator setup and isolated tests.
 
 ## Sakura shared ingress (2026-10-28)
@@ -38,6 +39,38 @@ through the public URL. Production was restored to its untouched data root (revi
 after testing; temporary test backend data was not promoted. Physical Android and live-library
 adoption remain separate from these transport checks.
 
+## Native-only library names (2026-11-23)
+
+The user requested keeping only native-sync libraries on every device and naming them `Mojian`.
+OMEN now selects `C:/Users/Meta/Documents/Mojian`; K70 and liuqin select
+`/storage/emulated/0/Documents/Mojian`. These are the existing native libraries renamed in place,
+including `.mojian-native-workspace` and `.mojian-sync`; the abandoned Syncthing directories and
+the temporary retired copies were deleted. No old pages were merged back.
+
+Native configuration files are keyed by the full local path: Windows hashes its uppercased
+full path and Android hashes its canonical path. A folder rename must also relocate that private
+configuration file and update the selected-root preference (including the Windows preference
+recovery copy). Windows `state.json.conflictDirectory` is absolute and must be rewritten to the
+new prefix; incoming/outbox file paths are relative and their operation bodies stay unchanged.
+The native marker, device/workspace IDs, endpoint, token, address order, certificate pins and
+checkpoint entries were preserved. Do not reset sync state to rename a library.
+
+K70 0.7.36 and liuqin 0.7.41 reopened from the new root. Both checkpoints match the live ROG
+manifest: revision1348,1923entries, same workspace ID; neither has an active incoming/outbox/
+conflict marker. K70 visually shows existing ink and native synced status. liuqin was locked
+(screen-off screenshot), so post-rename visual acceptance is unverified.
+
+OMEN 0.7.38 had an existing pending incoming journal (revision1348,7files) and one manual
+conflict on `page-33b83ffa0ac643e688dcaeaf26c2577c.json`; its pre-rename checkpoint was1146.
+Those records and recovery copies remain; renaming is not conflict resolution. The active
+conflict-directory pointer now references the retained `Mojian` root.
+
+Mac already has `/Users/meta/Documents/Mojian`, a read-only copy originally taken from the
+native library, and has no current Syncthing registration. Its current app has no native HTTPS
+client, so it is not an automatically synchronized participant. ROG has neither client folder;
+its existing `MojianNativeSync` backend remains running with configuration/data under
+`%LOCALAPPDATA%/MojianServices/.local/native-sync`, with no service or gateway restart.
+
 ## Workspace and credentials
 
 ### Ordered server addresses
@@ -71,8 +104,9 @@ trust entry; no key, token or user certificate is embedded in source or release 
   dedicated clone. A new `.mojian-native-workspace` marker identifies the clone. Reject existing
   destinations, source descendants, links/junctions and detected Syncthing folder boundaries.
   A failed clone is not activated. No code discovers or rewrites an existing server configuration.
-- Syncthing and native sync must never operate on the same tree. Keep the original files,
-  Syncthing identities, ignore rules and service unchanged. Marker detection is conservative
+- Syncthing and native sync must never operate on the same tree. The user explicitly removed
+  the abandoned Syncthing libraries on 2026-11-23. Keep unrelated Syncthing folders/settings
+  untouched and do not register the retained native library. Marker detection is conservative
   protection, not proof that an external synchronizer has never been configured without markers.
 - Credentials are local app settings, outside the synchronized tree. Never commit, embed in
   exports or log them. HTTPS is required; loopback HTTP is permitted only for local tests.
