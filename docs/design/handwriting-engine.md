@@ -258,7 +258,7 @@ speed thinning near its cap (≈0.28×, fast parts 0.15×) instead of ≈0.85×.
 (Onenote风格) are unaffected. Any app that trusts `xdpi` (likely Notein too) is affected the same way.
 
 Workaround (2026-11-22): Vector/Xposed module `com.meta.liuqin.dpifix`
-(`~/Project/Workspaces/liuqin-dpi-fix`, Mac) multiplies abnormal `xdpi/ydpi` (15–65) by 10 in scoped
+(`~/Developer/liuqin-dpi-fix`, Mac) multiplies abnormal `xdpi/ydpi` (15–65) by 10 in scoped
 apps only; scope is Mojian + Notein. Verified on a 32-stroke Notein风格 test page: stored
 `strokeUnitLengthCm` 0.045–0.060 (was 0.7–0.9) and computed stroke speed 2.6–11 cm/s (median ≈4.5),
 user confirmed normal width. Notein itself was not measured. Strokes written before keep their outlines.
@@ -267,7 +267,7 @@ Pressure is not the cause. A first comparison claimed PixelOS pressure was ≈25
 deliberate light/heavy test capture and was wrong. Post-flash Onenote风格 tablet strokes (only possible
 from 0.7.33, after the flash) have per-stroke median pressure p25/p50/p75 0.58/0.68/0.75, the same as
 HyperOS-era fountain-v2 strokes (0.60/0.68/0.74). Driver, Novatek firmware and 1/4095 normalization are
-byte-identical between the ROMs (Codex research, `~/SystemImages/Android/Xiaomi/Pad6Pro-liuqin/`).
+byte-identical between the ROMs (Codex research, `~/Documents/ISO/Android/Xiaomi/Pad6Pro-liuqin/`).
 
 ### Android tablet latency diagnosis (2026-11-07)
 

@@ -28,7 +28,7 @@
   the investigation. This occurrence is below app routing; preserve the two-finger/palm behavior.
   Follow-up: user authorized separate KPM `liuqin-pen-charge-bypass` 0.1.0, now active on the tablet;
   charge=1 still delivered 161 contacts/26129 frames. APModule installed for next normal boot;
-  first boot autoload remains unverified. Source: `/Users/meta/Project/Workspaces/liuqin-pen-charge-bypass`.
+  first boot autoload remains unverified. Source: `/Users/meta/Developer/liuqin-pen-charge-bypass`.
   Reuse `~/.agents/liuqin--stylus-input/AGENTS.md`; Mojian application code was unchanged.
 - **0.7.40 (Windows source only; Android included in 0.7.41/code45)**: native sync three-way merges JSON pages/library per
   key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
