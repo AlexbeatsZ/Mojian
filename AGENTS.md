@@ -144,7 +144,7 @@
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
 - Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
-  whole library and have no review UI yet (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
+  whole library; the per-file review UI exists on unmerged branches (Android/Windows), not released (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
 - iOS/iPadOS maintenance is retired by user direction, 2026-11-13.

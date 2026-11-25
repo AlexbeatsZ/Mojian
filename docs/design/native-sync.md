@@ -225,6 +225,13 @@ version); the reviewed page is read-only except two-finger/wheel navigation; lib
 files are reviewed in a list dialog. Taking the server's deletion of a page that the local library.json
 still lists is refused while library.json is conflicted: the deleted page file would be restored from
 `.previous` on reload and uploaded again. Resolve the library first.
+Windows (`SyncConflictReview`, `MainViewModel.SyncConflicts`, `MainWindow.SyncConflicts`): same rules and
+colors as Android (changed-on-both strokes yellow, ordinal label order, 笔记目录 first). `ConflictReview()` is
+re-read only when `conflicts.json` changes. A canvas showing a conflicted page gets `ConflictPreview`: pointer
+input becomes navigation (as in reading view) and undo/redo/clear/paste/insert/asset writes are refused until a
+version is chosen. Resolution reuses `TryApplyNativeSync` (reload library and open pages), then syncs again.
+Taking the server's deletion of a page still listed by a conflicted library.json is refused (先处理笔记目录).
+Messages appear as a short notice; the sync status line is replaced by a clickable 同步冲突 N chip.
 
 ### Historical default fields and conflict recovery
 

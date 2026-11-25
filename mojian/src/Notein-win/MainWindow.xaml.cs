@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     {
         DataContext = viewModel;
         InitializeComponent();
+        InitializeSyncConflictReview();
         viewModel.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(MainViewModel.SelectedTool)) RefreshPenStyleControls(); };
         RefreshPenStyleControls();
         Loaded += OnLoaded;

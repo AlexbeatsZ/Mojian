@@ -43,6 +43,9 @@ public sealed class WorkspaceStore
         Converters = { new StrokeJsonConverter() },
     };
 
+    /// <summary>Page serializer (strokes via <see cref="StrokeJsonConverter"/>), e.g. for previewing a sync conflict copy.</summary>
+    internal static JsonSerializerOptions PageSerializerOptions => PageJsonOptions;
+
     public string RootDirectory { get; }
     public string LibraryPath => Path.Combine(RootDirectory, "library.json");
     public string SettingsPath => Path.Combine(RootDirectory, "settings.json");

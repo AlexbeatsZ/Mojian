@@ -97,6 +97,7 @@ public partial class MainWindow
             if (ReferenceEquals(store, ViewModel.Store))
                 ViewModel.NativeSyncStatus = ViewModel.NativeSyncRecoveryRequired ? "接收失败，编辑已锁定，等待本地完整恢复" :
                     _nativeSyncPending && client.Snapshot.Phase is NativeSyncPhase.Synced or NativeSyncPhase.Pending ? "本地已保存，待上传" : NativeSyncDisplayStatus(client.Snapshot);
+            await RefreshSyncConflictsAsync(client, store);
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
@@ -114,6 +115,7 @@ public partial class MainWindow
 
     private void ResetNativeSyncClient()
     {
+        if (_nativeSyncClient != null) ClearSyncConflicts();
         _nativeSyncClient?.Dispose();
         _nativeSyncClient = null;
         _nativeSyncClientKey = null;

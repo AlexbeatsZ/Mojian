@@ -8,6 +8,7 @@
     <Grid Background="#0A0A0A">
         <local:CanvasDocumentScene x:Name="SceneLayer" IsHitTestVisible="False" ClipToBounds="True" />
         <local:CanvasWetInkOverlay x:Name="WetInkOverlay" IsHitTestVisible="False" />
+        <local:CanvasConflictOverlay x:Name="ConflictOverlay" IsHitTestVisible="False" />
         <Canvas x:Name="EditorLayer" Background="Transparent" />
         <local:CanvasPointerOverlay x:Name="PointerOverlay" IsHitTestVisible="False" />
     </Grid>

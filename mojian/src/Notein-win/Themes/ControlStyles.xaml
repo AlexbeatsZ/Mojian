@@ -142,6 +142,31 @@
     </Style>
 
     <!-- The two normal-canvas actions are opaque 34dp squares on Android. -->
+    <!-- Sync conflict review bar / dialog choice (native-sync.md "Conflict review"). -->
+    <Style x:Key="ConflictReviewButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="#333333" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Padding" Value="10,4" />
+        <Setter Property="Margin" Value="4,0,0,0" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#444444" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="CanvasActionButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
         <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />

@@ -65,6 +65,11 @@ public sealed class PagePaneRow
     public Thickness Margin => IsHeader ? new Thickness(6, 5, 6, 0) : new Thickness(6, 1, 6, 1);
     public bool IsSelected { get; init; }
     public bool IsPdf => Page?.IsPdfPage == true;
+    /// <summary>Sync conflict letter/color for this page (native-sync.md "Conflict review").</summary>
+    public Services.ConflictMark? Conflict { get; set; }
+    public bool HasConflict => Conflict != null;
+    public string ConflictLetter => Conflict is { } mark ? Services.SyncConflictReview.Letter(mark) : string.Empty;
+    public System.Windows.Media.Brush? ConflictBrush => Conflict is { } mark ? ConflictBrushes.For(mark) : null;
     public string SectionColorHex => SectionColors[Math.Abs(Depth + 1) % SectionColors.Length];
     public System.Windows.Media.Brush SectionColorBrush => new System.Windows.Media.SolidColorBrush(
         (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SectionColorHex));

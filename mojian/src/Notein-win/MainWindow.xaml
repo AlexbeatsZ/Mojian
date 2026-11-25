@@ -312,7 +312,31 @@
                             <Button x:Name="AddSectionButton" Grid.Column="1" Style="{StaticResource RibbonIconButtonStyle}" Width="38" Height="38" Margin="0,0,7,0" Padding="8"
                                     WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="新建笔记本或分区" Click="OnAddSectionMenuClick"><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="{StaticResource Fluent_add}" Fill="{StaticResource TextPrimary}" /></Canvas></Viewbox></Button>
                         </Grid>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer x:Name="SectionScroll" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                            <StackPanel x:Name="SyncConflictGroup" Visibility="{Binding HasSyncConflicts, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding SyncConflictTitle}" Foreground="#E2C08D" FontSize="12" FontWeight="SemiBold" Margin="15,4,7,4" />
+                                <ItemsControl ItemsSource="{Binding SyncConflictRows}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type models:SyncConflictRow}">
+                                            <Border CornerRadius="2" Margin="5,1" MinHeight="32" Padding="22,0,7,0" Cursor="Hand" ToolTip="{Binding Path}">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="Transparent" />
+                                                        <Style.Triggers><DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="Background" Value="{StaticResource SelectedOverlay}" /></DataTrigger></Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Border.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.OpenSyncConflictCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" /></Border.InputBindings>
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Letter}" Foreground="{Binding MarkBrush}" FontSize="11" FontWeight="SemiBold" Width="16" TextAlignment="Center" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Label}" Foreground="{Binding MarkBrush}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Border Height="1" Background="{StaticResource BorderHairline}" Margin="10,6" />
+                            </StackPanel>
                             <ItemsControl ItemsSource="{Binding NotebookTreeRows}">
                                 <ItemsControl.Resources>
                                     <DataTemplate DataType="{x:Type models:NotebookPaneRow}">
@@ -365,6 +389,7 @@
                                     </DataTemplate>
                                 </ItemsControl.Resources>
                             </ItemsControl>
+                            </StackPanel>
                         </ScrollViewer>
                     </DockPanel>
                 </Border>
@@ -386,13 +411,18 @@
                                             <Grid Background="Transparent">
                                                 <Grid.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectPageCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" /></Grid.InputBindings>
                                                 <DockPanel Visibility="{Binding IsHeader, Converter={StaticResource InverseBoolToVisibility}}">
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding ConflictLetter}" Foreground="{Binding ConflictBrush}" FontSize="11" FontWeight="SemiBold" Width="16" TextAlignment="Center" VerticalAlignment="Center" Visibility="{Binding HasConflict, Converter={StaticResource BoolToVisibility}}" />
                                                     <TextBlock DockPanel.Dock="Right" Text="PDF" Foreground="#828282" FontSize="9" FontWeight="SemiBold" Width="30" TextAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsPdf, Converter={StaticResource BoolToVisibility}}" />
                                                     <StackPanel VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis">
                                                             <TextBlock.Style>
                                                                 <Style TargetType="TextBlock">
                                                                     <Setter Property="FontWeight" Value="Normal" />
-                                                                    <Style.Triggers><DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger></Style.Triggers>
+                                                                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
+                                                                        <DataTrigger Binding="{Binding HasConflict}" Value="True"><Setter Property="Foreground" Value="{Binding ConflictBrush}" /></DataTrigger>
+                                                                    </Style.Triggers>
                                                                 </Style>
                                                             </TextBlock.Style>
                                                         </TextBlock>
@@ -508,6 +538,34 @@
                         <Button x:Name="ExitFullPageButton" Style="{StaticResource CanvasActionButtonStyle}" ToolTip="退出整页视图" AutomationProperties.AutomationId="ExitFullPageButton" Command="{Binding ToggleFullPageCommand}" Visibility="{Binding IsFullPageMode, Converter={StaticResource BoolToVisibility}}"><Grid Width="20" Height="20"><Path Data="{StaticResource Fluent_full_screen_minimize}" Fill="{StaticResource TextPrimary}" Width="15" Height="15" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" /></Grid></Button>
                     </StackPanel>
 
+                    <Border x:Name="SyncConflictBar" Grid.ColumnSpan="3" Panel.ZIndex="45" HorizontalAlignment="Center" VerticalAlignment="Top" Padding="10,4,4,4" CornerRadius="3"
+                            Background="#F0232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Margin" Value="0,8,0,0" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ActiveSyncConflict}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding IsFullPageMode}" Value="True"><Setter Property="Margin" Value="0,58,0,0" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding ActiveSyncConflict.Letter}" Foreground="{Binding ActiveSyncConflict.MarkBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding ActiveSyncConflict.Summary}" Foreground="{StaticResource TextSecondary}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <StackPanel Orientation="Horizontal">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Style.Triggers><DataTrigger Binding="{Binding IsResolvingSyncConflict}" Value="True"><Setter Property="IsEnabled" Value="False" /></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <Button x:Name="ConflictKeepLocalButton" Style="{StaticResource ConflictReviewButtonStyle}" Content="保留本机" Command="{Binding ResolveSyncConflictCommand}" CommandParameter="Local" />
+                                <Button x:Name="ConflictTakeRemoteButton" Style="{StaticResource ConflictReviewButtonStyle}" Content="采用服务器" Command="{Binding ResolveSyncConflictCommand}" CommandParameter="Remote" />
+                                <Button x:Name="ConflictKeepBothButton" Style="{StaticResource ConflictReviewButtonStyle}" Content="两边都要" Command="{Binding ResolveSyncConflictCommand}" CommandParameter="Both"
+                                        Visibility="{Binding ActiveSyncConflict.CanKeepBoth, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <Border x:Name="SearchPanel" Grid.ColumnSpan="3" Panel.ZIndex="30" Width="360" MaxHeight="380" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,44,7,0"
                             Background="#232323" BorderBrush="{StaticResource BorderHairline}" BorderThickness="1" CornerRadius="3" Visibility="Collapsed">
                         <DockPanel>
@@ -532,9 +590,25 @@
                             <TextBlock Text="{Binding SaveStateText}" Foreground="#FFB4AB" FontSize="11" MaxWidth="430" TextWrapping="Wrap" />
                         </Border>
                         <Border HorizontalAlignment="Right" Padding="8,4" CornerRadius="0" Background="#EE232323">
+                            <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding HasSyncConflicts}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></Border.Style>
                             <TextBlock Text="{Binding NativeSyncStatus}" Foreground="{StaticResource TextSecondary}" FontSize="11" MaxWidth="430" TextTrimming="CharacterEllipsis" />
                         </Border>
                     </StackPanel>
+                    <Border x:Name="SyncConflictNotice" Grid.ColumnSpan="3" Panel.ZIndex="46" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24" Padding="14,7" CornerRadius="16"
+                            Background="#F02E2E2E" IsHitTestVisible="False">
+                        <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding SyncConflictNotice}" Value=""><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></Border.Style>
+                        <TextBlock Text="{Binding SyncConflictNotice}" Foreground="{StaticResource TextPrimary}" FontSize="12" MaxWidth="420" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                    <Button x:Name="SyncConflictChip" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Padding="8,4" Cursor="Hand"
+                            Background="#EE232323" Foreground="#E2C08D" BorderThickness="0" FontSize="11" FontWeight="SemiBold"
+                            Content="{Binding SyncConflictTitle}" ToolTip="{Binding NativeSyncStatus}" Command="{Binding RevealSyncConflictsCommand}"
+                            Visibility="{Binding HasSyncConflicts, Converter={StaticResource BoolToVisibility}}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
                 </Grid>
             </Grid>
         </DockPanel>
