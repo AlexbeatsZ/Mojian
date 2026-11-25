@@ -121,6 +121,8 @@ private data class PageSessionState(
     val viewport: ViewportSnapshot,
 )
 
+private const val CONFLICT_PREVIEW_LIMIT = 24L * 1024 * 1024
+
 private data class LoadedCanvasPage(val document: PageInsertDocument?, val strokes: List<Stroke>)
 
 private data class ExportSnapshot(
@@ -231,12 +233,22 @@ class MainActivity : Activity() {
     private var nativeSyncStatusView: TextView? = null
     private var nativeSyncStatus = "原生同步未启用"
     private var nativeSyncForeground = false
+    private var nativeSyncStatusVisible = false
     private val nativeSyncController by lazy {
-        WorkspaceSyncController(this, ::applyNativeSyncIncoming) { status, visible ->
+        WorkspaceSyncController(this, ::applyNativeSyncIncoming, stateChanged = { status, visible ->
             nativeSyncStatus = status
-            nativeSyncStatusView?.apply { text = status; contentDescription = status; visibility = if (visible) View.VISIBLE else View.GONE }
-        }
+            nativeSyncStatusVisible = visible
+            nativeSyncStatusView?.apply { text = status; contentDescription = status }
+            applySyncStatusVisibility()
+        }, conflictsChanged = ::onSyncConflictsChanged)
     }
+    private var syncConflictItems: List<NativeSyncConflictItem> = emptyList()
+    private lateinit var conflictPreview: ConflictPreviewLayer
+    private var conflictReviewBar: ConflictReviewBar? = null
+    private var conflictChip: TextView? = null
+    private var conflictPreviewKey: String? = null
+    private var conflictResolving = false
+    private var sectionScroll: ScrollView? = null
     private val workspace: NotebookWorkspace
         get() = notebookLibrary.activeNotebook()
 
@@ -744,6 +756,198 @@ class MainActivity : Activity() {
             throw error
         }
         return true
+    }
+
+    // --- Sync conflict review (docs/design/native-sync.md "Conflict review") ---
+
+    private fun onSyncConflictsChanged(items: List<NativeSyncConflictItem>) {
+        syncConflictItems = items
+        conflictPreviewKey = null
+        applySyncStatusVisibility()
+        if (workspaceLoaded && ::sectionList.isInitialized) renderWorkspace()
+    }
+
+    /** Titles seen while a conflicted page was still listed, so it keeps its name after the library drops it. */
+    private val conflictPageTitles = HashMap<String, String>()
+
+    private fun conflictEntries(): List<ConflictEntry> = SyncConflictReview.entries(syncConflictItems) { notebookId, pageId ->
+        val key = "$notebookId/$pageId"
+        notebookLibrary.notebooks.firstOrNull { it.id == notebookId }?.allSections()?.asSequence()?.flatMap { it.pages.asSequence() }
+            ?.firstOrNull { it.id == pageId }?.title?.also { conflictPageTitles[key] = it } ?: conflictPageTitles[key]
+    }
+
+    private fun pageConflictMark(notebookId: String, pageId: String): ConflictMark? {
+        val related = conflictEntries().filter { it.notebookId == notebookId && it.pageId == pageId }
+        return related.firstOrNull { it.isPage }?.mark ?: if (related.isNotEmpty()) ConflictMark.MODIFY else null
+    }
+
+    private fun applySyncStatusVisibility() {
+        val conflicts = syncConflictItems.size
+        nativeSyncStatusView?.visibility = if (nativeSyncStatusVisible && conflicts == 0) View.VISIBLE else View.GONE
+        conflictChip?.apply {
+            text = "同步冲突 $conflicts"
+            contentDescription = text
+            visibility = if (conflicts > 0) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun revealSyncConflicts() {
+        val paneShown = if (fullPageMode) fullPageSectionPaneOpen else sectionPaneVisible
+        if (!paneShown) toggleSectionPane()
+        sectionScroll?.post { sectionScroll?.smoothScrollTo(0, 0) }
+    }
+
+    private fun renderConflictGroup() {
+        val entries = conflictEntries()
+        if (entries.isEmpty()) return
+        sectionList.addView(
+            TextView(this).apply {
+                text = "同步冲突 ${entries.size}"
+                setTextColor(ConflictMark.MODIFY.color)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), 0, dp(7), 0)
+            },
+            LinearLayout.LayoutParams(MATCH, dp(30)).apply { setMargins(dp(5), dp(2), dp(5), 0) },
+        )
+        val selectedPage = workspace.selectedPageId.takeIf(String::isNotEmpty)
+        for (entry in entries) {
+            val selected = entry.isPage && entry.notebookId == workspace.id && entry.pageId == selectedPage
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(22), 0, dp(7), 0)
+                background = rounded(if (selected) SELECTED_LAVENDER else Color.TRANSPARENT, dp(2).toFloat(), if (selected) SELECTED_LAVENDER else Color.TRANSPARENT)
+                contentDescription = "${entry.label} ${entry.mark.letter}"
+                setOnClickListener { openConflict(entry) }
+                addView(TextView(this@MainActivity).apply {
+                    text = entry.label
+                    setTextColor(entry.mark.color)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    gravity = Gravity.CENTER_VERTICAL
+                }, LinearLayout.LayoutParams(0, MATCH, 1f))
+                addView(conflictLetter(this@MainActivity, entry.mark), LinearLayout.LayoutParams(dp(18), MATCH))
+            }
+            sectionList.addView(row, LinearLayout.LayoutParams(MATCH, dp(34)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+        }
+        sectionList.addView(View(this).apply { setBackgroundColor(BORDER_COLOR) }, LinearLayout.LayoutParams(MATCH, 1).apply { setMargins(dp(10), dp(6), dp(10), dp(6)) })
+    }
+
+    private fun openConflict(entry: ConflictEntry) {
+        val notebook = notebookLibrary.notebooks.firstOrNull { it.id == entry.notebookId }
+        val section = notebook?.allSections()?.firstOrNull { node -> node.pages.any { it.id == entry.pageId } }
+        if (entry.isPage && notebook != null && section != null) {
+            notebookLibrary.selectNotebook(notebook.id)
+            notebook.selectPage(section.id, entry.pageId!!)
+            clearContentSelection()
+            persistWorkspacePreferences(saveLibrary = false)
+            renderWorkspace()
+        } else showConflictDialog(entry)
+    }
+
+    private fun selectedPageConflict(): ConflictEntry? {
+        val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty) ?: return null
+        return conflictEntries().firstOrNull { it.isPage && it.notebookId == workspace.id && it.pageId == pageId }
+    }
+
+    /** Shows the review bar and the red/green stroke preview for the selected page when it is conflicted. */
+    private fun updateConflictReview() {
+        if (!::conflictPreview.isInitialized) return
+        val bar = conflictReviewBar ?: return
+        val entry = selectedPageConflict()
+        if (entry == null) {
+            bar.visibility = View.GONE
+            conflictPreviewKey = null
+            conflictPreview.clear()
+            return
+        }
+        bar.bind(entry)
+        bar.setBusy(conflictResolving)
+        bar.onChoice = { choice -> resolveConflict(entry, choice) }
+        bar.visibility = View.VISIBLE
+        val local = entry.item.local
+        val remote = entry.item.remote
+        val key = listOf(entry.path, local?.length(), local?.lastModified(), remote?.length(), remote?.lastModified()).joinToString("|")
+        if (key == conflictPreviewKey) return
+        conflictPreviewKey = key
+        conflictPreview.clear()
+        ioExecutor.execute {
+            val result = runCatching {
+                fun read(file: File?) = file?.takeIf { it.isFile && it.length() <= CONFLICT_PREVIEW_LIMIT }?.bufferedReader(Charsets.UTF_8)?.use(StreamingJson::readObject)
+                fun decode(strokes: List<org.json.JSONObject>) = strokes.mapNotNull { json ->
+                    runCatching { SharedStrokeCodec.decode(json, { it.argb }).also { SharedStrokeCodec.path(it) } }.getOrNull()
+                }
+                val diff = SyncConflictReview.strokeDiff(read(local), read(remote))
+                Triple(decode(diff.remote), decode(diff.local), decode(diff.changed))
+            }
+            runOnUiThread {
+                if (isDestroyed || conflictPreviewKey != key) return@runOnUiThread
+                result.onSuccess { (remoteStrokes, localStrokes, changedStrokes) -> conflictPreview.show(remoteStrokes, localStrokes, changedStrokes) }
+                    .onFailure { android.util.Log.e("MojianSync", "Conflict preview unavailable", it) }
+            }
+        }
+    }
+
+    private fun showConflictDialog(entry: ConflictEntry) {
+        val local = entry.item.local
+        val remote = entry.item.remote
+        ioExecutor.execute {
+            val changes = if (entry.path == SyncConflictReview.LIBRARY && local != null && remote != null) runCatching {
+                fun read(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
+                SyncConflictReview.libraryChanges(read(local), read(remote))
+            }.getOrElse { emptyList() } else emptyList()
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                val list = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(22), dp(6), dp(22), dp(4))
+                    SyncConflictReview.summaryText(entry.item.summary).takeIf(String::isNotEmpty)?.let { summary ->
+                        addView(TextView(this@MainActivity).apply { text = summary; setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, 0, 0, dp(6)) })
+                    }
+                    changes.forEach { addView(conflictChangeRow(this@MainActivity, it)) }
+                }
+                val dialog = AlertDialog.Builder(this)
+                    .setTitle("${entry.mark.letter}  ${entry.label}")
+                    .setView(ScrollView(this).apply { addView(list) })
+                    .setPositiveButton("保留本机") { _, _ -> resolveConflict(entry, NativeSyncChoice.LOCAL) }
+                    .setNeutralButton("采用服务器") { _, _ -> resolveConflict(entry, NativeSyncChoice.REMOTE) }
+                if (entry.canKeepBoth) dialog.setNegativeButton("两边都要") { _, _ -> resolveConflict(entry, NativeSyncChoice.BOTH) }
+                dialog.show()
+            }
+        }
+    }
+
+    private fun resolveConflict(entry: ConflictEntry, choice: NativeSyncChoice, confirmed: Boolean = false) {
+        if (conflictResolving) return
+        val discarded = entry.item.summary?.localOnly ?: 0
+        val deletes = entry.item.action == "delete"
+        // A page file deleted while library.json still lists it is restored from `.previous` on reload
+        // and uploaded again, so the library conflict must be settled first.
+        if (choice == NativeSyncChoice.REMOTE && deletes && entry.isPage && syncConflictItems.any { it.path == SyncConflictReview.LIBRARY } &&
+            notebookLibrary.notebooks.any { notebook -> notebook.id == entry.notebookId && notebook.allSections().any { section -> section.pages.any { it.id == entry.pageId } } }) {
+            Toast.makeText(this, "先处理笔记目录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (choice == NativeSyncChoice.REMOTE && (discarded > 0 || deletes) && !confirmed) {
+            AlertDialog.Builder(this).setMessage(if (deletes) "删除「${entry.label}」？" else "移除本机独有的 $discarded 项？")
+                .setPositiveButton("采用服务器") { _, _ -> resolveConflict(entry, choice, confirmed = true) }
+                .setNegativeButton("取消", null).show()
+            return
+        }
+        if (contentDirty || !pageWrites.isIdle || pageWrites.hasFailures) {
+            Toast.makeText(this, "正在保存，稍后再试", Toast.LENGTH_SHORT).show()
+            return
+        }
+        conflictResolving = true
+        conflictReviewBar?.setBusy(true)
+        nativeSyncController.resolve(mapOf(entry.path to choice)) { resolved, status ->
+            conflictResolving = false
+            conflictReviewBar?.setBusy(false)
+            if (!resolved) Toast.makeText(this, status, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun showNativeSyncOptions() {
@@ -1405,6 +1609,18 @@ class MainActivity : Activity() {
             addView(nativeSyncStatusView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
                 marginStart = 0
             })
+            conflictReviewBar = ConflictReviewBar(this@MainActivity).apply { visibility = View.GONE }
+            addView(conflictReviewBar, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
+            conflictChip = TextView(this@MainActivity).apply {
+                textSize = 11f
+                setTextColor(ConflictMark.MODIFY.color)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                background = rounded(0xEE232323.toInt(), 0f, Color.TRANSPARENT)
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                visibility = View.GONE
+                setOnClickListener { revealSyncConflicts() }
+            }
+            addView(conflictChip, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END))
         }
         workArea.addView(canvasArea, LinearLayout.LayoutParams(0, MATCH, 1f))
         rootLayout.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
@@ -3483,6 +3699,7 @@ class MainActivity : Activity() {
                 }
             addView(
                 ScrollView(this@MainActivity).apply {
+                    sectionScroll = this
                     isFillViewport = true
                     addView(sectionList, ViewGroup.LayoutParams(MATCH, WRAP))
                     setOnClickListener {
@@ -3682,6 +3899,8 @@ class MainActivity : Activity() {
         paperContainer.addView(canvasBackgroundLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(insertContentLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(dryInkView, FrameLayout.LayoutParams(MATCH, MATCH))
+        conflictPreview = ConflictPreviewLayer(this).apply { setViewport(viewport.documentToViewMatrix()) }
+        paperContainer.addView(conflictPreview, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(wetInkView, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(textInputLayer, FrameLayout.LayoutParams(MATCH, MATCH))
         paperContainer.addView(tagLayer, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -3900,6 +4119,7 @@ class MainActivity : Activity() {
 
     private fun renderSections() {
         sectionList.removeAllViews()
+        renderConflictGroup()
         for ((notebookIndex, notebook) in notebookLibrary.notebooks.withIndex()) {
             val activeNotebook = notebook.id == notebookLibrary.activeNotebookId
             val notebookFocused = activeNotebook && notebook.focusedSectionId == null
@@ -4030,6 +4250,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams(MATCH, WRAP),
             )
             applySelectedPageAppearance()
+            updateConflictReview()
             return
         }
         for (row in rows) {
@@ -4039,6 +4260,7 @@ class MainActivity : Activity() {
             }
         }
         applySelectedPageAppearance()
+        updateConflictReview()
     }
 
     private fun addRecursiveSectionHeader(row: PagePaneRow.SectionHeader) {
@@ -4073,6 +4295,7 @@ class MainActivity : Activity() {
     private fun addPageRow(row: PagePaneRow.PageItem) {
         val page = row.page
         val selected = page.id == workspace.selectedPageId && row.sectionId == workspace.selectedPageSectionId
+        val conflict = pageConflictMark(workspace.id, page.id)
         val item =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -4088,7 +4311,7 @@ class MainActivity : Activity() {
                         addView(
                             TextView(this@MainActivity).apply {
                                 text = page.title
-                                setTextColor(TEXT_PRIMARY)
+                                setTextColor(conflict?.color ?: TEXT_PRIMARY)
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                                 typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
                                 maxLines = 1
@@ -4107,6 +4330,7 @@ class MainActivity : Activity() {
                                 LinearLayout.LayoutParams(dp(30), MATCH),
                             )
                         }
+                        if (conflict != null) addView(conflictLetter(this@MainActivity, conflict), LinearLayout.LayoutParams(dp(18), MATCH))
                     },
                     LinearLayout.LayoutParams(MATCH, dp(22)),
                 )
@@ -6082,6 +6306,8 @@ class MainActivity : Activity() {
             if (fingerCount > 0 || endsTouchSequence) handleFingerGesture(event)
             return true
         }
+        // A page under conflict review is a read-only preview until a version is chosen.
+        if (conflictReviewBar?.visibility == View.VISIBLE) return true
         if (readingViewEnabled && handleReadingViewGesture(event)) return true
         if (handleXiaomiSecondaryStylusEvent(event)) return true
         val mouseIndex = (0 until event.pointerCount).firstOrNull { event.getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
@@ -6305,6 +6531,7 @@ class MainActivity : Activity() {
 
     private fun applyViewportToLayers() {
         dryInkView.setViewport(viewport.documentToViewMatrix())
+        if (::conflictPreview.isInitialized) conflictPreview.setViewport(viewport.documentToViewMatrix())
         pageSurfaceBackground.invalidate()
         pageSurfaceForeground.invalidate()
         insertContentLayer.invalidate()
