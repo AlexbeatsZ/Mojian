@@ -9,13 +9,14 @@
 
 # Current State
 
-- **0.7.42 (Windows/Android code46; source validated, release packaging pending)**: Android all page
+- **0.7.42 (Windows/Android code46; v0.7.42 prerelease published)**: Android all page
   edits share one chronological history (erase/move/resize/delete/text/objects/clear/page appearance),
   one gesture per entry; saved deletion undo preserves canonical metadata/assets. Viewport is excluded.
   Windows existing erase/move paths pass regression; single-page appearance now joins their history.
   Zoom buttons/shortcuts use reciprocal 5% steps; presets unchanged. Read document-history.md.
   Android JVM 330 pass/1 opt-in skip, Release/native-test APK/lint pass; Windows targeted 55/55,
-  full 324/325 (only the existing SSH Hand-pan pixel failure, mean1.870/shift4.546). No Android install.
+  full 324/325 (only the existing SSH Hand-pan pixel failure, mean1.870/shift4.546). Mac/OMEN current
+  EXE/APK refreshed; original Android signer retained. No Android install or physical acceptance.
 - Older product/version and deployment details are archived in `docs/log/2026-11.md`.
 
 - **Android 0.7.41/code45**: invisible ink after opening/foreground return: cached `RenderNode`
