@@ -5,6 +5,11 @@ namespace Notein_win.Controls;
 
 public partial class NoteCanvas
 {
+    public void RecordReversibleEdit(Action undo, Action redo)
+    {
+        if (Document != null) PushHistory(new UndoEntry(UndoAction: undo, RedoAction: redo));
+    }
+
     private void PushUndo()
     {
         if (Document == null) return;
@@ -28,6 +33,7 @@ public partial class NoteCanvas
 
     private UndoEntry InvertHistory(UndoEntry entry)
     {
+        if (entry.UndoAction != null) return entry with { UndoAction = entry.RedoAction, RedoAction = entry.UndoAction };
         if (entry.Content != null) return new UndoEntry(Content: Snapshot(Document!));
         if (entry.Erased != null) return entry with { ReapplyErase = !entry.ReapplyErase };
         if (entry.RestoreStroke is { } restored) return new UndoEntry(AddedStrokeId: restored.Stroke.Id);
@@ -37,6 +43,7 @@ public partial class NoteCanvas
 
     private void RestoreSnapshot(UndoEntry entry)
     {
+        if (entry.UndoAction != null) { entry.UndoAction(); ClearSelection(); InvalidateVisual(); return; }
         if (entry.Content != null) { RestoreSnapshot(entry.Content); return; }
         if (Document == null) return;
         if (entry.Erased != null)

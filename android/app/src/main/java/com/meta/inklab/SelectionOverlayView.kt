@@ -48,6 +48,7 @@ class SelectionOverlayView(
     var onExitCrop: (() -> Unit)? = null
     var onTranslateSelection: ((Float, Float) -> Unit)? = null
     var onScaleSelection: ((Float, Float, Float, Float) -> Unit)? = null
+    var onTransformStarted: (() -> Unit)? = null
     var onTransformFinished: (() -> Unit)? = null
     var onBeginMove: (() -> Unit)? = null
     var onFinishMove: ((Boolean) -> Unit)? = null
@@ -242,6 +243,7 @@ class SelectionOverlayView(
                     if (viewDistance < touchSlop) return true
                     gestureCommitted = true
                     parent?.requestDisallowInterceptTouchEvent(true)
+                    if (gestureMode == GestureMode.MOVE || gestureMode == GestureMode.SCALE) onTransformStarted?.invoke()
                     if (gestureMode == GestureMode.MARQUEE) onBeginMarquee?.invoke(downViewX, downViewY)
                     if (gestureMode == GestureMode.MOVE) {
                         onBeginMove?.invoke()

@@ -55,6 +55,7 @@ class DryInkView(context: Context) : View(context) {
         private set
     private val strokeBounds = IdentityHashMap<Stroke, StrokeViewportBounds>()
     private var cachedContentBottom = 0f
+    var documentHistoryManaged = false
     private val editHistory = ReversibleEditHistory()
     private val selectedStrokes = mutableSetOf<Stroke>()
     private val lassoPoints = mutableListOf<DocumentPoint>()
@@ -147,7 +148,7 @@ class DryInkView(context: Context) : View(context) {
     fun addStrokes(newStrokes: Collection<Stroke>) {
         selectedStrokes.clear()
         strokes.addAll(newStrokes)
-        newStrokes.forEach { stroke ->
+        if (!documentHistoryManaged) newStrokes.forEach { stroke ->
             editHistory.record(ReversibleEditHistory.Edit({ strokes.remove(stroke) }, { strokes.add(stroke) }))
         }
         invalidate()
@@ -170,11 +171,7 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun undo(): Boolean {
-        if (!editHistory.undo {
-            strokes.lastOrNull()?.let { stroke ->
-                ReversibleEditHistory.Edit({ strokes.remove(stroke) }, { strokes.add(stroke) })
-            }
-        }) return false
+        if (!editHistory.undo()) return false
         rebuildStrokeMetrics()
         onContentChanged?.invoke()
         invalidate()
@@ -439,10 +436,12 @@ class DryInkView(context: Context) : View(context) {
     }
 
     fun translateSelection(deltaX: Float, deltaY: Float) {
+        if (deltaX == 0f && deltaY == 0f) return
         transformSelection(pointTransform = { x, y -> SelectionGeometry.translate(x, y, deltaX, deltaY) })
     }
 
     fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
+        if (factorX == 1f && factorY == 1f) return
         transformSelection(
             pointTransform = { x, y -> SelectionGeometry.scale(x, y, anchorX, anchorY, factorX, factorY) },
             brushScale = kotlin.math.sqrt(factorX * factorY),

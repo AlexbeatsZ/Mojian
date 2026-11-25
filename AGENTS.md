@@ -9,6 +9,15 @@
 
 # Current State
 
+- **0.7.42 (Windows/Android code46; source validated, release packaging pending)**: Android all page
+  edits share one chronological history (erase/move/resize/delete/text/objects/clear/page appearance),
+  one gesture per entry; saved deletion undo preserves canonical metadata/assets. Viewport is excluded.
+  Windows existing erase/move paths pass regression; single-page appearance now joins their history.
+  Zoom buttons/shortcuts use reciprocal 5% steps; presets unchanged. Read document-history.md.
+  Android JVM 330 pass/1 opt-in skip, Release/native-test APK/lint pass; Windows targeted 55/55,
+  full 324/325 (only the existing SSH Hand-pan pixel failure, mean1.870/shift4.546). No Android install.
+- Older product/version and deployment details are archived in `docs/log/2026-11.md`.
+
 - **Android 0.7.41/code45**: invisible ink after opening/foreground return: cached `RenderNode`
   entries may survive HWUI display-list eviction. Visible/prefetch paths now check `hasDisplayList`,
   re-record invalid tiles, release tiles while the window is hidden and request a frame on return.
@@ -30,21 +39,11 @@
   charge=1 still delivered 161 contacts/26129 frames. APModule installed for next normal boot;
   first boot autoload remains unverified. Source: `/Users/meta/Developer/liuqin-pen-charge-bypass`.
   Reuse `~/.agents/liuqin--stylus-input/AGENTS.md`; Mojian application code was unchanged.
-- **0.7.40 (Windows source only; Android included in 0.7.41/code45)**: native sync three-way merges JSON pages/library per
-  key and per id (`NativeSyncMerge`, shared `json-merge.json`); strokes added on two devices both
-  survive, volatile-only resaves receive the server page. Windows not released/installed. Read native-sync.md.
-- **Android 0.7.39/code43**: pen-style curves compile to AndroidX `Linear` via `curveMapping` so the
-  response is exactly 1 at x=1 (Ink's implicit end point). 0.7.26–0.7.37 snapped the Notein speed curve
-  back to full width at >=64 cm/s (blunt fast tails). Notein preset values never changed. Windows unaffected.
-  Release v0.7.39 (APK); OMEN/Mac current APK replaced; tablet updated in place 2026-11-22 (phone not).
 - **Windows 0.7.38**: `双击撤销重做` targets the graphics-tablet undo key: two presses of the undo
   shortcut (default Ctrl+Z) within the adjustable `双击判定时间` (150–800 ms, default 300) redo;
   Windows undo buttons are immediate again. Android stays 0.7.37/code42 (button variant unchanged).
   Read workspace-ui.md before changing undo input. Release v0.7.38 (EXE); OMEN artifacts EXE replaced.
   Physical tablet acceptance open.
-- **0.7.37 (Windows/Android code42)**: Windows pen tap/press circle feedback removed (`PenFeedback`).
-  Windows tool flyout re-anchors after toolbar rebuilds, fixing the jump when switching pen style.
-  Tablet/phone not installed; physical acceptance open.
 - **0.7.34 (Windows/Android code39, branch `fix/compact-ink-outline`)**: tablet "页面暂时无法读取"
   was Android OOM on a 358 MB page (作业 4); 90% was Windows pen `vectorPath` written since 0.7.21 as
   one full-precision disc per modeled sample. Windows now writes simplified, 0.01 DIP, relative
@@ -56,22 +55,10 @@
   `points` (`shared/ink-points.md`); all readers since these versions accept both, so never deploy
   an older client against the migrated library. Library packed on 2026-11-18 (3150 -> 1774 MB).
   Rewrite library files only after the all-device hash/base check in `ink-storage-format.md`.
-- **Android 0.7.35/code40**: `StreamingJson` shares repeated names/short values; 作业 4 (70 MB) now
-  opens on the tablet at 177 MB Java heap. Points as JSON objects remain the main memory cost;
-  Notein/OneNote research and the packed-points proposal are in `ink-storage-format.md`.
-- **Android 0.7.33/code38** fixes whole-workspace focus highlighting after Xiaomi pen keys on
-  liuqin PixelOS 17. StylusShortcutLayout keeps pre-IME focus routing with default focus highlight
-  disabled. Release installed in place on the tablet, user confirmed physical pen presses retain
-  normal colors. JVM 305 pass/2 skipped, Release/native-test APK/lint passed.
 - **Android 0.7.32/code37**: deploy the signed Release variant (`Mojian.apk`), with version name
   `0.7.32` and `debuggable=false`. Retain legacy package `com.meta.inklab.debug` and OMEN's original
   signer for in-place updates preserving notes/settings/sync. The package suffix is compatibility,
   not a build mode. User explicitly requires release installations on phone and tablet.
-- **2026-11-16 brand 0.7.31 (Windows/Android code36), macOS 0.2.1**: installed display name is now English
-  `Mojian` (Pixel 2026 white-tile icons); package `com.meta.inklab(.debug)`, macOS bundle ID, data roots
-  and signers unchanged. Installed in place: Mac `/Applications/Mojian.app` 0.2.1, OMEN and ROG
-  `mojian/artifacts/release/Mojian.exe` 0.7.31 (no running process), K70 code36 (first install time kept).
-  No Release and no UI/sync acceptance by user direction. Tablet offline, not updated.
 - **0.7.30 published (Windows/Android code35, source `e37604f`)**: architecture repair from review
   `mac:claude:efdd324c`. Device-local navigation (selection/expansion/active notebook) moved out of
   library.json into Windows settings.json / Android prefs; autosave no longer rewrites the index.
@@ -85,33 +72,15 @@
   Temporary Windows eraser switches update selection without rebuilding tool collections/pen controls.
   v0.7.30 prerelease has EXE/APK uploaded; current artifacts refreshed on Mac and OMEN.
   Release closeout reused completed tests/build/signature receipts; physical device acceptance is open.
-- **0.7.29 published (Windows/Android code34, source `b0a020f`)**: built-in pen configurations are now `Notein风格` + `Onenote风格`
-  (id `onenote`), from shared/pen-style-presets.json. OneNote was measured on OMEN's desktop OneNote 16 via
-  synthetic pen injection + COM ISF readback: ellipse tip, raw points, width×(0.25+1.5p), no speed/taper.
-  Example docs/examples/pen-configurations/onenote.json must equal the preset. Not installed on any device:
-  the tablet could not connect; deploy only when the user asks. Win 284/284, Android 298 pass/2 skipped.
 - **0.7.28 published (Windows/Android code33)**: PDF page-pane import creates one note per file,
   with vertically stacked immutable backgrounds and one original PDF asset. Both clients use the
   PDF original/invert/ask policy; physical output retains every source sheet and its size.
   Old split imports stay unchanged. Current EXE/APK refreshed; no device install/restart this task.
   Read `insert-and-export.md` / `export-and-print.md`; task `~/.agents/mojian--pdf-document-import`.
-- **0.7.27 published (Windows/Android code32, source `c433980`)**: only `Notein风格` is preinstalled;
-  original pressure/flow/stability stay visible. Configuration is JSON text/file import, with functions,
-  engine parameters and configurable front controls. Selecting a file only fills the text box.
-  WPF preset switching is fixed; historical ink/snapshots and 0.7.26 performance are preserved.
-  Local Windows EXE replaced while closed; K70/Pad updated in place and optimized, Pad resumed normally.
-  Read `pen-style-presets.md`; task `~/.agents/mojian--pen-styles`.
 - **Windows 0.7.26**: dry scene keeps a permanent `BitmapCache` (render thread was saturated
   re-tessellating old ink under wet ink); topmost new ink on layered pages uses the wet overlay;
   v2/pen-style eraser hits use modeled samples (`StrokeEraserHitTest`, 8.5 ms -> µs per candidate).
   Includes 0.7.24 same-canvas focus fix. Physical pen acceptance open; see perf design doc 0.7.26.
-- **Android 0.7.22** (code30): adds a focused root `dispatchKeyEventPreIme` entry for the exact
-  Xiaomi pen keyboard, ahead of IME hardware-key processing; Activity remains the fallback.
-  Existing bindings/state machine are preserved; `MojianPenKey` logs receipt and binding types.
-  OMEN-signed and installed in place on the tablet, speed dexopt passed and first-install time kept.
-  User confirmed buttons recovered and attributed the failure to Bluetooth not being updated.
-  Actual logs now show upper single toggling lasso and lower single Undo/double Redo via Activity.
-  This does not establish pre-IME handling as the cause of recovery. Capture has ended.
 - **0.7.21**: Windows now authors `fountain-v2` with calibrated pressure/speed/direction,
   per-pen stability, distributed WPF packet timestamps, physical speed and canonical filled outlines.
   Android adds stability 0–100% (default 50; 1/10/20/60/100 ms at 0/25/50/75/100%) and persists it
@@ -278,6 +247,7 @@
 
 # Docs Index
 
+- `docs/design/document-history.md`: page edit history, transaction boundaries, metadata/assets, fine zoom.
 - `docs/design/ink-storage-format.md`: stroke/point/outline storage size, Notein (AndroidX Ink) and OneNote (ISF) encodings.
 - `docs/design/pen-style-presets.md`: JSON import, functions, controls, snapshots, built-in Notein/OneNote evidence.
 - `docs/design/app-branding.md`: supplied artwork, platform icon packaging and regeneration.

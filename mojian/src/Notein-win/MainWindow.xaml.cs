@@ -183,6 +183,7 @@ public partial class MainWindow : Window
         ConfigureCanvas(RightCanvas);
         ViewModel.RequestUndo += () => FocusedCanvas.Undo();
         ViewModel.RequestRedo += () => FocusedCanvas.Redo();
+        ViewModel.RequestRecordDocumentEdit += (undo, redo) => FocusedCanvas.RecordReversibleEdit(undo, redo);
         ViewModel.RequestClearPage += () => FocusedCanvas.ClearPage();
         ViewModel.RequestZoom += scale => FocusedCanvas.SetZoom(scale ?? 1f);
         ViewModel.RequestFitPageWidth += () => FocusedCanvas.FitPageWidth();
@@ -1373,8 +1374,8 @@ public partial class MainWindow : Window
         RightCanvas.InvalidateVisual();
     }
 
-    private void OnZoomOutClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale / 1.25f);
-    private void OnZoomInClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale * 1.25f);
+    private void OnZoomOutClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.SteppedScale(-1));
+    private void OnZoomInClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(FocusedCanvas.Viewport.SteppedScale(1));
     private void OnResetZoomClick(object sender, RoutedEventArgs e) => FocusedCanvas.SetZoom(1f);
     private void UpdateZoomStatus() => ZoomStatus.Text = $"{MathF.Round(FocusedCanvas.Viewport.Scale * 100f)}%";
     private void OnLeftCanvasFocus(object sender, MouseButtonEventArgs e) { ViewModel.FocusCanvas(CanvasSlot.Left); UpdateZoomStatus(); }
@@ -1489,8 +1490,8 @@ public partial class MainWindow : Window
             case "view:normal-page": ViewModel.IsFullPageMode = false; return true;
             case "view:full-page": ViewModel.IsFullPageMode = true; return true;
             case "view:split": ViewModel.ToggleSplitViewCommand.Execute(null); return true;
-            case "view:zoom-in": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale * 1.25f); return true;
-            case "view:zoom-out": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.Scale / 1.25f); return true;
+            case "view:zoom-in": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.SteppedScale(1)); return true;
+            case "view:zoom-out": FocusedCanvas.SetZoom(FocusedCanvas.Viewport.SteppedScale(-1)); return true;
             case "view:zoom-reset": FocusedCanvas.SetZoom(1f); return true;
             case "view:fit-width": FocusedCanvas.FitPageWidth(); return true;
             case "view:toggle-title": ViewModel.TogglePageTitle(); return true;

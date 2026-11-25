@@ -603,6 +603,7 @@ public sealed partial class MainViewModel : ObservableObject
     public event Action<float?>? RequestZoom;
     public event Action? RequestFitPageWidth;
     public event Action? RequestAppearanceRefresh;
+    public event Action<Action, Action>? RequestRecordDocumentEdit;
 
     public ICommand ToggleSectionPaneCommand { get; }
     public ICommand TogglePagePaneCommand { get; }
@@ -1267,48 +1268,47 @@ public sealed partial class MainViewModel : ObservableObject
         return true;
     }
 
-    public void SetBackgroundFormat(CanvasBackgroundFormat format)
-    {
-        var page = ActiveWorkspace.SelectedPage();
-        if (page == null) return;
-        page.Appearance.Background = format;
-        RefreshPageAppearance();
-        SaveLibrary();
-        RequestAppearanceRefresh?.Invoke();
-    }
+    public void SetBackgroundFormat(CanvasBackgroundFormat format) =>
+        EditPageAppearance(appearance => appearance.Background = format);
 
-    public void SetPaperKind(PaperKind kind)
+    public void SetPaperKind(PaperKind kind) => EditPageAppearance(appearance =>
     {
-        var page = ActiveWorkspace.SelectedPage();
-        if (page == null) return;
-        page.Appearance.PaperKind = kind;
-        page.Appearance.SheetCount = Math.Max(1, page.Appearance.SheetCount);
-        if (FocusedDocument is { } document) InfinitePageLayout.EnsureCapacity(page.Appearance, document);
-        RefreshPageAppearance();
-        SaveLibrary();
-        RequestAppearanceRefresh?.Invoke();
-    }
+        appearance.PaperKind = kind;
+        appearance.SheetCount = Math.Max(1, appearance.SheetCount);
+        if (FocusedDocument is { } document) InfinitePageLayout.EnsureCapacity(appearance, document);
+    });
 
-    public void SetPageColor(string color, PageTheme theme)
+    public void SetPageColor(string color, PageTheme theme) => EditPageAppearance(appearance =>
     {
-        var page = ActiveWorkspace.SelectedPage();
-        if (page == null) return;
-        page.Appearance.PageColor = color;
-        page.Appearance.Theme = theme;
-        RefreshPageAppearance();
-        SaveLibrary();
-        RequestAppearanceRefresh?.Invoke();
-    }
+        appearance.PageColor = color;
+        appearance.Theme = theme;
+    });
 
-    public void TogglePageTitle()
+    public void TogglePageTitle() => EditPageAppearance(appearance => appearance.ShowTitle = !appearance.ShowTitle);
+
+    private void EditPageAppearance(Action<PageAppearance> change)
     {
         var page = ActiveWorkspace.SelectedPage();
         if (page == null) return;
-        page.Appearance.ShowTitle = !page.Appearance.ShowTitle;
-        RefreshPageAppearance();
-        SaveLibrary();
-        OnPropertyChanged(nameof(IsPageTitleHidden));
-        RequestAppearanceRefresh?.Invoke();
+        var before = page.Appearance.Clone();
+        var after = before.Clone();
+        change(after);
+        if (System.Text.Json.JsonSerializer.Serialize(before) == System.Text.Json.JsonSerializer.Serialize(after)) return;
+        void Apply(PageAppearance value)
+        {
+            var restored = value.Clone();
+            // Automatic paper growth remains monotonic across undo, just like content edits.
+            restored.SheetCount = Math.Max(restored.SheetCount, page.Appearance.SheetCount);
+            restored.InfiniteWidth = Math.Max(restored.InfiniteWidth, page.Appearance.InfiniteWidth);
+            restored.InfiniteHeight = Math.Max(restored.InfiniteHeight, page.Appearance.InfiniteHeight);
+            page.Appearance = restored;
+            RefreshPageAppearance();
+            SaveLibrary();
+            OnPropertyChanged(nameof(IsPageTitleHidden));
+            RequestAppearanceRefresh?.Invoke();
+        }
+        Apply(after);
+        RequestRecordDocumentEdit?.Invoke(() => Apply(before), () => Apply(after));
     }
 
     public void TogglePageTheme()

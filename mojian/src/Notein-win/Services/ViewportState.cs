@@ -6,6 +6,7 @@ namespace Notein_win.Services;
 
 public class ViewportState
 {
+    public const float ZoomStepFactor = 1.05f;
     public const float DefaultMinScale = 0.5f;
     public const float DefaultMaxScale = 64f;
     public static IReadOnlyList<int> ZoomPresets { get; } = Array.AsReadOnly(new[] { 50, 75, 100, 125, 150, 200, 400, 800, 1600, 3200, 6400 });
@@ -22,6 +23,9 @@ public class ViewportState
         MinScale = minScale;
         MaxScale = maxScale;
     }
+
+    public float SteppedScale(int direction) => Math.Clamp(
+        direction > 0 ? Scale * ZoomStepFactor : direction < 0 ? Scale / ZoomStepFactor : Scale, MinScale, MaxScale);
 
     public void ApplyGesture(
         float previousFocusX,

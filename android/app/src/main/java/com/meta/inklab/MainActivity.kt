@@ -298,6 +298,12 @@ class MainActivity : Activity() {
     private var pageWidthViewButton: View? = null
     private var splitViewButton: View? = null
 
+    private enum class HistoryPart { INK, TAGS, TEXT, OBJECTS, SETTINGS }
+    private var historySnapshot: PageEditSnapshot? = null
+    private val historyParts = mutableSetOf<HistoryPart>()
+    private val pageHistory = DocumentEditHistory(::capturePageEdit, ::restorePageEdit)
+    private var erasingHistory = false
+
     private var predictionEnabled = true
     private var undoDoubleTapRedoEnabled = true
     private val undoButtons = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
@@ -305,8 +311,8 @@ class MainActivity : Activity() {
         UndoTapGesture(
             schedule = { delay, action -> mainHandler.postDelayed(action, delay) },
             cancel = { action -> mainHandler.removeCallbacks(action) },
-            undo = { clearContentSelection(); dryInkView.undo() },
-            redo = { clearContentSelection(); dryInkView.redo() },
+            undo = { undoPageEdit() },
+            redo = { redoPageEdit() },
             enabled = { undoDoubleTapRedoEnabled },
         )
     }
@@ -606,6 +612,96 @@ class MainActivity : Activity() {
         }
         if (workspaceLoaded) nativeSyncController.resume(pageContentRepository.root)
         if(workspaceLoaded) { refreshSharedWorkspace();mainHandler.removeCallbacks(syncRefresh);mainHandler.postDelayed(syncRefresh,3000) }
+    }
+
+    private fun pageEdited(part: HistoryPart) {
+        if (!restoringPageInk && !pageHistory.restoring && boundPageKey != null) {
+            historyParts += part
+            pageHistory.changed()
+        }
+        markPageContentChanged()
+    }
+
+    private fun capturePageEdit(): PageEditSnapshot {
+        val previous = historySnapshot
+        fun changed(part: HistoryPart) = previous == null || part in historyParts
+        val document = insertContentLayer.currentDocument()
+        val text = if (changed(HistoryPart.TEXT)) textInputLayer.snapshotEditors() else previous!!.text.map { it.snapshot }
+        val tags = if (changed(HistoryPart.TAGS)) tagLayer.snapshotTags() else previous!!.tags
+        // Preserve canonical/unknown fields even if a deletion is saved before Undo. Only the
+        // small text/tag layers are encoded here; handwriting points are never serialized.
+        if (previous != null && document != null && (changed(HistoryPart.TEXT) || changed(HistoryPart.TAGS))) {
+            SharedContentCodec.save(document, tags, text, resources.displayMetrics.density)
+        }
+        fun source(key: String) = document?.sharedSource?.optJSONArray(key)?.toString() ?: "[]"
+        val snapshot = PageEditSnapshot(
+            if (changed(HistoryPart.INK)) dryInkView.snapshotStrokes() else previous!!.ink,
+            tags,
+            if (changed(HistoryPart.TEXT)) text.map(::HistoryText) else previous!!.text,
+            if (changed(HistoryPart.OBJECTS)) insertContentLayer.currentDocument()?.objects.orEmpty().map { InsertObject.fromJson(it.toJson()) } else previous!!.objects,
+            if (changed(HistoryPart.SETTINGS)) (workspace.selectedPage()?.viewSettings ?: PageViewSettings()).copy(
+                // Automatic paper growth and the device theme are not manual document edits.
+                a4PageCount = 1, boundlessDocumentWidth = BoundlessPageLayout.initialWidth,
+                boundlessDocumentHeight = BoundlessPageLayout.initialHeight, darkBackground = false,
+            ) else previous!!.settings,
+            if (changed(HistoryPart.TAGS)) source("tags") else previous!!.tagSource,
+            if (changed(HistoryPart.TEXT)) source("textItems") else previous!!.textSource,
+            if (changed(HistoryPart.OBJECTS)) source("objects") else previous!!.objectSource,
+        )
+        historySnapshot = snapshot
+        historyParts.clear()
+        return snapshot
+    }
+
+    private fun restorePageEdit(snapshot: PageEditSnapshot) {
+        val document = insertContentLayer.currentDocument() ?: return
+        clearContentSelection()
+        val previous = historySnapshot
+        // Rebuilding ink or editors for an unrelated edit is expensive on dense imported pages.
+        if (previous?.ink != snapshot.ink) dryInkView.replaceStrokes(snapshot.ink)
+        if (previous?.tags != snapshot.tags) {
+            document.sharedSource.put("tags", org.json.JSONArray(snapshot.tagSource))
+            tagLayer.replaceTags(snapshot.tags)
+        }
+        if (previous?.text != snapshot.text) {
+            document.sharedSource.put("textItems", org.json.JSONArray(snapshot.textSource))
+            SharedContentCodec.text(document) // Rebase the codec's unchanged-rich-text cache.
+            textInputLayer.replaceEditors(snapshot.text.map { it.snapshot })
+        }
+        if (previous?.objects != snapshot.objects) {
+            document.sharedSource.put("objects", org.json.JSONArray(snapshot.objectSource))
+            document.objects.clear()
+            document.objects.addAll(snapshot.objects.map { InsertObject.fromJson(it.toJson()) })
+            insertContentLayer.notifyObjectChanged()
+        }
+        if (previous?.settings != snapshot.settings) workspace.selectedPage()?.viewSettings?.apply {
+            val source = snapshot.settings
+            paperSize = source.paperSize; pageColor = source.pageColor; backgroundFormat = source.backgroundFormat
+            pageTitleVisible = source.pageTitleVisible
+            customDocumentWidth = source.customDocumentWidth; customDocumentHeight = source.customDocumentHeight
+            sourcePageColor = source.sourcePageColor; paperOriginX = source.paperOriginX; paperOriginY = source.paperOriginY
+            importedPresentation = source.importedPresentation; invertImportedImages = source.invertImportedImages
+            persistPageViewSettings()
+        }
+        historySnapshot = snapshot
+        historyParts.clear()
+        applySelectedPageAppearance()
+        markPageContentChanged()
+        updateSelectionInteraction()
+    }
+
+    private fun undoPageEdit(): Boolean {
+        clearContentSelection()
+        return pageHistory.undo()
+    }
+
+    private fun redoPageEdit(): Boolean {
+        clearContentSelection()
+        return pageHistory.redo()
+    }
+
+    private fun finishEraseHistory() {
+        if (erasingHistory) { erasingHistory = false; pageHistory.end() }
     }
 
     private fun markPageContentChanged() {
@@ -1100,8 +1196,8 @@ class MainActivity : Activity() {
                     selectTool(target)
                 }
             }
-            StylusBindingType.UNDO -> dryInkView.undo()
-            StylusBindingType.REDO -> dryInkView.redo()
+            StylusBindingType.UNDO -> undoPageEdit()
+            StylusBindingType.REDO -> redoPageEdit()
             StylusBindingType.NEXT_TOOL -> cycleDrawingTool(1)
             StylusBindingType.PREVIOUS_TOOL -> cycleDrawingTool(-1)
         }
@@ -1224,8 +1320,8 @@ class MainActivity : Activity() {
             "insert:images" -> { launchImagePicker(REQUEST_IMAGES); true }
             "insert:stickers" -> { showStickerPicker(); true }
             "insert:note-link" -> { showNoteLinkPicker(); true }
-            "draw:undo" -> { clearContentSelection(); dryInkView.undo(); true }
-            "draw:redo" -> { clearContentSelection(); dryInkView.redo(); true }
+            "draw:undo" -> { undoPageEdit(); true }
+            "draw:redo" -> { redoPageEdit(); true }
             "draw:previous-tool" -> { cycleDrawingTool(-1); true }
             "draw:next-tool" -> { cycleDrawingTool(1); true }
             "draw:pan" -> { togglePanoramaMode(); true }
@@ -3020,9 +3116,12 @@ class MainActivity : Activity() {
                     }
                     insertSpaceFromMouse = false
                     if (kotlin.math.abs(deltaY) >= 2f) {
-                        dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
-                        tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
-                        insertContentLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                        pageHistory.transaction {
+                            dryInkView.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                            tagLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                            textInputLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                            insertContentLayer.insertVerticalSpace(insertSpaceStartDocY, deltaY)
+                        }
                         expandPageIfNeeded()
                     }
                     insertSpaceActive = false
@@ -3471,7 +3570,7 @@ class MainActivity : Activity() {
         paperContainer = CanvasInputHost(this).apply { setBackgroundColor(PAPER_COLOR) }
         pageSurfaceBackground = PageSurfaceView(this, viewport, PageSurfaceLayer.BACKGROUND)
         pageSurfaceForeground = PageSurfaceView(this, viewport, PageSurfaceLayer.FOREGROUND)
-        dryInkView = DryInkView(this)
+        dryInkView = DryInkView(this).apply { documentHistoryManaged = true }
         dryInkView.backgroundFormat = workspace.selectedPage()?.viewSettings?.backgroundFormat ?: legacyBackgroundFormat
         canvasBackgroundLayer = CanvasBackgroundLayer(this, dryInkView)
         wetInkView = InProgressStrokesView(this)
@@ -3485,6 +3584,7 @@ class MainActivity : Activity() {
                 onPreviewCrop = { bounds -> insertContentLayer.previewImageCrop(bounds); dryInkView.invalidate() }
                 onCommitCrop = insertContentLayer::commitImageCrop
                 onExitCrop = { insertContentLayer.endImageCrop(); dryInkView.invalidate() }
+                onTransformStarted = { pageHistory.begin() }
                 onBeginMove = ::beginSelectionMove
                 onFinishMove = ::finishSelectionMove
                 blankContentHitTest = { x, y ->
@@ -3516,6 +3616,7 @@ class MainActivity : Activity() {
                 }
                 onTransformFinished = {
                     insertContentLayer.finishSelectionTransform()
+                    pageHistory.end()
                     saveBoundPageSession()
                     expandPageIfNeeded()
                     renderToolDetails()
@@ -3533,7 +3634,7 @@ class MainActivity : Activity() {
                 onCancelMarquee = ::cancelDirectMarquee
             }
         tagLayer.onPlacementFinished = { tag ->
-            markPageContentChanged()
+            pageEdited(HistoryPart.TAGS)
             updateSelectionInteraction()
             expandPageIfNeeded()
             Toast.makeText(this, "已放置${tag.kind.label}标记", Toast.LENGTH_SHORT).show()
@@ -3546,12 +3647,12 @@ class MainActivity : Activity() {
             updateSelectionInteraction()
             renderToolDetails()
         }
-        insertContentLayer.onDocumentChanged = { document ->
-            markPageContentChanged()
+        insertContentLayer.onDocumentChanged = { _ ->
+            pageEdited(HistoryPart.OBJECTS)
             expandPageIfNeeded()
         }
         insertContentLayer.onObjectContextMenuRequested = ::showInsertObjectContextMenu
-        insertContentLayer.onReversibleEdit = { undo, redo -> dryInkView.recordExternalEdit(undo, redo) }
+
         insertContentLayer.onSelectionChanged = { selected ->
             if (selected != null) {
                 dryInkView.clearSelection()
@@ -3571,9 +3672,9 @@ class MainActivity : Activity() {
             renderToolDetails()
         }
         textInputLayer.onEditingChanged = { updateSelectionInteraction() }
-        textInputLayer.onContentChanged = { expandPageIfNeeded();markPageContentChanged() }
-        tagLayer.onContentChanged = ::markPageContentChanged
-        dryInkView.onContentChanged = { expandPageIfNeeded();markPageContentChanged() }
+        textInputLayer.onContentChanged = { expandPageIfNeeded(); pageEdited(HistoryPart.TEXT) }
+        tagLayer.onContentChanged = { pageEdited(HistoryPart.TAGS) }
+        dryInkView.onContentChanged = { expandPageIfNeeded(); pageEdited(HistoryPart.INK) }
         textInputLayer.onPageGesture = ::handleFingerGesture
         paperContainer.onPointerEventObserved = ::observeCanvasPointerEvent
         dryInkView.setViewport(viewport.documentToViewMatrix())
@@ -4697,6 +4798,9 @@ class MainActivity : Activity() {
         showPageLoading(false)
         applySelectedPageAppearance()
         applyViewportToLayers()
+        historySnapshot = null
+        historyParts.clear()
+        pageHistory.reset()
         finishPageBinding()
     }
 
@@ -4712,6 +4816,10 @@ class MainActivity : Activity() {
 
     /** Called on UI only after the outgoing save barrier succeeds, before allocating new JSON. */
     private fun releasePageBeforeRead() {
+        pageHistory.clear()
+        historySnapshot = null
+        historyParts.clear()
+        erasingHistory = false
         boundPageKey?.let { pageLoadFallbackKey = it }
         boundPageKey = null
         pageSessions.replaceAll { _, session -> session.copy(strokes = null, tags = null, textBoxes = null) }
@@ -4864,7 +4972,7 @@ class MainActivity : Activity() {
             "draw:redo" ->
                 commandButton("arrow_redo", "重做", false) {
                     clearContentSelection()
-                    dryInkView.redo()
+                    redoPageEdit()
                 }
             "draw:add" -> commandButton("add", "添加绘图工具", false) { anchor -> showAddToolMenu(anchor) }
             "draw:pan" ->
@@ -4890,7 +4998,7 @@ class MainActivity : Activity() {
         row.addView(
             commandButton("arrow_redo", "重做", selected = false) {
                 clearContentSelection()
-                dryInkView.redo()
+                redoPageEdit()
             },
             LinearLayout.LayoutParams(dp(40), dp(42)),
         )
@@ -5460,6 +5568,7 @@ class MainActivity : Activity() {
             DrawingToolKind.SHAPE -> Unit
             null -> Unit
         }
+        finishEraseHistory()
         pressurePointerId = null
         activeDirectTool = null
         syncPressureEraserWithTool()
@@ -5480,6 +5589,7 @@ class MainActivity : Activity() {
             renderToolShelf()
             renderToolDetails()
         }
+        finishEraseHistory()
         syncPressureEraserWithTool()
     }
 
@@ -6251,6 +6361,7 @@ class MainActivity : Activity() {
             .coerceIn(ToolPreset.MINIMUM_ERASER_RADIUS_MM, ToolPreset.MAXIMUM_ERASER_RADIUS_MM) * INTERNAL_UNITS_PER_MM
 
     private fun eraseAt(point: PointF, radius: Float) {
+        if (!erasingHistory) { pageHistory.begin(); erasingHistory = true }
         dryInkView.setEraserCursor(point, radius)
         val removed =
             dryInkView.eraseAtDocument(point.x, point.y, radius) +
@@ -6279,11 +6390,12 @@ class MainActivity : Activity() {
     }
 
     private fun deleteContentSelection(): Int {
-        val removed =
+        val removed = pageHistory.transaction {
             dryInkView.deleteSelection() +
                 tagLayer.deleteSelection() +
                 textInputLayer.deleteSelection() +
                 insertContentLayer.deleteSelection()
+        }
         saveBoundPageSession()
         selectionOverlay.invalidate()
         return removed
@@ -6384,6 +6496,7 @@ class MainActivity : Activity() {
         if (activeStrokes.isNotEmpty()) return
         val page = workspace.selectedPage() ?: return
         change(page.viewSettings)
+        pageEdited(HistoryPart.SETTINGS)
         ensureA4Capacity(page)
         ensureBoundlessCapacity(page)
         persistPageViewSettings()
@@ -6532,11 +6645,7 @@ class MainActivity : Activity() {
     }
 
     private fun zoomByStep(direction: Int) {
-        val current = viewport.scale * 100f
-        val target =
-            if (direction > 0) ZOOM_PRESETS.firstOrNull { it > current + 0.5f } ?: ZOOM_PRESETS.last()
-            else ZOOM_PRESETS.lastOrNull { it < current - 0.5f } ?: ZOOM_PRESETS.first()
-        setZoomScale(target / 100f)
+        setZoomScale(viewport.steppedScale(direction))
     }
 
     private fun setZoomScale(scale: Float) {
@@ -6697,15 +6806,13 @@ class MainActivity : Activity() {
             .setPositiveButton("清空") { _, _ ->
                 if (!saveBoundPageSession()) return@setPositiveButton
                 LocalMutationEpoch.forWorkspace(pageContentRepository.root).begin().use {
-                    val document = insertContentLayer.currentDocument()
-                    val retained = insertContentLayer.retainedPageAssetNames()
-                    dryInkView.clear()
-                    textInputLayer.clearAll()
-                    tagLayer.clear()
-                    insertContentLayer.clearObjects(preservePageBackgrounds = true)
-                    if (saveBoundPageSession() && document != null) {
-                        assetStore.clearPageAssetsExcept(document.notebookId, document.pageId, retained)
+                    pageHistory.transaction {
+                        dryInkView.clear()
+                        textInputLayer.clearAll()
+                        tagLayer.clear()
+                        insertContentLayer.clearObjects(preservePageBackgrounds = true)
                     }
+                    saveBoundPageSession()
                 }
                 renderToolDetails()
             }
@@ -7185,11 +7292,13 @@ class MainActivity : Activity() {
             val objects = selection.objects.map { SelectionClipboard.translatedObject(it, offset, names, offsetY) }
             textInputLayer.endEditing()
             clearContentSelection()
-            dryInkView.appendSelectedStrokes(strokes)
-            dryInkView.setDarkBackground(darkCanvasActive)
-            tagLayer.appendSelectedTags(selection.tags.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
-            textInputLayer.appendEditors(selection.text.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
-            insertContentLayer.appendSelectedObjects(objects)
+            pageHistory.transaction {
+                dryInkView.appendSelectedStrokes(strokes)
+                dryInkView.setDarkBackground(darkCanvasActive)
+                tagLayer.appendSelectedTags(selection.tags.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
+                textInputLayer.appendEditors(selection.text.map { it.copy(documentX = it.documentX + offset, documentY = it.documentY + offsetY) })
+                insertContentLayer.appendSelectedObjects(objects)
+            }
             saveBoundPageSession()
             expandPageIfNeeded()
             updateSelectionInteraction()

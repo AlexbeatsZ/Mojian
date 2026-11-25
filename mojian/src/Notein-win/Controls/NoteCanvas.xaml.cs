@@ -57,7 +57,7 @@ public partial class NoteCanvas : UserControl
     private Rect? _importedPaperBounds;
     private readonly PageContentHistory _history = new();
     private sealed record UndoEntry(PageContentHistory.Snapshot? Content = null, string? AddedStrokeId = null, EraseGesture? Erased = null,
-        (int Index, StrokeRecord Stroke)? RestoreStroke = null, bool ReapplyErase = false);
+        (int Index, StrokeRecord Stroke)? RestoreStroke = null, bool ReapplyErase = false, Action? UndoAction = null, Action? RedoAction = null);
     private readonly Stack<UndoEntry> _undo = new();
     private readonly Stack<UndoEntry> _redo = new();
     private readonly List<Point> _lasso = new();

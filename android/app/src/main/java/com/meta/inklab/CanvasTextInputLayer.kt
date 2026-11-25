@@ -202,7 +202,8 @@ class CanvasTextInputLayer(
         forEachEditor(::applyDefaultEditorColors)
     }
 
-    fun clearAll() {
+    fun clearAll(notify: Boolean = true) {
+        val hadContent = (0 until childCount).any { getChildAt(it) !in temporaryEditors }
         endEditing()
         lastPasteAnchor = null
         removeAllViews()
@@ -211,6 +212,7 @@ class CanvasTextInputLayer(
         temporaryEditors.clear()
         formalEditingEditors.clear()
         onSelectionChanged?.invoke(0)
+        if (notify && hadContent) onContentChanged?.invoke()
     }
 
     fun applyViewport() {
@@ -273,6 +275,19 @@ class CanvasTextInputLayer(
             applyEditorTransform(editor)
         }
         if(selectedEditors.isNotEmpty()) onContentChanged?.invoke()
+    }
+
+    fun insertVerticalSpace(startY: Float, deltaY: Float) {
+        if (deltaY == 0f) return
+        var changed = false
+        forEachEditor { editor ->
+            if (editor !in temporaryEditors && state(editor).documentY >= startY) {
+                state(editor).documentY += deltaY
+                applyEditorTransform(editor)
+                changed = true
+            }
+        }
+        if (changed) onContentChanged?.invoke()
     }
 
     fun scaleSelection(anchorX: Float, anchorY: Float, factorX: Float, factorY: Float = factorX) {
@@ -405,7 +420,7 @@ class CanvasTextInputLayer(
     }
 
     fun replaceEditors(snapshots: List<CanvasTextSnapshot>) {
-        clearAll()
+        clearAll(notify = false)
         appendEditors(snapshots, select = false)
     }
 

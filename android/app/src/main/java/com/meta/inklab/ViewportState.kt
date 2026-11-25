@@ -20,6 +20,7 @@ class ViewportState(
     val maxScale: Float = DEFAULT_MAX_SCALE,
 ) {
     companion object {
+        const val ZOOM_STEP_FACTOR = 1.05f
         const val DEFAULT_MIN_SCALE = 0.5f
         const val DEFAULT_MAX_SCALE = 64f
         val ZOOM_PRESETS = listOf(50, 75, 100, 125, 150, 200, 400, 800, 1600, 3200, 6400)
@@ -31,6 +32,10 @@ class ViewportState(
         private set
     var translationY: Float = 0f
         private set
+
+    fun steppedScale(direction: Int): Float =
+        (if (direction > 0) scale * ZOOM_STEP_FACTOR else if (direction < 0) scale / ZOOM_STEP_FACTOR else scale)
+            .coerceIn(minScale, maxScale)
 
     fun applyGesture(
         previousFocusX: Float,
