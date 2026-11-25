@@ -203,7 +203,7 @@ documents against the base blob downloaded from the server:
 Same-field edits of the same item and malformed/oversized JSON remain manual conflicts. Deleting checkpoint
 or journal files to clear a warning is not a supported recovery procedure.
 
-### Conflict review (0.7.40)
+### Conflict review (engine 0.7.40, UI 0.7.43)
 
 What the JSON merge cannot settle is reviewed per file, like Shale's sync review (VS Code style).
 Engine API, same on both clients and covered by `shared/fixtures/json-review.json`:
@@ -217,7 +217,8 @@ Engine API, same on both clients and covered by `shared/fixtures/json-review.jso
   the conflict was recorded. When nothing remains the conflict marker is cleared and sync resumes.
 UI contract (both clients): conflicted pages are colored in navigation with an M/A/D letter
 (M yellow, A green, D red) and a 同步冲突 group lists every conflicted file (library.json as 笔记目录);
-the sync status opens it. An open conflicted page shows a review bar (summary counts plus
+the group opens each review. The bottom-right status stays display-only and never consumes input.
+An open conflicted page shows a review bar (summary counts plus
 保留本机 / 采用服务器 / 两边都要) and the canvas previews the difference: server-only strokes green,
 strokes the server lacks red. Keep explanatory text minimal.
 Android (SyncConflictReview/SyncConflictViews): strokes changed on both sides are marked yellow (local
@@ -231,7 +232,9 @@ re-read only when `conflicts.json` changes. A canvas showing a conflicted page g
 input becomes navigation (as in reading view) and undo/redo/clear/paste/insert/asset writes are refused until a
 version is chosen. Resolution reuses `TryApplyNativeSync` (reload library and open pages), then syncs again.
 Taking the server's deletion of a page still listed by a conflicted library.json is refused (先处理笔记目录).
-Messages appear as a short notice; the sync status line is replaced by a clickable 同步冲突 N chip.
+Messages appear as a short notice; the sync status line is replaced by a passive 同步冲突 N label.
+Both clients also refuse page appearance edits while reviewing a page; Android toolbar/keyboard undo,
+redo, clear, paste, delete and text commands obey the same lock as pointer input.
 
 ### Historical default fields and conflict recovery
 

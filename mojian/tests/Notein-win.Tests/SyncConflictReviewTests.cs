@@ -144,6 +144,7 @@ public class SyncConflictReviewTests
                 Assert.Null(model.ActiveSyncConflict);
                 Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("SyncConflictBar")).Visibility);
                 Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("SyncConflictChip")).Visibility);
+                Assert.False(((FrameworkElement)window.FindName("SyncConflictChip")).IsHitTestVisible);
 
                 model.OpenSyncConflictCommand.Execute(model.SyncConflictRows.Single(row => row.Label == "作业 4"));
                 Wait(window.ConflictPreviewsReady);
@@ -161,6 +162,11 @@ public class SyncConflictReviewTests
                 Assert.Equal(strokeCount, canvas.Document.Strokes.Count);
                 Assert.False(canvas.Document.HasPendingContentChanges);
                 Assert.Throws<InvalidOperationException>(() => model.WriteAsset(".png", [1, 2, 3]));
+                var appearance = System.Text.Json.JsonSerializer.Serialize(model.ActiveWorkspace.SelectedPage()!.Appearance);
+                model.TogglePageTitle();
+                model.SetPaperKind(PaperKind.A4);
+                model.SetBackgroundFormat(CanvasBackgroundFormat.GridStandard);
+                Assert.Equal(appearance, System.Text.Json.JsonSerializer.Serialize(model.ActiveWorkspace.SelectedPage()!.Appearance));
                 var (pixels, width) = Render(window, "conflict-review-page.png");
                 var area = canvas.TransformToAncestor((Visual)window.Content).TransformBounds(new Rect(0, 60, canvas.ActualWidth, canvas.ActualHeight - 60));
                 Assert.True(CountNear(pixels, width, area, NoteCanvas.ConflictGreen) > 50, "server-only strokes are not drawn green");

@@ -1291,7 +1291,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void EditPageAppearance(Action<PageAppearance> change)
     {
         var page = ActiveWorkspace.SelectedPage();
-        if (page == null) return;
+        if (page == null || SyncConflictFor(FocusedDocument) != null) return;
         var before = page.Appearance.Clone();
         var after = before.Clone();
         change(after);

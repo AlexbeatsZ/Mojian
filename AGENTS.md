@@ -9,6 +9,14 @@
 
 # Current State
 
+- **0.7.43 (Windows/Android code47, master integration in progress)**: merged all outstanding
+  Claude Android/Windows conflict review and delayed page-loading feedback branches. Page review
+  includes navigation M/A/D markers, per-file choices and red/green/yellow ink previews. Status labels
+  remain passive; review locks also cover unified history and page appearance. Validation/deployment
+  is in progress; 0.7.42 is currently installed on K70/liuqin. No conflict choice was made for user notes.
+- User authorized Mojian deployment and future routine updates on 2026-11-25 without repeated
+  approval. Preserve notes/settings/signers/sync; Mac app deployment and retired iOS stay outside scope.
+
 - **0.7.42 (Windows/Android code46; v0.7.42 prerelease published)**: Android all page
   edits share one chronological history (erase/move/resize/delete/text/objects/clear/page appearance),
   one gesture per entry; saved deletion undo preserves canonical metadata/assets. Viewport is excluded.
@@ -16,7 +24,8 @@
   Zoom buttons/shortcuts use reciprocal 5% steps; presets unchanged. Read document-history.md.
   Android JVM 330 pass/1 opt-in skip, Release/native-test APK/lint pass; Windows targeted 55/55,
   full 324/325 (only the existing SSH Hand-pan pixel failure, mean1.870/shift4.546). Mac/OMEN current
-  EXE/APK refreshed; original Android signer retained. No Android install or physical acceptance.
+  EXE/APK refreshed; original Android signer retained. K70/liuqin updated in place on 2026-11-25;
+  preferences/firstInstallTime preserved. Physical input acceptance remains open.
 - Older product/version and deployment details are archived in `docs/log/2026-11.md`.
 
 - **Android 0.7.41/code45**: invisible ink after opening/foreground return: cached `RenderNode`
@@ -122,7 +131,7 @@
   never silently recreated. Old migration-path recovery and historical counts are in monthly logs.
 - Windows deletion recovery lives in `.mojian-deletions.previous`; corrupt JSON copies live outside
   `notebooks/` in `.mojian-corrupt.previous`. Incoming partial sync locks editing until journal
-  replay AND repository reload finish. Unmergeable conflicts require manual review; no review UI yet.
+  replay AND repository reload finish. Unmergeable conflicts require per-file manual review; 0.7.43 adds the UI.
 - Global theme/new-page background/print choices are device-local (`settings-memory.md`). Imported
   Notein/OneNote presentation is display-only; preserve source coordinates, outlines and assets.
 - Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac deployment needs its own
@@ -144,7 +153,8 @@
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
 - Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
 - Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
-  whole library; the per-file review UI exists on unmerged branches (Android/Windows), not released (Shale's file tree/editor review is the reference design). Recovery evidence is in native-sync.md/November log.
+  whole library until per-file review. Android/Windows review UI is merged for 0.7.43; deployment
+  validation is in progress. Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
 - iOS/iPadOS maintenance is retired by user direction, 2026-11-13.

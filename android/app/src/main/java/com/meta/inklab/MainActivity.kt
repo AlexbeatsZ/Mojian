@@ -713,11 +713,13 @@ class MainActivity : Activity() {
     }
 
     private fun undoPageEdit(): Boolean {
+        if (selectedPageConflict() != null) return false
         clearContentSelection()
         return pageHistory.undo()
     }
 
     private fun redoPageEdit(): Boolean {
+        if (selectedPageConflict() != null) return false
         clearContentSelection()
         return pageHistory.redo()
     }
@@ -801,12 +803,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun revealSyncConflicts() {
-        val paneShown = if (fullPageMode) fullPageSectionPaneOpen else sectionPaneVisible
-        if (!paneShown) toggleSectionPane()
-        sectionScroll?.post { sectionScroll?.smoothScrollTo(0, 0) }
-    }
-
     private fun renderConflictGroup() {
         val entries = conflictEntries()
         if (entries.isEmpty()) return
@@ -875,6 +871,7 @@ class MainActivity : Activity() {
             return
         }
         bar.bind(entry)
+        clearContentSelection()
         bar.setBusy(conflictResolving)
         bar.onChoice = { choice -> resolveConflict(entry, choice) }
         bar.visibility = View.VISIBLE
@@ -1621,14 +1618,13 @@ class MainActivity : Activity() {
             })
             conflictReviewBar = ConflictReviewBar(this@MainActivity).apply { visibility = View.GONE }
             addView(conflictReviewBar, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
-            conflictChip = TextView(this@MainActivity).apply {
+            conflictChip = PassiveStatusView(this@MainActivity).apply {
                 textSize = 11f
                 setTextColor(ConflictMark.MODIFY.color)
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 background = rounded(0xEE232323.toInt(), 0f, Color.TRANSPARENT)
                 setPadding(dp(10), dp(5), dp(10), dp(5))
                 visibility = View.GONE
-                setOnClickListener { revealSyncConflicts() }
             }
             addView(conflictChip, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END))
         }
@@ -3025,6 +3021,7 @@ class MainActivity : Activity() {
         }
 
     private fun performHomeCommand(command: HomeCommand, anchor: View) {
+        if (selectedPageConflict() != null) return
         when (command) {
             HomeCommand.PASTE -> performPasteCommand()
             HomeCommand.CUT -> if (textInputLayer.isEditing()) runTextCommand("剪切") { textInputLayer.cut() } else copyNativeSelection(cut = true)
@@ -3087,6 +3084,7 @@ class MainActivity : Activity() {
     }
 
     private fun runTextCommand(label: String, action: () -> Boolean) {
+        if (selectedPageConflict() != null) return
         if (!action()) showTextSelectionHint() else Toast.makeText(this, "已$label", Toast.LENGTH_SHORT).show()
     }
 
@@ -3100,6 +3098,7 @@ class MainActivity : Activity() {
             anchor,
             choices.map { (label, action) ->
                 MojianCommandMenu.Item(label = label, icon = "style_guide") {
+                    if (selectedPageConflict() != null) return@Item
                     if (!action()) showTextSelectionHint()
                 }
             },
@@ -3119,6 +3118,7 @@ class MainActivity : Activity() {
     }
 
     private fun beginTagPlacement(kind: CanvasTagKind) {
+        if (selectedPageConflict() != null) return
         textInputLayer.abandonTemporaryEditors()
         textInputLayer.endEditing()
         singleFingerPanEnabled = false
@@ -6711,6 +6711,7 @@ class MainActivity : Activity() {
     }
 
     private fun deleteContentSelection(): Int {
+        if (selectedPageConflict() != null) return 0
         val removed = pageHistory.transaction {
             dryInkView.deleteSelection() +
                 tagLayer.deleteSelection() +
@@ -6814,7 +6815,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateCurrentPageView(change: (PageViewSettings) -> Unit) {
-        if (activeStrokes.isNotEmpty()) return
+        if (activeStrokes.isNotEmpty() || selectedPageConflict() != null) return
         val page = workspace.selectedPage() ?: return
         change(page.viewSettings)
         pageEdited(HistoryPart.SETTINGS)
@@ -7116,6 +7117,7 @@ class MainActivity : Activity() {
     }
 
     private fun confirmClearPage() {
+        if (selectedPageConflict() != null) return
         val isPdfPage = workspace.selectedPage()?.pdfPage != null
         AlertDialog.Builder(this)
             .setTitle("清空当前页面？")
@@ -7125,6 +7127,7 @@ class MainActivity : Activity() {
             )
             .setNegativeButton("取消", null)
             .setPositiveButton("清空") { _, _ ->
+                if (selectedPageConflict() != null) return@setPositiveButton
                 if (!saveBoundPageSession()) return@setPositiveButton
                 LocalMutationEpoch.forWorkspace(pageContentRepository.root).begin().use {
                     pageHistory.transaction {
@@ -7596,6 +7599,7 @@ class MainActivity : Activity() {
     }
 
     private fun pasteNativeSelection(): Boolean {
+        if (selectedPageConflict() != null) return false
         if (!hasNativeSelectionClipboard()) return false
         val selection = nativeSelection ?: return false
         val target = insertContentLayer.currentDocument() ?: return false
@@ -7681,6 +7685,7 @@ class MainActivity : Activity() {
     }
 
     private fun performPasteCommand() {
+        if (selectedPageConflict() != null) return
         if (pasteNativeSelection()) return
         val imageUris = clipboardImageUris()
         if (imageUris.isNotEmpty()) {
@@ -8267,6 +8272,7 @@ class MainActivity : Activity() {
     }
 
     private fun insertTarget(): InsertTarget? {
+        if (selectedPageConflict() != null) return null
         if (!::insertContentLayer.isInitialized) return null
         val pageId = workspace.selectedPageId.takeIf(String::isNotEmpty) ?: return null
         val point = insertContentLayer.nextInsertionPoint()
