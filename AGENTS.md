@@ -9,118 +9,49 @@
 
 # Current State
 
-- **0.7.43 (Windows/Android code47, master integration in progress)**: merged all outstanding
-  Claude Android/Windows conflict review and delayed page-loading feedback branches. Page review
-  includes navigation M/A/D markers, per-file choices and red/green/yellow ink previews. Status labels
-  remain passive; review locks also cover unified history and page appearance. Validation/deployment
-  is in progress; 0.7.42 is currently installed on K70/liuqin. No conflict choice was made for user notes.
+- **0.7.43 (Windows/Android code47; master)**: merged all outstanding Claude conflict-review
+  and delayed page-loading branches, retaining branch ancestry and the current save barriers.
+  Android/Windows conflict review has M/A/D navigation, per-file choices and red/green/yellow ink
+  previews; page edits (including unified undo and appearance) are locked during review. Status is
+  passive. Current test totals are under Active Work. K70/liuqin installed in place with original signer/prefs/time;
+  cold launch359/350ms, processes stayed running. K70 dexopt calls a missing dex2oat32; app has no crash.
+  Windows EXE deployed to OMEN repo and ROG Programs/Mojian with no running product at replacement.
+  v0.7.43 prerelease published with EXE/APK; Mac/OMEN current outputs refreshed. Physical input acceptance stays open.
 - User authorized Mojian deployment and future routine updates on 2026-11-25 without repeated
   approval. Preserve notes/settings/signers/sync; Mac app deployment and retired iOS stay outside scope.
 
-- **0.7.42 (Windows/Android code46; v0.7.42 prerelease published)**: Android all page
-  edits share one chronological history (erase/move/resize/delete/text/objects/clear/page appearance),
-  one gesture per entry; saved deletion undo preserves canonical metadata/assets. Viewport is excluded.
-  Windows existing erase/move paths pass regression; single-page appearance now joins their history.
-  Zoom buttons/shortcuts use reciprocal 5% steps; presets unchanged. Read document-history.md.
-  Android JVM 330 pass/1 opt-in skip, Release/native-test APK/lint pass; Windows targeted 55/55,
-  full 324/325 (only the existing SSH Hand-pan pixel failure, mean1.870/shift4.546). Mac/OMEN current
-  EXE/APK refreshed; original Android signer retained. K70/liuqin updated in place on 2026-11-25;
-  preferences/firstInstallTime preserved. Physical input acceptance remains open.
-- Older product/version and deployment details are archived in `docs/log/2026-11.md`.
+- **0.7.42 editor fixes**: one chronological per-page history covers all ink/objects/text/appearance,
+  one entry per gesture; undo retains viewport and canonical assets/metadata. Zoom multiply/divide1.05;
+  presets unchanged. See document-history.md; test and release receipts are in docs/log/2026-11.md.
 
-- **Android 0.7.41/code45**: invisible ink after opening/foreground return: cached `RenderNode`
-  entries may survive HWUI display-list eviction. Visible/prefetch paths now check `hasDisplayList`,
-  re-record invalid tiles, release tiles while the window is hidden and request a frame on return.
-  liuqin native regression: 0.7.39 fails, 0.7.41 passes partial/full eviction, page binding and window
-  visibility; JVM 323 pass/1 skipped, Release/native-test APK/lint pass. Installed in place on tablet
-  with original signer; firstInstallTime preserved, launch/foreground return show ink. Release v0.7.41
-  published (APK); Mac/OMEN current APK refreshed. See android-page-navigation.md.
-- **2026-11-22 tablet thin ink**: PixelOS 17 on liuqin reports `xdpi≈30.9` (real ≈309), so AndroidX Ink
-  speed is 10× too high and Notein风格 thins too much; pen pressure is unchanged. Vector module
-  `com.meta.liuqin.dpifix` (scope Mojian + Notein) corrects it; verified on a test page. See handwriting-engine.md.
-- **2026-11-22 tablet pen dropout diagnosis (Android 0.7.39 / liuqin PixelOS17)**: while the user
-  continuously attempted writing, a 60 s raw capture received 0 pen events versus 433 finger frames;
-  kernel reported Bluetooth connected, pen-charge detected, and pen input disabled (`pen_active=0`).
-  Hall4 was 0; recovery changed Hall4 to 1, charge detection off and `pen_active=1`, followed by
-  real pen events and user-confirmed writing. Initial recovery followed moving the tablet, not
-  removing the case. User subsequently explicitly confirmed the magnet as the cause and closed
-  the investigation. This occurrence is below app routing; preserve the two-finger/palm behavior.
-  Follow-up: user authorized separate KPM `liuqin-pen-charge-bypass` 0.1.0, now active on the tablet;
-  charge=1 still delivered 161 contacts/26129 frames. APModule installed for next normal boot;
-  first boot autoload remains unverified. Source: `/Users/meta/Developer/liuqin-pen-charge-bypass`.
-  Reuse `~/.agents/liuqin--stylus-input/AGENTS.md`; Mojian application code was unchanged.
-- **Windows 0.7.38**: `双击撤销重做` targets the graphics-tablet undo key: two presses of the undo
-  shortcut (default Ctrl+Z) within the adjustable `双击判定时间` (150–800 ms, default 300) redo;
-  Windows undo buttons are immediate again. Android stays 0.7.37/code42 (button variant unchanged).
-  Read workspace-ui.md before changing undo input. Release v0.7.38 (EXE); OMEN artifacts EXE replaced.
-  Physical tablet acceptance open.
-- **0.7.34 (Windows/Android code39, branch `fix/compact-ink-outline`)**: tablet "页面暂时无法读取"
-  was Android OOM on a 358 MB page (作业 4); 90% was Windows pen `vectorPath` written since 0.7.21 as
-  one full-precision disc per modeled sample. Windows now writes simplified, 0.01 DIP, relative
-  outlines (wet == stored geometry); Android streams page JSON (`StreamingJson`). Existing pages are
-  re-encoded by `tools/outline-compaction` only after confirming every device has synced them
-  unchanged (`--skip` others). Win 312/312, Android JVM 310 (2 opt-in skipped), Release/lint pass.
-  Deployment/compaction status is in `docs/log/2026-11.md`. Read handwriting-engine.md "Outline size".
-- **0.7.36 (Windows/Android code41), macOS 0.2.3**: strokes may store `pointsCoded` instead of
-  `points` (`shared/ink-points.md`); all readers since these versions accept both, so never deploy
-  an older client against the migrated library. Library packed on 2026-11-18 (3150 -> 1774 MB).
-  Rewrite library files only after the all-device hash/base check in `ink-storage-format.md`.
-- **Android 0.7.32/code37**: deploy the signed Release variant (`Mojian.apk`), with version name
-  `0.7.32` and `debuggable=false`. Retain legacy package `com.meta.inklab.debug` and OMEN's original
-  signer for in-place updates preserving notes/settings/sync. The package suffix is compatibility,
-  not a build mode. User explicitly requires release installations on phone and tablet.
-- **0.7.30 published (Windows/Android code35, source `e37604f`)**: architecture repair from review
-  `mac:claude:efdd324c`. Device-local navigation (selection/expansion/active notebook) moved out of
-  library.json into Windows settings.json / Android prefs; autosave no longer rewrites the index.
-  Shared contracts in `shared/`: workspace/page schemas, golden fixtures, sync decision table,
-  `fountain-v2.json` constants (consumed by both engines). 409 `version_conflict` drops the outbox and
-  re-decides next pass; remote library.json deletion is refused. Missing page files are errors, not
-  empty pages; copy section/page publishes only after data copy; Windows unchanged strokes are written
-  back verbatim (`StrokeJsonConverter`); undo keeps frozen per-stroke versions, bitmap caches are LRU
-  budgeted, PDF import stages previews on disk. Content IDs follow the sync path rule on all clients
-  (ASCII `[A-Za-z0-9._-]`, no leading/trailing dot). macOS client + `shared/swift` core now on master.
-  Temporary Windows eraser switches update selection without rebuilding tool collections/pen controls.
-  v0.7.30 prerelease has EXE/APK uploaded; current artifacts refreshed on Mac and OMEN.
-  Release closeout reused completed tests/build/signature receipts; physical device acceptance is open.
-- **0.7.28 published (Windows/Android code33)**: PDF page-pane import creates one note per file,
-  with vertically stacked immutable backgrounds and one original PDF asset. Both clients use the
-  PDF original/invert/ask policy; physical output retains every source sheet and its size.
-  Old split imports stay unchanged. Current EXE/APK refreshed; no device install/restart this task.
-  Read `insert-and-export.md` / `export-and-print.md`; task `~/.agents/mojian--pdf-document-import`.
-- **Windows 0.7.26**: dry scene keeps a permanent `BitmapCache` (render thread was saturated
-  re-tessellating old ink under wet ink); topmost new ink on layered pages uses the wet overlay;
-  v2/pen-style eraser hits use modeled samples (`StrokeEraserHitTest`, 8.5 ms -> µs per candidate).
-  Includes 0.7.24 same-canvas focus fix. Physical pen acceptance open; see perf design doc 0.7.26.
-- **0.7.21**: Windows now authors `fountain-v2` with calibrated pressure/speed/direction,
-  per-pen stability, distributed WPF packet timestamps, physical speed and canonical filled outlines.
-  Android adds stability 0–100% (default 50; 1/10/20/60/100 ms at 0/25/50/75/100%) and persists it
-  in tools/strokes. Both clients' hold-to-straighten uses `shape-default.WidthMm`, retaining source
-  color/highlighter opacity. Old v1 ink stays unchanged. Read `handwriting-engine.md` and
-  `shapes-and-straightening.md`. Windows queued snapshots cache frozen unchanged point lists.
-- **Android 0.7.20** (code28): product build is non-debuggable despite the `.debug` package suffix.
-  ART interpretation and scene-revision cache resets caused the earlier lag. User accepted the new
-  tablet feel. Prior injected ~1900-stroke acceptance: frame p90/95/99 24/28/38 ms (Notein 24/27/44),
-  dense save 0.33–0.9 s. `fountain-v2` was calibrated on device. These are prior 0.7.20 results.
-- Android 0.7.19 caches unchanged stroke JSON/fingerprints; save checks use size + inode rather than
-  HyperOS FUSE mtime. Idle save is 2 s, continuous dirty maximum 20 s; onPause wait is at most 1.5 s.
-  Device-local append journal is not implemented. Read `android-page-navigation.md`.
+- Android tile recovery since 0.7.41 checks RenderNode.hasDisplayList and window visibility;
+  liuqin native lifecycle regression passed. Read android-page-navigation.md before rendering changes.
+- liuqin PixelOS17 reports xdpi≈30.9 (real≈309); Vector module com.meta.liuqin.dpifix corrects
+  Mojian/Notein thin ink. User confirmed case magnets caused pen dropout below application routing;
+  authorized KPM liuqin-pen-charge-bypass is active, normal-boot autoload unverified. Keep palm/two-finger
+  routing unchanged. Recovery task ~/.agents/liuqin--stylus-input/AGENTS.md; source ~/Developer/liuqin-pen-charge-bypass.
+- Windows physical undo shortcut double-press timing is 150–800ms/default300; toolbar undo is
+  immediate. Android keeps its existing button policy. Read workspace-ui.md before undo-input changes.
+- Never deploy clients older than Windows/Android0.7.36/code41 or macOS0.2.3 against this library:
+  pointsCoded is already in use. Stored outline size caused Android OOM; retain compact outlines,
+  streaming reads and original unknown fields. Read ink-storage-format.md/handwriting-engine.md.
+- Android product is non-debuggable Release with legacy package com.meta.inklab.debug and OMEN's
+  original signer. Never uninstall/clear data; the suffix does not imply a debug product.
+- Navigation/settings are device-local; canonical schemas, fixtures and fountain constants live in
+  shared/. Physical Windows pen/stability, Android hold-width and native PDF output acceptance remain
+  open. Details of 0.7.20–0.7.41 behavior, fixes and deployment receipts are in docs/log/2026-11.md.
 - Independent sync-server **0.1.0** pins `@alexbeatsz/file-sync-core@0.1.0`; its `sync-server-v*`
   tags/releases never replace product latest. ROG `MojianNativeSync` runs `Programs/MojianSyncServer`
   using `%LOCALAPPDATA%/MojianServices/.local/native-sync/server.json` and its data. Preserve config/data,
   gateway module paths, and service state. See `sync-server/README.md` and `native-sync.md`.
-- **2026-11-23 native-only libraries**: OMEN, K70 and liuqin now retain only `Documents/Mojian`;
-  the former Syncthing libraries were deleted and `Mojian-native` renamed in place. Selected-root
-  preferences and path-keyed native credentials moved together; native identities/checkpoints,
-  journals and conflicts remain. K70/liuqin match server revision1348/1923 entries after reopening.
+- **2026-11-23 native-only libraries**: OMEN, K70 and liuqin retain only `Documents/Mojian`;
+  former Syncthing libraries were removed, Mojian-native renamed with preferences/private credentials.
+  Native identities/checkpoints/journals/conflicts remain; K70/liuqin then matched revision1348/1923 entries.
   OMEN retains an existing conflict and incoming journal; see native-sync.md. Mac already uses
   `Documents/Mojian` as a read-only copied library, without native HTTPS support. ROG is backend-only.
   Never register these native libraries with Syncthing. Routes are
   tried in strict configured order; private certificate pins do not alter global trust. Preserve
   `.local/native-sync/connection.json` and never publish it or its access values.
-- **2026-11-08 OMEN sync recovery**: reviewed revision 288 conflicts and preserved 145 local added
-  practice strokes plus 5 disjoint tablet erasures. Existing client now matches server revision 666,
-  with no pending outbox/incoming/conflict. Homework5 matches the tablet/server's 2697 strokes.
-  Full local/remote/resolved recovery copies remain under the existing conflict's resolution-20261108.
 - ROG sync uses loopback 18742 and HTTPS 18743, composed Dayweave gateway 18781; subscription 18782,
   Dayweave 49732. Do not restart SakuraFrpService or overwrite the original gateway module.
 - User selected restored/tablet659 and declined 90 old editable pages and the phone's divergent
@@ -143,21 +74,17 @@
 # Active Work
 
 - 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
-- Physical Windows pen feel/stability and Android stability/hold-width acceptance remain open.
-  Existing 0.7.20 tablet feel was accepted; this is not a new 0.7.21 physical acceptance.
-- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 305/306,
+- Windows pen/stability and Android stability/hold-width acceptance remain open; 0.7.20 tablet feel was accepted.
+- Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 328/329,
   existing Hand-pan pixel failure mean 1.870 / shifted 4.546. Preserve the original threshold.
-  Windows native sync 29 scenarios and sync integration 11/11 pass. Android: 306 passed/1 opt-in
+  Windows native sync 33 scenarios and sync integration 11/11 pass. Android: 341 passed/1 opt-in
   skipped, APK/test APK/lint pass. Shared Swift 23/23 and macOS 20/20 pass.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
-- Native sync v1 manual conflicts, no E2EE, and no blob/tombstone/receipt GC remain as designed.
 - Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
-  whole library until per-file review. Android/Windows review UI is merged for 0.7.43; deployment
-  validation is in progress. Recovery evidence is in native-sync.md/November log.
+  whole library until per-file review. Android/Windows review UI is included in 0.7.43. Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
-- iOS/iPadOS maintenance is retired by user direction, 2026-11-13.
 
 # Build / Run / Test
 
