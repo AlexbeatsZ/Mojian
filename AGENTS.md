@@ -11,6 +11,7 @@
 
 - **0.7.44 (Windows/Android code48)**: the two native clients isolate conflicted page/PDF dependency groups,
   retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
+  v0.7.44 prerelease is published with uploaded EXE166187988B and APK17313968B; tag points to ff1630b.
   `deferred-incoming.json` retains consistent groups awaiting review. A partial or unverifiable
   publication keeps `incoming.json` and the startup edit lock. See native-sync.md for recovery.
 - **0.7.43 (Windows/Android code47)**: merged all outstanding Claude conflict-review
