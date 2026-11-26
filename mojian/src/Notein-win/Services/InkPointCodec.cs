@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Notein_win.Models;
 
 namespace Notein_win.Services;
 
@@ -9,7 +8,7 @@ namespace Notein_win.Services;
 /// LEB128 deltas of quantized integers, like AndroidX Ink's CodedNumericRun and ISF packet streams.
 /// ~9 bytes/point instead of ~93 for a JSON object per point.
 /// </summary>
-public static class InkPointCodec
+public static partial class InkPointCodec
 {
     public const string Prefix = "1:";
     // Channel order, JSON names and quanta are part of the shared contract.
@@ -81,32 +80,6 @@ public static class InkPointCodec
         }
         if (offset != bytes.Length) throw new JsonException("笔迹采样编码已损坏。");
         return rows;
-    }
-
-    public static List<InkPoint> Decode(string text) => DecodeRows(text).Select(row => new InkPoint
-    {
-        X = (float)row[0]!.Value, Y = (float)row[1]!.Value,
-        Pressure = row[2] is { } pressure ? (float)pressure : .5f,
-        ElapsedMilliseconds = row[3] is { } elapsed ? (long)elapsed : 0,
-        TiltX = row[4] is { } tiltX ? (float)tiltX : 0, TiltY = row[5] is { } tiltY ? (float)tiltY : 0,
-        TiltRadians = row[6] is { } tilt ? (float)tilt : null,
-        OrientationRadians = row[7] is { } orientation ? (float)orientation : null,
-    }).ToList();
-
-    /// <summary>Null when the points carry per-point extension data or mixed optional channels.</summary>
-    public static string? TryEncode(IReadOnlyList<InkPoint> points)
-    {
-        if (points.Count == 0 || points.Any(p => p.AdditionalData is { Count: > 0 } || !float.IsFinite(p.X) || !float.IsFinite(p.Y))) return null;
-        var tilt = points[0].TiltRadians.HasValue;
-        var orientation = points[0].OrientationRadians.HasValue;
-        if (points.Any(p => p.TiltRadians.HasValue != tilt || p.OrientationRadians.HasValue != orientation)) return null;
-        // Windows always stores pressure, time and degree tilt, as its JSON objects did.
-        var mask = 0b111111 | (tilt ? 1 << 6 : 0) | (orientation ? 1 << 7 : 0);
-        return Encode(points.Count, mask, (i, channel) => channel switch
-        {
-            0 => points[i].X, 1 => points[i].Y, 2 => points[i].Pressure, 3 => points[i].ElapsedMilliseconds,
-            4 => points[i].TiltX, 5 => points[i].TiltY, 6 => points[i].TiltRadians!.Value, _ => points[i].OrientationRadians!.Value,
-        });
     }
 
     // Parsed nodes are JsonElement-backed; constructed nodes may hold any CLR numeric type.

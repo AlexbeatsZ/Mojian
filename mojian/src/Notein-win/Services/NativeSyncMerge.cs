@@ -23,7 +23,7 @@ internal static class NativeSyncMerge
     private static readonly HashSet<string> MaximumKeys = ["revision", "sheetCount", "infiniteWidth", "infiniteHeight"];
     private static readonly HashSet<string> LatestKeys = ["updatedAt"];
     private static readonly HashSet<string> VolatileKeys = ["revision", "updatedAt"];
-    private const string Erasable = "strokes";
+    private const string Strokes = "strokes";
     internal static readonly JsonSerializerOptions Output = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     public static Result? Merge(JsonObject @base, JsonObject local, JsonObject remote, string? now = null)
@@ -144,7 +144,7 @@ internal static class NativeSyncMerge
         throw new Conflict();
     }
 
-    private static JsonObject MergeObject(JsonObject @base, JsonObject local, JsonObject remote)
+    private static JsonObject MergeObject(JsonObject @base, JsonObject local, JsonObject remote, bool stroke = false)
     {
         var result = new JsonObject();
         var keys = new List<string>();
@@ -152,8 +152,21 @@ internal static class NativeSyncMerge
             foreach (var pair in source) if (!keys.Contains(pair.Key)) keys.Add(pair.Key);
         foreach (var key in keys)
         {
-            var merged = MergeValue(key, Value(@base, key), Value(local, key), Value(remote, key));
+            if (stroke && IsSampleField(key)) continue;
+            var before = Value(@base, key);
+            var mine = Value(local, key);
+            var theirs = Value(remote, key);
+            var merged = stroke && (EqualStrokeField(key, mine, theirs) || EqualStrokeField(key, mine, before)) ? theirs
+                : stroke && EqualStrokeField(key, theirs, before) ? mine
+                : MergeValue(key, before, mine, theirs);
             if (!IsAbsent(merged)) result[key] = merged?.DeepClone();
+        }
+        if (stroke)
+        {
+            var samples = SamplesEqual(local, remote) || SamplesEqual(local, @base) ? remote
+                : SamplesEqual(remote, @base) ? local : throw new Conflict();
+            foreach (var pair in samples.Where(pair => IsSampleField(pair.Key)))
+                result[pair.Key] = pair.Value?.DeepClone();
         }
         return result;
     }
@@ -179,13 +192,50 @@ internal static class NativeSyncMerge
             var before = ancestor.GetValueOrDefault(id) ?? Absent;
             var mine = ours.GetValueOrDefault(id) ?? Absent;
             var other = theirs.GetValueOrDefault(id) ?? Absent;
+            bool stroke = key == Strokes;
             JsonNode? merged;
-            if (!IsAbsent(before) && IsAbsent(mine)) merged = Equal(other, before) || key == Erasable ? Absent : throw new Conflict();
-            else if (!IsAbsent(before) && IsAbsent(other)) merged = Equal(mine, before) || key == Erasable ? Absent : throw new Conflict();
+            if (!IsAbsent(before) && IsAbsent(mine)) merged = ItemEqual(other, before, stroke) ? Absent : throw new Conflict();
+            else if (!IsAbsent(before) && IsAbsent(other)) merged = ItemEqual(mine, before, stroke) ? Absent : throw new Conflict();
+            else if (stroke && mine is JsonObject localStroke && other is JsonObject remoteStroke)
+                merged = MergeObject(before as JsonObject ?? new JsonObject(), localStroke, remoteStroke, stroke: true);
             else merged = MergeValue(null, before, mine, other);
             if (!IsAbsent(merged)) kept[id] = merged;
         }
         return new JsonArray(Order(ours.Keys, theirs.Keys, kept.Keys.ToHashSet()).Select(id => kept[id]?.DeepClone()).ToArray());
+    }
+
+    private static bool IsSampleField(string key) => key is "points" or "pointsCoded";
+
+    private static bool ItemEqual(JsonNode? left, JsonNode? right, bool stroke)
+    {
+        if (!stroke || left is not JsonObject lo || right is not JsonObject ro) return Equal(left, right);
+        return lo.Select(pair => pair.Key).Union(ro.Select(pair => pair.Key)).Where(key => !IsSampleField(key))
+            .All(key => EqualStrokeField(key, Value(lo, key), Value(ro, key))) && SamplesEqual(lo, ro);
+    }
+
+    private static bool EqualStrokeField(string key, JsonNode? left, JsonNode? right)
+    {
+        if (Equal(left, right)) return true;
+        var explicitValue = IsAbsent(left) ? right : IsAbsent(right) ? left : Absent;
+        return key switch
+        {
+            "stabilityPercent" => Number(explicitValue) == 50,
+            "strokeUnitLengthCm" => Number(explicitValue) == 0,
+            _ => false,
+        };
+    }
+
+    private static bool SamplesEqual(JsonObject left, JsonObject right)
+    {
+        var leftPlain = Value(left, "points");
+        var rightPlain = Value(right, "points");
+        var leftCoded = Value(left, "pointsCoded");
+        var rightCoded = Value(right, "pointsCoded");
+        if (Equal(leftPlain, rightPlain) && Equal(leftCoded, rightCoded)) return true;
+        if (leftCoded is JsonValue && rightPlain is JsonArray && IsAbsent(leftPlain) && IsAbsent(rightCoded)) return SamplesEqual(right, left);
+        return IsAbsent(leftCoded) && IsAbsent(rightPlain) && leftPlain is JsonArray points
+            && rightCoded is JsonValue coded && coded.TryGetValue<string>(out var text)
+            && InkPointCodec.TryEncode(points) is { } packed && packed == text;
     }
 
     private static decimal? Number(JsonNode? node) =>

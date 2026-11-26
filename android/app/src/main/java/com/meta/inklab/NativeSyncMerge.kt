@@ -17,7 +17,7 @@ object NativeSyncMerge {
     private val maximumKeys = setOf("revision", "sheetCount", "infiniteWidth", "infiniteHeight")
     private val latestKeys = setOf("updatedAt")
     private val volatileKeys = setOf("revision", "updatedAt")
-    private const val ERASABLE = "strokes"
+    private const val STROKES = "strokes"
 
     sealed interface Result {
         /** The merge equals the remote file apart from volatile fields: just receive it. */
@@ -129,11 +129,27 @@ object NativeSyncMerge {
         throw Conflict()
     }
 
-    private fun mergeObject(base: JSONObject, local: JSONObject, remote: JSONObject): JSONObject {
+    private fun mergeObject(base: JSONObject, local: JSONObject, remote: JSONObject, stroke: Boolean = false): JSONObject {
         val result = JSONObject()
         for (key in linkedSetOf<String>().apply { addAll(remote.keyNames()); addAll(local.keyNames()); addAll(base.keyNames()) }) {
-            val merged = mergeValue(key, value(base, key), value(local, key), value(remote, key))
+            if (stroke && isSampleField(key)) continue
+            val before = value(base, key)
+            val mine = value(local, key)
+            val theirs = value(remote, key)
+            val merged = when {
+                stroke && (equalStrokeField(key, mine, theirs) || equalStrokeField(key, mine, before)) -> theirs
+                stroke && equalStrokeField(key, theirs, before) -> mine
+                else -> mergeValue(key, before, mine, theirs)
+            }
             if (merged !== Absent) result.put(key, merged)
+        }
+        if (stroke) {
+            val samples = when {
+                samplesEqual(local, remote) || samplesEqual(local, base) -> remote
+                samplesEqual(remote, base) -> local
+                else -> throw Conflict()
+            }
+            for (key in samples.keyNames().filter(::isSampleField)) result.put(key, samples.get(key))
         }
         return result
     }
@@ -158,14 +174,49 @@ object NativeSyncMerge {
         for (id in ancestor.keys + ours.keys + theirs.keys) {
             if (id in kept) continue
             val before = ancestor[id] ?: Absent; val mine = ours[id] ?: Absent; val other = theirs[id] ?: Absent
+            val stroke = key == STROKES
             val merged = when {
-                before !== Absent && mine === Absent -> if (equal(other, before) || key == ERASABLE) Absent else throw Conflict()
-                before !== Absent && other === Absent -> if (equal(mine, before) || key == ERASABLE) Absent else throw Conflict()
+                before !== Absent && mine === Absent -> if (itemEqual(other, before, stroke)) Absent else throw Conflict()
+                before !== Absent && other === Absent -> if (itemEqual(mine, before, stroke)) Absent else throw Conflict()
+                stroke && mine is JSONObject && other is JSONObject -> mergeObject(before as? JSONObject ?: JSONObject(), mine, other, stroke = true)
                 else -> mergeValue(null, before, mine, other)
             }
             if (merged !== Absent) kept[id] = merged
         }
         return JSONArray().apply { order(ours.keys, theirs.keys, kept.keys).forEach { put(kept.getValue(it)) } }
+    }
+
+    private fun isSampleField(key: String) = key == InkPoints.POINTS || key == InkPoints.CODED
+
+    private fun itemEqual(left: Any, right: Any, stroke: Boolean): Boolean {
+        if (!stroke || left !is JSONObject || right !is JSONObject) return equal(left, right)
+        return (left.keyNames() + right.keyNames()).filterNot(::isSampleField)
+            .all { equalStrokeField(it, value(left, it), value(right, it)) } && samplesEqual(left, right)
+    }
+
+    private fun equalStrokeField(key: String, left: Any, right: Any): Boolean {
+        if (equal(left, right)) return true
+        val explicitValue = when {
+            left === Absent -> right
+            right === Absent -> left
+            else -> return false
+        }
+        return when (key) {
+            "stabilityPercent" -> equal(explicitValue, 50)
+            "strokeUnitLengthCm" -> equal(explicitValue, 0)
+            else -> false
+        }
+    }
+
+    private fun samplesEqual(left: JSONObject, right: JSONObject): Boolean {
+        val leftPlain = value(left, InkPoints.POINTS)
+        val rightPlain = value(right, InkPoints.POINTS)
+        val leftCoded = value(left, InkPoints.CODED)
+        val rightCoded = value(right, InkPoints.CODED)
+        if (equal(leftPlain, rightPlain) && equal(leftCoded, rightCoded)) return true
+        if (leftCoded is String && rightPlain is JSONArray && leftPlain === Absent && rightCoded === Absent) return samplesEqual(right, left)
+        return leftCoded === Absent && rightPlain === Absent && leftPlain is JSONArray
+            && rightCoded is String && InkPoints.encode(leftPlain) == rightCoded
     }
 
     private fun equal(left: Any?, right: Any?): Boolean {

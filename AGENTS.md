@@ -73,6 +73,10 @@
 
 # Active Work
 
+- 2026-11-26 sync refactor started on Windows/Android. Shared merge vectors cover packed/plain
+  parity, historical stroke defaults and erase-versus-real-edit; unacknowledged tombstones need review.
+  Dependency-group scheduling and optional paged/resumable transport remain under implementation.
+
 - 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Windows pen/stability and Android stability/hold-width acceptance remain open; 0.7.20 tablet feel was accepted.
 - Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 328/329,

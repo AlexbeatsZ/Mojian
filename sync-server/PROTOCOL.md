@@ -44,6 +44,8 @@ native-sync state, recovery files, source backups and credentials are excluded.
 
 An absent entry has version 0 and hash null. A deleted entry is a retained
 tombstone `{hash:null,version:N}`; entries/tombstones are never pruned in v1.
+A local file against a remote tombstone requires review when the baseline lacks that
+tombstone version. Matching null hashes alone cannot authorize re-creation.
 
 `PUT blobs/<hash>` streams raw bytes. Success: `200 {"hash":"..."}` after
 durable storage. Repeated uploads are safe; wrong hash returns 422. Blob size

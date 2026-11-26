@@ -192,8 +192,12 @@ documents against the base blob downloaded from the server:
 - Objects merge per key; arrays whose items all have unique string ids merge per item (strokes,
   textItems, notebooks/sections/pages), so each device's added strokes are kept. Order follows the
   remote array; a local addition is inserted after its nearest local predecessor.
-- In `strokes`, an item removed on one side stays removed even if the other side re-encoded it
-  (erasing wins). Elsewhere delete-versus-edit is a conflict.
+- In `strokes`, an item removed on one side stays removed if the other side left it semantically
+  unchanged. A legacy `points` array is equivalent to the exact `pointsCoded` output of the
+  shared quantizer. Missing `stabilityPercent` and `strokeUnitLengthCm` match explicit 50 and 0
+  respectively, as defined by both reader defaults. Unknown fields, a divergent sample edit
+  or a nondefault setting remain reviewable. Merging retains one original point representation.
+- Delete-versus-edit is a conflict when equivalence cannot be established.
 - `revision`, `sheetCount`, `infiniteWidth/Height` take the larger value; `updatedAt` the later.
   Numbers compare by value. Arrays without ids (points) compare whole.
 - If the result equals the remote document apart from `revision`/`updatedAt`, the device simply

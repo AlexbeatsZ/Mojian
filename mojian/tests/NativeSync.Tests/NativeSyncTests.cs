@@ -6,6 +6,14 @@ using System.Text.Json.Nodes;
 using Notein_win.Services;
 
 Console.OutputEncoding = Encoding.UTF8;
+if (args is ["--shared-contracts"])
+{
+    await DecisionFixture();
+    await MergeFixture();
+    await ReviewFixture();
+    Console.WriteLine("Shared native sync contracts passed");
+    return;
+}
 var endpoint = Environment.GetEnvironmentVariable("MOJIAN_TEST_SYNC_URL") ?? throw new InvalidOperationException("Loopback test server required");
 var token = Environment.GetEnvironmentVariable("MOJIAN_TEST_SYNC_TOKEN") ?? throw new InvalidOperationException("Test token required");
 var passed = 0;
@@ -775,6 +783,11 @@ Task DecisionFixture()
         string? Value(string key) => row.GetProperty(key).ValueKind == JsonValueKind.Null ? null : row.GetProperty(key).GetString();
         Check(NativeSyncDecisions.Decide(Value("base"), Value("local"), Value("remote")).ToString() == Value("decision"), "Decision table diverged");
     }
+    var tombstone = new SyncEntry(null, 3);
+    var local = new string('a', 64);
+    Check(NativeSyncDecisions.DecideEntry(null, local, tombstone) == NativeSyncDecision.Conflict, "Unknown tombstone ancestry");
+    Check(NativeSyncDecisions.DecideEntry(new(null, 2), local, tombstone) == NativeSyncDecision.Conflict, "Stale tombstone ancestry");
+    Check(NativeSyncDecisions.DecideEntry(tombstone, local, tombstone) == NativeSyncDecision.Upload, "Acknowledged tombstone allows reviewed recreation");
     return Task.CompletedTask;
 }
 

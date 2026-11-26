@@ -5,6 +5,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeSyncProtocolTest {
+    @Test fun aVersionedTombstoneNeedsAnAcknowledgedBaseBeforeRecreation() {
+        val tombstone = NativeSyncEntry(null, 3)
+        val local = "a".repeat(64)
+        assertEquals(NativeSyncDecision.Conflict, NativeSyncDecisions.decideEntry(null, local, tombstone))
+        assertEquals(NativeSyncDecision.Conflict, NativeSyncDecisions.decideEntry(NativeSyncEntry(null, 2), local, tombstone))
+        assertEquals(NativeSyncDecision.Upload, NativeSyncDecisions.decideEntry(tombstone, local, tombstone))
+    }
+
     @Test fun partialReceiptKeepsOperationIdentityAndOnlyAffectedPaths() {
         val source = JSONObject().put("workspaceId", "workspace").put("operationId", "0123456789abcdef")
             .put("revision", 8).put("files", JSONObject().put("library.json", JSONObject().put("hash", JSONObject.NULL).put("version", 8)))

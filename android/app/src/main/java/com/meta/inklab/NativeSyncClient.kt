@@ -79,6 +79,11 @@ class NativeSyncClient(
     private fun requireIdentity(manifest: NativeSyncManifest) {
         check(workspaceId.isEmpty() || workspaceId == manifest.workspaceId) { "服务器身份发生变化，已停止同步" }
         check(manifest.revision >= serverRevision) { "服务器版本回退，已停止同步" }
+        checkpoint.forEach { (path, previous) ->
+            val current = manifest.files[path]
+            check(current != null && current.version >= previous.version &&
+                (current.version != previous.version || current.hash == previous.hash)) { "服务器丢失已确认版本，已停止同步" }
+        }
         if (workspaceId == manifest.workspaceId && serverRevision == manifest.revision) return
         workspaceId = manifest.workspaceId
         serverRevision = manifest.revision
@@ -140,9 +145,7 @@ class NativeSyncClient(
             require(paths.map { it.lowercase(java.util.Locale.ROOT) }.distinct().size == paths.size) { "本地和远端同步路径大小写冲突" }
             paths.sorted().forEach { path ->
                 val ours = local[path]
-                val base = checkpoint[path]?.hash
-                val theirs = remote.files[path]?.hash
-                when (NativeSyncDecisions.decide(base, ours, theirs)) {
+                when (NativeSyncDecisions.decideEntry(checkpoint[path], ours, remote.files[path])) {
                     NativeSyncDecision.Equal -> remote.files[path]?.let { checkpoint[path] = it }
                     NativeSyncDecision.Conflict -> conflicts += path
                     NativeSyncDecision.Upload -> changes += NativeSyncChange(path, remote.files[path]?.version ?: 0, ours)

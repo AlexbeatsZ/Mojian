@@ -47,5 +47,10 @@ internal class NativeSyncAddressTransport(
     }
     override fun upload(hash: String, source: File, cancelled: () -> Boolean) = attempt(cancelled) { it.upload(hash, source, cancelled) }
     override fun download(hash: String, destination: File, cancelled: () -> Boolean) = attempt(cancelled) { it.download(hash, destination, cancelled) }
-    override fun commit(request: JSONObject, cancelled: () -> Boolean) = attempt(cancelled) { it.commit(request, cancelled).also(::verify) }
+    override fun commit(request: JSONObject, cancelled: () -> Boolean) = attempt(cancelled) { route ->
+        route.commit(request, cancelled).also { receipt ->
+            // A replay can return an original receipt older than a verified manifest.
+            check(receipt.workspaceId == identity) { "同步回执指向不同笔记库，已停止同步" }
+        }
+    }
 }

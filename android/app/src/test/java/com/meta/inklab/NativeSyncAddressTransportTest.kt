@@ -10,11 +10,12 @@ class NativeSyncAddressTransportTest {
         var offline = false
         var identity = "shared-workspace"
         var loseReceipt = false
+        var manifestRevision = 1L
         val commits = mutableListOf<String>()
         override fun manifest(cancelled: () -> Boolean): NativeSyncManifest {
             calls += "$name manifest"
             if (offline) throw NativeSyncNetworkFailure("offline")
-            return NativeSyncManifest(identity, 1, emptyMap())
+            return NativeSyncManifest(identity, manifestRevision, emptyMap())
         }
         override fun upload(hash: String, source: File, cancelled: () -> Boolean) { calls += "$name upload" }
         override fun download(hash: String, destination: File, cancelled: () -> Boolean) { calls += "$name download" }
@@ -42,6 +43,16 @@ class NativeSyncAddressTransportTest {
         transport.commit(request) { false }
         assertEquals(routes[0].commits.single(), routes[1].commits.single())
         assertTrue(calls.none { it.startsWith("3") })
+    }
+
+    @Test fun originalReceiptMayBeOlderThanTheVerifiedRouteManifest() {
+        val route = Route("1", mutableListOf()).apply { manifestRevision = 4 }
+        val transport = NativeSyncAddressTransport(NativeSyncConfiguration(addresses = listOf("https://server.example/")),
+            factory = { _, _ -> route })
+        assertEquals(4L, transport.manifest { false }.revision)
+        assertEquals(1L, transport.commit(JSONObject().put("operationId", "stable-operation-12345")) { false }.revision)
+        route.manifestRevision = 3
+        assertThrows(IllegalStateException::class.java) { transport.manifest { false } }
     }
 
     @Test fun foreignWorkspaceIsNotAFallbackAndCancellationDoesNotTryAnotherAddress() {

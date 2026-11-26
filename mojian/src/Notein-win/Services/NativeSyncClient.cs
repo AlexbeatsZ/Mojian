@@ -325,9 +325,7 @@ public sealed class NativeSyncClient : IDisposable
             {
                 if (!aliases.Add(path)) throw new IOException("服务器路径与本地大小写冲突");
                 var localHash = local.GetValueOrDefault(path)?.Hash;
-                var baseHash = Hash(_state.Files, path);
-                var remoteHash = Hash(remote.Files, path);
-                switch (NativeSyncDecisions.Decide(baseHash, localHash, remoteHash))
+                switch (NativeSyncDecisions.DecideEntry(_state.Files.GetValueOrDefault(path), localHash, remote.Files.GetValueOrDefault(path)))
                 {
                     case NativeSyncDecision.Equal:
                         if (remote.Files.TryGetValue(path, out var equal)) _state.Files[path] = equal;
@@ -365,13 +363,17 @@ public sealed class NativeSyncClient : IDisposable
                 if (!await ApplyIncoming(applyOnIdle, cancellation).ConfigureAwait(false)) return false;
             }
             _state.Revision = Math.Max(_state.Revision, remote.Revision);
-            _state.LastSuccessUtc = DateTimeOffset.UtcNow;
             PersistState();
             PruneTransferBlobs();
             var remaining = await Task.Run(ScanStable, cancellation).ConfigureAwait(false);
             if (remaining == null)
             { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
             var pending = remaining.Keys.Union(_state.Files.Keys).Count(path => remaining.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path));
+            if (pending == 0)
+            {
+                _state.LastSuccessUtc = DateTimeOffset.UtcNow;
+                PersistState();
+            }
             SetStatus(pending == 0 ? NativeSyncPhase.Synced : NativeSyncPhase.Pending,
                 pending == 0 ? (_addresses == null ? "已同步" : "已同步 · " + new Uri(_addresses.CurrentAddress).Authority) : $"本地已保存，待上传 {pending} 项", pending);
         }
