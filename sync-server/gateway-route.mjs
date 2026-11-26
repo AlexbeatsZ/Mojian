@@ -14,12 +14,16 @@ export function routeMojian(request, response, { port = 18742, maxBlobBytes = 10
     response.writeHead(status, { 'Cache-Control': 'no-store', Connection: 'close' }).end();
     request.resume();
   };
-  const manifest = request.url === `${prefix}manifest` && request.method === 'GET';
+  const manifest = request.method === 'GET' && (
+    request.url === `${prefix}manifest` ||
+    /^\/mojian-sync\/v1\/(manifest\/pages|changes)\?(limit=|since=|cursor=)[^#\s]+$/.test(request.url)
+  );
   const commit = request.url === `${prefix}commit` && request.method === 'POST';
   const blob = /^\/mojian-sync\/v1\/blobs\/[a-f0-9]{64}$/.test(request.url) && ['GET', 'PUT'].includes(request.method);
-  if (!manifest && !commit && !blob) { reject(404); return true; }
+  const upload = /^\/mojian-sync\/v1\/uploads\/[a-f0-9]{64}$/.test(request.url) && ['GET', 'PUT'].includes(request.method);
+  if (!manifest && !commit && !blob && !upload) { reject(404); return true; }
   if (request.headers.origin) { reject(403); return true; }
-  const limit = commit ? 4 * 1024 * 1024 : request.method === 'PUT' ? maxBlobBytes : 0;
+  const limit = commit ? 4 * 1024 * 1024 : request.method === 'PUT' ? (upload ? Math.min(maxBlobBytes, 8 * 1024 * 1024) : maxBlobBytes) : 0;
   if (Number(request.headers['content-length'] ?? 0) > limit) { reject(413); return true; }
   const upstream = http.request({
     hostname: '127.0.0.1', port, method: request.method, path: request.url,

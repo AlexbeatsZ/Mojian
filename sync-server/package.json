@@ -1,6 +1,6 @@
 {
   "name": "@alexbeatsz/mojian-sync-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Independent Mojian file synchronization server",
   "private": true,
   "type": "module",
@@ -19,6 +19,6 @@
     "fflate": "0.8.2"
   },
   "dependencies": {
-    "@alexbeatsz/file-sync-core": "https://github.com/AlexbeatsZ/file-sync-core/releases/download/v0.1.0/alexbeatsz-file-sync-core-0.1.0.tgz"
+    "@alexbeatsz/file-sync-core": "https://github.com/AlexbeatsZ/file-sync-core/releases/download/v0.2.0/alexbeatsz-file-sync-core-0.2.0.tgz"
   }
 }

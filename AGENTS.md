@@ -40,7 +40,7 @@
 - Navigation/settings are device-local; canonical schemas, fixtures and fountain constants live in
   shared/. Physical Windows pen/stability, Android hold-width and native PDF output acceptance remain
   open. Details of 0.7.20–0.7.41 behavior, fixes and deployment receipts are in docs/log/2026-11.md.
-- Independent sync-server **0.1.0** pins `@alexbeatsz/file-sync-core@0.1.0`; its `sync-server-v*`
+- Independent sync-server **0.2.0** pins `@alexbeatsz/file-sync-core@0.2.0`; its `sync-server-v*`
   tags/releases never replace product latest. ROG `MojianNativeSync` runs `Programs/MojianSyncServer`
   using `%LOCALAPPDATA%/MojianServices/.local/native-sync/server.json` and its data. Preserve config/data,
   gateway module paths, and service state. See `sync-server/README.md` and `native-sync.md`.

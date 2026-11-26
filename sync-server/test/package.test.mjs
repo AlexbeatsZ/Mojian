@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, realpath, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
@@ -16,7 +16,7 @@ const token = 'isolated-package-test-token-not-for-production';
 const parent = path.join(os.tmpdir(), '.agents');
 async function temporary() {
   await mkdir(parent, { recursive: true });
-  return mkdtemp(path.join(parent, 'mojian-server-package-'));
+  return realpath(await mkdtemp(path.join(parent, 'mojian-server-package-')));
 }
 async function freePort() {
   const server = net.createServer();
@@ -45,15 +45,17 @@ test('standalone ZIP runs outside the checkout and preserves old-server receipt 
     const runtime = path.join(directory, 'runtime');
     const names = await extract(packaged.archivePath, runtime);
     assert.ok(names.includes('node_modules/@alexbeatsz/file-sync-core/package.json'));
-    assert.ok(!names.some(name => /(^|\/)(test|tests|artifacts|\.local|fflate)(\/|$)/.test(name)));
+    const sharedContract = 'node_modules/@alexbeatsz/file-sync-core/test/fixtures/sync-golden-traces.json';
+    assert.ok(names.includes(sharedContract));
+    assert.ok(!names.some(name => name !== sharedContract && /(^|\/)(test|tests|artifacts|\.local|fflate)(\/|$)/.test(name)));
     assert.equal(names.filter(name => name.endsWith('package.json') && name.startsWith('node_modules/')).length, 1);
     const info = JSON.parse(await readFile(path.join(runtime, 'BUILD-INFO.json'), 'utf8'));
-    assert.equal(info.version, '0.1.0');
+    assert.equal(info.version, '0.2.0');
     assert.equal(info.core.version, packaged.buildInfo.core.version);
     assert.match(info.sourceRevision, /^[a-f0-9]{40}$/);
     assert.equal(
       execFileSync(process.execPath, [path.join(runtime, 'run-configured.mjs'), '--version'], { cwd: directory, encoding: 'utf8' }).trim(),
-      'Mojian Sync Server 0.1.0',
+      'Mojian Sync Server 0.2.0',
     );
     const fixture = JSON.parse(await readFile(new URL('./fixtures/v1-wire.json', import.meta.url), 'utf8'));
     const data = path.join(directory, 'existing-data');
