@@ -13,7 +13,10 @@
   retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
   v0.7.44 prerelease is published with uploaded EXE166187988B and APK17313968B; tag points to ff1630b.
   `deferred-incoming.json` retains consistent groups awaiting review. A partial or unverifiable
-  publication keeps `incoming.json` and the startup edit lock. See native-sync.md for recovery.
+  publication keeps `incoming.json` and the startup edit lock. OMEN and ROG Windows executables and
+  K70/Pad Android are upgraded. OMEN shipped EXE passed isolated two-way sync and preserved real
+  checkpoint 1146/incoming 1348. K70 production LAN sync was observed in the app. Mac 0.2.3
+  opened its copied library read-only. See November log and native-sync.md for the recovery boundary.
 - **0.7.43 (Windows/Android code47)**: merged all outstanding Claude conflict-review
   and delayed page-loading branches, retaining branch ancestry and the current save barriers.
   Android/Windows conflict review has M/A/D navigation, per-file choices and red/green/yellow ink
@@ -48,7 +51,10 @@
 - Independent sync-server **0.2.0** pins `@alexbeatsz/file-sync-core@0.2.0`; its `sync-server-v*`
   tags/releases never replace product latest. ROG `MojianNativeSync` runs `Programs/MojianSyncServer`
   using `%LOCALAPPDATA%/MojianServices/.local/native-sync/server.json` and its data. Preserve config/data,
-  gateway module paths, and service state. See `sync-server/README.md` and `native-sync.md`.
+  gateway module paths, and service state. ROG is live on 0.2.0; loopback and direct LAN/Tailnet
+  TLS passed 1,923 items, pages, delta and Range. The Sakura gateway still serves v1 manifest and
+  Range, while pages require direct TLS. Its live startup wrapper is missing from disk; retain
+  the process until the gateway restart path is verified. See `sync-server/README.md` and `native-sync.md`.
 - **2026-11-23 native-only libraries**: OMEN, K70 and liuqin retain only `Documents/Mojian`;
   former Syncthing libraries were removed, Mojian-native renamed with preferences/private credentials.
   Native identities/checkpoints/journals/conflicts remain; K70/liuqin then matched revision1348/1923 entries.
