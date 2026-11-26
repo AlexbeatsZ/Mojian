@@ -57,7 +57,8 @@ data class NativeSyncConfiguration(val endpoint: String = DEFAULT_ENDPOINT, val 
             require(File(root, ".mojian-native-workspace").isFile) { "请先创建原生同步专用副本" }
             require(!Files.isSymbolicLink(File(root, ".mojian-native-workspace").toPath()))
             listOf(".mojian-sync", ".mojian-sync/transfer", ".mojian-sync/state.json", ".mojian-sync/outbox.json",
-                ".mojian-sync/incoming.json", ".mojian-sync/client.lock", ".mojian-sync/conflicts", ".mojian-sync/conflict.json").forEach {
+                ".mojian-sync/incoming.json", ".mojian-sync/deferred-incoming.json", ".mojian-sync/remote-view.json",
+                ".mojian-sync/remote-pages.json", ".mojian-sync/client.lock", ".mojian-sync/conflicts", ".mojian-sync/conflict.json").forEach {
                 require(!Files.isSymbolicLink(File(root, it).toPath())) { "同步状态不能使用符号链接" }
             }
         }

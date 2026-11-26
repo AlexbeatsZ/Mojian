@@ -9,7 +9,11 @@
 
 # Current State
 
-- **0.7.43 (Windows/Android code47; master)**: merged all outstanding Claude conflict-review
+- **0.7.44 (Windows/Android code48)**: the two native clients isolate conflicted page/PDF dependency groups,
+  retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
+  `deferred-incoming.json` retains consistent groups awaiting review. A partial or unverifiable
+  publication keeps `incoming.json` and the startup edit lock. See native-sync.md for recovery.
+- **0.7.43 (Windows/Android code47)**: merged all outstanding Claude conflict-review
   and delayed page-loading branches, retaining branch ancestry and the current save barriers.
   Android/Windows conflict review has M/A/D navigation, per-file choices and red/green/yellow ink
   previews; page edits (including unified undo and appearance) are locked during review. Status is
@@ -73,10 +77,6 @@
 
 # Active Work
 
-- 2026-11-26 sync refactor started on Windows/Android. Shared merge vectors cover packed/plain
-  parity, historical stroke defaults and erase-versus-real-edit; unacknowledged tombstones need review.
-  Dependency-group scheduling and optional paged/resumable transport remain under implementation.
-
 - 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Windows pen/stability and Android stability/hold-width acceptance remain open; 0.7.20 tablet feel was accepted.
 - Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 328/329,
@@ -85,8 +85,8 @@
   skipped, APK/test APK/lint pass. Shared Swift 23/23 and macOS 20/20 pass.
 - Android folder-picker/permission/save-recovery/export/print, physical eraser-after-contact
   and direct-selection acceptance remain separate. Native instrumentation is compile-only.
-- Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts still block the
-  whole library until per-file review. Android/Windows review UI is included in 0.7.43. Recovery evidence is in native-sync.md/November log.
+- Sync prevention: 0.7.40 merges JSON conflicts automatically; unmergeable conflicts and their dependencies await
+  per-file review. Android/Windows review UI is included in 0.7.43. Recovery evidence is in native-sync.md/November log.
 - Not done from the review: splitting MainActivity/NoteCanvas/MainViewModel further, a WPF-free core
   assembly, unified sync state layout, recovery/conflict directory retention policy.
 

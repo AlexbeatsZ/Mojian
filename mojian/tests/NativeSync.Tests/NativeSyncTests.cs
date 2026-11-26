@@ -9,6 +9,7 @@ Console.OutputEncoding = Encoding.UTF8;
 if (args is ["--shared-contracts"])
 {
     await DecisionFixture();
+    await SharedCorePlanFixture();
     await MergeFixture();
     await ReviewFixture();
     Console.WriteLine("Shared native sync contracts passed");
@@ -25,6 +26,8 @@ await Run("local deletion versus remote edit remains a recoverable conflict", De
 await Run("remote tombstones delete only clean local content", Tombstones);
 await Run("partly published incoming journal replays offline with duplicate hashes", IncomingRecovery);
 await Run("incoming recovery refuses unexpected local edits and never networks", IncomingConflict);
+await Run("old journal isolates dependent assets and survives an interrupted review", DeferredIncomingReview);
+await Run("partial upload and local ranged download resume against real core", ResumeLargeBlob);
 await Run("corrupt incoming staging blocks editable startup", CorruptIncoming);
 await Run("incoming publication only renames worker-prepared files", PreparedIncomingPublication);
 await Run("incoming preparation rejects an edit made before UI publication", IncomingPublicationRace);
@@ -47,6 +50,7 @@ await Run("remote index deletion and incoming index tombstones preserve the loca
 await Run("offline incoming recovery needs no endpoint credential configuration", RecoveryWithoutCredentials);
 await Run("shared three-way decision table covers edits, deletions and equal concurrent changes", DecisionFixture);
 await Run("shared JSON merge fixtures match Android", MergeFixture);
+await Run("shared file-sync-core plan trace", SharedCorePlanFixture);
 await Run("strokes written on two devices merge and a volatile-only resave takes the server page", StrokeMerge);
 await Run("shared keep-both and summary fixtures match Android", ReviewFixture);
 await Run("reviewed conflicts resolve per file, keep both and resume sync", ConflictReviewFlow);
@@ -277,6 +281,58 @@ async Task IncomingConflict()
     Check(!await restarted.RecoverPendingIncomingAsync(Idle), "Conflicting partial library allowed startup");
     Check(restarted.HasPendingIncoming && restarted.Snapshot.Phase == NativeSyncPhase.Conflict, "Incoming conflict not blocked");
     Check(second.Read(page) == "unexpected offline edit" && offline.Requests == 0, "Offline recovery changed local data or performed network");
+}
+
+async Task DeferredIncomingReview()
+{
+    using var root = new TestWorkspace();
+    root.Write("library.json", """{"notebooks":[{"id":"n","sections":[{"pages":[{"id":"a"},{"id":"b"},{"id":"c"}]}]}]}""");
+    const string a = "notebooks/n/pages/a.json", b = "notebooks/n/pages/b.json", c = "notebooks/n/pages/c.json";
+    const string asset = "notebooks/n/assets/a/original.pdf";
+    foreach (var path in new[] { a, b, c, asset }) root.Write(path, "base");
+    StageIncoming(root, new() { [a] = "server-a", [asset] = "server-asset", [b] = "server-b", [c] = "server-c" });
+    NativeSyncStorage.CopyDurable(root.PathFor(asset), root.Private("incoming-backups", asset));
+    root.Write(asset, "server-asset"); // Previous process stopped after replacing the first dependency.
+    root.Write(a, "my-a");
+    root.Write(b, "my-b");
+    using (var client = NativeSyncClient.ForLocalRecovery(root.Root))
+    {
+        Check(await client.RecoverPendingIncomingAsync(Idle), client.Status);
+        Check(root.Read(c) == "server-c" && root.Read(asset) == "base", "Independent page or dependent asset was misplaced");
+        Check(client.ConflictReview().Count == 2 && !client.HasPendingIncoming, "Consistent workspace cannot open for review");
+        Check(!await client.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [a] = NativeSyncChoice.Local }, _ => Task.FromResult(false)), "Busy editor accepted a write");
+        Check(client.HasPendingIncoming && client.ConflictReview().Count == 2, "Review intent was lost before publication");
+    }
+    using var restarted = NativeSyncClient.ForLocalRecovery(root.Root);
+    Check(await restarted.RecoverPendingIncomingAsync(Idle), restarted.Status);
+    Check(root.Read(a) == "my-a" && root.Read(b) == "my-b" && root.Read(asset) == "server-asset", "Review replay changed another conflict or omitted dependencies");
+    Check(restarted.ConflictReview().Select(item => item.Path).SequenceEqual([b]), "Remaining conflict was not retained");
+    Check(await restarted.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [b] = NativeSyncChoice.Remote }, Idle), restarted.Status);
+    Check(root.Read(b) == "server-b" && restarted.ConflictReview().Count == 0, "Second choice did not settle");
+}
+
+async Task ResumeLargeBlob()
+{
+    using var root = new TestWorkspace();
+    using var http = new HttpClient { BaseAddress = new Uri(endpoint) };
+    http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+    const int chunk = 8 * 1024 * 1024;
+    var bytes = new byte[chunk + 391];
+    Random.Shared.NextBytes(bytes);
+    var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+    var source = root.Private("source.bin");
+    NativeSyncStorage.Write(source, bytes);
+    using var prefix = new ByteArrayContent(bytes, 0, chunk);
+    prefix.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(0, chunk - 1, bytes.Length);
+    using var response = await http.PutAsync("uploads/" + hash, prefix);
+    response.EnsureSuccessStatusCode();
+    var transfer = new NativeSyncBlobTransfer(http);
+    await transfer.UploadAsync(hash, source, default);
+    var target = root.Private("download.bin");
+    NativeSyncStorage.Write(target + ".part", bytes[..chunk]);
+    NativeSyncStorage.Save(target + ".progress", new { offset = chunk, total = bytes.Length });
+    await transfer.DownloadAsync(hash, target, default);
+    Check(NativeSyncStorage.Hash(target) == hash && !File.Exists(target + ".progress"), "Resumed download lost verified bytes");
 }
 
 async Task PreparedIncomingPublication()
@@ -791,6 +847,33 @@ Task DecisionFixture()
     return Task.CompletedTask;
 }
 
+Task SharedCorePlanFixture()
+{
+    var fixture = JsonNode.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "sync-golden-traces.json")))!;
+    foreach (var trace in fixture["traces"]!.AsArray())
+    foreach (var step in trace!["steps"]!.AsArray())
+    {
+        var input = step!["event"]!;
+        if (input["type"]!.GetValue<string>() != "plan") continue;
+        var basis = input["base"]?.Deserialize<SyncEntry>(NativeSyncStorage.Json);
+        var remote = input["remote"]?.Deserialize<SyncEntry>(NativeSyncStorage.Json);
+        var local = input["localHash"]?.GetValue<string>();
+        var actual = input["blockedGroups"]!.AsArray().Any(group => group!.GetValue<string>() == input["group"]!.GetValue<string>())
+            ? "blocked" : NativeSyncDecisions.DecideEntry(basis, local, remote) switch
+            {
+                NativeSyncDecision.Equal => basis == remote ? "no_change" : "adopt",
+                NativeSyncDecision.Receive => "download",
+                NativeSyncDecision.Upload => "upload",
+                NativeSyncDecision.Conflict => "conflict",
+                _ => throw new InvalidOperationException()
+            };
+        Check(actual == step["expected"]!["decision"]!.GetValue<string>(), trace["id"]!.GetValue<string>());
+        if (actual == "upload")
+            Check((remote?.Version ?? 0) == step["expected"]!["expectedVersion"]!.GetValue<long>(), "Upload CAS");
+    }
+    return Task.CompletedTask;
+}
+
 Task MergeFixture()
 {
     var cases = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "json-merge.json")))!.AsArray();
@@ -876,6 +959,8 @@ async Task ConflictReviewFlow()
     var (p, q) = (NewPage(), NewPage());
     first.Write(p, "{\"revision\":1,\"strokes\":[{\"id\":\"a\",\"color\":1}]}"); first.Write(q, "{\"revision\":1,\"strokes\":[{\"id\":\"b\",\"color\":1}]}");
     using var one = new NativeSyncClient(first.Root, endpoint, token); using var two = new NativeSyncClient(second.Root, endpoint, token);
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    first.Write("library.json", """{"notebooks":[]}""");
     await one.SyncAsync(Idle); await two.SyncAsync(Idle);
     first.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":3},{\"id\":\"theirs\"}]}"); first.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":3}]}");
     second.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":2},{\"id\":\"mine\"}]}"); second.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":2}]}");
@@ -972,9 +1057,10 @@ sealed class AddressForwarder : IDisposable
                 var incoming = context.Request;
                 requests.Add(name + " " + incoming.HttpMethod);
                 if (Unavailable) { context.Response.StatusCode = 503; context.Response.Close(); continue; }
-                var relative = incoming.Url!.AbsolutePath.Split("/mojian-sync/v1/", 2).Last();
+                var relative = incoming.Url!.PathAndQuery.Split("/mojian-sync/v1/", 2).Last();
                 using var message = new HttpRequestMessage(new HttpMethod(incoming.HttpMethod), target + relative);
                 if (incoming.Headers["Authorization"] is { } authorization) message.Headers.TryAddWithoutValidation("Authorization", authorization);
+                if (incoming.Headers["Range"] is { } range) message.Headers.TryAddWithoutValidation("Range", range);
                 if (incoming.HasEntityBody)
                 {
                     using var memory = new MemoryStream(); await incoming.InputStream.CopyToAsync(memory);
@@ -982,14 +1068,16 @@ sealed class AddressForwarder : IDisposable
                     if (incoming.HttpMethod == "POST") CommitBodies.Add(Encoding.UTF8.GetString(body));
                     message.Content = new ByteArrayContent(body);
                     if (incoming.ContentType != null) message.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(incoming.ContentType);
+                    if (incoming.Headers["Content-Range"] is { } contentRange) message.Content.Headers.TryAddWithoutValidation("Content-Range", contentRange);
                 }
                 using var reply = await http.SendAsync(message);
                 var bytes = await reply.Content.ReadAsByteArrayAsync();
-                if (WrongIdentity && relative == "manifest")
+                if (WrongIdentity && (relative.StartsWith("manifest", StringComparison.Ordinal) || relative.StartsWith("changes", StringComparison.Ordinal)))
                 { var node = JsonNode.Parse(bytes)!; node["workspaceId"] = Guid.NewGuid().ToString("N"); bytes = Encoding.UTF8.GetBytes(node.ToJsonString()); }
                 if (DropNextCommitReply && incoming.HttpMethod == "POST")
                 { DropNextCommitReply = false; context.Response.StatusCode = 503; context.Response.Close(); continue; }
                 context.Response.StatusCode = (int)reply.StatusCode; context.Response.ContentType = "application/json";
+                if (reply.Content.Headers.ContentRange != null) context.Response.Headers["Content-Range"] = reply.Content.Headers.ContentRange.ToString();
                 context.Response.ContentLength64 = bytes.Length;
                 await context.Response.OutputStream.WriteAsync(bytes); context.Response.Close();
             }
@@ -1032,6 +1120,8 @@ sealed class TransportFault : HttpMessageHandler
     public List<string> CommitBodies { get; } = new();
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        if (ChangeManifest != null && (request.RequestUri!.AbsolutePath.EndsWith("/manifest/pages") || request.RequestUri.AbsolutePath.EndsWith("/changes")))
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
         if (BeforeSend != null) await BeforeSend();
         Requests++;
         if (RejectCommitCode is { } rejected && request.Method == HttpMethod.Post)

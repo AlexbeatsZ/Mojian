@@ -289,6 +289,36 @@ class NativeSyncClientTest {
         assertEquals(1, File(root, ".mojian-sync/conflicts").listFiles()!!.size)
     }
 
+    @Test fun conflictedPageAndSharedPdfStayBlockedWhileIndependentPageContinuesAcrossRestart() = isolated { _, root, server ->
+        File(root, "library.json").writeText("""{"notebooks":[{"id":"n","sections":[{"pages":[
+            {"id":"p","pdfPage":{"sourceOwnerPageId":"owner","sourceAssetName":"original.pdf"}},
+            {"id":"owner"},{"id":"q"}]}]}]}""".trimIndent())
+        val pagePath = "notebooks/n/pages/p.json"
+        val independentPath = "notebooks/n/pages/q.json"
+        val sharedPath = "notebooks/n/assets/owner/original.pdf"
+        fun write(path: String, content: String) = File(root, path).apply { parentFile!!.mkdirs(); writeText(content) }
+        val page = write(pagePath, "base-p")
+        val independent = write(independentPath, "base-q")
+        val shared = write(sharedPath, "base-pdf")
+        client(root, server).sync(idle)
+        page.writeText("local-p")
+        server.update(pagePath, "remote-p")
+        server.update(sharedPath, "remote-pdf")
+        server.update(independentPath, "remote-q")
+        val engine = client(root, server)
+        engine.sync(idle)
+        assertEquals(listOf(pagePath), engine.conflictReview().map { it.path })
+        assertEquals("local-p", page.readText())
+        assertEquals("base-pdf", shared.readText())
+        assertEquals("remote-q", independent.readText())
+        server.update(independentPath, "remote-q2")
+        val restarted = client(root, server)
+        restarted.sync(idle)
+        assertEquals(listOf(pagePath), restarted.conflictReview().map { it.path })
+        assertEquals("base-pdf", shared.readText())
+        assertEquals("remote-q2", independent.readText())
+    }
+
     @Test fun strokesWrittenOnBothDevicesMergeAndUploadWithoutConflict() = isolated { _, root, server ->
         File(root, "library.json").writeText("library")
         val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"strokes":[{"id":"a"}]}""") }
@@ -320,8 +350,48 @@ class NativeSyncClientTest {
         assertEquals(commits, server.commits)
     }
 
+    @Test fun journalConflictDefersDependenciesAndReplaysInterruptedChoiceWithoutLosingOtherPages() = isolated { _, root, server ->
+        File(root, "library.json").writeText("""{"notebooks":[{"id":"n","sections":[{"pages":[{"id":"a"},{"id":"b"},{"id":"c"}]}]}]}""")
+        val a = "notebooks/n/pages/a.json"
+        val b = "notebooks/n/pages/b.json"
+        val c = "notebooks/n/pages/c.json"
+        val asset = "notebooks/n/assets/a/original.pdf"
+        fun write(path: String, value: String) = File(root, path).apply { parentFile!!.mkdirs(); writeText(value) }
+        for (path in listOf(a, b, c, asset)) write(path, "base")
+        val engine = client(root, server)
+        engine.sync(idle)
+        for (path in listOf(a, b, c, asset)) server.update(path, "remote-$path")
+        engine.sync({ false })
+        write("$asset.previous", "base")
+        write(asset, "remote-$asset")
+        write(a, "my-a")
+        write(b, "my-b")
+        server.offline = true
+        assertTrue(engine.status, engine.recoverIncoming(idle))
+        assertEquals("remote-$c", File(root, c).readText())
+        assertEquals("base", File(root, asset).readText())
+        assertFalse(engine.hasPendingIncoming)
+        assertEquals(setOf(a, b), engine.conflictReview().map { it.path }.toSet())
+        server.offline = false
+        server.update(c, "newer-c")
+        engine.sync(idle)
+        assertEquals("newer-c", File(root, c).readText())
+        assertFalse(engine.resolveConflicts(mapOf(a to NativeSyncChoice.LOCAL), { false }))
+        assertTrue(engine.hasPendingIncoming)
+        server.offline = true
+        val restarted = client(root, server)
+        assertTrue(restarted.status, restarted.recoverIncoming(idle))
+        assertEquals("my-a", File(root, a).readText())
+        assertEquals("my-b", File(root, b).readText())
+        assertEquals("remote-$asset", File(root, asset).readText())
+        assertEquals(listOf(b), restarted.conflictReview().map { it.path })
+        assertTrue(restarted.resolveConflicts(mapOf(b to NativeSyncChoice.REMOTE), idle))
+        assertEquals("remote-$b", File(root, b).readText())
+        assertTrue(restarted.conflictReview().isEmpty())
+    }
+
     @Test fun reviewedConflictsResolvePerFileIncludingKeepBoth() = isolated { _, root, server ->
-        File(root, "library.json").writeText("library")
+        File(root, "library.json").writeText("""{"notebooks":[]}""")
         val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"strokes":[{"id":"a","color":1}]}""") }
         val note = File(root, "notebooks/n/pages/q.json").apply { writeText("""{"revision":1,"strokes":[{"id":"b","color":1}]}""") }
         client(root, server).sync(idle)

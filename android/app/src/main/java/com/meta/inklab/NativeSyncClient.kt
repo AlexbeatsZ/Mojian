@@ -27,14 +27,25 @@ class NativeSyncClient(
     private val stateFile = File(directory, "state.json")
     private val outboxFile = File(directory, "outbox.json")
     private val incomingFile = File(directory, "incoming.json")
+    private val deferredFile = File(directory, "deferred-incoming.json")
+    private fun resumeIncoming(): JSONObject {
+        if (deferredFile.isFile) {
+            check(!incomingFile.exists()) { "接收日志重复，请保留恢复目录" }
+            movePrepared(deferredFile, incomingFile)
+        }
+        return if (incomingFile.exists()) NativeSyncFiles.read(incomingFile)
+            else JSONObject().put("workspaceId", workspaceId).put("files", JSONObject())
+    }
     private val conflictFile = File(directory, "conflict.json")
     private val blobs = File(directory, "transfer")
+    private val discovery = NativeSyncManifestFeed(transport, directory)
     private var workspaceId = ""
     private var deviceId = UUID.randomUUID().toString()
     private val checkpoint = linkedMapOf<String, NativeSyncEntry>()
     private val hashCache = NativeSyncHashCache()
     private val localMutations = LocalMutationEpoch.forWorkspace(this.root)
     private var serverRevision = 0L
+    private var lastSuccessMillis = 0L
     val hasPendingIncoming: Boolean get() = incomingFile.exists()
     val recoveryDirectory: File get() = directory
     @Volatile var status: String = "等待同步"
@@ -52,6 +63,7 @@ class NativeSyncClient(
             deviceId = state.getString("deviceId")
             workspaceId = state.getString("workspaceId")
             require(NativeSyncFiles.validId(deviceId)) { "无效设备身份" }
+            lastSuccessMillis = state.optLong("lastSuccessMillis", 0L)
             serverRevision = NativeSyncFiles.safeInteger(state, "revision")
             val manifest = NativeSyncManifest.parse(JSONObject().put("workspaceId", workspaceId.ifEmpty { "unbound" })
                 .put("revision", serverRevision).put("files", state.getJSONObject("files")))
@@ -61,8 +73,10 @@ class NativeSyncClient(
     }
 
     private fun setStatus(value: String) {
-        status = value
-        runCatching { statusChanged(value) }
+        val time = if (lastSuccessMillis > 0L) java.text.DateFormat.getDateTimeInstance(
+            java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(lastSuccessMillis)) else null
+        status = if (time == null) value else "$value · 上次完整同步 $time"
+        runCatching { statusChanged(status) }
     }
 
     private fun persistState() {
@@ -72,7 +86,7 @@ class NativeSyncClient(
     private fun stateJson(files: Map<String, NativeSyncEntry>): JSONObject {
         val revision = maxOf(serverRevision, files.values.maxOfOrNull { it.version } ?: 0)
         return JSONObject().put("endpoint", endpoint).put("deviceId", deviceId)
-            .put("workspaceId", workspaceId).put("revision", revision)
+            .put("workspaceId", workspaceId).put("revision", revision).put("lastSuccessMillis", lastSuccessMillis)
             .put("files", JSONObject().apply { files.forEach { (path, entry) -> put(path, entry.json()) } })
     }
 
@@ -125,17 +139,19 @@ class NativeSyncClient(
             checkCancelled(cancelled)
             if (incomingFile.exists() && !replayIncoming(applyOnIdle, cancelled)) return
             check(File(root, "library.json").isFile) { "本地 library.json 缺失，已停止同步；不能将目录事故作为删除上传" }
-            if (conflictFile.exists()) { setStatus("同步冲突尚未解决，双方副本保留在 .mojian-sync/conflicts"); return }
+            val activeConflicts = conflictMarker()?.second.orEmpty().toSet()
+            val heldPaths = activeConflicts + if (deferredFile.isFile)
+                NativeSyncFiles.read(deferredFile).getJSONObject("files").keys().asSequence().toSet() else emptySet()
             val scanEpoch = localMutations.capture() ?: run { setStatus("本地写入中，等待下一轮同步"); return }
             val local = hashCache.scan(root, cancelled, rejectSyncthing = true)
-            val identity = transport.manifest(cancelled)
+            val identity = discovery.read(workspaceId, serverRevision, cancelled)
             requireIdentity(identity)
             check(identity.files["library.json"]?.let { it.hash != null } != false) { "远端 library.json 已删除，已停止同步并保留本地库" }
             val retriedOutbox = outboxFile.exists()
             if (retriedOutbox) retryOutbox(cancelled)
             checkCancelled(cancelled)
             setStatus("正在检查同步…")
-            val remote = if (retriedOutbox) transport.manifest(cancelled) else identity
+            val remote = if (retriedOutbox) discovery.read(workspaceId, serverRevision, cancelled) else identity
             requireIdentity(remote)
             check(remote.files["library.json"]?.let { it.hash != null } != false) { "远端 library.json 已删除，已停止同步并保留本地库" }
             val changes = mutableListOf<NativeSyncChange>()
@@ -144,6 +160,7 @@ class NativeSyncClient(
             val paths = (checkpoint.keys + local.keys + remote.files.keys).toSet()
             require(paths.map { it.lowercase(java.util.Locale.ROOT) }.distinct().size == paths.size) { "本地和远端同步路径大小写冲突" }
             paths.sorted().forEach { path ->
+                if (path in heldPaths) return@forEach
                 val ours = local[path]
                 when (NativeSyncDecisions.decideEntry(checkpoint[path], ours, remote.files[path])) {
                     NativeSyncDecision.Equal -> remote.files[path]?.let { checkpoint[path] = it }
@@ -163,12 +180,26 @@ class NativeSyncClient(
                     else -> { conflicts -= path; incoming[path] = entry; contents[path] = merged }
                 }
             }
-            if (conflicts.isNotEmpty()) {
-                preserveConflicts(local, remote, conflicts, cancelled, expectedEpoch = scanEpoch)
-                setStatus("同步冲突 ${conflicts.size} 项，双方内容已保留在 .mojian-sync/conflicts")
-                return
+            val blocked = heldPaths + conflicts
+            if (blocked.isNotEmpty()) {
+                val indexPath = "library.json"
+                val localIndex = readDependencyIndex(File(root, indexPath))
+                val remoteHash = remote.files[indexPath]?.hash
+                val remoteIndex = when {
+                    remoteHash == null -> JSONObject().put("notebooks", JSONArray())
+                    remoteHash == local[indexPath] -> localIndex
+                    else -> { ensureBlob(remoteHash, cancelled); readDependencyIndex(blob(remoteHash)) }
+                }
+                val dependencies = NativeSyncDependencies.fromIndexes(localIndex, remoteIndex,
+                    local[indexPath] != remote.files[indexPath]?.hash,
+                    paths.filter { path -> (local[path] == null) != (remote.files[path]?.hash == null) })
+                val blockedGroups = blocked.map(dependencies::group).toSet()
+                changes.removeAll { dependencies.group(it.path) in blockedGroups }
+                incoming.keys.removeAll { dependencies.group(it) in blockedGroups }
+                if (conflicts.isNotEmpty()) preserveConflicts(local, remote, conflicts, cancelled, expectedEpoch = scanEpoch)
             }
             if (changes.isNotEmpty()) {
+                setStatus("待上传 ${changes.size} 项，待接收 ${incoming.size} 项")
                 changes.filter { it.hash != null }.forEach { change ->
                     checkCancelled(cancelled)
                     val hash = requireNotNull(change.hash)
@@ -182,19 +213,35 @@ class NativeSyncClient(
                 retryOutbox(cancelled)
             }
             if (incoming.isNotEmpty()) {
+                setStatus("正在接收 ${incoming.size} 项")
                 incoming.values.mapNotNull { it.hash }.distinct().forEach { ensureBlob(it, cancelled) }
-                val journal = JSONObject().put("workspaceId", workspaceId).put("files", JSONObject().apply {
+                val journal = resumeIncoming()
+                journal.getJSONObject("files").apply {
                     incoming.forEach { (path, entry) ->
                         put(path, JSONObject().put("entry", entry.json()).put("expectedHash", local[path] ?: JSONObject.NULL)
                             .apply { contents[path]?.let { put("content", it) } })
                     }
-                })
+                }
                 check(localMutations.publishIfUnchanged(scanEpoch) { NativeSyncFiles.atomicJson(incomingFile, journal) }) { "本地笔记在接收准备期间发生变化，下一轮重试" }
                 if (!replayIncoming(applyOnIdle, cancelled)) return
             }
             persistState()
-            if (!outboxFile.exists() && !incomingFile.exists()) blobs.listFiles()?.filter { it.isFile }?.forEach { it.delete() }
-            setStatus("本轮已同步，新编辑将在下一轮检查" + (transport.selectedAddress?.let { " · ${java.net.URI(it).authority}" } ?: ""))
+            val unresolved = conflictMarker()?.second.orEmpty()
+            if (unresolved.isNotEmpty() || deferredFile.exists() || incomingFile.exists()) {
+                setStatus("同步冲突 ${unresolved.size} 项，独立笔记已检查")
+                return
+            }
+            val epoch = localMutations.capture() ?: run { setStatus("本地写入中，等待下一轮同步"); return }
+            val current = hashCache.scan(root, cancelled, rejectSyncthing = true)
+            val pending = (current.keys + checkpoint.keys).count { current[it] != checkpoint[it]?.hash }
+            if (pending > 0) { setStatus("本地已保存，待上传 $pending 项"); return }
+            checkCancelled(cancelled)
+            if (!localMutations.publishIfUnchanged(epoch) {
+                lastSuccessMillis = System.currentTimeMillis()
+                persistState()
+            }) { setStatus("本地写入中，等待下一轮同步"); return }
+            blobs.listFiles()?.filter { it.isFile }?.forEach { it.delete() }
+            setStatus("本轮已同步" + (transport.selectedAddress?.let { " · ${java.net.URI(it).authority}" } ?: ""))
         } catch (_: CancellationException) {
             setStatus("同步已暂停，下次继续")
         } catch (_: NativeSyncVersionConflict) {
@@ -234,7 +281,10 @@ class NativeSyncClient(
                     val (folder, paths) = conflictMarker() ?: return true
                     require(choices.isNotEmpty() && choices.keys.all { it in paths }) { "请选择冲突文件保留的版本" }
                     val remote = NativeSyncManifest.parse(NativeSyncFiles.read(File(folder, "conflicts.json")).getJSONObject("remote"))
-                    val incoming = JSONObject()
+                    val journal = resumeIncoming()
+                    check(journal.getString("workspaceId") == workspaceId) { "接收日志身份不匹配" }
+                    val incoming = journal.getJSONObject("files")
+                    val reviewPaths = arrayStrings(journal.optJSONArray("reviewPaths")).toMutableSet()
                     choices.forEach { (path, choice) ->
                         val preserved = NativeSyncFiles.safeFile(File(folder, "local"), path).takeIf(File::isFile)
                         check(NativeSyncFiles.hash(NativeSyncFiles.safeFile(root, path)) == preserved?.let(NativeSyncFiles::hash)) { "$path 在冲突后又改过，请先同步重新比较" }
@@ -242,7 +292,9 @@ class NativeSyncClient(
                         val remoteFile = NativeSyncFiles.safeFile(File(folder, "remote"), path).takeIf(File::isFile)
                         entry?.hash?.let { hash -> if (NativeSyncFiles.hash(blob(hash)) != hash) NativeSyncFiles.copyVerified(requireNotNull(remoteFile) { "冲突快照缺失" }, blob(hash), hash) }
                         when (choice) {
-                            NativeSyncChoice.LOCAL -> if (entry == null) checkpoint.remove(path) else checkpoint[path] = entry
+                            NativeSyncChoice.LOCAL -> incoming.put(path, JSONObject().put("entry",
+                                requireNotNull(entry) { "服务器没有该文件的版本" }.json())
+                                .put("expectedHash", preserved?.let(NativeSyncFiles::hash) ?: JSONObject.NULL).put("keepLocal", true))
                             NativeSyncChoice.REMOTE -> incoming.put(path, JSONObject().put("entry", requireNotNull(entry) { "服务器没有该文件的版本" }.json())
                                 .put("expectedHash", preserved?.let(NativeSyncFiles::hash) ?: JSONObject.NULL))
                             NativeSyncChoice.BOTH -> {
@@ -254,12 +306,10 @@ class NativeSyncClient(
                             }
                         }
                     }
-                    persistState()
-                    if (incoming.length() > 0) NativeSyncFiles.atomicJson(incomingFile, JSONObject().put("workspaceId", workspaceId).put("files", incoming))
-                    val remaining = paths - choices.keys
-                    if (remaining.isEmpty()) check(conflictFile.delete()) { "无法清理冲突标记" }
-                    else NativeSyncFiles.atomicJson(conflictFile, NativeSyncFiles.read(conflictFile).put("paths", JSONArray(remaining)))
-                    if (incoming.length() > 0 && !replayIncoming(applyOnIdle, cancelled)) return false
+                    reviewPaths.addAll(choices.keys)
+                    NativeSyncFiles.atomicJson(incomingFile, journal.put("reviewPaths", JSONArray(reviewPaths)))
+                    if (!replayIncoming(applyOnIdle, cancelled)) return false
+                    val remaining = conflictMarker()?.second.orEmpty()
                     setStatus(if (remaining.isEmpty()) "冲突已处理，下一轮同步继续" else "还有 ${remaining.size} 个冲突待处理")
                     return true
                 } finally { lock.release() }
@@ -268,6 +318,17 @@ class NativeSyncClient(
             setStatus("冲突处理未完成，本地内容已保留：${error.message}")
             return false
         } finally { running.set(false) }
+    }
+
+    private fun arrayStrings(array: JSONArray?): List<String> =
+        if (array == null) emptyList() else (0 until array.length()).map(array::getString)
+
+    private fun completeConflictReview(choices: Set<String>) {
+        if (choices.isEmpty() || !conflictFile.exists()) return
+        val marker = NativeSyncFiles.read(conflictFile)
+        val remaining = arrayStrings(marker.getJSONArray("paths")).filterNot(choices::contains)
+        if (remaining.isEmpty()) check(conflictFile.delete()) { "无法清理冲突标记" }
+        else NativeSyncFiles.atomicJson(conflictFile, marker.put("paths", JSONArray(remaining)))
     }
 
     private fun conflictMarker(): Pair<File, List<String>>? {
@@ -280,6 +341,10 @@ class NativeSyncClient(
     }
 
     private fun readJson(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
+
+    private fun readDependencyIndex(file: File): JSONObject? =
+        try { readJson(file) } catch (_: org.json.JSONException) { null }
+        catch (_: IllegalStateException) { null }
 
     private fun retryOutbox(cancelled: () -> Boolean) {
         val request = NativeSyncFiles.read(outboxFile)
@@ -336,6 +401,8 @@ class NativeSyncClient(
             checkCancelled(cancelled)
             check(NativeSyncFiles.hash(blob(it)) == it) { "本地接收快照缺失，禁止打开未恢复的笔记库" }
         }
+        val plannedReview = arrayStrings(journal.optJSONArray("reviewPaths")).toSet()
+        require(plannedReview.all(paths::contains)) { "无效冲突审阅记录" }
         val changed = mutableListOf<String>()
         val prepared = paths.map { path ->
             checkCancelled(cancelled)
@@ -346,30 +413,67 @@ class NativeSyncClient(
             val item = files.getJSONObject(path)
             val expected = if (item.isNull("expectedHash")) null else item.getString("expectedHash")
             val entry = entries.getValue(path)
-            val wanted = contents[path] ?: entry.hash
+            val keepLocal = item.optBoolean("keepLocal")
+            val wanted = if (keepLocal) expected else contents[path] ?: entry.hash
             if (actual != expected && actual != wanted) changed += path
             val key = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it.toInt() and 255) }
-            val replacement = if (actual != wanted && wanted != null) File(target.parentFile, ".mojian-incoming-$key.tmp").also {
+            val replacement = if (actual != wanted && wanted != null && !keepLocal) File(target.parentFile, ".mojian-incoming-$key.tmp").also {
                 NativeSyncFiles.copyVerified(blob(wanted), it, wanted)
             } else null
             val backup = if (actual != wanted && actual != null) File(target.parentFile, ".mojian-previous-$key.tmp").also {
                 NativeSyncFiles.copyVerified(target, it, actual)
             } else null
-            PreparedIncoming(path, target, before, actual, entry, replacement, backup)
+            PreparedIncoming(path, target, before, actual, expected, wanted, replacement, backup)
         }
+        val rollback = mutableListOf<PreparedIncoming>()
         try {
-            if (changed.isNotEmpty()) {
-                if (!journal.optBoolean("conflictsPreserved")) {
-                    val local = changed.mapNotNull { path -> NativeSyncFiles.hash(NativeSyncFiles.safeFile(root, path))?.let { path to it } }.toMap()
-                    val staged = NativeSyncManifest(workspaceId, entries.values.maxOf { it.version }, entries)
-                    preserveConflicts(local, staged, changed, cancelled, offline = true, expectedEpoch = replayEpoch)
-                    journal.put("conflictsPreserved", true)
-                    NativeSyncFiles.atomicJson(incomingFile, journal)
-                }
-                error("本地页面已变化，双方冲突副本已保留；接收日志等待解决")
+            val active = conflictMarker()?.second.orEmpty().toSet()
+            val newConflicts = changed.filter { it !in active || it in plannedReview }
+            if (newConflicts.isNotEmpty()) {
+                val local = prepared.mapNotNull { item -> item.actual?.let { item.path to it } }.toMap()
+                val staged = NativeSyncManifest(workspaceId, entries.values.maxOf { it.version }, entries)
+                preserveConflicts(local, staged, newConflicts, cancelled, offline = true, expectedEpoch = replayEpoch)
             }
-            val next = checkpoint.toMutableMap().apply { putAll(entries) }
+            val blocked = (active - plannedReview) + changed
+            var known = false
+            val remaining = if (blocked.isEmpty()) emptySet() else {
+                val indexPath = "library.json"
+                val localIndex = readDependencyIndex(File(root, indexPath))
+                val remoteIndex = prepared.firstOrNull { it.path == indexPath && !files.getJSONObject(indexPath).optBoolean("keepLocal") }
+                    ?.wanted?.let { readDependencyIndex(blob(it)) } ?: localIndex
+                val structure = prepared.filter { (it.expected == null) != (it.wanted == null) }.map { it.path }
+                val dependencies = NativeSyncDependencies.fromIndexes(localIndex, remoteIndex, indexPath in entries, structure)
+                known = dependencies.known
+                val groups = blocked.map(dependencies::group).toSet()
+                paths.filter { dependencies.group(it) in groups }.toSet()
+            }
+            val runnable = prepared.filterNot { it.path in remaining }
+            var canDefer = known
+            for (item in prepared.filter { it.path in remaining && it.expected != it.wanted && it.actual == it.wanted }) {
+                val replacement = item.expected?.let { hash ->
+                    val previous = File(item.target.parentFile, "${item.target.name}.previous")
+                    if (NativeSyncFiles.hash(previous) != hash) null else
+                        File(item.target.parentFile, ".mojian-rollback-${UUID.randomUUID()}.tmp").also {
+                            NativeSyncFiles.copyVerified(previous, it, hash)
+                        }
+                }
+                if (item.expected != null && replacement == null) { canDefer = false; break }
+                rollback += item.copy(wanted = item.expected, replacement = replacement, backup = null)
+            }
+            val deferredReview = (plannedReview intersect remaining) - changed.toSet()
+            if ((runnable.isEmpty() && rollback.isEmpty()) || (remaining.isNotEmpty() && !canDefer)) {
+                if (runnable.isEmpty()) {
+                    if (deferredReview != plannedReview)
+                        NativeSyncFiles.atomicJson(incomingFile, journal.put("reviewPaths", JSONArray(deferredReview)))
+                    if (canDefer) movePrepared(incomingFile, deferredFile)
+                }
+                setStatus("接收组存在冲突，双方副本及其依赖项已保留")
+                return canDefer
+            }
+            val settled = plannedReview - remaining
+            val acknowledged = entries.filterKeys { it !in remaining }
+            val next = checkpoint.toMutableMap().apply { putAll(acknowledged) }
             val nextState = File(directory, "incoming-checkpoint.tmp")
             NativeSyncFiles.atomicJson(nextState, stateJson(next))
             checkCancelled(cancelled)
@@ -377,32 +481,41 @@ class NativeSyncClient(
             val applied = applyOnIdle {
                 check(!executed) { "接收操作不能重复执行" }
                 NativeSyncConfiguration.requireDedicatedBoundary(root)
-                prepared.forEach { item ->
+                val publish = (runnable + rollback).sortedBy { it.path == "library.json" }
+                publish.forEach { item ->
                     NativeSyncFiles.safeFile(root, item.path)
                     // HyperOS can rewrite a replaced file's mtime later; only a content change blocks replay.
                     check(generation(item.target) == item.generation || NativeSyncFiles.hash(item.target) == item.actual) { "接收前本地文件发生变化，保留日志等待重试" }
                 }
-                prepared.forEach { item ->
+                publish.forEach { item ->
                     item.backup?.let { movePrepared(it, File(item.target.parentFile, "${item.target.name}.previous")) }
-                    if (item.entry.hash == null) check(!item.target.exists() || item.target.delete()) { "无法删除已同步文件" }
-                    else item.replacement?.let { movePrepared(it, item.target) }
+                    if (item.actual != item.wanted) {
+                        if (item.wanted == null) check(!item.target.exists() || item.target.delete()) { "无法删除已同步文件" }
+                        else movePrepared(requireNotNull(item.replacement), item.target)
+                    }
                     hashCache.invalidate(item.path)
                 }
                 movePrepared(nextState, stateFile)
-                checkpoint.putAll(entries)
-                check(incomingFile.delete()) { "无法清理接收日志" }
+                checkpoint.putAll(acknowledged)
+                completeConflictReview(settled)
+                if (remaining.isEmpty()) check(incomingFile.delete()) { "无法清理接收日志" }
+                else NativeSyncFiles.atomicJson(incomingFile, journal.put("files", JSONObject().apply {
+                    remaining.forEach { path -> put(path, files.getJSONObject(path)) }
+                }).put("reviewPaths", JSONArray(deferredReview)))
+                if (remaining.isNotEmpty()) movePrepared(incomingFile, deferredFile)
                 executed = true
             }
             check(applied == executed) { "空闲接收回调必须同步执行操作或返回 false" }
             if (!applied) setStatus("收到的更新等待当前编辑保存")
+            else if (remaining.isNotEmpty()) setStatus("已接收独立组，冲突组仍待审阅")
             return applied
         } finally {
-            prepared.forEach { it.replacement?.delete(); it.backup?.delete() }
+            (prepared + rollback).forEach { it.replacement?.delete(); it.backup?.delete() }
         }
     }
 
     private data class Generation(val size: Long, val modified: java.nio.file.attribute.FileTime, val key: Any?)
-    private data class PreparedIncoming(val path: String, val target: File, val generation: Generation?, val actual: String?, val entry: NativeSyncEntry, val replacement: File?, val backup: File?)
+    private data class PreparedIncoming(val path: String, val target: File, val generation: Generation?, val actual: String?, val expected: String?, val wanted: String?, val replacement: File?, val backup: File?)
     private fun generation(file: File): Generation? {
         if (!file.exists()) return null
         val attributes = Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
@@ -446,6 +559,29 @@ class NativeSyncClient(
         val conflictEpoch = expectedEpoch ?: localMutations.capture() ?: error("本地写入中，下一轮重新检查冲突")
         check(localMutations.publishIfUnchanged(conflictEpoch) { }) { "本地内容已变化，下一轮重新检查冲突" }
         val folder = File(directory, "conflicts/${remote.revision}-${UUID.randomUUID()}")
+        val retained = conflictMarker()
+        val previous = retained?.let { (source, _) ->
+            NativeSyncManifest.parse(NativeSyncFiles.read(File(source, "conflicts.json")).getJSONObject("remote"))
+        }
+        val allPaths = (retained?.second.orEmpty() + paths).distinct()
+        retained?.let { (source, previousPaths) ->
+            previousPaths.filterNot(paths::contains).forEach { path ->
+                for (side in listOf("local", "remote")) {
+                    val from = NativeSyncFiles.safeFile(File(source, side), path)
+                    if (from.isFile) {
+                        val to = NativeSyncFiles.safeFile(File(folder, side), path)
+                        NativeSyncFiles.copyVerified(from, to, requireNotNull(NativeSyncFiles.hash(from)))
+                    }
+                }
+            }
+        }
+        val preservedRemote = remote.copy(revision = maxOf(remote.revision, previous?.revision ?: 0),
+            files = remote.files.toMutableMap().apply {
+                retained?.second.orEmpty().filterNot(paths::contains).forEach { path ->
+                    val entry = previous?.files?.get(path)
+                    if (entry == null) remove(path) else put(path, entry)
+                }
+            })
         paths.forEach { path ->
             checkCancelled(cancelled)
             local[path]?.let { NativeSyncFiles.copyVerified(NativeSyncFiles.safeFile(root, path), NativeSyncFiles.safeFile(File(folder, "local"), path), it) }
@@ -456,9 +592,9 @@ class NativeSyncClient(
         }
         val preparedMetadata = File(folder, "conflicts-ready.tmp")
         val preparedMarker = File(directory, "conflict-marker.tmp")
-        NativeSyncFiles.atomicJson(preparedMetadata, JSONObject().put("paths", JSONArray(paths))
-            .put("remote", remote.json()).put("localDeletions", JSONArray(paths.filter { !local.containsKey(it) })))
-        NativeSyncFiles.atomicJson(preparedMarker, JSONObject().put("directory", folder.name).put("paths", JSONArray(paths)).put("revision", remote.revision))
+        NativeSyncFiles.atomicJson(preparedMetadata, JSONObject().put("paths", JSONArray(allPaths))
+            .put("remote", preservedRemote.json()).put("localDeletions", JSONArray(allPaths.filter { !NativeSyncFiles.safeFile(File(folder, "local"), it).isFile })))
+        NativeSyncFiles.atomicJson(preparedMarker, JSONObject().put("directory", folder.name).put("paths", JSONArray(allPaths)).put("revision", preservedRemote.revision))
         checkCancelled(cancelled)
         check(localMutations.publishIfUnchanged(conflictEpoch) {
             movePrepared(preparedMetadata, File(folder, "conflicts.json"))

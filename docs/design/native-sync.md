@@ -275,3 +275,22 @@ V1 intentionally has no receipt/blob/tombstone garbage collection, multi-user ac
 end-to-end encryption or simultaneous handwriting merge. Monitor storage capacity. Local
 protocol tests and build results do not establish public TLS/proxy reachability or physical
 Android acceptance; record those layers independently in the delivery log.
+
+### Dependency groups and durable review (0.7.44)
+
+The local and remote indexes link each page with its assets and any shared PDF
+source owner. Membership and reference changes link the affected groups to
+`library.json`. An unreadable index forces conservative grouping. A changed
+local precondition during replay preserves both sides. Unrelated compatible
+groups may publish and acknowledge their own remote versions. A held group whose replacement is visible is restored to the pre-publication
+version using its verified recovery copy. A missing recovery copy keeps the
+blocking `incoming.json`. If nothing from a blocked group was applied, its journal is renamed
+atomically to `deferred-incoming.json` so the library can open for review.
+The periodic pass holds deferred groups while syncing independent groups.
+
+Each user choice merges into the durable journal before any file or checkpoint
+changes. The journal records reviewed paths and the LOCAL/REMOTE/merged result,
+then replays without network, clears only settled conflict markers, and retires
+the journal last. Older journals lacking the optional choice fields replay as
+ordinary receives. The complete remote discovery cursor is independent of a
+deferred file's applied checkpoint.

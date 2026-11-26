@@ -52,6 +52,37 @@ class NativeSyncWireContractTest {
         }
     }
 
+    @Test fun consumesSharedCorePlanTrace() {
+        val fixture = JSONObject(File(repository(),
+            "sync-server/node_modules/@alexbeatsz/file-sync-core/test/fixtures/sync-golden-traces.json").readText())
+        fun JSONObject.hash(key: String) = if (isNull(key)) null else getString(key)
+        fun JSONObject.entry(key: String) = optJSONObject(key)?.let { NativeSyncEntry(it.hash("hash"), it.getLong("version")) }
+        val traces = fixture.getJSONArray("traces")
+        for (i in 0 until traces.length()) {
+            val trace = traces.getJSONObject(i)
+            val steps = trace.getJSONArray("steps")
+            for (j in 0 until steps.length()) {
+                val step = steps.getJSONObject(j)
+                val input = step.getJSONObject("event")
+                if (input.getString("type") != "plan") continue
+                val basis = input.entry("base")
+                val local = input.hash("localHash")
+                val remote = input.entry("remote")
+                val blocked = input.getJSONArray("blockedGroups")
+                val actual = if ((0 until blocked.length()).any { blocked.getString(it) == input.getString("group") }) "blocked"
+                else when (NativeSyncDecisions.decideEntry(basis, local, remote)) {
+                    NativeSyncDecision.Equal -> if (basis == remote) "no_change" else "adopt"
+                    NativeSyncDecision.Receive -> "download"
+                    NativeSyncDecision.Upload -> "upload"
+                    NativeSyncDecision.Conflict -> "conflict"
+                }
+                val expected = step.getJSONObject("expected")
+                assertEquals(trace.getString("id"), expected.getString("decision"), actual)
+                if (actual == "upload") assertEquals(expected.getLong("expectedVersion"), remote?.version ?: 0L)
+            }
+        }
+    }
+
     @Test fun realNodeServerSupportsTwoHttpClientsRoundtripAndTombstone() = isolated { directory ->
         val serverModule = File(repository(), "sync-server/server.mjs").toURI().toString()
         val token = "isolated-native-sync-test-token-0123456789"
@@ -99,6 +130,24 @@ class NativeSyncWireContractTest {
             val remote = NativeSyncHttpTransport(endpoint, token).manifest { false }
             assertNull(remote.files.getValue(path).hash)
             assertEquals(3L, remote.revision)
+            val asset = NativeSyncFiles.safeFile(firstRoot, "notebooks/book/assets/page/attachment.pdf")
+            asset.parentFile!!.mkdirs()
+            asset.writeBytes(ByteArray(8 * 1024 * 1024 + 391) { (it % 193).toByte() })
+            val hash = requireNotNull(NativeSyncFiles.hash(asset))
+            val partial = java.net.URL(endpoint.trimEnd('/') + "/uploads/$hash").openConnection() as java.net.HttpURLConnection
+            try {
+                val chunk = 8 * 1024 * 1024
+                partial.requestMethod = "PUT"
+                partial.doOutput = true
+                partial.setRequestProperty("Authorization", "Bearer $token")
+                partial.setRequestProperty("Content-Range", "bytes 0-${chunk - 1}/${asset.length()}")
+                partial.setFixedLengthStreamingMode(chunk)
+                partial.outputStream.use { sink -> asset.inputStream().use { sink.write(it.readNBytes(chunk)) } }
+                assertTrue("Partial upload returned HTTP ${partial.responseCode}", partial.responseCode in 200..299)
+            } finally { partial.disconnect() }
+            first.sync(idle)
+            second.sync(idle)
+            assertEquals(second.status, hash, NativeSyncFiles.hash(File(secondRoot, "notebooks/book/assets/page/attachment.pdf")))
             assertFalse(first.hasPendingIncoming)
             assertFalse(second.hasPendingIncoming)
         } finally {

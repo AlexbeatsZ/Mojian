@@ -12,6 +12,8 @@
     <None Include="../../../shared/fixtures/sync-decisions.json" Link="sync-decisions.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../shared/fixtures/json-merge.json" Link="json-merge.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../shared/fixtures/json-review.json" Link="json-review.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../../sync-server/node_modules/@alexbeatsz/file-sync-core/test/fixtures/sync-golden-traces.json" Link="sync-golden-traces.json" CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('../../../sync-server/node_modules/@alexbeatsz/file-sync-core/test/fixtures/sync-golden-traces.json')" />
     <None Include="../../../sync-server/test/fixtures/v1-wire.json" Link="v1-wire.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

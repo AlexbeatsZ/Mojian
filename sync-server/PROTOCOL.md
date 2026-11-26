@@ -192,3 +192,12 @@ a partially copied unmarked destination may remain for inspection.
 Conflicts stay blocked and recoverable on disk; v1 does not invent an automatic
 resolution. The UI can open the recovery directory; manual resolution requires
 an explicit reviewed workspace recovery, not clearing a checkpoint blindly.
+
+## Optional v1 discovery and transfer extensions
+
+Core 0.2.0 serves anchored `manifest/pages`, `changes?since=…`, ranged immutable
+blob GETs and `uploads/<hash>` progress/append requests. Windows and Android
+retain their last complete remote view independently of local applied versions.
+A persisted next cursor can resume only at the same workspace and revision. A
+410 restarts from a full snapshot. A missing extension falls back to the original
+manifest or blob route. Completed downloads are hash-verified before publication.

@@ -78,5 +78,12 @@ internal sealed class NativeSyncOutbox
 }
 
 /// <summary>Content, when set, is a merge result published instead of Target's bytes; the checkpoint still records Target.</summary>
-internal sealed record NativeSyncIncomingFile(string? ExpectedHash, SyncEntry Target, string? Content = null);
-internal sealed record NativeSyncIncoming(string WorkspaceId, long Revision, Dictionary<string, NativeSyncIncomingFile> Files);
+internal sealed record NativeSyncIncomingFile(string? ExpectedHash, SyncEntry Target, string? Content = null, bool KeepLocal = false)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? WantedHash => KeepLocal ? ExpectedHash : Content ?? Target.Hash;
+}
+internal sealed record NativeSyncIncoming(string WorkspaceId, long Revision, Dictionary<string, NativeSyncIncomingFile> Files,
+    string[]? ReviewPaths = null);
+
+internal sealed record NativeSyncConflictRecord(string[] Paths, SyncManifest Remote);

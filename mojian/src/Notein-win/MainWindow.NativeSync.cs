@@ -121,13 +121,13 @@ public partial class MainWindow
         _nativeSyncClientKey = null;
     }
 
-    private static string NativeSyncDisplayStatus(NativeSyncStatus status) => status.Phase switch
+    private static string NativeSyncDisplayStatus(NativeSyncStatus status) => (status.Phase switch
     {
         NativeSyncPhase.Offline => "离线 · " + status.Message,
         NativeSyncPhase.Conflict => "冲突 · " + status.Message,
         NativeSyncPhase.Error => "同步错误 · " + status.Message,
         _ => status.Message,
-    };
+    }) + (status.LastSuccessUtc is { } time ? $" · 上次完整同步 {time.LocalDateTime:g}" : "");
 
     private void ShowNativeSyncSettings()
     {
