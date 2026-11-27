@@ -17,7 +17,8 @@
   `Documents/Mojian` uses separate `.mojian-sync/macos-readonly` state and private Application Support
   credentials; never upload/adopt this copy as writable or copy another device's checkpoint.
   Read `docs/design/macos-readonly-sync.md`. Shared core25 + desktop36 tests pass, including an
-  actual isolated server and offline replay with a fresh receiver. Deployment receipts follow in November log.
+  actual isolated server and offline replay with a fresh receiver. Installed `/Applications/Mojian.app` and
+  published `macos-v0.2.4` (ZIP929262B); production rev1676/1804 live files, settled changed0. See November log.
 - **0.7.44 (Windows/Android code48)**: the two native clients isolate conflicted page/PDF dependency groups,
   retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
   v0.7.44 prerelease is published with uploaded EXE166187988B and APK17313968B; tag points to ff1630b.

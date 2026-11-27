@@ -37,5 +37,12 @@
     "strokes": 1,
     "texts": 1
   },
-  "windowIsReadOnly": true
+  "windowIsReadOnly": true,
+  "release": {
+    "tag": "macos-v0.2.4",
+    "prerelease": true,
+    "draft": false,
+    "asset": "Mojian-macOS-arm64-0.2.4.zip",
+    "uploadedBytes": 929262
+  }
 }
