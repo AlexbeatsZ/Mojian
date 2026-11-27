@@ -535,7 +535,8 @@ class NativeSyncClient(
         val localFile = NativeSyncFiles.safeFile(root, path)
         if (localFile.length() > MERGE_LIMIT) return null
         return try {
-            ensureBlob(base, cancelled); ensureBlob(remote, cancelled)
+            try { ensureBlob(base, cancelled) } catch (_: NativeSyncBlobMissing) { return null }
+            ensureBlob(remote, cancelled)
             if (blob(base).length() > MERGE_LIMIT || blob(remote).length() > MERGE_LIMIT) return null
             val ours = readJson(localFile)
             check(NativeSyncFiles.hash(localFile) == local) { "本地文件在合并期间发生变化" }

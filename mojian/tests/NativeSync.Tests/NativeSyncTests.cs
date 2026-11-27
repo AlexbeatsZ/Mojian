@@ -18,6 +18,12 @@ if (args is ["--shared-contracts"])
 var endpoint = Environment.GetEnvironmentVariable("MOJIAN_TEST_SYNC_URL") ?? throw new InvalidOperationException("Loopback test server required");
 var token = Environment.GetEnvironmentVariable("MOJIAN_TEST_SYNC_TOKEN") ?? throw new InvalidOperationException("Test token required");
 var passed = 0;
+if (args is ["--expired-ancestor"])
+{
+    await ExpiredMergeAncestor();
+    Console.WriteLine("Expired merge ancestor regression passed");
+    return;
+}
 await Run("offline outbox survives restart and uploads without touching local content", OfflineOutbox);
 await Run("lost commit response replays stable operation without a second revision", LostReceipt);
 await Run("newer local edits survive lost-response retry", NewerEdit);
@@ -52,6 +58,7 @@ await Run("shared three-way decision table covers edits, deletions and equal con
 await Run("shared JSON merge fixtures match Android", MergeFixture);
 await Run("shared file-sync-core plan trace", SharedCorePlanFixture);
 await Run("strokes written on two devices merge and a volatile-only resave takes the server page", StrokeMerge);
+await Run("expired merge ancestor preserves conflict and receives independent pages", ExpiredMergeAncestor);
 await Run("shared keep-both and summary fixtures match Android", ReviewFixture);
 await Run("reviewed conflicts resolve per file, keep both and resume sync", ConflictReviewFlow);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
@@ -897,6 +904,32 @@ Task MergeFixture()
     return Task.CompletedTask;
 }
 
+async Task ExpiredMergeAncestor()
+{
+    using var first = new TestWorkspace(); using var second = new TestWorkspace();
+    using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+    var library = (await Remote()).Files.TryGetValue("library.json", out var existingLibrary)
+        ? await http.GetStringAsync(endpoint + "blobs/" + existingLibrary.Hash) : "{\"notebooks\":[]}";
+    first.Write("library.json", library); second.Write("library.json", library);
+    var page = NewPage(); var independent = NewPage();
+    first.Write(page, "{\"revision\":1,\"strokes\":[{\"id\":\"a\"}]}");
+    first.Write(independent, "base q");
+    var fault = new TransportFault();
+    using var one = new NativeSyncClient(first.Root, endpoint, token);
+    using var two = new NativeSyncClient(second.Root, endpoint, token, fault);
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    first.Write("library.json", "{\"notebooks\":[]}");
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    fault.MissingBlobHash = (await Remote()).Files[page].Hash;
+    first.Write(page, "{\"revision\":2,\"strokes\":[{\"id\":\"a\"},{\"id\":\"remote\"}]}");
+    second.Write(page, "{\"revision\":2,\"strokes\":[{\"id\":\"a\"},{\"id\":\"local\"}]}");
+    first.Write(independent, "independent page");
+    await one.SyncAsync(Idle); await two.SyncAsync(Idle);
+    Check(two.Snapshot.Phase == NativeSyncPhase.Conflict, "Expired ancestor did not enter review: " + two.Status);
+    Check(second.Read(page).Contains("local"), "Local conflict was overwritten");
+    Check(second.Read(independent) == "independent page", "Expired ancestor blocked unrelated incoming content");
+}
+
 async Task StrokeMerge()
 {
     using var first = new TestWorkspace(); using var second = new TestWorkspace();
@@ -1113,6 +1146,7 @@ sealed class TransportFault : HttpMessageHandler
     public string? RejectCommitCode { get; set; }
     public bool Offline { get; set; }
     public bool DropCommitReply { get; set; }
+    public string? MissingBlobHash { get; set; }
     public int Requests { get; private set; }
     public int Uploads { get; private set; }
     public Func<SyncManifest, SyncManifest>? ChangeManifest { get; set; }
@@ -1124,6 +1158,8 @@ sealed class TransportFault : HttpMessageHandler
             return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
         if (BeforeSend != null) await BeforeSend();
         Requests++;
+        if (MissingBlobHash != null && request.RequestUri!.AbsolutePath.EndsWith("/blobs/" + MissingBlobHash, StringComparison.Ordinal))
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
         if (RejectCommitCode is { } rejected && request.Method == HttpMethod.Post)
         {
             RejectCommitCode = null;

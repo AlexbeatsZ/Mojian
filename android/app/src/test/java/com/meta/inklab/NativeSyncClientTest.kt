@@ -23,7 +23,7 @@ class NativeSyncClientTest {
         }
         override fun upload(hash: String, source: File, cancelled: () -> Boolean) { blobs[hash] = source.readBytes() }
         override fun download(hash: String, destination: File, cancelled: () -> Boolean) {
-            destination.parentFile!!.mkdirs(); destination.writeBytes(blobs.getValue(hash)); afterDownload?.invoke()
+            destination.parentFile!!.mkdirs(); destination.writeBytes(blobs[hash] ?: throw NativeSyncBlobMissing()); afterDownload?.invoke()
         }
         override fun commit(request: JSONObject, cancelled: () -> Boolean): NativeSyncManifest {
             commits++
@@ -317,6 +317,23 @@ class NativeSyncClientTest {
         assertEquals(listOf(pagePath), restarted.conflictReview().map { it.path })
         assertEquals("base-pdf", shared.readText())
         assertEquals("remote-q2", independent.readText())
+    }
+
+    @Test fun expiredMergeAncestorPreservesConflictAndStillReceivesIndependentPages() = isolated { _, root, server ->
+        File(root, "library.json").writeText("""{"notebooks":[]}""")
+        val page = File(root, "notebooks/n/pages/p.json").apply { parentFile!!.mkdirs(); writeText("""{"revision":1,"strokes":[{"id":"a"}]}""") }
+        File(root, "notebooks/other/pages/q.json").apply { parentFile!!.mkdirs(); writeText("base q") }
+        client(root, server).sync(idle)
+        val base = server.remote.files.getValue("notebooks/n/pages/p.json").hash!!
+        page.writeText("""{"revision":2,"strokes":[{"id":"a"},{"id":"local"}]}""")
+        server.update("notebooks/n/pages/p.json", """{"revision":2,"strokes":[{"id":"a"},{"id":"remote"}]}""")
+        server.update("notebooks/other/pages/q.json", "independent page")
+        server.blobs.remove(base)
+        val engine = client(root, server)
+        engine.sync(idle)
+        assertEquals(listOf("notebooks/n/pages/p.json"), engine.conflictReview().map { it.path })
+        assertTrue(page.readText().contains("local"))
+        assertEquals("independent page", File(root, "notebooks/other/pages/q.json").readText())
     }
 
     @Test fun strokesWrittenOnBothDevicesMergeAndUploadWithoutConflict() = isolated { _, root, server ->

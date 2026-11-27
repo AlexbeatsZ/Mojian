@@ -9,7 +9,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>Mojian</AssemblyName>
     <Product>Mojian</Product>
-    <Version>0.7.44</Version>
+    <Version>0.7.45</Version>
     <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
 

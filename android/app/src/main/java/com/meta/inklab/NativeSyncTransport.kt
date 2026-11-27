@@ -33,6 +33,7 @@ interface NativeSyncTransport {
 
 class NativeSyncVersionConflict(val code: String = "version_conflict") : IOException("远端版本已改变，双方修改已保留")
 class NativeSyncNetworkFailure(message: String, cause: Throwable? = null) : IOException(message, cause)
+class NativeSyncBlobMissing : IOException("同步历史内容已过期")
 
 class NativeSyncHttpTransport @JvmOverloads constructor(endpoint: String, private val token: String, certificatePin: String? = null) : NativeSyncTransport {
     private val base: URI = NativeSyncFiles.endpoint(endpoint)
@@ -96,6 +97,7 @@ class NativeSyncHttpTransport @JvmOverloads constructor(endpoint: String, privat
                 } }.getOrNull()
                 throw NativeSyncVersionConflict(code ?: "unknown_conflict")
             }
+            if (status == 404 && path.startsWith("blobs/")) throw NativeSyncBlobMissing()
             if (status !in 200..299) throw NativeSyncNetworkFailure("同步请求失败 HTTP $status")
             return read(connection)
         } catch (error: IOException) {

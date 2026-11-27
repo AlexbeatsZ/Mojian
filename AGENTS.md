@@ -84,6 +84,8 @@
 
 # Active Work
 
+- 0.7.45/code49 同步兼容有限历史：旧合并祖先404保留冲突并继续其他页面；本次构建使用提交源码隔离归档，不携带 Material UI 工作树。预览 Android code49 日后发布前需要递增。
+
 - **Material 3 Expressive experiment**: branch `codex/material-3-expressive`; user requested
   preview before further builds on 2026-11-26. Interactive proposal is
   `docs/previews/mojian-material-expressive.html` (desktop/tablet/phone, dark/light, pen settings).

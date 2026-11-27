@@ -294,3 +294,8 @@ then replays without network, clears only settled conflict markers, and retires
 the journal last. Older journals lacking the optional choice fields replay as
 ordinary receives. The complete remote discovery cursor is independent of a
 deferred file's applied checkpoint.
+
+
+## Expired server merge ancestors (0.7.45)
+
+Server history is bounded independently of current path versions and DR. Android and Windows treat an HTTP404 only for the optional old merge ancestor as an unavailable automatic merge: preserve current local/remote bytes as an explicit conflict and continue unrelated dependency groups. An unavailable current remote target, authentication/transport failure or corrupt local recovery still fails its ordinary protected path. Android uses a dedicated blob-missing exception so ordered address fallback does not consume all routes on a confirmed missing historical digest. Do not treat arbitrary I/O errors as permission to merge without a base.

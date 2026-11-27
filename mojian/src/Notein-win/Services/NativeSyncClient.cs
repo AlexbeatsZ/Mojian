@@ -751,7 +751,8 @@ public sealed class NativeSyncClient : IDisposable
         if (!path.EndsWith(".json", StringComparison.Ordinal) || baseHash == null || localHash == null || remoteHash == null) return null;
         var localFile = LocalPath(path);
         if (!File.Exists(localFile) || new FileInfo(localFile).Length > MergeLimit) return null;
-        await Download(baseHash, cancellation).ConfigureAwait(false);
+        try { await Download(baseHash, cancellation).ConfigureAwait(false); }
+        catch (HttpRequestException error) when (error.StatusCode == System.Net.HttpStatusCode.NotFound) { return null; }
         await Download(remoteHash, cancellation).ConfigureAwait(false);
         return await Task.Run(() =>
         {
