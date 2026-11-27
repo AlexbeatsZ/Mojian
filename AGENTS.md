@@ -84,6 +84,15 @@
 
 # Active Work
 
+- **Material 3 Expressive experiment**: branch `codex/material-3-expressive`; user requested
+  preview before further builds on 2026-11-26. Interactive proposal is
+  `docs/previews/mojian-material-expressive.html` (desktop/tablet/phone, dark/light, pen settings).
+  Native Android/Windows edits remain uncommitted and unaccepted; do not release/deploy them
+  before design review. Initial Android compilation passed but lint reported 14 errors
+  (13 existing indentation sites exposed by the new dependency, plus PassiveStatusView
+  AppCompat inheritance); final native checks remain pending. Windows task-specific tests
+  were stopped at the user's request. Read `docs/design/material-expressive.md`.
+
 - 0.7.28 PDF import/inversion awaits physical device acceptance; Android native fixture is compile-only.
 - Windows pen/stability and Android stability/hold-width acceptance remain open; 0.7.20 tablet feel was accepted.
 - Windows physical writing/erasing acceptance remains pending. Current SSH full suite: 328/329,
@@ -195,6 +204,8 @@
   compilation do not establish editability, interoperability, native output or physical latency.
 
 # Docs Index
+
+- `docs/design/material-expressive.md`: experimental Google Material 3 Expressive proposal and review boundary.
 
 - `docs/design/document-history.md`: page edit history, transaction boundaries, metadata/assets, fine zoom.
 - `docs/design/ink-storage-format.md`: stroke/point/outline storage size, Notein (AndroidX Ink) and OneNote (ISF) encodings.

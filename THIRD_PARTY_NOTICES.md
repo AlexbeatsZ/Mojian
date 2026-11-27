@@ -27,3 +27,13 @@ NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPO
 NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Google Material 3 Expressive preview
+
+The interactive proposal in `docs/previews/mojian-material-expressive.html` embeds the
+uncontained loading-indicator demonstration from Material Components for Android 1.14.0:
+https://github.com/material-components/material-components-android/blob/1.14.0/docs/components/assets/loadingindicator/loading-indicator.gif
+
+Copyright Google LLC / The Android Open Source Project. Licensed under the Apache License 2.0;
+see `shared/material/LICENSE-MATERIAL.txt`. The preview requests Roboto and Material Symbols
+Rounded from Google Fonts; no proprietary Google product artwork is included.
