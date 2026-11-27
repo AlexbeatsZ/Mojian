@@ -11,6 +11,13 @@
 
 - 2026-11-26 生命周期服务器0.3.1/core0.3.4已上线，真实DR恢复revision1676/1923项通过；普通升级不复制笔记。客户端0.7.45/code49支持祖先过期保留冲突，Windows37同步、Android348项(0失败/2跳过)、release/lint通过；已发版，部署与离线平板边界见当月日志。
 
+- **macOS 0.2.4 receive-only sync**: user requested current notes while keeping Mac read-only on
+  2026-11-26. GET-only HTTPS receiver, ordered pinned routes, streaming verified downloads, retained
+  recovery, offline journal replay before model load and foreground refresh are implemented.
+  `Documents/Mojian` uses separate `.mojian-sync/macos-readonly` state and private Application Support
+  credentials; never upload/adopt this copy as writable or copy another device's checkpoint.
+  Read `docs/design/macos-readonly-sync.md`. Shared core25 + desktop36 tests pass, including an
+  actual isolated server and offline replay with a fresh receiver. Deployment receipts follow in November log.
 - **0.7.44 (Windows/Android code48)**: the two native clients isolate conflicted page/PDF dependency groups,
   retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
   v0.7.44 prerelease is published with uploaded EXE166187988B and APK17313968B; tag points to ff1630b.
@@ -28,7 +35,8 @@
   Windows EXE deployed to OMEN repo and ROG Programs/Mojian with no running product at replacement.
   v0.7.43 prerelease published with EXE/APK; Mac/OMEN current outputs refreshed. Physical input acceptance stays open.
 - User authorized Mojian deployment and future routine updates on 2026-11-25 without repeated
-  approval. Preserve notes/settings/signers/sync; Mac app deployment and retired iOS stay outside scope.
+  approval. Preserve notes/settings/signers/sync. The 2026-11-26 request separately authorizes the Mac
+  read-only sync update; retired iOS stays outside scope.
 
 - **0.7.42 editor fixes**: one chronological per-page history covers all ink/objects/text/appearance,
   one entry per gesture; undo retains viewport and canonical assets/metadata. Zoom multiply/divide1.05;
@@ -78,8 +86,8 @@
   replay AND repository reload finish. Unmergeable conflicts require per-file manual review; 0.7.43 adds the UI.
 - Global theme/new-page background/print choices are device-local (`settings-memory.md`). Imported
   Notein/OneNote presentation is display-only; preserve source coordinates, outlines and assets.
-- Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac deployment needs its own
-  request. Feather branding remains in shared/branding.
+- Native macOS history: chat `01a18ccf-8616-7ff1-aa48-9654cd0930ae`; Mac receive-only sync/update
+  was requested on 2026-11-26. Feather branding remains in shared/branding.
 - Current output paths: `mojian/artifacts/release/Mojian.exe`,
   `android/artifacts/current/Mojian.apk`. Historical iOS artifacts are not maintained.
   Historical version/deployment details have moved to `docs/log/2026-10.md` and `2026-11.md`.
@@ -238,6 +246,7 @@
 - `docs/design/data-migration.md`: Notein/OneNote backup conversion and native imported assets.
 - `docs/design/sync-architecture.md`: original interoperability/storage investigation.
 - `docs/design/macos-client.md`: AppKit client, canonical store, local-only write boundary.
+- `docs/design/macos-readonly-sync.md`: GET-only Mac receiver, configuration, recovery and foreground lifecycle.
 - `docs/design/ios-client.md`: historical only (iOS retired 2026-11-13).
 - `docs/log/2026-10.md`: completed work, validation and historical entry-state archive.
 - `docs/log/2026-11.md`: November completed work.

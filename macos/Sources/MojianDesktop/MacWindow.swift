@@ -43,6 +43,7 @@ enum RibbonTab: Int, CaseIterable {
     var lastPopoverClose: (String, Date)?
     private var clipboard: (PageDocument, [String: Data], Int)?
     var closeHandler: (() -> Void)?
+    var readOnlySync: ReadOnlySyncController?
 
     init(session: DesktopSession) {
         self.session = session; canvas = NoteCanvas(session: session)
@@ -248,6 +249,19 @@ enum RibbonTab: Int, CaseIterable {
             canvas.rebind(resetViewport: true); refresh(reloadTree: true)
         } catch { showError(error); refresh() }
     }
+    func applyReadOnlySync(_ publish: () throws -> Void) throws {
+        let oldPage = session.page?.id, oldRoot = root?.id
+        canvas.cancelOperation(nil); session.remember(canvas.viewport)
+        do {
+            try publish(); try session.reloadReadOnlyLibrary()
+            root = session.notebook?.allSections.first { $0.id == oldRoot } ?? session.section
+            canvas.rebind(resetViewport: oldPage != session.page?.id); refresh(reloadTree: true)
+        } catch {
+            session.suspendReadOnlyLibrary(); root = nil
+            canvas.rebind(); refresh(reloadTree: true); throw error
+        }
+    }
+    @objc func synchronizeReadOnly(_ sender: Any?) { readOnlySync?.request() }
     func refresh(reloadTree: Bool = false) {
         if let r = root, !(session.notebook?.allSections.contains(where: { $0 === r }) ?? false) { root = nil }
         if root == nil { root = session.section }
@@ -604,7 +618,7 @@ enum RibbonTab: Int, CaseIterable {
         canvas.cancelOperation(nil)
         do { try session.flush(); return true } catch { showError(error); return false }
     }
-    func windowWillClose(_ notification: Notification) { closeHandler?() }
+    func windowWillClose(_ notification: Notification) { readOnlySync?.close(); closeHandler?() }
     func showError(_ error: Error) {
         let alert = NSAlert(error: error)
         if let window, window.isVisible, window.attachedSheet == nil { alert.beginSheetModal(for: window) } else { alert.runModal() }

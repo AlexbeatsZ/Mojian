@@ -2,8 +2,9 @@
 
 Implementation baseline: 2026-10-28. This is an opt-in Windows/Android transport for the
 canonical folder format. The user retired the old Syncthing Mojian libraries on 2026-11-23;
-current client libraries use native sync under `Documents/Mojian`. The Mac client remains
-a read-only copied-library viewer without this transport. iOS/iPadOS is retired. See `sync-server/PROTOCOL.md` for
+current client libraries use native sync under `Documents/Mojian`. Mac 0.2.4 adds a separate
+GET-only receiver for its read-only copy, with private checkpoint/recovery and no uploads; see
+`macos-readonly-sync.md`. iOS/iPadOS is retired. See `sync-server/PROTOCOL.md` for
 the exact v1 wire contract and `sync-server/README.md` for operator setup and isolated tests.
 
 ## Sakura shared ingress (2026-10-28)
@@ -66,8 +67,9 @@ Those records and recovery copies remain; renaming is not conflict resolution. T
 conflict-directory pointer now references the retained `Mojian` root.
 
 Mac already has `/Users/meta/Documents/Mojian`, a read-only copy originally taken from the
-native library, and has no current Syncthing registration. Its current app has no native HTTPS
-client, so it is not an automatically synchronized participant. ROG has neither client folder;
+native library, and has no current Syncthing registration. The 2026-11-26 user-selected receive-only
+extension connects that copy without editing/uploading; its checkpoint is independent of other
+devices. ROG has neither client folder;
 its existing `MojianNativeSync` backend remains running with configuration/data under
 `%LOCALAPPDATA%/MojianServices/.local/native-sync`, with no service or gateway restart.
 

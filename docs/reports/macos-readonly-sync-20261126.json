@@ -1,0 +1,41 @@
+{
+  "revision": 1676,
+  "manifestEntries": 1923,
+  "liveFiles": 1804,
+  "mismatches": 0,
+  "recoveryFiles": 443,
+  "recoveryBytes": 3158123794,
+  "missingRecovery": 0,
+  "notebooks": 4,
+  "indexedPages": 621,
+  "pendingIncoming": false,
+  "installedVersion": "0.2.4",
+  "identifier": "com.meta.mojian.macos",
+  "fixedCertificate": true,
+  "settledPass": {
+    "revision": 1676,
+    "liveFiles": 1804,
+    "changed": 0
+  },
+  "nativeWindowStatus": "笔记已同步 · 只读",
+  "coreTestsPassed": 25,
+  "desktopTestsPassed": 36,
+  "newReceiveTestsPassed": 16,
+  "nativeSmoke": {
+    "diskReload": true,
+    "focusedMenuResponderRoute": true,
+    "mouseEventInk": true,
+    "nativeWindow": true,
+    "pdfBytes": 21098,
+    "readOnlyExternal": true,
+    "undoRedo": true,
+    "viewOnlyBytesUnchanged": true
+  },
+  "freshProcessReopen": {
+    "freshProcess": true,
+    "nativeWindow": true,
+    "strokes": 1,
+    "texts": 1
+  },
+  "windowIsReadOnly": true
+}

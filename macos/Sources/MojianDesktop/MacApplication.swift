@@ -5,8 +5,22 @@ import MojianCore
     private var controllers = [MacWindow]()
     private var welcome: NSWindow?
     private var preferences: PreferencesWindow?
+    private var opening = Set<String>()
     private static var retained: MacApplication?
     public static func run() {
+        if let index = CommandLine.arguments.firstIndex(of: "--readonly-sync-once"), index + 1 < CommandLine.arguments.count {
+            let root = URL(fileURLWithPath: CommandLine.arguments[index + 1]).standardizedFileURL.resolvingSymlinksInPath()
+            Task {
+                do {
+                    guard let configuration = try ReadOnlySyncConfiguration.load(root: root) else { throw MojianError.invalid("未配置只读同步") }
+                    let engine = try ReadOnlySync(root: root, configuration: configuration)
+                    let result = try await engine.synchronize(progress: { text in print(text) })
+                    print(String(data: try JSONEncoder().encode(result), encoding: .utf8)!)
+                    exit(0)
+                } catch { fputs("只读同步失败：\(error.localizedDescription)\n", stderr); exit(1) }
+            }
+            RunLoop.main.run(); return
+        }
         let application = NSApplication.shared
         let delegate = MacApplication(); retained = delegate
         application.delegate = delegate; application.setActivationPolicy(.regular); application.run()
@@ -41,9 +55,41 @@ import MojianCore
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { if let first = controllers.first { first.showWindow(nil) } else { showWelcome() } }; return true
     }
+    public func applicationDidBecomeActive(_ notification: Notification) { for controller in controllers { controller.readOnlySync?.request() } }
+    public func applicationDidResignActive(_ notification: Notification) { for controller in controllers { controller.readOnlySync?.pause() } }
     private var active: MacWindow? { controllers.first { $0.window?.isKeyWindow == true } ?? controllers.last }
     func open(_ url: URL, create: Bool = false, writable: Bool = false, preferences: UserDefaults = .standard) throws {
         if let existing = controllers.first(where: { $0.session.store.root == url.standardizedFileURL.resolvingSymlinksInPath() }) { existing.showWindow(nil); return }
+        let configuration = !create && !writable && preferences === UserDefaults.standard ? try ReadOnlySyncConfiguration.load(root: url) : nil
+        if !create, !writable, configuration == nil,
+           FileManager.default.fileExists(atPath: url.appendingPathComponent(".mojian-sync/macos-readonly/incoming.json").path) {
+            throw MojianError.invalid("只读同步尚有恢复记录，请恢复原同步配置后重新打开")
+        }
+        if let configuration {
+            let key = url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard opening.insert(key).inserted else { return }
+            let engine: ReadOnlySync
+            do { engine = try ReadOnlySync(root: url, configuration: configuration) }
+            catch { opening.remove(key); throw error }
+            Task {
+                defer { opening.remove(key) }
+                do {
+                    // No model may load a partially published batch, including when offline.
+                    _ = try await engine.recover()
+                    let controller = try openLocal(url, create: false, writable: false, preferences: preferences)
+                    if configuration.enabled {
+                        let receiver = ReadOnlySyncController(window: controller, engine: engine)
+                        controller.readOnlySync = receiver
+                        controller.session.syncStatus = "正在检查笔记更新 · 只读"
+                        controller.refresh(); receiver.request()
+                    } else { controller.session.syncStatus = "只读同步已暂停"; controller.refresh() }
+                } catch { NSAlert(error: error).runModal(); showWelcome() }
+            }
+            return
+        }
+        _ = try openLocal(url, create: create, writable: writable, preferences: preferences)
+    }
+    @discardableResult private func openLocal(_ url: URL, create: Bool, writable: Bool, preferences: UserDefaults) throws -> MacWindow {
         let store = try CanonicalStore(root: url, create: create, writable: writable)
         let session = try DesktopSession(store: store, preferences: preferences)
         let controller = MacWindow(session: session)
@@ -52,6 +98,7 @@ import MojianCore
         welcome?.close(); welcome = nil
         controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         if preferences === UserDefaults.standard { preferences.set(url.path, forKey: "lastWorkspace") }
+        return controller
     }
     private func showWelcome() {
         if let welcome { welcome.makeKeyAndOrderFront(nil); return }
@@ -86,7 +133,7 @@ import MojianCore
     }
     @objc func showAbout(_ sender: Any?) {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0"
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "墨笺 Mojian", .applicationVersion: "macOS \(version)", .credits: NSAttributedString(string: "原生 AppKit 客户端 · 与 Windows/Android 同一界面语言\nHTTPS 同步仍在开发中。")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "墨笺 Mojian", .applicationVersion: "macOS \(version)", .credits: NSAttributedString(string: "原生 AppKit 客户端 · 与 Windows/Android 同一界面语言\n支持 HTTPS 只读接收同步。")])
     }
     @objc func showPreferences(_ sender: Any?) {
         if preferences == nil {
@@ -121,6 +168,7 @@ import MojianCore
         add(file, "重命名页面…", #selector(MacWindow.renamePage(_:)))
         add(file, "删除页面…", #selector(MacWindow.deleteCurrentPage(_:)))
         add(file, "保存", #selector(MacWindow.saveNow(_:)), "s")
+        add(file, "立即同步只读笔记", #selector(MacWindow.synchronizeReadOnly(_:)))
         file.addItem(.separator()); add(file, "导入笔记本 (.mjn)…", #selector(MacWindow.importNotebook(_:)))
         add(file, "导出笔记本 (.mjn)…", #selector(MacWindow.exportNotebook(_:)))
         add(file, "导出当前页 PDF…", #selector(MacWindow.exportPDF(_:)), "e")

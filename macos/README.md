@@ -20,14 +20,22 @@ Open `macos/Package.swift` in Xcode for native debugging. The scripts use existi
 and project-local ZIPFoundation 0.9.19; they do not install or switch system tools.
 Build intermediates go to `/tmp/.agents/mojian-macos-client/build`. The sole current `.app`
 and distributable ZIP are in `macos/artifacts/current`. The original supplied ICNS is copied unchanged.
-The bundle is ad-hoc signed; it has no Developer ID notarization or Intel build.
+The bundle uses the fixed `Local Development Code Signing` certificate and identifier
+`com.meta.mojian.macos`; packaging checks that its designated requirement contains `certificate leaf`.
+It has no Developer ID notarization or Intel build. The build script reexecutes as arm64 when the
+calling terminal runs under Rosetta, so XCTest loads the correct architecture.
 
 ## First launch and data
 
 The welcome window asks to create a local library in an empty folder or open an existing library.
 No sample library is created at an inferred Documents path. Mac-created libraries retain a local
 marker and an advisory writer lock. Existing external Windows/Android/native-sync libraries open
-read-only. HTTPS synchronization is not implemented in this baseline.
+read-only. Version 0.2.4 supports explicitly configured HTTPS receive-only synchronization for an
+external copy. It never uploads or enables editing. Opening the app, returning to the foreground,
+the 30-second foreground timer and File → 立即同步只读笔记 request updates. An interrupted incoming
+batch replays offline before notes load; replaced/deleted files remain in private recovery storage.
+See `../docs/design/macos-readonly-sync.md` for configuration and recovery details. A configured
+library can also receive once with `Mojian.app/Contents/MacOS/Mojian --readonly-sync-once <library>`.
 
 The local folder is canonical v2: `library.json`, `notebooks/<id>/pages/<id>.json`, and page-owned
 assets. Read/edit/write retains unknown JSON fields. Atomic writes retain one valid `.previous`.
@@ -62,7 +70,7 @@ page pane, then the paper. Icons are the same Fluent vectors as Windows/Android,
 
 ## Remaining parity
 
-Native HTTPS sync/adoption and writable external workspaces; move/copy/merge/ordering of
+Writable native HTTPS sync/adoption and writable external workspaces; move/copy/merge/ordering of
 notebooks, sections and pages; independent split slots; tags; advanced rich-text/tables/attachments/link UI;
 PDF page import, PNG/SVG/selection output; complete print scope/range/image controls and restored choices;
 source-layer controls; imported screenshot contrast heuristics; pen hold recognition/pressure eraser

@@ -2,7 +2,7 @@
 
 ## Scope and platform boundary
 
-Native AppKit desktop client, version 0.2.0, Apple Silicon arm64, deployment target macOS 13.
+Native AppKit desktop client, version 0.2.4, Apple Silicon arm64, deployment target macOS 13.
 Reuse `MojianCore` JSON/geometry/InkPath/archive/output algorithms. Native menus, NSWindow,
 NSToolbar, NSTableView, NSPopover/NSMenu and NSView event routing remain macOS-owned.
 Do not use the simulator, Catalyst or old iOS output as a desktop deliverable.
@@ -23,7 +23,9 @@ reads do not repair source bytes, and a later write never rotates corrupt bytes 
 
 First launch requires an explicit empty-folder create or existing-folder open. Only libraries
 created by this Mac client are writable. External folders are read-only; native-sync/Syncthing
-markers prohibit local writing. No sync credentials, daemon, server calls or adopted clones.
+markers prohibit local writing. Version 0.2.4 adds an explicitly configured, GET-only HTTPS
+receiver for external read-only copies; see `macos-readonly-sync.md`. Writable adoption and uploads
+remain unsupported. Private per-library credentials live in Application Support, outside notes.
 Opening read-only must not create a lock, settings, notebooks, recovery files or directories.
 
 Writable local folders use an advisory OS lock. Safe relative IDs and symlink rejection protect
@@ -95,7 +97,7 @@ Editable archive import stages validation in a disposable folder before publishi
 notebook with remapped IDs. Export adapts only hierarchy appearance into the existing exchange
 manifest and keeps canonical native page content/assets. Native PDF output renders physical sheets;
 A4 uses current 32-unit gaps, boundless/legacy output includes negative coordinates. System printing
-uses PDFKit. Full export scopes/ranges, native-sync transport, layer UI, split slots, advanced rich
+uses PDFKit. Full export scopes/ranges, writable native-sync transport, layer UI, split slots, advanced rich
 text/table/attachment/PDF authoring and physical stylus validation remain parity work.
 
 ## Verification

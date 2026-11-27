@@ -32,12 +32,15 @@ import MojianCore
     private var generation = 0
     private var completionEpoch = 0
     private var libraryDirty = false
+    var syncStatus: String?
+    var syncRevision: Int64?
     var canEdit: Bool { !store.readOnly && page != nil }
     var canUndo: Bool { page.map { !(histories[$0.id]?.0.isEmpty ?? true) } ?? false }
     var canRedo: Bool { page.map { !(histories[$0.id]?.1.isEmpty ?? true) } ?? false }
     var status: String {
         if let saveError { return "保存失败：\(saveError.localizedDescription)" }
         if dirty { return "正在保存…" }
+        if let syncStatus { return syncStatus }
         if store.readOnly { return "外部笔记库 · 只读" }
         return store.recoveredFiles.isEmpty ? "已保存在本机" : "已从上一修订恢复 · 原文件保留"
     }
@@ -65,6 +68,24 @@ import MojianCore
         if let n = notebook, let p = page { document = try store.loadPage(notebook: n.id, page: p.id) }
     }
     var displayPage: Page? { page.map { AppearanceBridge.display($0, dark: dark) } }
+    func reloadReadOnlyLibrary() throws {
+        guard store.readOnly else { throw MojianError.invalid("只读同步不能更新可编辑笔记库") }
+        let selectedPage = page?.id, selectedNotebook = notebook?.id, selectedSection = section?.id
+        let loaded = try store.loadLibrary()
+        let n = loaded.first(where: { $0.pages.contains { $0.id == selectedPage } })
+            ?? loaded.first(where: { $0.id == selectedNotebook }) ?? loaded.first
+        let s = n?.allSections.first(where: { $0.pages.contains { $0.id == selectedPage } })
+            ?? n?.allSections.first(where: { $0.id == selectedSection }) ?? n?.allSections.first
+        let p = s?.pages.first(where: { $0.id == selectedPage }) ?? s?.pages.first
+        let d = try p.flatMap { p in try n.map { try store.loadPage(notebook: $0.id, page: p.id) } }
+        notebooks = loaded; notebook = n; section = s; page = p; document = d
+        histories.removeAll(); savePreferences()
+    }
+    func suspendReadOnlyLibrary() {
+        guard store.readOnly else { return }
+        notebooks = []; notebook = nil; section = nil; page = nil; document = nil
+        histories.removeAll()
+    }
     func savePreferences() {
         preferences.set(try? JSONEncoder().encode(settings), forKey: "drawing")
         preferences.set(dark, forKey: "darkPages"); preferences.set(defaultBackground, forKey: "defaultBackground")

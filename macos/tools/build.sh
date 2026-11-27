@@ -1,5 +1,9 @@
 #!/bin/bash
 set -euo pipefail
+# The desktop tool may itself run under Rosetta; XCTest must use the bundle's arm64 architecture.
+if [[ "$(uname -m)" != "arm64" ]]; then
+    exec arch -arm64 /bin/bash "$0" "$@"
+fi
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 SCRATCH="${MOJIAN_MAC_BUILD_ROOT:-/tmp/.agents/mojian-macos-client/build}"
 MODE="${1:-build}"
@@ -22,8 +26,14 @@ cp "$ROOT/macos/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/shared/branding/Mojian_macOS.icns" "$APP/Contents/Resources/Mojian.icns"
 for RESOURCE in "$BIN"/*.bundle; do cp -R "$RESOURCE" "$APP/Contents/Resources/"; done
 cp "$ROOT/shared/swift/THIRD_PARTY_NOTICES.md" "$APP/Contents/Resources/THIRD_PARTY_NOTICES.md"
-codesign --force --sign - "$APP"
+codesign --force --sign "Local Development Code Signing" --identifier "com.meta.mojian.macos" "$APP"
 codesign --verify --deep --strict "$APP"
+REQUIREMENT="$(codesign -d -r- "$APP" 2>&1)"
+if [[ "$REQUIREMENT" != *"certificate leaf"* ]]; then
+    echo "The Mojian signature must bind the fixed local certificate." >&2
+    exit 1
+fi
+echo "$REQUIREMENT"
 plutil -lint "$APP/Contents/Info.plist"
 if [[ -d "$OUT/Mojian.app" ]] && pgrep -if "$OUT/Mojian.app/Contents/MacOS/Mojian" >/dev/null; then
     echo "The current Mojian.app is running; close it normally before replacing the deliverable." >&2
