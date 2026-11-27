@@ -7,9 +7,9 @@ export { prefix, validPath } from './protocol.mjs';
 
 // Mojian owns its wire namespace and allowed notebook paths. Persistence, blobs,
 // exact-version commits and durable replay are owned by the pinned shared core.
-export function createSyncServer({ root, token, maxBlobBytes = 1024 * 1024 * 1024 }) {
+export function createSyncServer({ root, token, maxBlobBytes = 1024 * 1024 * 1024, lifecycle, maintenanceActions }) {
   return createFileSyncServer({
-    root, token, maxBlobBytes, routePrefix: prefix, validPath, validateManifest,
+    root, token, maxBlobBytes, routePrefix: prefix, validPath, validateManifest, lifecycle, maintenanceActions,
     validateToken(value) {
       if (typeof value !== 'string' || Buffer.byteLength(value) < 32 || /[\r\n]/.test(value)) {
         throw new Error('MOJIAN_SYNC_TOKEN must contain at least 32 bytes');

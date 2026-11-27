@@ -194,3 +194,25 @@ ingress, and production-size library performance are outside that evidence.
 
 These tests do not constitute real Windows UI, Android, public HTTPS, proxy or
 physical-device acceptance. No deployment is performed by test commands.
+
+
+## 服务器生命周期管理
+
+正式状态、同步历史、DR 与升级回滚分别管理，完整策略见 `docs/design/server-data-lifecycle.md`。顶层 `backup` 是灾难恢复轮换（默认 04:00、7 日/4 周/3 月、压缩验证、20 GiB）；历史最多 100 份且 30 天，GC 每 24 小时，上传宽限 24 小时。配置省略时采用默认值，保留原 dataRoot/dataDir 和 token。备份默认放在 `<正式数据根>-backups`，升级回滚放 `<正式数据根>-upgrades`；两者不可与正式数据嵌套。压缩对象独立存储，无变化不重复创建快照；超限不能清理最新/手动点时记录失败并告警。
+
+```
+node admin.mjs CONFIG status
+node admin.mjs CONFIG cleanup                 # dry-run
+node admin.mjs CONFIG backup                  # dry-run
+node admin.mjs CONFIG backup --apply
+node admin.mjs CONFIG cleanup --apply
+node admin.mjs CONFIG backup-list
+node admin.mjs CONFIG restore ID --destination NEW_EMPTY_DIRECTORY
+node admin.mjs CONFIG upgrade-prepare --current PROGRAM_DIRECTORY
+node admin.mjs CONFIG upgrade-verified UPGRADE_DIRECTORY
+node admin.mjs CONFIG upgrade-prune           # dry-run；--apply 才实际删除
+```
+
+普通代码更新：先通过原任务停止并确认唯一写入者退出，再运行 upgrade-prepare（只复制旧程序和私有配置），替换代码并用原任务启动。通过 manifest 身份/当前版本、核心 API 和数据验证后标记 upgrade-verified，自动保留最近 1 份且最多 7 天；过期后最后一份也删除。只有确实迁移数据时使用 `--migration schema|format|full`，不把例行程序更新当数据迁移。回退只恢复旧程序/必要配置，保留后来已确认写入。
+
+恢复先到新目录完成完整性验证，确认身份、数据版本和以后写入范围后再停服务并按事故恢复操作切换；不覆盖当前数据试验。清理与提交共用队列，保护活跃传输和分页快照，最近上传宽限保留。过期增量返回 410，客户端改读当前全清单；旧 CAS 不能覆盖较新数据。同步冲突和客户端正式笔记不是缓存。

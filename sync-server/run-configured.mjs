@@ -15,7 +15,13 @@ export async function startConfigured(configPath) {
   if (typeof configuration.dataRoot !== 'string' || !configuration.dataRoot) {
     throw new Error('A dedicated data directory is required');
   }
-  const service = await createSyncServer({ root: configuration.dataRoot, token: configuration.token });
+  let configured;
+  const service = await createSyncServer({ root: configuration.dataRoot, token: configuration.token,
+    maintenanceActions: { shutdown: async dryRun => {
+      if (!dryRun) setTimeout(() => void configured.close().catch(() => { process.exitCode = 1; }), 50);
+      return { accepted: !dryRun, dryRun };
+    } },
+    lifecycle: { backup: configuration.backup, history: configuration.history, garbageCollection: configuration.garbageCollection } });
   let direct;
   try {
     await new Promise((resolve, reject) => {
@@ -28,7 +34,7 @@ export async function startConfigured(configPath) {
     throw error;
   }
   let closing;
-  return {
+  configured = {
     ...service, direct,
     close: () => closing ??= (async () => {
       // The TLS listener delegates into the same core. Drain it before releasing
@@ -39,6 +45,7 @@ export async function startConfigured(configPath) {
       await service.close();
     })(),
   };
+  return configured;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

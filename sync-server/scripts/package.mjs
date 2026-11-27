@@ -7,7 +7,7 @@ import { zipSync } from 'fflate';
 const source = fileURLToPath(new URL('../', import.meta.url));
 const repository = path.resolve(source, '..');
 const runtimeFiles = [
-  'server.mjs', 'protocol.mjs', 'run-configured.mjs', 'direct-tls.mjs',
+  'server.mjs', 'admin.mjs', 'protocol.mjs', 'run-configured.mjs', 'direct-tls.mjs',
   'gateway-route.mjs', 'shared-gateway.mjs', 'package.json', 'server.example.json',
   'README.md', 'PROTOCOL.md', 'LICENSE',
 ];

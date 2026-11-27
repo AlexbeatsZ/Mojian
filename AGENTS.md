@@ -237,3 +237,5 @@
 - `docs/design/ios-client.md`: historical only (iOS retired 2026-11-13).
 - `docs/log/2026-10.md`: completed work, validation and historical entry-state archive.
 - `docs/log/2026-11.md`: November completed work.
+
+- 服务器数据生命周期：`docs/design/server-data-lifecycle.md`；正式数据、历史、DR 与升级回滚独立，普通升级不复制数据。新服务器版本的部署结果以当月日志为准。

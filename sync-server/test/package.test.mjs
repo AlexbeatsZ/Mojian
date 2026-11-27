@@ -50,12 +50,12 @@ test('standalone ZIP runs outside the checkout and preserves old-server receipt 
     assert.ok(!names.some(name => name !== sharedContract && /(^|\/)(test|tests|artifacts|\.local|fflate)(\/|$)/.test(name)));
     assert.equal(names.filter(name => name.endsWith('package.json') && name.startsWith('node_modules/')).length, 1);
     const info = JSON.parse(await readFile(path.join(runtime, 'BUILD-INFO.json'), 'utf8'));
-    assert.equal(info.version, '0.2.0');
+    assert.equal(info.version, packaged.buildInfo.version);
     assert.equal(info.core.version, packaged.buildInfo.core.version);
     assert.match(info.sourceRevision, /^[a-f0-9]{40}$/);
     assert.equal(
       execFileSync(process.execPath, [path.join(runtime, 'run-configured.mjs'), '--version'], { cwd: directory, encoding: 'utf8' }).trim(),
-      'Mojian Sync Server 0.2.0',
+      `Mojian Sync Server ${packaged.buildInfo.version}`,
     );
     const fixture = JSON.parse(await readFile(new URL('./fixtures/v1-wire.json', import.meta.url), 'utf8'));
     const data = path.join(directory, 'existing-data');
