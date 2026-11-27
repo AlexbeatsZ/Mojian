@@ -9,6 +9,8 @@
 
 # Current State
 
+- 2026-11-26 生命周期服务器0.3.1/core0.3.4已上线，真实DR恢复revision1676/1923项通过；普通升级不复制笔记。客户端0.7.45/code49支持祖先过期保留冲突，Windows37同步、Android348项(0失败/2跳过)、release/lint通过；已发版，部署与离线平板边界见当月日志。
+
 - **0.7.44 (Windows/Android code48)**: the two native clients isolate conflicted page/PDF dependency groups,
   retain reviewed choices across offline restart, and negotiate paged discovery and resumable transfers.
   v0.7.44 prerelease is published with uploaded EXE166187988B and APK17313968B; tag points to ff1630b.
