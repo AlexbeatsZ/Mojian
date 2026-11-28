@@ -57,7 +57,10 @@ test('standalone ZIP runs outside the checkout and preserves old-server receipt 
       execFileSync(process.execPath, [path.join(runtime, 'run-configured.mjs'), '--version'], { cwd: directory, encoding: 'utf8' }).trim(),
       `Mojian Sync Server ${packaged.buildInfo.version}`,
     );
-    const fixture = JSON.parse(await readFile(new URL('./fixtures/v1-wire.json', import.meta.url), 'utf8'));
+    // The captured state predates the folder library: its receipts name the v2 path, which stays valid for replay.
+    const legacyPath = 'notebooks/wirebook/pages/wirepage.json';
+    const fixture = JSON.parse((await readFile(new URL('./fixtures/v1-wire.json', import.meta.url), 'utf8'))
+      .replaceAll('线上本/分区/wirepage.mojian', legacyPath));
     const data = path.join(directory, 'existing-data');
     await mkdir(data);
     // Captured from the original dc63bcea server with the shared synthetic wire fixture.
