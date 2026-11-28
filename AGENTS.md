@@ -9,6 +9,8 @@
 
 # Current State
 
+- 2026-11-28 文件夹库 v3 已上线：服务器 rev2076 为 v3（无活跃 v2 路径，迁移前 DR 快照 rev2075）。Windows/Android 0.8.0/code50、macOS 0.3.0 已发布；OMEN/ROG EXE 原位替换，平板/K70 已装，平板与 Mac 已完成首次接收并显示文件夹层级。OMEN 未上传页作为冲突副本在 `Chemistry/未归档页面`。读 `docs/design/folder-library.md`。
+
 - 2026-11-26 生命周期服务器0.3.1/core0.3.4已上线，真实DR恢复revision1676/1923项通过；普通升级不复制笔记。客户端0.7.45/code49支持祖先过期保留冲突，Windows37同步、Android348项(0失败/2跳过)、release/lint通过；已发版，部署与离线平板边界见当月日志。
 
 - **macOS 0.2.4 receive-only sync**: user requested current notes while keeping Mac read-only on
@@ -94,6 +96,8 @@
   Historical version/deployment details have moved to `docs/log/2026-10.md` and `2026-11.md`.
 
 # Active Work
+
+- v3 上线遗留：OMEN/ROG 0.8.0 尚未打开实测；K70 解锁后首次接收未确认；Mac 检查点校验修复缺自动化回归测试；Windows 全量 331/332（仅基线 HandPan 失败）。
 
 - 0.7.45/code49 同步兼容有限历史：旧合并祖先404保留冲突并继续其他页面；本次构建使用提交源码隔离归档，不携带 Material UI 工作树。预览 Android code49 日后发布前需要递增。
 
