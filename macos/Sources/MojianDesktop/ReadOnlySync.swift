@@ -69,7 +69,7 @@ actor ReadOnlySync {
             if fm.fileExists(atPath: file.path) {
                 let loaded = try JSONDecoder().decode(ReadOnlySyncState.self, from: Data(contentsOf: file))
                 guard loaded.endpoint == configuration.endpoint else { throw MojianError.invalid("只读同步检查点地址不符") }
-                try loaded.manifest.validate(expectedWorkspace: configuration.workspaceId, previous: nil)
+                try loaded.manifest.validate(expectedWorkspace: configuration.workspaceId, previous: nil, checkpoint: true)
                 state = loaded
             }
         } catch { flock(opened, LOCK_UN); Darwin.close(opened); descriptor = -1; throw error }

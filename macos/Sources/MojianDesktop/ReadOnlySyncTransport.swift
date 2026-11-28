@@ -68,7 +68,8 @@ struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
     var workspaceId: String
     var revision: Int64
     var files: [String: ReadOnlySyncEntry]
-    func validate(expectedWorkspace: String, previous: Self?) throws {
+    /// `checkpoint`: a manifest this device stored earlier; it may predate the folder library, so it need not hold folders.
+    func validate(expectedWorkspace: String, previous: Self?, checkpoint: Bool = false) throws {
         guard workspaceId == expectedWorkspace, previous == nil || previous?.workspaceId == workspaceId else {
             throw MojianError.invalid("同步服务器的笔记库身份不符，已停止接收")
         }
@@ -97,7 +98,7 @@ struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
             }
         }
         // A manifest without any notebook folder would empty the library.
-        guard files.contains(where: { $0.value.directory == true && !$0.key.contains("/") && !$0.key.hasPrefix(".") }) else {
+        guard checkpoint || files.contains(where: { $0.value.directory == true && !$0.key.contains("/") && !$0.key.hasPrefix(".") }) else {
             throw MojianError.invalid("同步清单缺少笔记本文件夹")
         }
     }
