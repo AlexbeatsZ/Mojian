@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Migrate the live server library from v2 to the v3 folder library in one atomic commit.
 // The server manifest is authoritative: a local v2 replica is reused only where its bytes match the manifest.
-// Usage: node migrate-server.mjs --config <sync-config.json> --address <url> --work <empty dir> [--replica <v2 root>] [--apply]
+// Usage: node migrate-server.mjs --config <sync-config.json> --address <url> --work <empty dir> [--replica <v2 root>] [--conflicts <json>] [--apply]
+// --conflicts lists local edits that never reached the server: [{"path":"<v2 path>","file":"<local file>"}]. Each is placed
+// next to its v2 path as <name>.sync-conflict-YYYYMMDD-HHMMSS.json (Syncthing naming, local file mtime in UTC), so the
+// conversion keeps it as a 冲突副本 page in the notebook's 未归档页面 section.
 // Without --apply it builds, converts and verifies, then prints what the commit would contain.
 import { createHash, randomUUID, X509Certificate } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -74,6 +77,18 @@ for (const [name, entry] of live) {
   await fs.writeFile(target, bytes); downloaded++;
 }
 console.log(JSON.stringify({ reused, downloaded }));
+
+const conflicts = args.conflicts ? JSON.parse(await fs.readFile(args.conflicts, 'utf8')) : [];
+for (const { path: name, file } of conflicts) {
+  if (!legacy.test(name) || !name.endsWith('.json') || !manifest.files[name]?.hash) throw new Error(`conflict target is not a live v2 page: ${name}`);
+  const bytes = await fs.readFile(file);
+  if (sha256(bytes) === manifest.files[name].hash) { console.log(JSON.stringify({ conflictSkipped: name, reason: 'identical to server' })); continue; }
+  JSON.parse(bytes.toString('utf8')); // a conflict copy must be a readable page
+  const stamp = (await fs.stat(file)).mtime.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const copy = `${name.slice(0, -'.json'.length)}.sync-conflict-${stamp}.json`;
+  await fs.writeFile(path.join(v2, copy), bytes);
+  console.log(JSON.stringify({ conflict: copy, sha256: sha256(bytes) }));
+}
 
 const v3 = path.join(work, 'v3');
 const report = await convert(v2, v3);

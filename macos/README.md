@@ -30,7 +30,7 @@ calling terminal runs under Rosetta, so XCTest loads the correct architecture.
 The welcome window asks to create a local library in an empty folder or open an existing library.
 No sample library is created at an inferred Documents path. Mac-created libraries retain a local
 marker and an advisory writer lock. Existing external Windows/Android/native-sync libraries open
-read-only. Version 0.2.4 supports explicitly configured HTTPS receive-only synchronization for an
+read-only. Version 0.3.0 reads the v3 folder library and supports explicitly configured HTTPS receive-only synchronization for an
 external copy. It never uploads or enables editing. Opening the app, returning to the foreground,
 the 30-second foreground timer and File → 立即同步只读笔记 request updates. An interrupted incoming
 batch replays offline before notes load; replaced/deleted files remain in private recovery storage.

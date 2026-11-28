@@ -72,9 +72,12 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         // Unrecoverable: no previous version to fall back to.
         var previous = Path.Combine(temp.Path, FolderNames.HiddenRoot, "previous", Path.GetRelativePath(temp.Path, path) + ".previous");
         if (File.Exists(previous)) File.Delete(previous);
+        var intactPage = File.ReadAllBytes(path);
         File.WriteAllText(path, "{damaged");
         for (var i = 0; i < 2; i++) Assert.Throws<InvalidDataException>(() => store.LoadPage(notebook.Id, page.Id));
         Assert.Equal("{damaged", File.ReadAllText(path));
+        // A head that cannot be read and has no previous version carries no id, so the descriptor case below uses the intact page.
+        File.WriteAllBytes(path, intactPage);
 
         var descriptor = FolderLibraryFixture.Descriptor(temp.Path);
         var intact = File.ReadAllText(descriptor);

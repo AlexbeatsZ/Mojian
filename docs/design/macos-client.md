@@ -2,7 +2,7 @@
 
 ## Scope and platform boundary
 
-Native AppKit desktop client, version 0.2.4, Apple Silicon arm64, deployment target macOS 13.
+Native AppKit desktop client, version 0.3.0, Apple Silicon arm64, deployment target macOS 13.
 Reuse `MojianCore` JSON/geometry/InkPath/archive/output algorithms. Native menus, NSWindow,
 NSToolbar, NSTableView, NSPopover/NSMenu and NSView event routing remain macOS-owned.
 Do not use the simulator, Catalyst or old iOS output as a desktop deliverable.
@@ -24,7 +24,7 @@ reads do not repair source bytes, and a later write never rotates corrupt bytes 
 First launch requires an explicit empty-folder create or existing-folder open. Only libraries
 created by this Mac client are writable. External folders are read-only; native-sync/Syncthing
 markers prohibit local writing. Version 0.2.4 adds an explicitly configured, GET-only HTTPS
-receiver for external read-only copies; see `macos-readonly-sync.md`. Writable adoption and uploads
+receiver for external read-only copies; see `macos-readonly-sync.md`. Version 0.3.0 reads and receives the v3 folder library (`folder-library.md`). Writable adoption and uploads
 remain unsupported. Private per-library credentials live in Application Support, outside notes.
 Opening read-only must not create a lock, settings, notebooks, recovery files or directories.
 
