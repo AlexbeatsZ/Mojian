@@ -9,12 +9,13 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>Mojian</AssemblyName>
     <Product>Mojian</Product>
-    <Version>0.7.45</Version>
+    <Version>0.8.0-material.1</Version>
     <ApplicationIcon>Assets\mojian.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Assets\mojian.png" />
+    <Resource Include="../../../shared/material/fonts/*.ttf" Link="Assets/Fonts/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../../shared/fountain-v2.json" LogicalName="Mojian.FountainV2.json" />
     <EmbeddedResource Include="../../../shared/page-backgrounds.json" LogicalName="Mojian.PageBackgrounds.json" />
     <EmbeddedResource Include="../../../shared/pen-style-presets.json" LogicalName="Mojian.PenStylePresets.json" />

@@ -1,7 +1,8 @@
 package com.meta.inklab
 
 import android.app.Activity
-import android.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.loadingindicator.LoadingIndicator
 import android.app.Dialog
 import android.annotation.SuppressLint
 import android.content.ClipData
@@ -229,6 +230,8 @@ class MainActivity : Activity() {
     private val pageLoads = LatestPageLoader<PageSessionKey?, LoadedCanvasPage>(pageLoadExecutor) { task -> mainHandler.post(task) }
     private var pageLoadingOverlay: FrameLayout? = null
     private var pageLoadingProgress: View? = null
+    private lateinit var workspaceChrome: MaterialWorkspaceLayout
+    private lateinit var materialTabRow: LinearLayout
     private var pageLoadingFailure: View? = null
     private val pageLoadingFeedback = PageLoadingFeedback(
         schedule = { delay, task -> mainHandler.postDelayed(task, delay) },
@@ -740,7 +743,7 @@ class MainActivity : Activity() {
     }
 
     private fun showSyncOptions() {
-        AlertDialog.Builder(this).setTitle("笔记同步")
+        MaterialAlertDialogBuilder(this).setTitle("笔记同步")
             .setItems(arrayOf("原生 HTTPS 同步（独立副本）", "打开笔记文件夹", "现有 Syncthing 共享文件夹")) { _, index ->
                 when (index) { 0 -> showNativeSyncOptions(); 1 -> openWorkspaceFolderPicker(); else -> showLegacySyncOptions() }
             }.setNegativeButton("取消", null).show()
@@ -830,7 +833,7 @@ class MainActivity : Activity() {
                 addView(TextView(this@MainActivity).apply {
                     text = entry.label
                     setTextColor(entry.mark.color)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     gravity = Gravity.CENTER_VERTICAL
@@ -912,11 +915,11 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(22), dp(6), dp(22), dp(4))
                     SyncConflictReview.summaryText(entry.item.summary).takeIf(String::isNotEmpty)?.let { summary ->
-                        addView(TextView(this@MainActivity).apply { text = summary; setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, 0, 0, dp(6)) })
+                        addView(TextView(this@MainActivity).apply { text = summary; setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f); setPadding(0, 0, 0, dp(6)) })
                     }
                     changes.forEach { addView(conflictChangeRow(this@MainActivity, it)) }
                 }
-                val dialog = AlertDialog.Builder(this)
+                val dialog = MaterialAlertDialogBuilder(this)
                     .setTitle("${entry.mark.letter}  ${entry.label}")
                     .setView(ScrollView(this).apply { addView(list) })
                     .setPositiveButton("保留本机") { _, _ -> resolveConflict(entry, NativeSyncChoice.LOCAL) }
@@ -939,7 +942,7 @@ class MainActivity : Activity() {
             return
         }
         if (choice == NativeSyncChoice.REMOTE && (discarded > 0 || deletes) && !confirmed) {
-            AlertDialog.Builder(this).setMessage(if (deletes) "删除「${entry.label}」？" else "移除本机独有的 $discarded 项？")
+            MaterialAlertDialogBuilder(this).setMessage(if (deletes) "删除「${entry.label}」？" else "移除本机独有的 $discarded 项？")
                 .setPositiveButton("采用服务器") { _, _ -> resolveConflict(entry, choice, confirmed = true) }
                 .setNegativeButton("取消", null).show()
             return
@@ -962,7 +965,7 @@ class MainActivity : Activity() {
             WorkspaceSyncOptionsDialog(this, pageContentRepository.root, nativeSyncStatus) { configuration, destination ->
                 if (!saveBoundPageSession() || !persistWorkspacePreferences()) return@WorkspaceSyncOptionsDialog
                 val source = pageContentRepository.root
-                val progress = AlertDialog.Builder(this).setMessage(if (destination == null) "正在保存同步设置…" else "正在创建独立同步副本，原笔记保持不变…")
+                val progress = MaterialAlertDialogBuilder(this).setMessage(if (destination == null) "正在保存同步设置…" else "正在创建独立同步副本，原笔记保持不变…")
                     .setCancelable(false).create()
                 progress.show()
                 nativeSyncController.pause()
@@ -994,7 +997,7 @@ class MainActivity : Activity() {
     }
 
     private fun showLegacySyncOptions() {
-        AlertDialog.Builder(this).setTitle("Syncthing 共享笔记库")
+        MaterialAlertDialogBuilder(this).setTitle("Syncthing 共享笔记库")
             .setMessage("通过系统文件夹选择器打开 Syncthing 同步的笔记文件夹。同一本笔记请轮流编辑，切换设备前等待同步完成。不要在同一文件夹启用原生同步。")
             .setNeutralButton("文件夹权限") { _,_->openSharedStoragePermission() }
             .setNegativeButton("重新加载") { _,_->refreshSharedWorkspace(true) }
@@ -1025,7 +1028,7 @@ class MainActivity : Activity() {
         runCatching {
             check(!workspaceLoaded || saveBoundPageSession()) { "笔记未保存，无法切换笔记库" }
             if (!hasSharedStorageAccess()) {
-                AlertDialog.Builder(this).setTitle("允许访问笔记文件夹")
+                MaterialAlertDialogBuilder(this).setTitle("允许访问笔记文件夹")
                     .setMessage("墨笺需要 Android 11 或更高版本的所有文件访问权限，以直接编辑所选本地文件夹并安全同步。不会自动选择或移动任何笔记。授权后继续选择文件夹。")
                     .setNegativeButton("取消", null).setPositiveButton("去授权") { _, _ ->
                         waitingForFolderPermission = true
@@ -1051,7 +1054,7 @@ class MainActivity : Activity() {
             if (File(target, "library.json").isFile) activateWorkspaceFolder(target)
             else {
                 require(target.list()?.isEmpty() == true) { "此目录不是墨笺笔记库；请选择包含 library.json 的目录，或空文件夹" }
-                AlertDialog.Builder(this).setTitle("在空文件夹新建笔记库？").setMessage(target.path)
+                MaterialAlertDialogBuilder(this).setTitle("在空文件夹新建笔记库？").setMessage(target.path)
                     .setNegativeButton("取消", null).setPositiveButton("新建并打开") { _, _ -> activateWorkspaceFolder(target, create = true) }.show()
             }
         }.onFailure { Toast.makeText(this, it.message, Toast.LENGTH_LONG).show() }
@@ -1585,8 +1588,10 @@ class MainActivity : Activity() {
                 setBackgroundColor(TOOLBAR_BACKGROUND)
                 addView(buildDrawingRibbon(), FrameLayout.LayoutParams(MATCH, MATCH))
             }
-        rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(34)))
-        rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(50)))
+        rootLayout.addView(ribbonTabs, LinearLayout.LayoutParams(MATCH, dp(64)))
+        rootLayout.addView(drawingRibbon, LinearLayout.LayoutParams(MATCH, dp(64)).apply { setMargins(dp(8), 0, dp(8), dp(8)) })
+        drawingRibbon.background = rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT)
+        drawingRibbon.clipToOutline = true
         // Display-only: it must never consume canvas touches or open configuration (settings owns that).
         nativeSyncStatusView = PassiveStatusView(this).apply {
             text = nativeSyncStatus
@@ -1600,17 +1605,9 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
 
-        val workArea =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setBackgroundColor(PAPER_COLOR)
-            }
         navigationPane = buildNavigationPane()
         pagePane = buildPagePane()
         navigationRail = buildNavigationRail()
-        workArea.addView(navigationRail, LinearLayout.LayoutParams(dp(32), MATCH))
-        workArea.addView(navigationPane, LinearLayout.LayoutParams(dp(196), MATCH))
-        workArea.addView(pagePane, LinearLayout.LayoutParams(dp(196), MATCH))
         val canvasArea = FrameLayout(this).apply {
             addView(buildSplitCanvasHost(), FrameLayout.LayoutParams(MATCH, MATCH))
             addView(nativeSyncStatusView, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END).apply {
@@ -1628,8 +1625,8 @@ class MainActivity : Activity() {
             }
             addView(conflictChip, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.END))
         }
-        workArea.addView(canvasArea, LinearLayout.LayoutParams(0, MATCH, 1f))
-        rootLayout.addView(workArea, LinearLayout.LayoutParams(MATCH, 0, 1f))
+        workspaceChrome = MaterialWorkspaceLayout(this, navigationRail, navigationPane, pagePane, canvasArea)
+        rootLayout.addView(workspaceChrome, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
         applyChromeVisibility()
         return rootLayout
@@ -1663,19 +1660,19 @@ class MainActivity : Activity() {
                     setBackgroundColor(NAV_BACKGROUND)
                     addView(
                         backstageNavItem("←", false) { dialog.dismiss() },
-                        LinearLayout.LayoutParams(MATCH, dp(42)),
+                        LinearLayout.LayoutParams(MATCH, dp(48)),
                     )
-                    addView(backstageNavItem("信息", true) {}, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("新建", false) { showShell("新建笔记本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("打开文件夹", false) { dialog.dismiss(); openWorkspaceFolderPicker() }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("信息", true) {}, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("新建", false) { showShell("新建笔记本") }, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("打开文件夹", false) { dialog.dismiss(); openWorkspaceFolderPicker() }, LinearLayout.LayoutParams(MATCH, dp(48)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(8), dp(4), dp(8)) })
-                    addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("打印", false) { dialog.dismiss(); showExportDialog(printing = true) }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("共享", false) { showShell("共享") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("导出", false) { dialog.dismiss(); showExportDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("保存副本", false) { showShell("保存副本") }, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("打印", false) { dialog.dismiss(); showExportDialog(printing = true) }, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("共享", false) { showShell("共享") }, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("导出", false) { dialog.dismiss(); showExportDialog() }, LinearLayout.LayoutParams(MATCH, dp(48)))
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(MATCH, 0, 1f))
-                    addView(backstageNavItem("帐户", false) { showShell("帐户") }, LinearLayout.LayoutParams(MATCH, dp(42)))
-                    addView(backstageNavItem("选项", false) { showOptionsDialog() }, LinearLayout.LayoutParams(MATCH, dp(42)))
+                    addView(backstageNavItem("帐户", false) { showShell("帐户") }, LinearLayout.LayoutParams(MATCH, dp(48)))
+                    addView(backstageNavItem("选项", false) { showOptionsDialog() }, LinearLayout.LayoutParams(MATCH, dp(48)))
                 }
             addView(navigation, LinearLayout.LayoutParams(dp(124), MATCH))
 
@@ -1716,11 +1713,11 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), 0, dp(8), 0)
             setTextColor(if (selected) TEXT_PRIMARY else TEXT_SECONDARY)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
             background =
                 if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), ACCENT_PURPLE)
-                else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+                else MaterialChrome.background(this@MainActivity, radius = 28)
             setOnClickListener { action() }
         }
 
@@ -1804,7 +1801,7 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(8), dp(8), dp(8), dp(14))
                     setBackgroundColor(NAV_BACKGROUND)
-                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(44)))
+                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(64)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
                     addView(backstageNavItem("常规", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
                     addView(
@@ -1916,7 +1913,7 @@ class MainActivity : Activity() {
                         )
                     }
 
-                    addView(optionsSectionTitle("整页视图"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
+                    addView(optionsSectionTitle("整页视图"), LinearLayout.LayoutParams(MATCH, dp(64)).apply { topMargin = dp(12) })
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
                     val toolbarValue = settingsValueButton("配置")
                     toolbarValue.setOnClickListener { showFullPageToolbarOptions() }
@@ -1930,7 +1927,7 @@ class MainActivity : Activity() {
                     )
 
                     // Sync configuration lives only here; the canvas status overlay is display-only.
-                    addView(optionsSectionTitle("同步"), LinearLayout.LayoutParams(MATCH, dp(44)).apply { topMargin = dp(12) })
+                    addView(optionsSectionTitle("同步"), LinearLayout.LayoutParams(MATCH, dp(64)).apply { topMargin = dp(12) })
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)))
                     val nativeSyncValue = settingsValueButton("配置")
                     nativeSyncValue.setOnClickListener { showNativeSyncOptions() }
@@ -2128,7 +2125,7 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(8), dp(8), dp(8), dp(14))
                     setBackgroundColor(NAV_BACKGROUND)
-                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(44)))
+                    addView(backstageNavItem("←  返回", false) { dialog.dismiss() }, LinearLayout.LayoutParams(MATCH, dp(64)))
                     addView(horizontalDivider(), LinearLayout.LayoutParams(MATCH, dp(1)).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
                     addView(backstageNavItem("常规", false) { dialog.setContentView(buildOptionsPage(dialog)) }, LinearLayout.LayoutParams(MATCH, dp(40)))
                     addView(backstageNavItem("快捷键", true) {}, LinearLayout.LayoutParams(MATCH, dp(40)))
@@ -2173,7 +2170,7 @@ class MainActivity : Activity() {
                     XiaomiStylusKey.entries.forEach { key ->
                         val profile = xiaomiPenShortcutSettings.profile(key)
                         val label = if (key == XiaomiStylusKey.PAGE_UP) "上键（远离笔尖，PageUp）" else "下键（靠近笔尖，PageDown）"
-                        addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
+                        addView(optionsSectionTitle(label), LinearLayout.LayoutParams(MATCH, dp(48)).apply { topMargin = dp(8) })
                         addView(stylusBindingSettingsRow("单击", profile.single, holdOnly = false, allowLassoContext = true, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
                         addView(stylusBindingSettingsRow("双击", profile.double, holdOnly = false, allowLassoContext = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
                         addView(stylusBindingSettingsRow("按住", profile.hold, holdOnly = true, allowLassoContext = false, dialog), LinearLayout.LayoutParams(MATCH, dp(46)))
@@ -2232,7 +2229,7 @@ class MainActivity : Activity() {
                         },
                     )
                 },
-                LinearLayout.LayoutParams(0, dp(42), 1f),
+                LinearLayout.LayoutParams(0, dp(48), 1f),
             )
             addView(valueLabel, LinearLayout.LayoutParams(dp(82), MATCH))
         }
@@ -2374,7 +2371,7 @@ class MainActivity : Activity() {
                         dialog.setContentView(buildShortcutOptionsPage(dialog))
                     }
                 },
-                LinearLayout.LayoutParams(dp(42), dp(36)),
+                LinearLayout.LayoutParams(dp(48), dp(36)),
             )
         }
 
@@ -2402,7 +2399,7 @@ class MainActivity : Activity() {
                         setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                         gravity = Gravity.CENTER_VERTICAL
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(42)),
+                    LinearLayout.LayoutParams(MATCH, dp(48)),
                 )
                 addView(
                     TextView(this@MainActivity).apply {
@@ -2718,7 +2715,24 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), 0, dp(8), 0)
             setBackgroundColor(RIBBON_BACKGROUND)
-            populateRibbonTabs(this)
+            addView(titleIconButton("navigation", "笔记本导航") { toggleSectionPane() }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(titleIconButton("panel_left", "页面导航") { togglePagePane() }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            if (resources.configuration.screenWidthDp >= 840) addView(TextView(this@MainActivity).apply {
+                text = "墨笺"
+                textSize = 22f
+                setTextColor(TEXT_PRIMARY)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setPadding(dp(12), 0, dp(24), 0)
+            })
+            addView(HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                materialTabRow = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    populateRibbonTabs(this)
+                }
+                addView(materialTabRow, ViewGroup.LayoutParams(WRAP, MATCH))
+            }, LinearLayout.LayoutParams(0, MATCH, 1f))
         }
 
     private fun populateRibbonTabs(row: LinearLayout) {
@@ -2734,7 +2748,7 @@ class MainActivity : Activity() {
     private fun selectRibbonPage(page: RibbonPage) {
         if (activeRibbonPage == page) return
         activeRibbonPage = page
-        populateRibbonTabs(ribbonTabs as LinearLayout)
+        populateRibbonTabs(materialTabRow)
         val host = drawingRibbon as FrameLayout
         host.removeAllViews()
         host.addView(
@@ -2802,7 +2816,7 @@ class MainActivity : Activity() {
             setOnClickListener { action(this) }
             contentDescription = label
             setDarkTooltip(this, label)
-            layoutParams = LinearLayout.LayoutParams(dp(40), MATCH)
+            layoutParams = LinearLayout.LayoutParams(dp(48), MATCH)
         }
 
     private fun buildNavigationRail(): View =
@@ -2832,7 +2846,7 @@ class MainActivity : Activity() {
                     isHorizontalScrollBarEnabled = false
                     addView(toolShelfRow, ViewGroup.LayoutParams(WRAP, MATCH))
                 },
-                LinearLayout.LayoutParams(MATCH, dp(48)),
+                LinearLayout.LayoutParams(MATCH, dp(64)),
             )
 
             toolDetailRow =
@@ -2864,7 +2878,7 @@ class MainActivity : Activity() {
                         contentDescription = "复制选项"
                         setDarkTooltip(this, "复制选项")
                         setOnClickListener { showCopyOptions(this) }
-                    }, LinearLayout.LayoutParams(dp(18), dp(42)))
+                    }, LinearLayout.LayoutParams(dp(18), dp(48)))
                     addHomeCommand(HomeCommand.FORMAT_PAINTER)
                     addView(verticalDivider())
 
@@ -2921,13 +2935,13 @@ class MainActivity : Activity() {
 
                     fullViewButton =
                         commandButton("full_screen_maximize", "整页视图", fullPageMode) { setFullPageMode(true) }
-                    addView(fullViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(fullViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     normalViewButton =
                         commandButton("panel_left", "普通视图", !fullPageMode) { setFullPageMode(false) }
-                    addView(normalViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(normalViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     splitViewButton =
                         commandButton("split_view", "拆分视图", splitViewState.enabled) { toggleSplitView() }
-                    addView(splitViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(splitViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     addView(verticalDivider())
 
                     zoomLockButton =
@@ -2936,27 +2950,27 @@ class MainActivity : Activity() {
                             persistWorkspacePreferences()
                             refreshViewRibbonState()
                         }
-                    addView(zoomLockButton, LinearLayout.LayoutParams(dp(38), dp(42)))
+                    addView(zoomLockButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     zoomPercentButton = zoomValueButton()
                     addView(zoomPercentButton, LinearLayout.LayoutParams(dp(70), dp(34)).apply { marginEnd = dp(3) })
                     zoomInButton = commandButton("zoom_in", "放大", false) { zoomByStep(1) }
-                    addView(zoomInButton, LinearLayout.LayoutParams(dp(38), dp(42)))
+                    addView(zoomInButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     zoomOutButton = commandButton("zoom_out", "缩小", false) { zoomByStep(-1) }
-                    addView(zoomOutButton, LinearLayout.LayoutParams(dp(38), dp(42)))
+                    addView(zoomOutButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     zoomResetViewButton = zoomResetButton()
                     addView(zoomResetViewButton, LinearLayout.LayoutParams(dp(54), dp(34)).apply { marginStart = dp(2) })
                     pageWidthViewButton = commandButton("page_width", "页宽", false) { fitPageWidth() }
-                    addView(pageWidthViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(pageWidthViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     addView(verticalDivider())
 
                     addView(
                         pageBoundCommand("rule_lines", "基准线") { anchor -> showBackgroundFormatMenu(anchor) },
-                        LinearLayout.LayoutParams(dp(40), dp(42)),
+                        LinearLayout.LayoutParams(dp(48), dp(48)),
                     )
-                    addView(pageColorButton(), LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(pageColorButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
                     addView(
                         pageBoundCommand("document_page", "纸张大小") { anchor -> showPaperSizeMenu(anchor) },
-                        LinearLayout.LayoutParams(dp(40), dp(42)),
+                        LinearLayout.LayoutParams(dp(48), dp(48)),
                     )
                     pageTitleViewButton =
                         pageBoundCommand(
@@ -2966,7 +2980,7 @@ class MainActivity : Activity() {
                         ) {
                             updateCurrentPageView { it.pageTitleVisible = !it.pageTitleVisible }
                         }
-                    addView(pageTitleViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(pageTitleViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                     backgroundViewButton =
                         pageBoundCommand(
                             "weather_moon",
@@ -2975,14 +2989,14 @@ class MainActivity : Activity() {
                         ) {
                             toggleGlobalPageTheme()
                         }
-                    addView(backgroundViewButton, LinearLayout.LayoutParams(dp(40), dp(42)))
+                    addView(backgroundViewButton, LinearLayout.LayoutParams(dp(48), dp(48)))
                 },
                 ViewGroup.LayoutParams(WRAP, MATCH),
             )
         }
 
     private fun LinearLayout.addHomeCommand(command: HomeCommand, redAccent: Boolean = false) {
-        addView(homeCommandButton(command, redAccent), LinearLayout.LayoutParams(dp(36), dp(42)))
+        addView(homeCommandButton(command, redAccent), LinearLayout.LayoutParams(dp(48), dp(48)))
     }
 
     private fun homeCommandButton(command: HomeCommand, redAccent: Boolean = command == HomeCommand.TAG || command == HomeCommand.FIND_TAGS): View =
@@ -3468,7 +3482,7 @@ class MainActivity : Activity() {
                             renderDialog()
                         }
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(10) },
+                    LinearLayout.LayoutParams(MATCH, dp(48)).apply { topMargin = dp(10) },
                 )
                 optionsHost.addView(
                     LinearLayout(this).apply {
@@ -3487,7 +3501,7 @@ class MainActivity : Activity() {
                                     draft.pageColor = color
                                     renderDialog()
                                 },
-                                LinearLayout.LayoutParams(dp(42), dp(38)).apply { marginEnd = dp(4) },
+                                LinearLayout.LayoutParams(dp(48), dp(38)).apply { marginEnd = dp(4) },
                             )
                         }
                     },
@@ -3547,7 +3561,7 @@ class MainActivity : Activity() {
                 )
                 addView(tabHost, LinearLayout.LayoutParams(MATCH, dp(38)))
                 addView(optionsHost, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dp(4) })
-                addView(actionHost, LinearLayout.LayoutParams(MATCH, dp(42)).apply { topMargin = dp(8) })
+                addView(actionHost, LinearLayout.LayoutParams(MATCH, dp(48)).apply { topMargin = dp(8) })
             }
         renderDialog()
         dialog.setContentView(root)
@@ -3696,10 +3710,10 @@ class MainActivity : Activity() {
                     addView(View(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f))
                     addView(
                         titleIconButton("add", "新建笔记本或分区") { anchor -> showNavigationAddMenu(anchor) },
-                        LinearLayout.LayoutParams(dp(38), dp(38)),
+                        LinearLayout.LayoutParams(dp(48), dp(48)),
                     )
                 },
-                LinearLayout.LayoutParams(MATCH, dp(44)),
+                LinearLayout.LayoutParams(MATCH, dp(64)),
             )
 
             sectionList =
@@ -3719,7 +3733,7 @@ class MainActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(MATCH, 0, 1f),
             )
-        }.also { it.background = bordered(NAV_BACKGROUND, BORDER_COLOR, 0f) }
+        }.also { it.background = rounded(NAV_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT) }
 
     private fun buildPagePane(): View =
         LinearLayout(this).apply {
@@ -3741,7 +3755,7 @@ class MainActivity : Activity() {
                         }
                     addView(
                         addPageButton,
-                        LinearLayout.LayoutParams(dp(38), dp(38)),
+                        LinearLayout.LayoutParams(dp(48), dp(48)),
                     )
                 },
                 LinearLayout.LayoutParams(MATCH, dp(48)),
@@ -3758,7 +3772,7 @@ class MainActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(MATCH, 0, 1f),
             )
-        }.also { it.background = bordered(PAGE_LIST_BACKGROUND, BORDER_COLOR, 0f) }
+        }.also { it.background = rounded(PAGE_LIST_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT) }
 
     private fun buildSplitCanvasHost(): View {
         splitCanvasHost =
@@ -4078,7 +4092,7 @@ class MainActivity : Activity() {
         HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             elevation = dp(7).toFloat()
-            background = rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG)
+            background = rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT)
             floatingToolShelfRow =
                 LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -4096,8 +4110,8 @@ class MainActivity : Activity() {
                 canvasActionButton("navigation", "折叠或展开分区栏", sectionPaneVisible) { toggleSectionPane() }
             fullPagePagePaneToggle =
                 canvasActionButton("panel_left", "折叠或展开页面栏", pagePaneVisible) { togglePagePane() }
-            addView(fullPageSectionPaneToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { bottomMargin = dp(4) })
-            addView(fullPagePagePaneToggle, LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(fullPageSectionPaneToggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { bottomMargin = dp(4) })
+            addView(fullPagePagePaneToggle, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
 
     private fun buildCanvasActions(): View =
@@ -4110,16 +4124,16 @@ class MainActivity : Activity() {
                 drawingToolbarVisible = !drawingToolbarVisible
                 applyChromeVisibility()
             }
-            addView(toolbarToggle, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(4) })
+            addView(toolbarToggle, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(4) })
             addView(
                 canvasActionButton("search", "搜索笔记", selected = false) { showShell("全文搜索") },
-                LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(4) },
+                LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(4) },
             )
             fullPageToggle = canvasActionButton("full_screen_maximize", "进入整页视图", selected = false) {
                 setFullPageMode(!fullPageMode)
             }
             fullPageToggleIcon = (fullPageToggle as ViewGroup).getChildAt(0) as ImageView
-            addView(fullPageToggle, LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(fullPageToggle, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
 
     private fun renderWorkspace() {
@@ -4139,8 +4153,8 @@ class MainActivity : Activity() {
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(dp(5), 0, dp(7), 0)
                     background =
-                        if (notebookFocused) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
-                        else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+                        if (notebookFocused) MaterialChrome.background(this@MainActivity, selected = true, radius = 28)
+                        else MaterialChrome.background(this@MainActivity, radius = 28)
                     setOnClickListener {
                         notebookLibrary.selectNotebook(notebook.id)
                         notebook.focusNotebook()
@@ -4168,14 +4182,14 @@ class MainActivity : Activity() {
                     text = notebook.title
                     gravity = Gravity.CENTER_VERTICAL
                     setTextColor(if (activeNotebook) TEXT_PRIMARY else TEXT_SECONDARY)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                     typeface = if (activeNotebook) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
                     maxLines = 1
                 },
                 LinearLayout.LayoutParams(0, MATCH, 1f),
             )
             installNavigationLongPressAndDrag(notebookRow, payload = null) { showNotebookMenu(notebookRow, notebook) }
-            sectionList.addView(notebookRow, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+            sectionList.addView(notebookRow, LinearLayout.LayoutParams(MATCH, dp(56)).apply { setMargins(dp(12), dp(2), dp(12), dp(2)) })
 
             if (!notebook.expanded) continue
             for (row in notebook.flattenSections()) {
@@ -4187,11 +4201,12 @@ class MainActivity : Activity() {
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dp(14 + row.depth * 15), 0, dp(7), 0)
                         background =
-                            if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
-                            else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+                            if (selected) MaterialChrome.background(this@MainActivity, selected = true, radius = 28)
+                            else MaterialChrome.background(this@MainActivity, radius = 28)
                         setOnClickListener {
                             notebookLibrary.selectNotebook(notebook.id)
                             notebook.selectSection(section.id)
+                            workspaceChrome.showPageDrawer()
                             clearContentSelection()
                             persistWorkspacePreferences(saveLibrary = false)
                             renderWorkspace()
@@ -4223,13 +4238,13 @@ class MainActivity : Activity() {
                         text = section.title
                         gravity = Gravity.CENTER_VERTICAL
                         setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                         typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
                         maxLines = 1
                     },
                     LinearLayout.LayoutParams(0, MATCH, 1f),
                 )
-                sectionList.addView(item, LinearLayout.LayoutParams(MATCH, dp(40)).apply { setMargins(dp(5), dp(1), dp(5), dp(1)) })
+                sectionList.addView(item, LinearLayout.LayoutParams(MATCH, dp(56)).apply { setMargins(dp(12), dp(2), dp(12), dp(2)) })
             }
         }
     }
@@ -4312,8 +4327,8 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(13 + row.depth * 13), dp(7), dp(10), dp(6))
                 background =
-                    if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), SELECTED_LAVENDER)
-                    else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+                    if (selected) MaterialChrome.background(this@MainActivity, selected = true, radius = 28)
+                    else MaterialChrome.background(this@MainActivity, radius = 28)
                 addView(
                     LinearLayout(this@MainActivity).apply {
                         orientation = LinearLayout.HORIZONTAL
@@ -4322,7 +4337,7 @@ class MainActivity : Activity() {
                             TextView(this@MainActivity).apply {
                                 text = page.title
                                 setTextColor(conflict?.color ?: TEXT_PRIMARY)
-                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                                 typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
                                 maxLines = 1
                             },
@@ -4354,6 +4369,7 @@ class MainActivity : Activity() {
                 )
                 setOnClickListener {
                     workspace.selectPage(row.sectionId, page.id)
+                    workspaceChrome.dismissDrawer()
                     persistWorkspacePreferences(saveLibrary = false)
                     renderPages()
                 }
@@ -4363,7 +4379,7 @@ class MainActivity : Activity() {
             item,
             NavigationDragPayload.Page(workspace.id, row.sectionId, page.id),
         ) { showPageMenu(item, workspace, row.sectionId, page) }
-        pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(58)).apply { setMargins(dp(6), dp(1), dp(6), dp(1)) })
+        pageList.addView(item, LinearLayout.LayoutParams(MATCH, dp(72)).apply { setMargins(dp(8), dp(2), dp(8), dp(2)) })
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -4561,7 +4577,7 @@ class MainActivity : Activity() {
     private fun confirmDeleteNotebook(notebook: NotebookWorkspace) {
         val sections = notebook.allSections()
         val pages = sections.sumOf { it.pages.size }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("删除笔记本？")
             .setMessage("将删除“${notebook.title}”以及其中 ${sections.size} 个分区、$pages 个页面和本地附件。此操作无法撤销。")
             .setPositiveButton("删除") { _, _ ->
@@ -4658,7 +4674,7 @@ class MainActivity : Activity() {
                 setSingleLine(true)
                 setPadding(dp(18), dp(8), dp(18), dp(8))
             }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle(title)
             .setView(input)
             .setPositiveButton("保存") { _, _ -> onSave(input.text.toString()) }
@@ -4676,7 +4692,7 @@ class MainActivity : Activity() {
                 if (childCount > 0 || pages.isNotEmpty()) append("以及其中 $childCount 个子分区、${pages.size} 个页面")
                 append("。此操作无法撤销。")
             }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("删除分区？")
             .setMessage(message)
             .setPositiveButton("删除") { _, _ ->
@@ -4696,7 +4712,7 @@ class MainActivity : Activity() {
     }
 
     private fun confirmDeletePage(notebook: NotebookWorkspace, sectionId: String, page: NotePage) {
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("删除页面？")
             .setMessage("将删除“${page.title}”及其本地内容。此操作无法撤销。")
             .setPositiveButton("删除") { _, _ ->
@@ -4725,7 +4741,7 @@ class MainActivity : Activity() {
             }
         val currentParentId = notebook.breadcrumb(section.id).dropLast(1).lastOrNull()?.id
         var selectedIndex = candidates.indexOfFirst { it.second == currentParentId }.coerceAtLeast(0)
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("移动或复制“${section.title}”")
             .setSingleChoiceItems(candidates.map { it.first }.toTypedArray(), selectedIndex) { _, which -> selectedIndex = which }
             .setPositiveButton("移动") { _, _ ->
@@ -4752,11 +4768,11 @@ class MainActivity : Activity() {
             Toast.makeText(this, "没有可合并的其他分区", Toast.LENGTH_SHORT).show()
             return
         }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("与其他分区合并")
             .setItems(candidates.map { notebook.breadcrumb(it.id).joinToString(" / ") { node -> node.title } }.toTypedArray()) { _, which ->
                 val target = candidates[which]
-                AlertDialog.Builder(this)
+                MaterialAlertDialogBuilder(this)
                     .setTitle("合并分区？")
                     .setMessage("“${section.title}”中的页面和子分区将移入“${target.title}”，原分区会被删除。")
                     .setPositiveButton("合并") { _, _ ->
@@ -4773,7 +4789,7 @@ class MainActivity : Activity() {
         val candidates = notebook.allSections()
         if (candidates.isEmpty()) return
         var selectedIndex = candidates.indexOfFirst { it.id == sourceSectionId }.coerceAtLeast(0)
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("移动或复制“${page.title}”")
             .setSingleChoiceItems(
                 candidates.map { notebook.breadcrumb(it.id).joinToString(" / ") { node -> node.title } }.toTypedArray(),
@@ -5102,7 +5118,7 @@ class MainActivity : Activity() {
 
     /**
      * Transparent layer over the paper: the page surface and its background stay visible, with a
-     * thin accent progress line along the top edge instead of a navigation-colored block.
+     * official Material morphing indicator; the existing delayed reveal/save barriers are retained.
      */
     private fun ensurePageLoadingOverlay() {
         mainHandler.removeCallbacks(removePageLoadingOverlay)
@@ -5111,9 +5127,12 @@ class MainActivity : Activity() {
             overlay.bringToFront()
             return
         }
-        val progress = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            isIndeterminate = true
-            indeterminateTintList = ColorStateList.valueOf(ACCENT_PURPLE)
+        val progress = LoadingIndicator(this).apply {
+            setIndicatorColor(ACCENT_PURPLE)
+            setContainerColor(MaterialTokens.SURFACE_CONTAINER_HIGH)
+            setIndicatorSize(dp(38))
+            setContainerWidth(dp(64))
+            setContainerHeight(dp(64))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             alpha = 0f
             visibility = View.INVISIBLE
@@ -5143,7 +5162,7 @@ class MainActivity : Activity() {
         val overlay = FrameLayout(this).apply {
             isClickable = true
             contentDescription = "正在打开页面"
-            addView(progress, FrameLayout.LayoutParams(MATCH, dp(3), Gravity.TOP))
+            addView(progress, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER))
             addView(failure, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         }
@@ -5278,7 +5297,7 @@ class MainActivity : Activity() {
         if (id.startsWith("home:")) {
             val command = HomeCommand.fromId(id.removePrefix("home:")) ?: return null
             return homeCommandButton(command).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(38), dp(42))
+                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             }
         }
         if (id.startsWith("tool:")) {
@@ -5307,18 +5326,18 @@ class MainActivity : Activity() {
                 }
             "draw:clear" -> commandButton("delete_dismiss", "清纸", false) { confirmClearPage() }
             else -> null
-        }?.apply { layoutParams = LinearLayout.LayoutParams(dp(40), dp(42)) }
+        }?.apply { layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)) }
     }
 
     private fun populateToolShelf(row: LinearLayout) {
         row.removeAllViews()
-        row.addView(undoCommandButton(), LinearLayout.LayoutParams(dp(40), dp(42)))
+        row.addView(undoCommandButton(), LinearLayout.LayoutParams(dp(48), dp(48)))
         row.addView(
             commandButton("arrow_redo", "重做", selected = false) {
                 clearContentSelection()
                 redoPageEdit()
             },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(verticalDivider())
         toolShelf.tools.filter { it.kind == DrawingToolKind.LASSO }.forEach { row.addView(toolButton(it)) }
@@ -5328,40 +5347,40 @@ class MainActivity : Activity() {
         toolShelf.tools.filter { it.kind == DrawingToolKind.PEN }.forEach { row.addView(toolButton(it)) }
         row.addView(
             commandButton("add", "添加", selected = false) { anchor -> showAddToolMenu(anchor) },
-            LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(3) },
+            LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(3) },
         )
         row.addView(verticalDivider())
         toolShelf.tools.filter { it.kind == DrawingToolKind.SHAPE }.forEach { row.addView(toolButton(it)) }
         row.addView(verticalDivider())
         row.addView(
             commandButton("hand_left", "触控笔抓手", selected = singleFingerPanEnabled) { anchor -> handlePanoramaToolClick(anchor) },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(
             commandButton("book_open", "阅读视图", selected = readingViewEnabled) { toggleReadingView() },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(
             commandButton("cursor", "光标模式", selected = fingerCursorModeEnabled) { toggleFingerCursorMode() },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(verticalDivider())
         row.addView(
             commandButton("insert_space", "插入空白空间", selected = insertSpaceModeEnabled, preserveColors = true) { anchor ->
                 handleInsertSpace(anchor)
             },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(
             commandButton("rule_lines", "设置背景格式", selected = false, preserveColors = true) { anchor ->
                 showBackgroundFormatMenu(anchor)
             },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
         row.addView(verticalDivider())
         row.addView(
             commandButton("delete_dismiss", "清纸", selected = false) { confirmClearPage() },
-            LinearLayout.LayoutParams(dp(40), dp(42)),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
     }
 
@@ -5391,7 +5410,7 @@ class MainActivity : Activity() {
                     TextView(this@MainActivity).apply {
                         text = tool.displayName
                         setTextColor(TEXT_PRIMARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                         gravity = Gravity.CENTER_VERTICAL
                     },
@@ -5418,15 +5437,15 @@ class MainActivity : Activity() {
                             toolShelf.applyPenStyle(tool, preset); persistToolShelf(); rebuildBrush(); renderToolDetails()
                         }
                     }
-                }, LinearLayout.LayoutParams(0, dp(42), 1f))
-                toolDetailRow.addView(presetRow, LinearLayout.LayoutParams(MATCH, dp(42)))
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                toolDetailRow.addView(presetRow, LinearLayout.LayoutParams(MATCH, dp(48)))
                 toolDetailRow.addView(
                     parameterControl("笔宽", ((tool.widthMm * 10).roundToInt() - 1).coerceIn(0, 19), 19, { "${(it + 1) / 10f} mm" }) {
                         tool.widthMm = (it + 1) / 10f
                         persistToolShelf()
                         rebuildBrush()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 toolShelf.penStyles.firstOrNull { it.id == tool.penStyleId }?.configuration?.let { config ->
                     val values = config.valuesFor(tool)
@@ -5438,7 +5457,7 @@ class MainActivity : Activity() {
                             try { toolShelf.setPenParameter(tool, control.parameter, (control.min + progress * control.step).coerceIn(control.min, control.max)); accepted = progress; persistToolShelf(); rebuildBrush() }
                             catch (error: IllegalArgumentException) { ((parameterView as ViewGroup).getChildAt(1) as SeekBar).progress = accepted; Toast.makeText(this, error.message, Toast.LENGTH_SHORT).show() }
                         }
-                        toolDetailRow.addView(parameterView, LinearLayout.LayoutParams(MATCH, dp(44)))
+                        toolDetailRow.addView(parameterView, LinearLayout.LayoutParams(MATCH, dp(64)))
                     }
                 }
             }
@@ -5451,7 +5470,7 @@ class MainActivity : Activity() {
                         persistToolShelf()
                         rebuildBrush()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 toolDetailRow.addView(
                     parameterControl("透明度", (tool.opacityPercent - 10).coerceIn(0, 60), 60, { "${it + 10}%" }) {
@@ -5459,7 +5478,7 @@ class MainActivity : Activity() {
                         persistToolShelf()
                         rebuildBrush()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
             }
 
@@ -5469,7 +5488,7 @@ class MainActivity : Activity() {
                         tool.eraserRadiusMm = stepToEraserRadius(it)
                         persistToolShelf()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 addToolDetailLine(
                     detailChip(if (tool.pressureEraseEnabled) "书写压感切换 开" else "书写压感切换 关", tool.pressureEraseEnabled) {
@@ -5485,7 +5504,7 @@ class MainActivity : Activity() {
                         persistToolShelf()
                         syncPressureEraserWithTool()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 toolDetailRow.addView(
                     parameterControl("按压时间", ((tool.pressureEraseDwellMillis - 50) / 10).toInt().coerceIn(0, 45), 45, { "${50 + it * 10} ms" }) {
@@ -5493,7 +5512,7 @@ class MainActivity : Activity() {
                         persistToolShelf()
                         syncPressureEraserWithTool()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 toolDetailRow.addView(
                     parameterControl("触发路程上限", (tool.pressureEraseTravelLimitMm * 10).roundToInt().minus(1).coerceIn(0, 99), 99, { "${(it + 1) / 10f} mm" }) {
@@ -5501,7 +5520,7 @@ class MainActivity : Activity() {
                         persistToolShelf()
                         syncPressureEraserWithTool()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 addToolDetailLine(detailHint("本次落笔超过上限后不再压感切换"))
                 addToolDetailLine(detailChip("整笔擦除", true) { }, detailHint("像素擦除稍后接入"))
@@ -5566,7 +5585,7 @@ class MainActivity : Activity() {
                     })
                 }
             }
-        toolDetailRow.addView(row, LinearLayout.LayoutParams(MATCH, dp(42)))
+        toolDetailRow.addView(row, LinearLayout.LayoutParams(MATCH, dp(48)))
     }
 
     private fun addToolDetailLine(vararg children: View) {
@@ -5576,7 +5595,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 for (child in children) addView(child)
             }
-        toolDetailRow.addView(row, LinearLayout.LayoutParams(MATCH, dp(42)))
+        toolDetailRow.addView(row, LinearLayout.LayoutParams(MATCH, dp(48)))
     }
 
     private fun showToolDetails(anchor: View) {
@@ -5587,12 +5606,12 @@ class MainActivity : Activity() {
             ScrollView(this).apply {
                 isFillViewport = true
                 addView(toolDetailRow, ViewGroup.LayoutParams(MATCH, WRAP))
-                background = rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG)
+                background = rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT)
             }
         val popup =
             PopupWindow(scroll, dp(316), WRAP, true).apply {
                 isOutsideTouchable = true
-                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT))
                 elevation = dp(10).toFloat()
                 setOnDismissListener { if (toolDetailPopup === this) toolDetailPopup = null }
             }
@@ -5614,7 +5633,7 @@ class MainActivity : Activity() {
                     TextView(this@MainActivity).apply {
                         text = "全景手柄"
                         setTextColor(TEXT_PRIMARY)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                         gravity = Gravity.CENTER_VERTICAL
                     },
@@ -5631,7 +5650,7 @@ class MainActivity : Activity() {
                         panoramaSensitivity = ((it + 25) / 100f).coerceIn(MINIMUM_PANORAMA_SENSITIVITY, MAXIMUM_PANORAMA_SENSITIVITY)
                         persistWorkspacePreferences()
                     },
-                    LinearLayout.LayoutParams(MATCH, dp(44)),
+                    LinearLayout.LayoutParams(MATCH, dp(64)),
                 )
                 addView(
                     detailHint("同时作用于全景手柄和中键临时平移"),
@@ -5641,7 +5660,7 @@ class MainActivity : Activity() {
         val popup =
             PopupWindow(content, dp(316), WRAP, true).apply {
                 isOutsideTouchable = true
-                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT))
                 elevation = dp(10).toFloat()
                 setOnDismissListener { if (toolDetailPopup === this) toolDetailPopup = null }
             }
@@ -6739,6 +6758,7 @@ class MainActivity : Activity() {
     }
 
     private fun toggleSectionPane() {
+        if (::workspaceChrome.isInitialized && workspaceChrome.toggleDrawer(pages = false)) return
         if (fullPageMode) fullPageSectionPaneOpen = !fullPageSectionPaneOpen
         else {
             sectionPaneVisible = !sectionPaneVisible
@@ -6748,6 +6768,7 @@ class MainActivity : Activity() {
     }
 
     private fun togglePagePane() {
+        if (::workspaceChrome.isInitialized && workspaceChrome.toggleDrawer(pages = true)) return
         if (fullPageMode) fullPagePagePaneOpen = !fullPagePagePaneOpen
         else {
             pagePaneVisible = !pagePaneVisible
@@ -6778,6 +6799,11 @@ class MainActivity : Activity() {
         fullPagePaneButtons.visibility = if (fullPageMode) View.VISIBLE else View.GONE
         navigationPane.visibility = if (if (fullPageMode) fullPageSectionPaneOpen else sectionPaneVisible) View.VISIBLE else View.GONE
         pagePane.visibility = if (if (fullPageMode) fullPagePagePaneOpen else pagePaneVisible) View.VISIBLE else View.GONE
+        if (::workspaceChrome.isInitialized) workspaceChrome.configure(
+            !fullPageMode,
+            if (fullPageMode) fullPageSectionPaneOpen else sectionPaneVisible,
+            if (fullPageMode) fullPagePagePaneOpen else pagePaneVisible,
+        )
         updateToggleVisual(toolbarToggle, drawingToolbarVisible)
         updateToggleVisual(sectionPaneToggle, sectionPaneVisible)
         updateToggleVisual(pagePaneToggle, pagePaneVisible)
@@ -7061,7 +7087,7 @@ class MainActivity : Activity() {
         popup =
             PopupWindow(row, dp(216), dp(48), true).apply {
                 isOutsideTouchable = true
-                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+                setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT))
                 elevation = dp(10).toFloat()
                 setOnDismissListener { if (toolDetailPopup === this) toolDetailPopup = null }
             }
@@ -7119,7 +7145,7 @@ class MainActivity : Activity() {
     private fun confirmClearPage() {
         if (selectedPageConflict() != null) return
         val isPdfPage = workspace.selectedPage()?.pdfPage != null
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("清空当前页面？")
             .setMessage(
                 if (isPdfPage) "将清空批注、文本、标记和后来插入的内容；PDF 页面保留。"
@@ -7148,21 +7174,19 @@ class MainActivity : Activity() {
             text = label
             gravity = Gravity.CENTER
             setTextColor(if (selected) ACCENT_PURPLE else TEXT_PRIMARY)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = if (selected) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.DEFAULT
-            background =
-                if (selected) bottomBorderDrawable(RIBBON_BACKGROUND, ACCENT_PURPLE)
-                else ColorStateList.valueOf(Color.TRANSPARENT).let { rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT) }
+            background = MaterialChrome.background(this@MainActivity, selected)
+            MaterialChrome.interactive(this, selected)
             setOnClickListener { action() }
-            layoutParams = LinearLayout.LayoutParams(dp(58), MATCH)
+            layoutParams = LinearLayout.LayoutParams(dp(64), dp(48)).apply { marginEnd = dp(4) }
         }
 
     private fun toolButton(tool: ToolPreset): View {
         val selected = !singleFingerPanEnabled && !insertSpaceModeEnabled && !readingViewEnabled && tool.id == effectiveDrawingTool().id
         return FrameLayout(this).apply {
-            background =
-                if (selected) rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
-                else rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
+            background = MaterialChrome.background(this@MainActivity, selected, radius = 16)
+            MaterialChrome.interactive(this, selected)
             val iconName =
                 when (tool.kind) {
                     DrawingToolKind.PEN -> "pen"
@@ -7206,7 +7230,7 @@ class MainActivity : Activity() {
             }
             contentDescription = tool.displayName
             setDarkTooltip(this, "点击选择；再次点击打开参数")
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(42)).apply { marginEnd = dp(2) }
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(2) }
         }
     }
 
@@ -7260,7 +7284,7 @@ class MainActivity : Activity() {
             contentDescription = label
             setDarkTooltip(this, label)
             layoutParams =
-                LinearLayout.LayoutParams(dp(28), dp(34)).apply {
+                LinearLayout.LayoutParams(dp(56), dp(48)).apply {
                     topMargin = dp(2)
                     gravity = Gravity.CENTER_HORIZONTAL
                 }
@@ -7289,11 +7313,7 @@ class MainActivity : Activity() {
     }
 
     private fun toggleBackground(selected: Boolean, opaqueWhenIdle: Boolean = false): Drawable =
-        when {
-            selected -> rounded(SELECTED_LAVENDER, dp(2).toFloat(), BORDER_STRONG)
-            opaqueWhenIdle -> rounded(TOOLBAR_BACKGROUND, dp(2).toFloat(), BORDER_STRONG)
-            else -> rounded(Color.TRANSPARENT, dp(2).toFloat(), Color.TRANSPARENT)
-        }
+        MaterialChrome.background(this, selected, opaqueWhenIdle, radius = 24)
 
     private fun parameterControl(
         label: String,
@@ -7313,7 +7333,7 @@ class MainActivity : Activity() {
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
                     gravity = Gravity.CENTER_VERTICAL
                 }
-            addView(text, LinearLayout.LayoutParams(dp(84), dp(42)))
+            addView(text, LinearLayout.LayoutParams(dp(84), dp(48)))
             addView(
                 SeekBar(this@MainActivity).apply {
                     this.max = max
@@ -7331,7 +7351,7 @@ class MainActivity : Activity() {
                         },
                     )
                 },
-                LinearLayout.LayoutParams(dp(104), dp(42)),
+                LinearLayout.LayoutParams(dp(104), dp(48)),
             )
         }
 
@@ -7396,7 +7416,7 @@ class MainActivity : Activity() {
             }
         val popup = PopupWindow(popupContent, WRAP, WRAP, true).apply {
             isOutsideTouchable = true
-            setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(3).toFloat(), BORDER_STRONG))
+            setBackgroundDrawable(rounded(TOOLBAR_BACKGROUND, dp(28).toFloat(), Color.TRANSPARENT))
             elevation = dp(10).toFloat()
         }
         val grid = GridLayout(this).apply { columnCount = 8; rowCount = 6 }
@@ -7468,14 +7488,14 @@ class MainActivity : Activity() {
                                         setPadding(dp(7), 0, dp(7), 0)
                                     }
                                 editors += editor
-                                addView(editor, LinearLayout.LayoutParams(dp(112), dp(42)).apply { setMargins(dp(1), dp(1), dp(1), dp(1)) })
+                                addView(editor, LinearLayout.LayoutParams(dp(112), dp(48)).apply { setMargins(dp(1), dp(1), dp(1), dp(1)) })
                             }
                         },
                         LinearLayout.LayoutParams(WRAP, dp(44)),
                     )
                 }
             }
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("编辑 ${table.rows} × ${table.columns} 表格")
             .setView(HorizontalScrollView(this).apply { addView(ScrollView(this@MainActivity).apply { addView(rows) }) })
             .setNegativeButton("取消", null)
@@ -7746,7 +7766,7 @@ class MainActivity : Activity() {
             ImageImportDisplayMode.INVERT -> action(true)
             ImageImportDisplayMode.ORIGINAL -> action(false)
             ImageImportDisplayMode.ASK ->
-                AlertDialog.Builder(this)
+                MaterialAlertDialogBuilder(this)
                     .setTitle(title)
                     .setItems(arrayOf("反色保色显示", "保持原图显示")) { _, which -> action(which == 0) }
                     .setNegativeButton("取消", null)
@@ -8071,7 +8091,7 @@ class MainActivity : Activity() {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(16)) }
-        rows.addView(TextView(this).apply { text = "链接到笔记"; setTextColor(TEXT_PRIMARY); setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f); typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(MATCH, dp(42)))
+        rows.addView(TextView(this).apply { text = "链接到笔记"; setTextColor(TEXT_PRIMARY); setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f); typeface = Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(MATCH, dp(48)))
         notebookLibrary.notebooks.forEach { notebook ->
             fun visit(sections: List<SectionNode>, path: List<String>) {
                 sections.forEach { section ->
@@ -8102,7 +8122,7 @@ class MainActivity : Activity() {
                                     dialog.dismiss()
                                 }
                             },
-                            LinearLayout.LayoutParams(MATCH, dp(42)).apply { bottomMargin = dp(3) },
+                            LinearLayout.LayoutParams(MATCH, dp(48)).apply { bottomMargin = dp(3) },
                         )
                     }
                     visit(section.children, nextPath)
@@ -8598,7 +8618,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setCompoundDrawablesRelativeWithIntrinsicBounds(fluentIcon(icon), null, null, null)
             compoundDrawableTintList = ColorStateList.valueOf(if (description == "导航") Color.WHITE else TEXT_PRIMARY)
-            background = rounded(Color.TRANSPARENT, 0f, Color.TRANSPARENT)
+            background = MaterialChrome.background(this@MainActivity)
+            MaterialChrome.interactive(this)
             setOnClickListener { action(this) }
         }
 
@@ -8613,6 +8634,7 @@ class MainActivity : Activity() {
         }
 
     private fun setDarkTooltip(view: View, label: CharSequence) {
+        MaterialChrome.interactive(view, view.isSelected)
         view.setOnHoverListener { hovered, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER -> {
@@ -8668,6 +8690,8 @@ class MainActivity : Activity() {
             fallback?.let(::add)
         }
         for (name in names) {
+            val materialId = resources.getIdentifier("ic_material_$name", "drawable", packageName)
+            if (materialId != 0) return getDrawable(materialId)?.mutate()
             for (size in listOf(24, 20, 16)) {
                 val resourceName = "ic_fluent_${name}_${size}_regular"
                 val id = resources.getIdentifier(resourceName, "drawable", packageName)
@@ -8678,7 +8702,7 @@ class MainActivity : Activity() {
     }
 
     private fun sectionAccent(depth: Int): Int =
-        listOf(0xFF7719AA.toInt(), 0xFF185ABD.toInt(), 0xFFC239B3.toInt(), 0xFFCA5010.toInt())[depth % 4]
+        listOf(MaterialTokens.PRIMARY, MaterialTokens.SECONDARY, MaterialTokens.TERTIARY, MaterialTokens.ON_SURFACE_VARIANT)[depth % 4]
 
     /** OneNote dark mode shows logical black ink as light ink without changing its saved color. */
     private fun displayColor(color: InkPalette): Int =
@@ -8767,18 +8791,18 @@ class MainActivity : Activity() {
         private const val NAVIGATION_DRAG_ARM_MILLIS = 180L
         private const val TOOLBAR_ID_SEPARATOR = "\u001F"
         private val ZOOM_PRESETS = ViewportState.ZOOM_PRESETS
-        private val TITLE_PURPLE = Color.rgb(20, 20, 20)
-        private val RIBBON_BACKGROUND = Color.rgb(17, 17, 17)
-        private val ACCENT_PURPLE = Color.rgb(218, 178, 233)
-        private val SELECTED_LAVENDER = Color.rgb(55, 64, 72)
-        private val TOOLBAR_BACKGROUND = Color.rgb(35, 35, 35)
-        private val DARK_TOOLTIP_BACKGROUND = Color.rgb(58, 58, 58)
-        private val NAV_BACKGROUND = Color.rgb(15, 15, 15)
-        private val PAGE_LIST_BACKGROUND = Color.rgb(42, 42, 42)
+        private val TITLE_PURPLE = MaterialTokens.SURFACE
+        private val RIBBON_BACKGROUND = MaterialTokens.SURFACE
+        private val ACCENT_PURPLE = MaterialTokens.PRIMARY
+        private val SELECTED_LAVENDER = MaterialTokens.SECONDARY_CONTAINER
+        private val TOOLBAR_BACKGROUND = MaterialTokens.SURFACE_CONTAINER_HIGH
+        private val DARK_TOOLTIP_BACKGROUND = MaterialTokens.SURFACE_CONTAINER_HIGHEST
+        private val NAV_BACKGROUND = MaterialTokens.SURFACE_CONTAINER_LOW
+        private val PAGE_LIST_BACKGROUND = MaterialTokens.SURFACE_CONTAINER
         private val PAPER_COLOR = Color.rgb(10, 10, 10)
-        private val BORDER_COLOR = Color.rgb(61, 61, 61)
-        private val BORDER_STRONG = Color.rgb(87, 87, 87)
-        private val TEXT_PRIMARY = Color.rgb(244, 244, 244)
-        private val TEXT_SECONDARY = Color.rgb(185, 185, 185)
+        private val BORDER_COLOR = MaterialTokens.OUTLINE_VARIANT
+        private val BORDER_STRONG = MaterialTokens.OUTLINE
+        private val TEXT_PRIMARY = MaterialTokens.ON_SURFACE
+        private val TEXT_SECONDARY = MaterialTokens.ON_SURFACE_VARIANT
     }
 }

@@ -6,7 +6,7 @@ public interface INotebookTreeRow;
 
 public sealed class SectionRow : INotebookTreeRow
 {
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
+    private static readonly string[] SectionColors = ["#D0BCFF", "#CCC2DC", "#EFB8C8", "#CAC4D0"];
 
     public SectionNode Section { get; }
     public int Depth { get; }
@@ -27,7 +27,7 @@ public sealed class SectionRow : INotebookTreeRow
 
 public sealed class NotebookPaneRow : INotebookTreeRow
 {
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
+    private static readonly string[] SectionColors = ["#D0BCFF", "#CCC2DC", "#EFB8C8", "#CAC4D0"];
 
     public NotebookWorkspace Notebook { get; }
     public string Id => Notebook.Id;
@@ -51,7 +51,7 @@ public sealed class NotebookPaneRow : INotebookTreeRow
 
 public sealed class PagePaneRow
 {
-    private static readonly string[] SectionColors = ["#7719AA", "#185ABD", "#C239B3", "#CA5010"];
+    private static readonly string[] SectionColors = ["#D0BCFF", "#CCC2DC", "#EFB8C8", "#CAC4D0"];
 
     public bool IsHeader { get; init; }
     public string Title { get; init; } = string.Empty;

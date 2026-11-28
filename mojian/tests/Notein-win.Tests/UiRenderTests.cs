@@ -159,7 +159,7 @@ public class UiRenderTests
                 Assert.True(WindowChrome.GetIsHitTestVisibleInChrome(addPage));
                 Assert.Equal(new Thickness(6), enterFullPage.Padding);
                 Assert.Equal(new Thickness(6), exitFullPage.Padding);
-                Assert.Equal(34, exitFullPage.ActualWidth);
+                Assert.Equal(48, exitFullPage.ActualWidth);
                 AssertRenderedIconIsCentered(exitFullPage);
                 AssertCaptionButtons(window);
                 var minimizeCaption = Assert.IsType<Button>(window.FindName("MinimizeCaptionButton"));
@@ -169,8 +169,8 @@ public class UiRenderTests
                 vm.ToggleSectionPaneCommand.Execute(null);
                 vm.TogglePagePaneCommand.Execute(null);
                 CaptureVisual(window, 1440, 900, "win_10_fullpage_panes.png");
-                Assert.Equal(196, sectionPane.ActualWidth);
-                Assert.Equal(196, pagePane.ActualWidth);
+                Assert.Equal(248, sectionPane.ActualWidth);
+                Assert.Equal(240, pagePane.ActualWidth);
                 var eraserSlider = Assert.IsType<Slider>(window.FindName("EraserSlider"));
                 Assert.Equal(ToolPreset.MinimumEraserRadiusMm, eraserSlider.Minimum);
                 Assert.Equal(ToolPreset.MaximumEraserRadiusMm, eraserSlider.Maximum);

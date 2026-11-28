@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Mojian.Expressive" parent="Theme.Material3Expressive.Dark.NoActionBar">
+        <item name="colorPrimary">@color/mojian_md_primary</item>
+        <item name="colorOnPrimary">@color/mojian_md_on_primary</item>
+        <item name="colorPrimaryContainer">@color/mojian_md_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/mojian_md_on_primary_container</item>
+        <item name="colorSecondary">@color/mojian_md_secondary</item>
+        <item name="colorSecondaryContainer">@color/mojian_md_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/mojian_md_on_secondary_container</item>
+        <item name="colorSurface">@color/mojian_md_surface</item>
+        <item name="colorOnSurface">@color/mojian_md_on_surface</item>
+        <item name="colorSurfaceContainer">@color/mojian_md_surface_container</item>
+        <item name="colorSurfaceContainerHigh">@color/mojian_md_surface_container_high</item>
+        <item name="colorOutline">@color/mojian_md_outline</item>
+        <item name="android:windowBackground">@color/mojian_md_surface</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">@color/mojian_md_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

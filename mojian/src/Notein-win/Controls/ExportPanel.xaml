@@ -42,7 +42,7 @@
      <CheckBox x:Name="TrimCheck" IsChecked="True" Content="省略 A4 末尾空白页" Checked="OnChanged" Unchecked="OnChanged" />
      <CheckBox x:Name="HideFormatCheck" Visibility="Collapsed" Content="隐藏背景格式（横线、网格、点阵）" Checked="OnChanged" Unchecked="OnChanged" />
      <TextBlock Text="输出页码（留空为全部，例如 1-3,5）" Foreground="#AAA5AF" FontSize="12" Margin="0,12,0,5" />
-     <TextBox x:Name="RangeText" Background="#232323" Foreground="#F4F4F4" BorderBrush="#626262" Padding="10,7" TextChanged="OnChanged" />
+     <TextBox x:Name="RangeText" Background="{StaticResource ToolbarBackground}" Foreground="#F4F4F4" BorderBrush="#626262" Padding="10,7" TextChanged="OnChanged" />
     </StackPanel>
     <StackPanel x:Name="PrintColorPanel" Margin="0,16,0,0" Visibility="Collapsed">
      <TextBlock Text="深色页面打印" Foreground="#DCD0E8" FontSize="16" />

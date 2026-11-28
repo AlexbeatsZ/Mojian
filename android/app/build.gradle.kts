@@ -21,7 +21,7 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = 49
-        versionName = "0.7.45"
+        versionName = "0.8.0-material.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -53,6 +53,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.android.material:material:1.14.0")
     val inkVersion = "1.0.0"
 
     implementation("androidx.ink:ink-nativeloader:$inkVersion")

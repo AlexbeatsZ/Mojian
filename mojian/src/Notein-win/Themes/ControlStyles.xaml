@@ -25,29 +25,33 @@
     <Style x:Key="RibbonTabButtonStyle" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="Normal" />
-        <Setter Property="Width" Value="58" />
-        <Setter Property="Height" Value="34" />
+        <Setter Property="Width" Value="64" />
+        <Setter Property="Height" Value="48" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Background="Transparent">
-                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <Border x:Name="border" CornerRadius="24" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <Border x:Name="underline" Height="2" Background="{StaticResource AccentPurple}"
                                 VerticalAlignment="Bottom" Visibility="Collapsed" />
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource RibbonTabHover}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="border" Property="Background" Value="Transparent" />
-                            <Setter TargetName="underline" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource Md_secondary_container}" />
+                            <Setter TargetName="underline" Property="Visibility" Value="Collapsed" />
                             <Setter Property="Foreground" Value="{StaticResource AccentPurple}" />
                             <Setter Property="FontWeight" Value="SemiBold" />
                         </Trigger>
@@ -64,19 +68,23 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="6" />
         <Setter Property="Margin" Value="2" />
-        <Setter Property="Height" Value="34" />
-        <Setter Property="MinWidth" Value="34" />
+        <Setter Property="Height" Value="48" />
+        <Setter Property="MinWidth" Value="48" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="border"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="3"
+                            CornerRadius="24"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource HoverOverlay}" />
                         </Trigger>
@@ -94,11 +102,11 @@
 
     <Style x:Key="RibbonFileButtonStyle" TargetType="Button" BasedOn="{StaticResource RibbonIconButtonStyle}">
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="Normal" />
-        <Setter Property="Width" Value="58" />
-        <Setter Property="MinWidth" Value="58" />
-        <Setter Property="Height" Value="34" />
+        <Setter Property="Width" Value="64" />
+        <Setter Property="MinWidth" Value="64" />
+        <Setter Property="Height" Value="48" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="Padding" Value="0" />
     </Style>
@@ -110,19 +118,23 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="6" />
         <Setter Property="Margin" Value="2" />
-        <Setter Property="Height" Value="34" />
-        <Setter Property="MinWidth" Value="34" />
+        <Setter Property="Height" Value="48" />
+        <Setter Property="MinWidth" Value="48" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="border"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="3"
+                            CornerRadius="24"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource HoverOverlay}" />
                         </Trigger>
@@ -144,9 +156,9 @@
     <!-- The two normal-canvas actions are opaque 34dp squares on Android. -->
     <!-- Sync conflict review bar / dialog choice (native-sync.md "Conflict review"). -->
     <Style x:Key="ConflictReviewButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="#333333" />
+        <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="Padding" Value="10,4" />
         <Setter Property="Margin" Value="4,0,0,0" />
         <Setter Property="MinHeight" Value="26" />
@@ -154,11 +166,15 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="24" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#444444" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource Md_surface_container_highest}" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -171,9 +187,9 @@
         <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Width" Value="34" />
-        <Setter Property="MinWidth" Value="34" />
-        <Setter Property="Height" Value="34" />
+        <Setter Property="Width" Value="48" />
+        <Setter Property="MinWidth" Value="48" />
+        <Setter Property="Height" Value="48" />
         <Setter Property="Margin" Value="0,0,4,0" />
         <!-- 34 = 1 px border on each side + 6 px padding on each side + a 20 px icon. -->
         <Setter Property="Padding" Value="6" />
@@ -181,11 +197,15 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="24" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#333333" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource ToolbarBackground}" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -197,20 +217,24 @@
         <Setter Property="Background" Value="{StaticResource ToolbarBackground}" />
         <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Width" Value="34" />
-        <Setter Property="MinWidth" Value="34" />
-        <Setter Property="Height" Value="34" />
+        <Setter Property="Width" Value="48" />
+        <Setter Property="MinWidth" Value="48" />
+        <Setter Property="Height" Value="48" />
         <Setter Property="Margin" Value="0" />
         <Setter Property="Padding" Value="6" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="24" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="#333333" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource ToolbarBackground}" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource SelectedOverlay}" />
@@ -227,19 +251,23 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Width" Value="28" />
-        <Setter Property="Height" Value="34" />
-        <Setter Property="Margin" Value="2,2,2,0" />
+        <Setter Property="Width" Value="56" />
+        <Setter Property="Height" Value="48" />
+        <Setter Property="Margin" Value="12,8,12,0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="border"
                             Background="{TemplateBinding Background}"
-                            CornerRadius="3">
+                            CornerRadius="24">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentPurple}" />
+                            <Setter TargetName="border" Property="BorderThickness" Value="3" />
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="border" Property="Background" Value="{StaticResource HoverOverlay}" />
                             <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
@@ -281,7 +309,7 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
         <Setter Property="Padding" Value="8,6" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="14" />
         <Setter Property="MinWidth" Value="150" />
         <Setter Property="Template">
             <Setter.Value>
@@ -307,7 +335,7 @@
                         <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsSubmenuOpen}"
                                Placement="Right" HorizontalOffset="-2" AllowsTransparency="True" Focusable="False">
                             <Border Background="{StaticResource PagePaneBackground}"
-                                    BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="2">
+                                    BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8" CornerRadius="16">
                                 <StackPanel IsItemsHost="True" />
                             </Border>
                         </Popup>
@@ -317,7 +345,7 @@
                             <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible" />
                         </Trigger>
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="ItemBorder" Property="Background" Value="#374048" />
+                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource SelectedOverlay}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.42" />
@@ -354,8 +382,8 @@
                             <Setter.Value><ControlTemplate TargetType="ComboBoxItem">
                                 <Border x:Name="ItemBorder" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter /></Border>
                                 <ControlTemplate.Triggers>
-                                    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
-                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#374048" /></Trigger>
+                                    <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
+                                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource SelectedOverlay}" /></Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate></Setter.Value>
                         </Setter>
@@ -366,7 +394,7 @@
                 <Setter.Value><ControlTemplate TargetType="ComboBox">
                     <Grid>
                         <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#303030" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="2" /></ControlTemplate></ToggleButton.Template>
+                            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="#303030" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="24" /></ControlTemplate></ToggleButton.Template>
                         </ToggleButton>
                         <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="10,0,25,0" VerticalAlignment="Center" IsHitTestVisible="False" />
                         <Path Data="M0,0L4,4L8,0" Stroke="#B9B9B9" StrokeThickness="1.5" Width="8" Height="4" Stretch="Fill" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0" IsHitTestVisible="False" />

@@ -1,0 +1,138 @@
+"""Generate native chrome resources from the checked-in Google Material token snapshot.
+
+Run with Python 3; no packages or network required. Use --refresh to update the
+upstream snapshot intentionally. Legacy icon keys remain adapters for tool IDs.
+"""
+from __future__ import annotations
+
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+import json
+from pathlib import Path
+import urllib.request
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
+
+ROOT = Path(__file__).resolve().parents[2]
+SHARED = ROOT / "shared/material"
+ANDROID = ROOT / "android/app/src/main"
+WINDOWS = ROOT / "mojian/src/Notein-win"
+MATERIAL = "https://raw.githubusercontent.com/material-components/material-components-android/1.14.0/"
+ICONS = {
+    "add": "add", "arrow_undo": "undo", "arrow_redo": "redo", "attach": "attach_file",
+    "book_open": "menu_book", "caret_down": "arrow_drop_down", "chevron_right": "chevron_right",
+    "clipboard_paste": "content_paste", "copy": "content_copy", "crop": "crop", "cursor": "arrow_selector_tool",
+    "cut": "content_cut", "delete_dismiss": "delete", "document_page": "description", "document_pdf": "picture_as_pdf",
+    "eraser": "ink_eraser", "eye_off": "visibility_off", "full_screen_maximize": "fullscreen",
+    "full_screen_minimize": "fullscreen_exit", "hand_left": "pan_tool", "highlight": "ink_highlighter",
+    "highlight_text": "format_ink_highlighter", "image": "image", "insert_space": "expand",
+    "lasso": "lasso_select", "link": "link", "lock_closed": "lock", "navigation": "menu",
+    "notebook": "book_2", "page_width": "width", "paint_brush": "format_paint", "panel_left": "side_navigation",
+    "pen": "stylus_note", "rule_lines": "format_line_spacing", "search": "search", "shapes": "shapes",
+    "split_view": "splitscreen", "sticker": "sticky_note_2", "style_guide": "palette", "table": "table",
+    "table_simple": "table_chart", "tag": "label", "tag_search": "label_important",
+    "text_align_center": "format_align_center", "text_align_left": "format_align_left", "text_align_right": "format_align_right",
+    "text_bold": "format_bold", "text_bullet_list_ltr": "format_list_bulleted", "text_clear_formatting": "format_clear",
+    "text_color": "format_color_text", "text_font": "font_download", "text_font_size": "format_size",
+    "text_indent_decrease_ltr": "format_indent_decrease", "text_indent_increase_ltr": "format_indent_increase",
+    "text_italic": "format_italic", "text_line_spacing": "format_line_spacing", "text_number_list_ltr": "format_list_numbered",
+    "text_strikethrough": "strikethrough_s", "text_subscript": "subscript", "text_underline": "format_underlined",
+    "weather_moon": "dark_mode", "zoom_in": "zoom_in", "zoom_out": "zoom_out",
+}
+
+
+def fetch(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=45) as response:
+        return response.read()
+
+
+def refresh() -> None:
+    SHARED.mkdir(parents=True, exist_ok=True)
+    xml = ET.fromstring(fetch(MATERIAL + "lib/java/com/google/android/material/color/res/values/tokens.xml"))
+    values = {e.attrib["name"]: e.text for e in xml.findall("color")}
+
+    def resolve(name: str) -> str:
+        value = values[name]
+        return resolve(value[7:]) if value.startswith("@color/") else "#" + value[-6:].upper()
+
+    colors = {k.removeprefix("m3_sys_color_dark_"): resolve(k) for k in values if k.startswith("m3_sys_color_dark_")}
+    snapshot = {"source": MATERIAL + "lib/java/com/google/android/material/color/res/values/tokens.xml",
+                "scheme": "Google Material baseline dark", "colors": colors,
+                "layout": {"rail": 80, "sectionPane": 248, "pagePane": 240, "touchTarget": 48, "appBar": 64, "toolbar": 64},
+                "shape": {"small": 8, "medium": 12, "large": 16, "extraLarge": 28, "full": 999},
+                "icons": ICONS}
+    (SHARED / "material-tokens.json").write_text(json.dumps(snapshot, indent=2) + "\n")
+
+    def icon(name: str) -> None:
+        url = f"https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/{name}/materialsymbolsrounded/{name}_24px.svg"
+        (SHARED / "symbols" / f"{name}.svg").write_bytes(fetch(url))
+
+    (SHARED / "symbols").mkdir(exist_ok=True)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(icon, sorted(set(ICONS.values()))))
+    fonts = SHARED / "fonts"
+    fonts.mkdir(exist_ok=True)
+    for weight in ["Regular", "Medium"]:
+        (fonts / f"Roboto-{weight}.ttf").write_bytes(fetch(f"https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-{weight}.ttf"))
+    (fonts / "LICENSE.txt").write_bytes(fetch("https://raw.githubusercontent.com/googlefonts/roboto/main/LICENSE"))
+
+
+def generate() -> None:
+    tokens = json.loads((SHARED / "material-tokens.json").read_text())
+    colors = tokens["colors"]
+    android_colors = ['<?xml version="1.0" encoding="utf-8"?>', '<resources>', '    <!-- Generated by tools/material-design/generate_resources.py. -->']
+    for role, color in colors.items():
+        android_colors.append(f'    <color name="mojian_md_{role}">{color}</color>')
+    android_colors.append('</resources>')
+    (ANDROID / "res/values/material-colors.xml").write_text("\n".join(android_colors) + "\n")
+    kotlin = ['package com.meta.inklab', '', '// Generated from Google MDC 1.14.0; chrome only, never document colors.', 'internal object MaterialTokens {']
+    kotlin += [f'    val {role.upper()}: Int = 0xFF{color[1:]}.toInt()' for role, color in colors.items()]
+    kotlin.append('}')
+    (ANDROID / "java/com/meta/inklab/MaterialTokens.kt").write_text("\n".join(kotlin) + "\n")
+
+    aliases = {
+        "WindowBackground": "surface", "TitleBarBackground": "surface", "RibbonBackground": "surface",
+        "ToolbarBackground": "surface_container_high", "RibbonTabHover": "surface_container_highest",
+        "RibbonTabSelected": "secondary_container", "SectionPaneBackground": "surface_container_low",
+        "PagePaneBackground": "surface_container", "RailBackground": "surface", "PaperBackground": "surface_container_lowest",
+        "GridLineBrush": "outline_variant", "BorderHairline": "outline_variant", "BorderStrong": "outline",
+        "AccentPurple": "primary", "AccentBlue": "primary", "TagRed": "error", "TextPrimary": "on_surface",
+        "TextSecondary": "on_surface_variant", "TextMuted": "outline", "SelectedOverlay": "secondary_container",
+        "SelectionFill": "secondary_container", "SelectionStroke": "primary",
+    }
+    header = '<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"\n                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">'
+    xaml = [header, '    <!-- Generated from Google MDC 1.14.0. Legacy keys adapt existing native controls. -->']
+    for role, color in colors.items():
+        xaml += [f'    <Color x:Key="Md_{role}Color">{color}</Color>', f'    <SolidColorBrush x:Key="Md_{role}" Color="{color}" />']
+    for key, role in aliases.items():
+        # Some existing controls request the Color suffix directly.
+        xaml += [f'    <Color x:Key="{key}Color">{colors[role]}</Color>', f'    <SolidColorBrush x:Key="{key}" Color="{colors[role]}" />']
+    xaml += ['    <SolidColorBrush x:Key="HoverOverlay" Color="#14E6E0E9" />',
+             '    <FontFamily x:Key="MaterialFont">pack://application:,,,/Mojian;component/Assets/Fonts/#Roboto, Microsoft YaHei UI</FontFamily>', '</ResourceDictionary>']
+    (WINDOWS / "Themes/DarkColors.xaml").write_text("\n".join(xaml) + "\n")
+
+    geometries = [header, '    <!-- Google Material Symbols Rounded, Apache-2.0. Legacy Fluent keys are compatibility adapters. -->']
+    for key, name in tokens["icons"].items():
+        svg = ET.parse(SHARED / "symbols" / f"{name}.svg").getroot()
+        paths = " ".join(p.attrib["d"] for p in svg.findall("{http://www.w3.org/2000/svg}path"))
+        geometries += [f'    <PathGeometry x:Key="Fluent_{key}" Figures="{escape(paths)}" FillRule="Nonzero">',
+                       '        <PathGeometry.Transform><MatrixTransform Matrix="0.025,0,0,0.025,0,24" /></PathGeometry.Transform>',
+                       '    </PathGeometry>']
+        vector = ['<?xml version="1.0" encoding="utf-8"?>',
+                  '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">',
+                  '    <!-- Google Material Symbols Rounded, Apache-2.0. -->',
+                  '    <group android:scaleX="0.025" android:scaleY="0.025" android:translateY="24">',
+                  f'        <path android:fillColor="#FFFFFFFF" android:pathData="{escape(paths)}" />',
+                  '    </group>', '</vector>']
+        (ANDROID / f"res/drawable/ic_material_{key}.xml").write_text("\n".join(vector) + "\n")
+    geometries.append('</ResourceDictionary>')
+    (WINDOWS / "Themes/IconResources.xaml").write_text("\n".join(geometries) + "\n")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--refresh", action="store_true")
+    args = parser.parse_args()
+    if args.refresh:
+        refresh()
+    generate()

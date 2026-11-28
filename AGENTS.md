@@ -100,8 +100,8 @@
 - **Material 3 Expressive experiment**: branch `codex/material-3-expressive`; user requested
   preview before further builds on 2026-11-26. Interactive proposal is
   `docs/previews/mojian-material-expressive.html` (desktop/tablet/phone, dark/light, pen settings).
-  Native Android/Windows edits remain uncommitted and unaccepted; do not release/deploy them
-  before design review. Initial Android compilation passed but lint reported 14 errors
+  Native Android/Windows edits are committed on this branch only (2026-11-27, unaccepted); do not
+  merge/release/deploy them before design review. Initial Android compilation passed but lint reported 14 errors
   (13 existing indentation sites exposed by the new dependency, plus PassiveStatusView
   AppCompat inheritance); final native checks remain pending. Windows task-specific tests
   were stopped at the user's request. Read `docs/design/material-expressive.md`.

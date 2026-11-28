@@ -1,50 +1,118 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-
-    <Color x:Key="WindowBackgroundColor">#0A0A0A</Color>
-    <Color x:Key="TitleBarBackgroundColor">#141414</Color>
-    <Color x:Key="RibbonBackgroundColor">#111111</Color>
-    <Color x:Key="ToolbarBackgroundColor">#232323</Color>
-    <Color x:Key="RibbonTabHoverColor">#333337</Color>
-    <Color x:Key="RibbonTabSelectedColor">#2D2D30</Color>
-    <Color x:Key="SectionPaneBackgroundColor">#0F0F0F</Color>
-    <Color x:Key="PagePaneBackgroundColor">#2A2A2A</Color>
-    <Color x:Key="RailBackgroundColor">#0F0F0F</Color>
-    <Color x:Key="PaperBackgroundColor">#1B1B1B</Color>
-    <Color x:Key="GridLineColor">#2D3238</Color>
-    <Color x:Key="BorderHairlineColor">#3D3D3D</Color>
-    <Color x:Key="BorderStrongColor">#575757</Color>
-    <Color x:Key="AccentPurpleColor">#DAB2E9</Color>
-    <Color x:Key="AccentBlueColor">#0078D4</Color>
-    <Color x:Key="TagRedColor">#E83139</Color>
-    <Color x:Key="TextPrimaryColor">#F4F4F4</Color>
-    <Color x:Key="TextSecondaryColor">#B9B9B9</Color>
-    <Color x:Key="TextMutedColor">#707070</Color>
-    <Color x:Key="HoverOverlayColor">#1AFFFFFF</Color>
-    <Color x:Key="SelectedOverlayColor">#FF374048</Color>
-
-    <SolidColorBrush x:Key="WindowBackground" Color="{StaticResource WindowBackgroundColor}" />
-    <SolidColorBrush x:Key="TitleBarBackground" Color="{StaticResource TitleBarBackgroundColor}" />
-    <SolidColorBrush x:Key="RibbonBackground" Color="{StaticResource RibbonBackgroundColor}" />
-    <SolidColorBrush x:Key="ToolbarBackground" Color="{StaticResource ToolbarBackgroundColor}" />
-    <SolidColorBrush x:Key="RibbonTabHover" Color="{StaticResource RibbonTabHoverColor}" />
-    <SolidColorBrush x:Key="RibbonTabSelected" Color="{StaticResource RibbonTabSelectedColor}" />
-    <SolidColorBrush x:Key="SectionPaneBackground" Color="{StaticResource SectionPaneBackgroundColor}" />
-    <SolidColorBrush x:Key="PagePaneBackground" Color="{StaticResource PagePaneBackgroundColor}" />
-    <SolidColorBrush x:Key="RailBackground" Color="{StaticResource RailBackgroundColor}" />
-    <SolidColorBrush x:Key="PaperBackground" Color="{StaticResource PaperBackgroundColor}" />
-    <SolidColorBrush x:Key="GridLineBrush" Color="{StaticResource GridLineColor}" />
-    <SolidColorBrush x:Key="BorderHairline" Color="{StaticResource BorderHairlineColor}" />
-    <SolidColorBrush x:Key="BorderStrong" Color="{StaticResource BorderStrongColor}" />
-    <SolidColorBrush x:Key="AccentPurple" Color="{StaticResource AccentPurpleColor}" />
-    <SolidColorBrush x:Key="AccentBlue" Color="{StaticResource AccentBlueColor}" />
-    <SolidColorBrush x:Key="TagRed" Color="{StaticResource TagRedColor}" />
-    <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource TextPrimaryColor}" />
-    <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource TextSecondaryColor}" />
-    <SolidColorBrush x:Key="TextMuted" Color="{StaticResource TextMutedColor}" />
-    <SolidColorBrush x:Key="HoverOverlay" Color="{StaticResource HoverOverlayColor}" />
-    <SolidColorBrush x:Key="SelectedOverlay" Color="{StaticResource SelectedOverlayColor}" />
-    <SolidColorBrush x:Key="SelectionFill" Color="#28374048" />
-    <SolidColorBrush x:Key="SelectionStroke" Color="#DAB2E9" />
-
+    <!-- Generated from Google MDC 1.14.0. Legacy keys adapt existing native controls. -->
+    <Color x:Key="Md_primaryColor">#D0BCFF</Color>
+    <SolidColorBrush x:Key="Md_primary" Color="#D0BCFF" />
+    <Color x:Key="Md_on_primaryColor">#381E72</Color>
+    <SolidColorBrush x:Key="Md_on_primary" Color="#381E72" />
+    <Color x:Key="Md_primary_containerColor">#4F378B</Color>
+    <SolidColorBrush x:Key="Md_primary_container" Color="#4F378B" />
+    <Color x:Key="Md_on_primary_containerColor">#EADDFF</Color>
+    <SolidColorBrush x:Key="Md_on_primary_container" Color="#EADDFF" />
+    <Color x:Key="Md_secondaryColor">#CCC2DC</Color>
+    <SolidColorBrush x:Key="Md_secondary" Color="#CCC2DC" />
+    <Color x:Key="Md_on_secondaryColor">#332D41</Color>
+    <SolidColorBrush x:Key="Md_on_secondary" Color="#332D41" />
+    <Color x:Key="Md_secondary_containerColor">#4A4458</Color>
+    <SolidColorBrush x:Key="Md_secondary_container" Color="#4A4458" />
+    <Color x:Key="Md_on_secondary_containerColor">#E8DEF8</Color>
+    <SolidColorBrush x:Key="Md_on_secondary_container" Color="#E8DEF8" />
+    <Color x:Key="Md_tertiaryColor">#EFB8C8</Color>
+    <SolidColorBrush x:Key="Md_tertiary" Color="#EFB8C8" />
+    <Color x:Key="Md_on_tertiaryColor">#492532</Color>
+    <SolidColorBrush x:Key="Md_on_tertiary" Color="#492532" />
+    <Color x:Key="Md_tertiary_containerColor">#633B48</Color>
+    <SolidColorBrush x:Key="Md_tertiary_container" Color="#633B48" />
+    <Color x:Key="Md_on_tertiary_containerColor">#FFD8E4</Color>
+    <SolidColorBrush x:Key="Md_on_tertiary_container" Color="#FFD8E4" />
+    <Color x:Key="Md_errorColor">#F2B8B5</Color>
+    <SolidColorBrush x:Key="Md_error" Color="#F2B8B5" />
+    <Color x:Key="Md_on_errorColor">#601410</Color>
+    <SolidColorBrush x:Key="Md_on_error" Color="#601410" />
+    <Color x:Key="Md_error_containerColor">#8C1D18</Color>
+    <SolidColorBrush x:Key="Md_error_container" Color="#8C1D18" />
+    <Color x:Key="Md_on_error_containerColor">#F9DEDC</Color>
+    <SolidColorBrush x:Key="Md_on_error_container" Color="#F9DEDC" />
+    <Color x:Key="Md_surfaceColor">#141218</Color>
+    <SolidColorBrush x:Key="Md_surface" Color="#141218" />
+    <Color x:Key="Md_on_surfaceColor">#E6E0E9</Color>
+    <SolidColorBrush x:Key="Md_on_surface" Color="#E6E0E9" />
+    <Color x:Key="Md_surface_variantColor">#49454F</Color>
+    <SolidColorBrush x:Key="Md_surface_variant" Color="#49454F" />
+    <Color x:Key="Md_on_surface_variantColor">#CAC4D0</Color>
+    <SolidColorBrush x:Key="Md_on_surface_variant" Color="#CAC4D0" />
+    <Color x:Key="Md_surface_container_highestColor">#36343B</Color>
+    <SolidColorBrush x:Key="Md_surface_container_highest" Color="#36343B" />
+    <Color x:Key="Md_surface_container_highColor">#2B2930</Color>
+    <SolidColorBrush x:Key="Md_surface_container_high" Color="#2B2930" />
+    <Color x:Key="Md_surface_containerColor">#211F26</Color>
+    <SolidColorBrush x:Key="Md_surface_container" Color="#211F26" />
+    <Color x:Key="Md_surface_container_lowColor">#1D1B20</Color>
+    <SolidColorBrush x:Key="Md_surface_container_low" Color="#1D1B20" />
+    <Color x:Key="Md_surface_container_lowestColor">#0F0D13</Color>
+    <SolidColorBrush x:Key="Md_surface_container_lowest" Color="#0F0D13" />
+    <Color x:Key="Md_inverse_surfaceColor">#E6E0E9</Color>
+    <SolidColorBrush x:Key="Md_inverse_surface" Color="#E6E0E9" />
+    <Color x:Key="Md_inverse_on_surfaceColor">#322F35</Color>
+    <SolidColorBrush x:Key="Md_inverse_on_surface" Color="#322F35" />
+    <Color x:Key="Md_outlineColor">#938F99</Color>
+    <SolidColorBrush x:Key="Md_outline" Color="#938F99" />
+    <Color x:Key="Md_outline_variantColor">#49454F</Color>
+    <SolidColorBrush x:Key="Md_outline_variant" Color="#49454F" />
+    <Color x:Key="Md_inverse_primaryColor">#6750A4</Color>
+    <SolidColorBrush x:Key="Md_inverse_primary" Color="#6750A4" />
+    <Color x:Key="Md_backgroundColor">#141218</Color>
+    <SolidColorBrush x:Key="Md_background" Color="#141218" />
+    <Color x:Key="Md_on_backgroundColor">#E6E0E9</Color>
+    <SolidColorBrush x:Key="Md_on_background" Color="#E6E0E9" />
+    <Color x:Key="Md_surface_brightColor">#3B383E</Color>
+    <SolidColorBrush x:Key="Md_surface_bright" Color="#3B383E" />
+    <Color x:Key="Md_surface_dimColor">#141218</Color>
+    <SolidColorBrush x:Key="Md_surface_dim" Color="#141218" />
+    <Color x:Key="WindowBackgroundColor">#141218</Color>
+    <SolidColorBrush x:Key="WindowBackground" Color="#141218" />
+    <Color x:Key="TitleBarBackgroundColor">#141218</Color>
+    <SolidColorBrush x:Key="TitleBarBackground" Color="#141218" />
+    <Color x:Key="RibbonBackgroundColor">#141218</Color>
+    <SolidColorBrush x:Key="RibbonBackground" Color="#141218" />
+    <Color x:Key="ToolbarBackgroundColor">#2B2930</Color>
+    <SolidColorBrush x:Key="ToolbarBackground" Color="#2B2930" />
+    <Color x:Key="RibbonTabHoverColor">#36343B</Color>
+    <SolidColorBrush x:Key="RibbonTabHover" Color="#36343B" />
+    <Color x:Key="RibbonTabSelectedColor">#4A4458</Color>
+    <SolidColorBrush x:Key="RibbonTabSelected" Color="#4A4458" />
+    <Color x:Key="SectionPaneBackgroundColor">#1D1B20</Color>
+    <SolidColorBrush x:Key="SectionPaneBackground" Color="#1D1B20" />
+    <Color x:Key="PagePaneBackgroundColor">#211F26</Color>
+    <SolidColorBrush x:Key="PagePaneBackground" Color="#211F26" />
+    <Color x:Key="RailBackgroundColor">#141218</Color>
+    <SolidColorBrush x:Key="RailBackground" Color="#141218" />
+    <Color x:Key="PaperBackgroundColor">#0F0D13</Color>
+    <SolidColorBrush x:Key="PaperBackground" Color="#0F0D13" />
+    <Color x:Key="GridLineBrushColor">#49454F</Color>
+    <SolidColorBrush x:Key="GridLineBrush" Color="#49454F" />
+    <Color x:Key="BorderHairlineColor">#49454F</Color>
+    <SolidColorBrush x:Key="BorderHairline" Color="#49454F" />
+    <Color x:Key="BorderStrongColor">#938F99</Color>
+    <SolidColorBrush x:Key="BorderStrong" Color="#938F99" />
+    <Color x:Key="AccentPurpleColor">#D0BCFF</Color>
+    <SolidColorBrush x:Key="AccentPurple" Color="#D0BCFF" />
+    <Color x:Key="AccentBlueColor">#D0BCFF</Color>
+    <SolidColorBrush x:Key="AccentBlue" Color="#D0BCFF" />
+    <Color x:Key="TagRedColor">#F2B8B5</Color>
+    <SolidColorBrush x:Key="TagRed" Color="#F2B8B5" />
+    <Color x:Key="TextPrimaryColor">#E6E0E9</Color>
+    <SolidColorBrush x:Key="TextPrimary" Color="#E6E0E9" />
+    <Color x:Key="TextSecondaryColor">#CAC4D0</Color>
+    <SolidColorBrush x:Key="TextSecondary" Color="#CAC4D0" />
+    <Color x:Key="TextMutedColor">#938F99</Color>
+    <SolidColorBrush x:Key="TextMuted" Color="#938F99" />
+    <Color x:Key="SelectedOverlayColor">#4A4458</Color>
+    <SolidColorBrush x:Key="SelectedOverlay" Color="#4A4458" />
+    <Color x:Key="SelectionFillColor">#4A4458</Color>
+    <SolidColorBrush x:Key="SelectionFill" Color="#4A4458" />
+    <Color x:Key="SelectionStrokeColor">#D0BCFF</Color>
+    <SolidColorBrush x:Key="SelectionStroke" Color="#D0BCFF" />
+    <SolidColorBrush x:Key="HoverOverlay" Color="#14E6E0E9" />
+    <FontFamily x:Key="MaterialFont">pack://application:,,,/Mojian;component/Assets/Fonts/#Roboto, Microsoft YaHei UI</FontFamily>
 </ResourceDictionary>
