@@ -28,8 +28,11 @@ Obsidian): the file system is the hierarchy, a page is a file named by its title
 
 - The folder or file name is the title. There is no second copy of a title.
 - A notebook holds sections only; a section holds pages and child sections (unchanged model).
-- `.mojian-folder.json` holds the stable id and `sortKey`. A page file holds its own `id`,
-  `sortKey`, `createdAt`, `updatedAt`, `appearance`, PDF fields and the v2 page content.
+- `.mojian-folder.json` holds the stable id and `sortKey`. A page file is
+  `{"version":3,"id","sortKey","page":{createdAt, updatedAt, appearance, PDF fields…},"content":{revision, strokes…}}`.
+  `page` (directory metadata) is always written before `content`, so listing a library parses each
+  file only up to `content` instead of reading every stroke. Metadata edits rewrite `page`, page saves
+  rewrite `content`; neither overwrites the other.
 - Order uses fractional `sortKey` strings in each item (Figma/Notion style), not a shared order
   list, so two devices adding or reordering different items never edit the same file.
 - Names that the file system or other devices cannot store (`\ / : * ? " < > |`, trailing space or

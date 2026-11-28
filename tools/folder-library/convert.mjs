@@ -42,7 +42,9 @@ export async function convert(source, output) {
   const library = JSON.parse(await fs.readFile(path.join(source, 'library.json'), 'utf8'));
   if (library.version !== 2 || !Array.isArray(library.notebooks)) throw new Error('source is not a v2 library');
   const report = { pages: [], folders: [], assets: [], orphanPages: [], missingPages: [] };
-  const writeJson = async (file, value) => { await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, JSON.stringify(value, null, 2) + '\n'); };
+  // Folder descriptors are small and readable; page files stay compact like v2 because strokes dominate their size.
+  const writeJson = async (file, value) => { await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, file.endsWith(PAGE_EXTENSION) ? JSON.stringify(value) : JSON.stringify(value, null, 2) + '\n'); };
   const listed = new Set();
 
   const writeFolder = async (directory, item, sortKey, omitted, relative) => {
@@ -65,11 +67,9 @@ export async function convert(source, output) {
       if (!await exists(contentFile)) { report.missingPages.push({ notebook: notebook.id, page: page.id, title: page.title }); continue; }
       const content = JSON.parse(await fs.readFile(contentFile, 'utf8'));
       if (content.pageId !== page.id || content.notebookId !== notebook.id) throw new Error(`page identity mismatch: ${contentFile}`);
-      const metadata = pick(page, ['id', 'title']);
-      const document = { version: 3, id: page.id, sortKey: pageKeys[index], ...metadata, ...pick(content, ['version', 'notebookId', 'pageId']) };
-      for (const key of Object.keys(metadata)) if (key in content && key !== 'updatedAt' && stable(content[key]) !== stable(metadata[key]))
-        throw new Error(`page ${page.id} has different ${key} in library and page file`);
-      if ('updatedAt' in content) document.updatedAt = content.updatedAt;
+      // `page` holds directory metadata, `content` the editable page; each is rewritten on its own.
+      const document = { version: 3, id: page.id, sortKey: pageKeys[index], page: pick(page, ['id', 'title']),
+        content: pick(content, ['version', 'notebookId', 'pageId']) };
       await writeJson(path.join(directory, name), document);
       report.pages.push({ id: page.id, notebook: notebook.id, title: page.title, path: `${relative}/${name}`, source: path.relative(source, contentFile) });
     }
@@ -111,8 +111,8 @@ export async function convert(source, output) {
       const id = conflict ? `${content.pageId}-conflict-${conflict[1]}${conflict[2]}` : content.pageId;
       const title = conflict ? `冲突副本 ${conflict[1]} ${content.pageId.slice(-8)}` : `未归档 ${content.pageId.slice(-8)}`;
       const name = uniqueName(storableName(title), PAGE_EXTENSION, pageTaken);
-      const document = { version: 3, id, sortKey: keys[index], createdAt: content.updatedAt, appearance: { sheetCount: 1 },
-        ...pick(content, ['version', 'notebookId', 'pageId']) };
+      const document = { version: 3, id, sortKey: keys[index], page: { createdAt: content.updatedAt, updatedAt: content.updatedAt, appearance: { sheetCount: 1 } },
+        content: pick(content, ['version', 'notebookId', 'pageId']) };
       await writeJson(path.join(directory, name), document);
       report.orphanPages.push(path.relative(source, path.join(pages, file)));
       report.pages.push({ id, notebook: notebook.id, title, path: `${notebookFolder}/${sectionName}/${name}`, source: path.relative(source, path.join(pages, file)), unfiled: true });
@@ -152,7 +152,7 @@ async function verify(source, output, library, report) {
     const original = JSON.parse(await fs.readFile(path.join(source, entry.source), 'utf8'));
     for (const [key, value] of Object.entries(original)) {
       if (['version', 'notebookId', 'pageId'].includes(key)) continue;
-      if (stable(migrated[key]) !== stable(value)) throw new Error(`content field ${key} changed for ${entry.id}`);
+      if (stable(migrated.content[key]) !== stable(value)) throw new Error(`content field ${key} changed for ${entry.id}`);
     }
     if (migrated.id !== entry.id || path.basename(entry.path, PAGE_EXTENSION) === '') throw new Error(`identity lost for ${entry.id}`);
   }

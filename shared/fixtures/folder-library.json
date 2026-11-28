@@ -1,0 +1,229 @@
+{
+  "names": [
+    {
+      "title": "化学",
+      "name": "化学"
+    },
+    {
+      "title": "a/b:c*d?e\"f<g>h|i",
+      "name": "a／b：c＊d？e＂f＜g＞h｜i"
+    },
+    {
+      "title": "  spaced  ",
+      "name": "spaced"
+    },
+    {
+      "title": ".hidden",
+      "name": "．hidden"
+    },
+    {
+      "title": "trailing.",
+      "name": "trailing．"
+    },
+    {
+      "title": ".",
+      "name": "．"
+    },
+    {
+      "title": "",
+      "name": "无标题"
+    },
+    {
+      "title": "CON",
+      "name": "CON_"
+    },
+    {
+      "title": "nul.txt",
+      "name": "nul.txt_"
+    },
+    {
+      "title": "com1",
+      "name": "com1_"
+    },
+    {
+      "title": "tab\there",
+      "name": "tabhere"
+    },
+    {
+      "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+    },
+    {
+      "title": "Normal Title",
+      "name": "Normal Title"
+    },
+    {
+      "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  ],
+  "sequence": [
+    "a0",
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
+    "a8",
+    "a9",
+    "aA",
+    "aB",
+    "aC",
+    "aD",
+    "aE",
+    "aF",
+    "aG",
+    "aH",
+    "aI",
+    "aJ",
+    "aK",
+    "aL",
+    "aM",
+    "aN",
+    "aO",
+    "aP",
+    "aQ",
+    "aR",
+    "aS",
+    "aT",
+    "aU",
+    "aV",
+    "aW",
+    "aX",
+    "aY",
+    "aZ",
+    "aa",
+    "ab",
+    "ac",
+    "ad",
+    "ae",
+    "af",
+    "ag",
+    "ah",
+    "ai",
+    "aj",
+    "ak",
+    "al",
+    "am",
+    "an",
+    "ao",
+    "ap",
+    "aq",
+    "ar",
+    "as",
+    "at",
+    "au",
+    "av",
+    "aw",
+    "ax",
+    "ay",
+    "az",
+    "b00",
+    "b01",
+    "b02",
+    "b03",
+    "b04",
+    "b05",
+    "b06",
+    "b07",
+    "b08",
+    "b09",
+    "b0A",
+    "b0B",
+    "b0C",
+    "b0D",
+    "b0E",
+    "b0F",
+    "b0G",
+    "b0H",
+    "b0I",
+    "b0J",
+    "b0K",
+    "b0L",
+    "b0M",
+    "b0N",
+    "b0O",
+    "b0P",
+    "b0Q",
+    "b0R",
+    "b0S",
+    "b0T",
+    "b0U",
+    "b0V",
+    "b0W",
+    "b0X",
+    "b0Y",
+    "b0Z",
+    "b0a",
+    "b0b",
+    "b0c",
+    "b0d",
+    "b0e",
+    "b0f",
+    "b0g",
+    "b0h",
+    "b0i",
+    "b0j",
+    "b0k",
+    "b0l",
+    "b0m",
+    "b0n",
+    "b0o",
+    "b0p",
+    "b0q",
+    "b0r",
+    "b0s",
+    "b0t",
+    "b0u",
+    "b0v"
+  ],
+  "between": [
+    {
+      "a": null,
+      "b": null,
+      "key": "a0"
+    },
+    {
+      "a": "a0",
+      "b": null,
+      "key": "a1"
+    },
+    {
+      "a": null,
+      "b": "a0",
+      "key": "Zz"
+    },
+    {
+      "a": "a0",
+      "b": "a1",
+      "key": "a0V"
+    },
+    {
+      "a": "a0",
+      "b": "a0V",
+      "key": "a0G"
+    },
+    {
+      "a": "a1",
+      "b": "a2",
+      "key": "a1V"
+    },
+    {
+      "a": "Zz",
+      "b": "a0",
+      "key": "ZzV"
+    },
+    {
+      "a": "a0V",
+      "b": "a1",
+      "key": "a0l"
+    },
+    {
+      "a": "az",
+      "b": "b00",
+      "key": "azV"
+    }
+  ]
+}
