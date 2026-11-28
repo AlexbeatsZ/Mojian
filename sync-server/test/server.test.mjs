@@ -7,6 +7,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createSyncServer, validPath, prefix } from '../server.mjs';
+import { validateManifest } from '../protocol.mjs';
 
 const token = 'isolated-test-token-never-for-production';
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -39,9 +40,24 @@ async function fixture(run) {
 }
 
 test('path rules are cross-platform safe', () => {
-  for (const name of ['library.json', 'notebooks/book/pages/page.json', 'notebooks/book/assets/page/image.png']) assert.equal(validPath(name), true, name);
+  for (const name of ['library.json', 'notebooks/book/pages/page.json', 'notebooks/book/assets/page/image.png',
+    '化学', '化学/有机化学', '化学/有机化学/第 1 周 (2).mojian', '化学/.mojian-folder.json', '.mojian', '.mojian/assets', '.mojian/assets/page-1/image.png'])
+    assert.equal(validPath(name), true, name);
   for (const name of ['../library.json', 'notebooks/../pages/a.json', 'notebooks/book/pages/CON.json', 'notebooks/book/assets/page/hi.',
-    'settings.json', 'notebooks/book/pages/page-sync-conflict-a.json', 'notebooks/book/assets/page/a.previous', 'notebooks/book/pages/page.json\n', null]) assert.equal(validPath(name), false, name);
+    'notebooks/book/pages/page-sync-conflict-a.json', 'notebooks/book/assets/page/a.previous', 'notebooks/book/pages/page.json\n', null,
+    '.DS_Store', '化学/.git', '.mojian/other/x', '.mojian/assets/p/q/r', 'a:b', 'CON', '化学/页.mojian.tmp-1', 'trailing. '])
+    assert.equal(validPath(name), false, name);
+});
+
+test('folder library manifests allow folders, case-only renames and only page files', () => {
+  const hash = 'a'.repeat(64);
+  const manifest = files => ({ workspaceId: 'workspace-identity-1234', revision: 3, files });
+  validateManifest(manifest({ '化学': { hash: null, version: 1, directory: true }, '化学/页.mojian': { hash, version: 2 },
+    'Old.mojian': { hash: null, version: 3 }, 'old.mojian': { hash, version: 3 }, 'library.json': { hash: null, version: 1 } }));
+  assert.throws(() => validateManifest(manifest({ 'settings.json': { hash, version: 1 } })));
+  assert.throws(() => validateManifest(manifest({ 'A.mojian': { hash, version: 1 }, 'a.mojian': { hash, version: 1 } })));
+  assert.throws(() => validateManifest(manifest({ 'p.mojian': { hash, version: 1 }, 'p.mojian/x.mojian': { hash, version: 1 } })));
+  assert.throws(() => validateManifest(manifest({ 'dir': { hash, version: 1, directory: true } })));
 });
 
 test('authentication, immutable blobs, size and malformed commits', async () => fixture(async service => {

@@ -37,3 +37,8 @@ https://github.com/material-components/material-components-android/blob/1.14.0/d
 Copyright Google LLC / The Android Open Source Project. Licensed under the Apache License 2.0;
 see `shared/material/LICENSE-MATERIAL.txt`. The preview requests Roboto and Material Symbols
 Rounded from Google Fonts; no proprietary Google product artwork is included.
+
+## fractional-indexing (rocicorp)
+
+`tools/folder-library/fractional-index.mjs` and the client ports of the same algorithm are derived from
+https://github.com/rocicorp/fractional-indexing, released under CC0-1.0 (public domain dedication).
