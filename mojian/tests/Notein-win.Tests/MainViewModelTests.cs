@@ -392,7 +392,7 @@ public class MainViewModelTests
         vm.AddChildSection(vm.ActiveWorkspace.Sections[0].Id, "Nested");
         vm.AddPage("Nested page", new PageAppearance());
         vm.ToggleSplitViewCommand.Execute(null);
-        var directory = vm.Store.GetNotebookDirectory(deletedId);
+        var directory = Path.GetDirectoryName(Path.GetDirectoryName(vm.Store.GetPageDocumentPath(deletedId, deletedDocument.PageId)))!;
 
         Assert.True(vm.DeleteNotebook(deletedId));
         vm.SaveDocument(deletedDocument); // A late canvas notification cannot resurrect deleted data.
@@ -502,13 +502,13 @@ public class MainViewModelTests
         vm.ToggleSplitViewCommand.Execute(null);
         vm.AddPage("second", new PageAppearance { PageColor = "#302A21" });
         var secondId = vm.FocusedDocument!.PageId;
-        var before = File.ReadAllText(vm.Store.LibraryPath);
+        var before = FolderLibraryFixture.State(vm.Store.RootDirectory);
         vm.TogglePageTheme();
         Assert.False(vm.IsDarkPageBackground);
         Assert.Equal(PageTheme.Light, vm.PrimaryPageAppearance.Theme);
         Assert.Equal(PageTheme.Light, vm.SecondaryPageAppearance.Theme);
         Assert.Equal("#F3E9D2", vm.ActivePageAppearance.PageColor);
-        Assert.Equal(before, File.ReadAllText(vm.Store.LibraryPath));
+        Assert.Equal(before, FolderLibraryFixture.State(vm.Store.RootDirectory));
         Assert.Equal(PageTheme.Dark, first.Appearance.Theme);
         vm.NavigateToPage(vm.ActiveWorkspace.Id, first.Id);
         Assert.Equal(PageTheme.Light, vm.ActivePageAppearance.Theme);

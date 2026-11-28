@@ -37,7 +37,7 @@ public class PreferenceMemoryUiTests
                 var document = model.PrimaryDocument!;
                 var path = model.Store.GetPageDocumentPath(document.NotebookId, document.PageId);
                 var pageBytes = File.ReadAllBytes(path);
-                var libraryBytes = File.ReadAllBytes(model.Store.LibraryPath);
+                var libraryBytes = FolderLibraryFixture.State(model.Store.RootDirectory);
                 var published = 0;
                 model.LocalSaveCompleted += () => published++;
                 canvas.Viewport.Pan(-800, -24000);
@@ -47,7 +47,7 @@ public class PreferenceMemoryUiTests
                 Assert.Equal(1, canvas.Appearance.SheetCount);
                 Assert.Equal(1, model.ActiveWorkspace.SelectedPage()!.Appearance.SheetCount);
                 Assert.Equal(pageBytes, File.ReadAllBytes(path));
-                Assert.Equal(libraryBytes, File.ReadAllBytes(model.Store.LibraryPath));
+                Assert.Equal(libraryBytes, FolderLibraryFixture.State(model.Store.RootDirectory));
                 Assert.Equal(0, published);
                 var expected = new PageViewport();
                 canvas.Viewport.CopyTo(expected);
@@ -60,7 +60,7 @@ public class PreferenceMemoryUiTests
                 window.Close();
                 window = null;
                 Assert.Equal(pageBytes, File.ReadAllBytes(path));
-                Assert.Equal(libraryBytes, File.ReadAllBytes(model.Store.LibraryPath));
+                Assert.Equal(libraryBytes, FolderLibraryFixture.State(model.Store.RootDirectory));
                 Assert.Equal(0, published);
                 var restored = new MainViewModel(root, preferences);
                 Assert.Equal(expected.Scale, restored.PrimaryDocument!.Viewport.Scale);

@@ -9,28 +9,30 @@ namespace Notein_win.Tests;
 
 public class WorkspaceStoreTests
 {
-    [Fact]
-    public void DeleteNotebookData_RejectsParentDirectoryIds()
-    {
-        using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
-        var keep = store.WriteAsset("keep", "page", ".bin", new byte[] { 1 });
+    private static string FileName(string path) => System.IO.Path.GetFileName(path);
 
-        Assert.Throws<ArgumentException>(() => store.DeleteNotebookData(".."));
-        Assert.Throws<ArgumentException>(() => store.DeleteNotebookData("."));
-        Assert.True(File.Exists(store.ResolveAsset("keep", "page", keep)));
+    private static (WorkspaceStore Store, NotebookLibrary Library) Seeded(string root)
+    {
+        var store = new WorkspaceStore(root);
+        return (store, store.LoadLibrary());
     }
 
     [Fact]
-    public void LoadLibrary_RefusesToSeedSampleBesideExistingNotes()
+    public void LoadLibrary_SeedsOnlyNewEmptyWorkspaceAsRealFolders()
     {
         using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
-        store.SavePage(new PageDocument("notebook-one", "page-one"));
+        Assert.True(WorkspaceStore.IsNewWorkspace(temp.Path));
+        var (store, library) = Seeded(temp.Path);
+        var notebook = library.ActiveNotebook;
+        var section = notebook.Sections[0];
+        var page = section.Pages[0];
 
-        Assert.Throws<WorkspaceLibraryMissingException>(() => store.LoadLibrary());
-        Assert.False(File.Exists(store.LibraryPath));
-        Assert.True(File.Exists(store.GetPageDocumentPath("notebook-one", "page-one")));
+        Assert.True(Directory.Exists(System.IO.Path.Combine(temp.Path, notebook.Title, section.Title)));
+        Assert.Equal(System.IO.Path.Combine(temp.Path, notebook.Title, section.Title, page.Title + ".mojian"), store.GetPageDocumentPath(notebook.Id, page.Id));
+        Assert.True(File.Exists(System.IO.Path.Combine(temp.Path, notebook.Title, ".mojian-folder.json")));
+        Assert.False(WorkspaceStore.IsNewWorkspace(temp.Path));
+        Assert.NotEmpty(store.LoadPage(notebook.Id, page.Id).TextItems);
+        Assert.Empty(Directory.EnumerateFiles(temp.Path, "*.previous", SearchOption.AllDirectories).Where(path => !path.Contains(".mojian" + System.IO.Path.DirectorySeparatorChar)));
     }
 
     [Fact]
@@ -40,52 +42,157 @@ public class WorkspaceStoreTests
         File.WriteAllText(System.IO.Path.Combine(temp.Path, ".mojian-native-workspace"), "clone");
 
         Assert.Throws<WorkspaceLibraryMissingException>(() => new WorkspaceStore(temp.Path).LoadLibrary());
-        Assert.False(File.Exists(System.IO.Path.Combine(temp.Path, "library.json")));
+        Assert.Empty(Directory.EnumerateDirectories(temp.Path).Where(path => !FileName(path).StartsWith('.')));
     }
 
     [Fact]
-    public void LoadLibrary_SeedsOnlyNewEmptyWorkspace()
+    public void RenamesMovesAndReordersBecomeFolderOperations()
     {
         using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
+        var (store, library) = Seeded(temp.Path);
+        var notebook = library.ActiveNotebook;
+        var first = notebook.Sections[0];
+        var second = new SectionNode("section-second", "第二/分区");
+        notebook.Sections.Add(second);
+        var page = first.Pages[0];
+        store.SaveLibrary(library);
+        Assert.True(Directory.Exists(System.IO.Path.Combine(temp.Path, notebook.Title, "第二\uFF0F分区")));
 
-        Assert.True(WorkspaceStore.IsNewWorkspace(temp.Path));
-        Assert.NotEmpty(store.LoadLibrary().Notebooks);
-        Assert.True(File.Exists(store.LibraryPath));
-        Assert.False(WorkspaceStore.IsNewWorkspace(temp.Path));
+        first.Title = "改名后的分区";
+        first.Pages.Remove(page);
+        second.Pages.Add(page);
+        page.Title = "移动后的页";
+        notebook.Sections.Reverse();
+        store.SaveLibrary(library);
+
+        Assert.Equal(System.IO.Path.Combine(temp.Path, notebook.Title, "第二\uFF0F分区", "移动后的页.mojian"), store.GetPageDocumentPath(notebook.Id, page.Id));
+        Assert.True(Directory.Exists(System.IO.Path.Combine(temp.Path, notebook.Title, "改名后的分区")));
+        var reloaded = new WorkspaceStore(temp.Path).LoadLibrary().ActiveNotebook;
+        Assert.Equal(new[] { "第二\uFF0F分区", "改名后的分区" }, reloaded.Sections.Select(section => section.Title));
+        Assert.Equal(page.Id, Assert.Single(reloaded.Sections[0].Pages).Id);
+        Assert.NotEmpty(new WorkspaceStore(temp.Path).LoadPage(notebook.Id, page.Id).TextItems);
     }
 
     [Fact]
-    public async Task SaveLibrary_WaitsForSyncScannerToReleaseFile()
+    public void DuplicateTitlesGetExplorerStyleSuffixes()
     {
         using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
-        var library = store.LoadLibrary();
-        // Syncthing hashes files with read/write sharing but without FILE_SHARE_DELETE.
-        var scanner = new FileStream(store.LibraryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var (store, library) = Seeded(temp.Path);
+        var section = library.ActiveNotebook.Sections[0];
+        section.Pages.Add(new NotePage("page-a", "同名"));
+        section.Pages.Add(new NotePage("page-b", "同名"));
+        store.SaveLibrary(library);
+
+        var names = Directory.EnumerateFiles(System.IO.Path.GetDirectoryName(store.GetPageDocumentPath("", "page-a"))!, "同名*.mojian").Select(FileName).Order().ToArray();
+        Assert.Equal(new[] { "同名 (2).mojian", "同名.mojian" }, names);
+        Assert.Equal(new[] { "同名", "同名 (2)" }, new WorkspaceStore(temp.Path).LoadLibrary().ActiveNotebook.Sections[0].Pages.Skip(1).Select(page => page.Title));
+    }
+
+    [Fact]
+    public void FoldersAndPagesMadeInFileManagerAreAdopted()
+    {
+        using var temp = new TemporaryDirectory();
+        var (store, library) = Seeded(temp.Path);
+        var notebookFolder = System.IO.Path.Combine(temp.Path, library.ActiveNotebook.Title);
+        Directory.CreateDirectory(System.IO.Path.Combine(notebookFolder, "外部分区"));
+        File.Copy(store.GetPageDocumentPath("", library.ActiveNotebook.Sections[0].Pages[0].Id),
+            System.IO.Path.Combine(notebookFolder, "外部分区", "复制的页.mojian"));
+
+        var reloaded = new WorkspaceStore(temp.Path).LoadLibrary().ActiveNotebook;
+        var adopted = reloaded.Sections.Single(section => section.Title == "外部分区");
+        var copy = Assert.Single(adopted.Pages);
+        Assert.Equal("复制的页", copy.Title);
+        Assert.NotEqual(library.ActiveNotebook.Sections[0].Pages[0].Id, copy.Id);
+        Assert.True(File.Exists(System.IO.Path.Combine(notebookFolder, "外部分区", ".mojian-folder.json")));
+    }
+
+    [Fact]
+    public void MetadataEditsAndPageSavesNeverOverwriteEachOther()
+    {
+        using var temp = new TemporaryDirectory();
+        var (store, library) = Seeded(temp.Path);
+        var notebook = library.ActiveNotebook;
+        var page = notebook.Sections[0].Pages[0];
+        var document = store.LoadPage(notebook.Id, page.Id);
+
+        page.Appearance.PageColor = "#123456";
+        store.SaveLibrary(library);
+        document.TextItems.Add(new TextItem { Text = "after metadata edit" });
+        store.SavePage(document);
+
+        var reloaded = new WorkspaceStore(temp.Path);
+        Assert.Equal("#123456", reloaded.LoadLibrary().ActiveNotebook.Sections[0].Pages[0].Appearance.PageColor);
+        Assert.Contains(reloaded.LoadPage(notebook.Id, page.Id).TextItems, item => item.Text == "after metadata edit");
+    }
+
+    [Fact]
+    public void ContentSavedBeforeThePageJoinsTheLibraryIsKept()
+    {
+        using var temp = new TemporaryDirectory();
+        var (store, library) = Seeded(temp.Path);
+        var section = library.ActiveNotebook.Sections[0];
+        var page = new NotePage("page-new", "新页面");
+        section.Pages.Add(page);
+        var document = new PageDocument(library.ActiveNotebook.Id, page.Id);
+        document.TextItems.Add(new TextItem { Text = "staged" });
+        store.SavePage(document);
+        store.SaveLibrary(library);
+
+        Assert.EndsWith(System.IO.Path.Combine(section.Title, "新页面.mojian"), store.GetPageDocumentPath(library.ActiveNotebook.Id, page.Id));
+        Assert.Equal("staged", Assert.Single(new WorkspaceStore(temp.Path).LoadPage(library.ActiveNotebook.Id, page.Id).TextItems).Text);
+        Assert.Empty(Directory.EnumerateFiles(System.IO.Path.Combine(temp.Path, ".mojian", "pending")));
+    }
+
+    [Fact]
+    public void AnotherDevicesFolderChangeBlocksStaleLibrarySaves()
+    {
+        using var temp = new TemporaryDirectory();
+        var (store, library) = Seeded(temp.Path);
+        Directory.CreateDirectory(System.IO.Path.Combine(temp.Path, library.ActiveNotebook.Title, "另一台设备的分区"));
+
+        Assert.True(store.HasExternalChanges);
+        library.ActiveNotebook.Title = "本机改名";
+        Assert.Throws<IOException>(() => store.SaveLibrary(library));
+        Assert.Throws<IOException>(() => store.ValidateLibraryUnchanged());
+    }
+
+    [Fact]
+    public async Task SaveLibrary_WaitsForScannerToReleaseDescriptor()
+    {
+        using var temp = new TemporaryDirectory();
+        var (store, library) = Seeded(temp.Path);
+        var descriptor = System.IO.Path.Combine(temp.Path, library.ActiveNotebook.Title, library.ActiveNotebook.Sections[0].Title, ".mojian-folder.json");
+        // Scanners hash files with read/write sharing but without FILE_SHARE_DELETE.
+        var scanner = new FileStream(descriptor, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         var release = Task.Run(async () => { await Task.Delay(300); scanner.Dispose(); });
 
-        library.Notebooks[0].Title = "扫描后保存";
+        library.ActiveNotebook.Sections.Insert(0, new SectionNode("section-front", "排到最前"));
+        library.ActiveNotebook.Sections.Add(library.ActiveNotebook.Sections[1]);
+        library.ActiveNotebook.Sections.RemoveAt(1);
         store.SaveLibrary(library);
         await release;
 
-        Assert.Equal("扫描后保存", store.LoadLibrary().Notebooks[0].Title);
-        Assert.Empty(Directory.GetFiles(temp.Path, "*.tmp"));
+        Assert.Equal("排到最前", new WorkspaceStore(temp.Path).LoadLibrary().ActiveNotebook.Sections[0].Title);
+        Assert.Empty(Directory.EnumerateFiles(temp.Path, "*.tmp", SearchOption.AllDirectories));
     }
 
     [Fact]
-    public void PageAndAssets_UseSyncthingFriendlyAndroidCompatibleLayout()
+    public void PageAndAssets_UseFolderLibraryLayout()
     {
         using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
-        var document = new PageDocument("notebook-one", "page-one");
+        var (store, library) = Seeded(temp.Path);
+        var notebook = library.ActiveNotebook;
+        var page = notebook.Sections[0].Pages[0];
+        var document = store.LoadPage(notebook.Id, page.Id);
         document.Strokes.Add(new StrokeRecord { Points = new List<InkPoint> { new(1, 2), new(3, 4) } });
         store.SavePage(document);
-        var asset = store.WriteAsset(document.NotebookId, document.PageId, ".bin", new byte[] { 1, 2, 3 });
+        var asset = store.WriteAsset(notebook.Id, page.Id, ".bin", new byte[] { 1, 2, 3 });
 
-        Assert.Equal(System.IO.Path.Combine(temp.Path, "notebooks", "notebook-one", "pages", "page-one.json"), store.GetPageDocumentPath(document.NotebookId, document.PageId));
-        Assert.True(File.Exists(store.ResolveAsset(document.NotebookId, document.PageId, asset)));
-        Assert.Single(store.LoadPage(document.NotebookId, document.PageId).Strokes);
+        Assert.Equal(System.IO.Path.Combine(temp.Path, ".mojian", "assets", page.Id, asset), store.ResolveAsset(notebook.Id, page.Id, asset));
+        Assert.True(File.Exists(store.ResolveAsset(notebook.Id, page.Id, asset)));
+        Assert.Single(new WorkspaceStore(temp.Path).LoadPage(notebook.Id, page.Id).Strokes);
+        var head = PageFileFormat.ReadHead(store.GetPageDocumentPath(notebook.Id, page.Id));
+        Assert.Equal((3, page.Id), (head.Version, head.Id));
     }
 
     [Fact]
@@ -163,25 +270,23 @@ public class WorkspaceStoreTests
     }
 
     [Fact]
-    public void CopyAndDeletePageData_KeepDocumentAndAssetsTogether()
+    public void CopyPageData_StagesUntilTheCopyJoinsTheLibrary()
     {
         using var temp = new TemporaryDirectory();
-        var store = new WorkspaceStore(temp.Path);
-        var source = new PageDocument("notebook-one", "page-source");
-        source.TextItems.Add(new TextItem { Text = "copied content" });
-        store.SavePage(source);
-        var assetName = store.WriteAsset(source.NotebookId, source.PageId, ".bin", new byte[] { 7, 8, 9 });
+        var (store, library) = Seeded(temp.Path);
+        var notebook = library.ActiveNotebook;
+        var source = notebook.Sections[0].Pages[0];
+        var assetName = store.WriteAsset(notebook.Id, source.Id, ".bin", new byte[] { 7, 8, 9 });
 
-        store.CopyPageData(source.NotebookId, source.PageId, source.NotebookId, "page-copy");
-
-        var copy = store.LoadPage(source.NotebookId, "page-copy");
+        store.CopyPageData(notebook.Id, source.Id, notebook.Id, "page-copy");
+        var copy = store.LoadPage(notebook.Id, "page-copy");
         Assert.Equal("page-copy", copy.PageId);
-        Assert.Equal("copied content", Assert.Single(copy.TextItems).Text);
-        Assert.Equal(new byte[] { 7, 8, 9 }, File.ReadAllBytes(store.ResolveAsset(source.NotebookId, copy.PageId, assetName)));
+        Assert.NotEmpty(copy.TextItems);
+        Assert.Equal(new byte[] { 7, 8, 9 }, File.ReadAllBytes(store.ResolveAsset(notebook.Id, copy.PageId, assetName)));
 
-        store.DeletePageData(source.NotebookId, copy.PageId);
-        Assert.False(File.Exists(store.GetPageDocumentPath(source.NotebookId, copy.PageId)));
-        Assert.Empty(Directory.EnumerateFiles(store.GetAssetDirectory(source.NotebookId, copy.PageId)));
+        store.DeletePageData(notebook.Id, copy.PageId);
+        Assert.False(File.Exists(store.GetPageDocumentPath(notebook.Id, copy.PageId)));
+        Assert.False(Directory.Exists(System.IO.Path.Combine(temp.Path, ".mojian", "assets", "page-copy")));
     }
 
     [Fact]

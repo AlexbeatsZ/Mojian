@@ -18,6 +18,7 @@ public sealed class WorkspaceStore
     private readonly object _sync;
     private readonly Dictionary<string, HashSet<string?>> _localVersions = new();
     private Index _index = new();
+    private bool _indexed;
     private string? _snapshot;
     private string? _structure;
 
@@ -110,6 +111,7 @@ public sealed class WorkspaceStore
             // published over the shared library by sync.
             if (!IsNewWorkspace(RootDirectory)) throw new WorkspaceLibraryMissingException(RootDirectory);
             _index = index;
+            _indexed = true;
             var created = NotebookLibrary.Sample();
             SaveLibraryCore(created);
             SaveWelcomePage(created.ActiveNotebook);
@@ -120,6 +122,7 @@ public sealed class WorkspaceStore
         if (library.Notebooks.All(notebook => notebook.Id != library.ActiveNotebookId)) library.ActiveNotebookId = library.Notebooks[0].Id;
         NormalizeSelections(library);
         _index = index;
+        _indexed = true;
         WorkspaceDeletionTransaction.Recover(RootDirectory, relative => KeepsDeletedFile(relative, index));
         _snapshot = Snapshot(library);
         _structure = StructureSignature();
@@ -140,9 +143,7 @@ public sealed class WorkspaceStore
             if (FolderNames.IsHidden(name) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) continue;
             var childRelative = Combine(relative, name);
             var descriptorPath = Path.Combine(path, FolderNames.Descriptor);
-            JsonObject descriptor;
-            try { descriptor = File.Exists(descriptorPath) ? JsonNode.Parse(File.ReadAllText(descriptorPath))!.AsObject() : new JsonObject(); }
-            catch (JsonException) { descriptor = new JsonObject(); }
+            var descriptor = ReadDescriptor(descriptorPath);
             var id = descriptor["id"]?.GetValue<string>();
             var key = descriptor["sortKey"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(id) || index.Folders.ContainsKey(id) || !IsSafeId(id))
@@ -163,6 +164,26 @@ public sealed class WorkspaceStore
         }
         AssignMissingKeys(result.Select(folder => (folder.Id, folder.SortKey, folder.Name)).ToList(), index);
         return result.OrderBy(folder => index.Keys[folder.Id], StringComparer.Ordinal).ThenBy(folder => folder.Name, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>A damaged descriptor is restored from its previous copy; otherwise a corrupt copy is kept and the folder re-adopted.</summary>
+    private JsonObject ReadDescriptor(string path)
+    {
+        static JsonObject? Parse(string file)
+        {
+            try { return JsonNode.Parse(File.ReadAllText(file)) as JsonObject; }
+            catch (JsonException) { return null; }
+        }
+        if (!File.Exists(path)) return new JsonObject();
+        if (Parse(path) is { } current) return current;
+        PreserveCorruptFile(path, RootDirectory);
+        var previous = PreviousPath(path);
+        if (File.Exists(previous) && Parse(previous) is { } recovered)
+        {
+            File.Copy(previous, path, overwrite: true);
+            return recovered;
+        }
+        return new JsonObject();
     }
 
     private List<(NotePage Page, string SortKey)> ReadPages(string relative, Index index, string notebookId)
@@ -540,7 +561,21 @@ public sealed class WorkspaceStore
 
     // ---- Pages -------------------------------------------------------------------------------------------------
 
-    private string PagePath(string pageId) => _index.Pages.TryGetValue(pageId, out var relative) ? Path.Combine(RootDirectory, relative) : PendingPath(pageId);
+    private string PagePath(string pageId)
+    {
+        EnsureIndex();
+        return _index.Pages.TryGetValue(pageId, out var relative) ? Path.Combine(RootDirectory, relative) : PendingPath(pageId);
+    }
+
+    /// <summary>Page access before the first library load (exports, tools) builds the id-to-path index on demand.</summary>
+    private void EnsureIndex()
+    {
+        if (_indexed) return;
+        var index = new Index();
+        ReadFolders(string.Empty, index, notebookId: null);
+        _index = index;
+        _indexed = true;
+    }
     private string PendingPath(string pageId) => Path.Combine(PendingDirectory, SafeId(pageId) + ".json");
 
     public PageDocument LoadPage(string notebookId, string pageId)

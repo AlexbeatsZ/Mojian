@@ -73,7 +73,10 @@ void Check(bool condition, string message)
 {
     if (!condition) throw new Exception(message);
 }
-string NewPage() => "notebooks/testbook/pages/" + Guid.NewGuid().ToString("N") + ".json";
+// Folder library v3: pages are <title>.mojian files in section folders; "测试本" is the test notebook folder.
+const string Index = "测试本/.mojian-folder.json";
+string NewPage() => "测试本/分区/" + Guid.NewGuid().ToString("N") + ".mojian";
+string PageFile(string id, string value) => JsonSerializer.Serialize(new { version = 3, id, sortKey = "a0", page = new { }, content = new { text = value } });
 Task<bool> Idle(Action action) { action(); return Task.FromResult(true); }
 Task<bool> OnPublicationThread(Func<bool> callback)
 {
@@ -285,37 +288,38 @@ async Task IncomingConflict()
     second.Write(page, "unexpected offline edit");
     var offline = new TransportFault { Offline = true };
     using var restarted = new NativeSyncClient(second.Root, endpoint, token, offline);
-    Check(!await restarted.RecoverPendingIncomingAsync(Idle), "Conflicting partial library allowed startup");
-    Check(restarted.HasPendingIncoming && restarted.Snapshot.Phase == NativeSyncPhase.Conflict, "Incoming conflict not blocked");
+    // Folder items are independent groups: they publish while the edited page waits for review.
+    await restarted.RecoverPendingIncomingAsync(Idle);
+    Check(restarted.ConflictReview().Any(item => item.Path == page) && restarted.Snapshot.Phase == NativeSyncPhase.Conflict, "Incoming conflict not retained for review");
     Check(second.Read(page) == "unexpected offline edit" && offline.Requests == 0, "Offline recovery changed local data or performed network");
 }
 
 async Task DeferredIncomingReview()
 {
     using var root = new TestWorkspace();
-    root.Write("library.json", """{"notebooks":[{"id":"n","sections":[{"pages":[{"id":"a"},{"id":"b"},{"id":"c"}]}]}]}""");
-    const string a = "notebooks/n/pages/a.json", b = "notebooks/n/pages/b.json", c = "notebooks/n/pages/c.json";
-    const string asset = "notebooks/n/assets/a/original.pdf";
-    foreach (var path in new[] { a, b, c, asset }) root.Write(path, "base");
-    StageIncoming(root, new() { [a] = "server-a", [asset] = "server-asset", [b] = "server-b", [c] = "server-c" });
+    const string a = "测试本/分区/页 A.mojian", b = "测试本/分区/页 B.mojian", c = "测试本/分区/页 C.mojian";
+    const string asset = ".mojian/assets/a/original.pdf";
+    foreach (var (path, id) in new[] { (a, "a"), (b, "b"), (c, "c") }) root.Write(path, PageFile(id, "base"));
+    root.Write(asset, "base");
+    StageIncoming(root, new() { [a] = PageFile("a", "server-a"), [asset] = "server-asset", [b] = PageFile("b", "server-b"), [c] = PageFile("c", "server-c") });
     NativeSyncStorage.CopyDurable(root.PathFor(asset), root.Private("incoming-backups", asset));
     root.Write(asset, "server-asset"); // Previous process stopped after replacing the first dependency.
-    root.Write(a, "my-a");
-    root.Write(b, "my-b");
+    root.Write(a, PageFile("a", "my-a"));
+    root.Write(b, PageFile("b", "my-b"));
     using (var client = NativeSyncClient.ForLocalRecovery(root.Root))
     {
         Check(await client.RecoverPendingIncomingAsync(Idle), client.Status);
-        Check(root.Read(c) == "server-c" && root.Read(asset) == "base", "Independent page or dependent asset was misplaced");
+        Check(root.Read(c) == PageFile("c", "server-c") && root.Read(asset) == "base", "Independent page or dependent asset was misplaced");
         Check(client.ConflictReview().Count == 2 && !client.HasPendingIncoming, "Consistent workspace cannot open for review");
         Check(!await client.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [a] = NativeSyncChoice.Local }, _ => Task.FromResult(false)), "Busy editor accepted a write");
         Check(client.HasPendingIncoming && client.ConflictReview().Count == 2, "Review intent was lost before publication");
     }
     using var restarted = NativeSyncClient.ForLocalRecovery(root.Root);
     Check(await restarted.RecoverPendingIncomingAsync(Idle), restarted.Status);
-    Check(root.Read(a) == "my-a" && root.Read(b) == "my-b" && root.Read(asset) == "server-asset", "Review replay changed another conflict or omitted dependencies");
+    Check(root.Read(a) == PageFile("a", "my-a") && root.Read(b) == PageFile("b", "my-b") && root.Read(asset) == "server-asset", "Review replay changed another conflict or omitted dependencies");
     Check(restarted.ConflictReview().Select(item => item.Path).SequenceEqual([b]), "Remaining conflict was not retained");
     Check(await restarted.ResolveConflictsAsync(new Dictionary<string, NativeSyncChoice> { [b] = NativeSyncChoice.Remote }, Idle), restarted.Status);
-    Check(root.Read(b) == "server-b" && restarted.ConflictReview().Count == 0, "Second choice did not settle");
+    Check(root.Read(b) == PageFile("b", "server-b") && restarted.ConflictReview().Count == 0, "Second choice did not settle");
 }
 
 async Task ResumeLargeBlob()
@@ -361,7 +365,7 @@ async Task PreparedIncomingPublication()
     {
         Check(preparationThread != 0 && preparationThread != Environment.CurrentManagedThreadId, "Preparation ran on the publication thread");
         Check(File.ReadAllText(second.Private("incoming-backups", page)) == "before incoming", "Backup was not prepared before UI publication");
-        Check(Directory.EnumerateFiles(Path.GetDirectoryName(second.PathFor(page))!, "*.tmp").Any(), "Replacement was not prepared before UI publication");
+        Check(Directory.EnumerateFiles(second.Private("incoming-replacements"), "*.tmp").Any(), "Replacement was not prepared before UI publication");
         using var immutableBlob = new FileStream(second.Private("blobs", HashText("after incoming")), FileMode.Open, FileAccess.Read, FileShare.None);
         using var oldTarget = new FileStream(second.PathFor(page), FileMode.Open, FileAccess.Read, FileShare.Delete);
         action();
@@ -389,7 +393,8 @@ async Task IncomingPublicationRace()
     });
     Check(reader.HasPendingIncoming && second.Read(page) == "intervening local edit", "Prepared incoming overwrote an intervening local edit");
     Check(reader.Snapshot.Phase == NativeSyncPhase.Error, "Failed Action did not signal the host to keep editing locked");
-    Check(!await reader.RecoverPendingIncomingAsync(Idle) && reader.Snapshot.Phase == NativeSyncPhase.Conflict, "Deferred edit was not preserved as a recoverable conflict");
+    await reader.RecoverPendingIncomingAsync(Idle); // independent folder items may publish; the page waits for review
+    Check(reader.Snapshot.Phase == NativeSyncPhase.Conflict && reader.ConflictReview().Any(item => item.Path == page), "Deferred edit was not preserved as a recoverable conflict");
 }
 
 async Task IncomingPreparationThread()
@@ -441,7 +446,7 @@ async Task IncomingPublicationFailure()
     var secondPage = NewPage();
     root.Write(firstPage, "old first");
     root.Write(secondPage, "old second");
-    StageIncoming(root, new() { ["library.json"] = "new index", [firstPage] = "new first", [secondPage] = "new second" });
+    StageIncoming(root, new() { [Index] = "new index", [firstPage] = "new first", [secondPage] = "new second" });
     var checkpoint = File.ReadAllBytes(root.Private("state.json"));
     var offline = new TransportFault { Offline = true };
     using (var client = new NativeSyncClient(root.Root, endpoint, token, offline))
@@ -454,7 +459,6 @@ async Task IncomingPublicationFailure()
         });
         Check(!recovered && client.HasPendingIncoming && client.Snapshot.Phase == NativeSyncPhase.Error, "Partial publication did not block editable startup");
         Check(root.Read(firstPage) == "new first" && root.Read(secondPage) == "old second", "Test did not reach a real partial replacement boundary");
-        Check(root.Read("library.json") == "{}", "Library was published before all page replacements completed");
         Check(File.ReadAllBytes(root.Private("state.json")).SequenceEqual(checkpoint), "Partial publication advanced the checkpoint");
         Check(File.ReadAllText(root.Private("incoming-backups", firstPage)) == "old first", "Original first-page recovery copy missing");
         AssertIncomingTemporariesRemoved(root);
@@ -462,7 +466,7 @@ async Task IncomingPublicationFailure()
     var restartedOffline = new TransportFault { Offline = true };
     using var restarted = new NativeSyncClient(root.Root, endpoint, token, restartedOffline);
     Check(await restarted.RecoverPendingIncomingAsync(Idle), "Offline replay failed: " + restarted.Status);
-    Check(!restarted.HasPendingIncoming && root.Read(firstPage) == "new first" && root.Read(secondPage) == "new second" && root.Read("library.json") == "new index",
+    Check(!restarted.HasPendingIncoming && root.Read(firstPage) == "new first" && root.Read(secondPage) == "new second" && root.Read(Index) == "new index",
         "Offline replay did not finish the entire batch");
     var state = NativeSyncStorage.Read<NativeSyncState>(root.Private("state.json"));
     Check(state.Revision == 2 && state.Files.Values.All(entry => entry.Version == 2), "Full replay did not acknowledge the complete batch");
@@ -584,15 +588,18 @@ async Task MigrationGuards()
     {
         NativeSyncClient.CloneWorkspace(root.Root, target);
         NativeSyncClient.RequireDedicatedWorkspace(target);
-        Check(File.Exists(Path.Combine(target, "library.json")), "Clone incomplete");
+        Check(File.Exists(Path.Combine(target, Index)), "Clone incomplete");
         Check(!NativeSyncConfiguration.Load(target).Enabled, "Clone default enabled sync");
         Directory.CreateDirectory(Path.Combine(target, "nested", ".stfolder"));
-        var blocked = false;
-        try { NativeSyncClient.RequireDedicatedWorkspace(target); } catch (IOException) { blocked = true; }
-        Check(blocked, "Nested Syncthing folder accepted");
+        NativeSyncClient.RequireDedicatedWorkspace(target);
+        using (var scanner = new NativeSyncClient(target, endpoint, token, new TransportFault { Offline = true }))
+        {
+            Check(!scanner.Scan().Keys.Any(path => path.StartsWith("nested/", StringComparison.Ordinal)) &&
+                scanner.FailedItems.ContainsKey("nested"), "Nested Syncthing folder was synchronized or not reported");
+        }
         Directory.Delete(Path.Combine(target, "nested"), true);
         using var first = new NativeSyncClient(target, endpoint, token);
-        blocked = false;
+        var blocked = false;
         try { using var second = new NativeSyncClient(target, endpoint, token); } catch (IOException) { blocked = true; }
         Check(blocked, "Two local sync writers accepted");
     }
@@ -620,7 +627,7 @@ async Task DeletionSnapshotBarrier()
     var page = NewPage();
     root.Write(page, "page before transactional delete");
     var oldLibrary = JsonSerializer.Serialize(new { pages = new[] { page } });
-    root.Write("library.json", oldLibrary);
+    root.Write(Index, oldLibrary);
     await client.SyncAsync(Idle);
     AssertSynced(client);
     var initialCommits = transport.CommitBodies.Count;
@@ -637,7 +644,7 @@ async Task DeletionSnapshotBarrier()
             File.Move(root.PathFor(page), root.Private("deleted-page-backup.json"));
             moved.Set();
             if (!publish.Wait(TimeSpan.FromSeconds(10))) throw new Exception("Timed out publishing test deletion");
-            root.Write("library.json", "{\"pages\":[]}");
+            root.Write(Index, "{\"pages\":[]}");
         }
     });
     Check(await Task.Run(() => moved.Wait(TimeSpan.FromSeconds(5))), "Deletion test did not reach move-before-index boundary");
@@ -672,10 +679,10 @@ async Task DeletionSnapshotBarrier()
     var commit = JsonNode.Parse(transport.CommitBodies[^1])!;
     var changes = commit["changes"]!.AsArray();
     Check(changes.Count == 2 && changes.Any(change => change!["path"]!.GetValue<string>() == page && change["hash"] == null) &&
-        changes.Any(change => change!["path"]!.GetValue<string>() == "library.json" && change["hash"]!.GetValue<string>() == HashText("{\"pages\":[]}")),
+        changes.Any(change => change!["path"]!.GetValue<string>() == Index && change["hash"]!.GetValue<string>() == HashText("{\"pages\":[]}")),
         "Deletion commit did not contain matching library and page tombstone");
     var remote = await Remote();
-    Check(remote.Files[page].Hash == null && remote.Files[page].Version == remote.Files["library.json"].Version,
+    Check(remote.Files[page].Hash == null && remote.Files[page].Version == remote.Files[Index].Version,
         "Server observed a partial deletion transaction");
 }
 
@@ -706,14 +713,14 @@ Task MutationEpochBarrier()
 async Task SnapshotAfterNetworkMutation()
 {
     using var root = new TestWorkspace();
-    root.Write("library.json", "{\"pages\":[]}");
+    root.Write(Index, "{\"pages\":[]}");
     var transport = new TransportFault();
     using var client = new NativeSyncClient(root.Root, endpoint, token, transport);
     await client.SyncAsync(Idle);
     AssertSynced(client);
     var page = NewPage();
     root.Write(page, "captured-before-network");
-    root.Write("library.json", "{\"version\":\"before-network\"}");
+    root.Write(Index, "{\"version\":\"before-network\"}");
     var network = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     transport.BeforeSend = async () =>
@@ -730,7 +737,7 @@ async Task SnapshotAfterNetworkMutation()
             lock (WorkspaceFileGate.ForRoot(root.Root))
             {
                 root.Write(page, "edited-during-network");
-                root.Write("library.json", "{\"version\":\"during-network\"}");
+                root.Write(Index, "{\"version\":\"during-network\"}");
             }
         }).WaitAsync(TimeSpan.FromSeconds(2));
     }
@@ -738,45 +745,49 @@ async Task SnapshotAfterNetworkMutation()
     await synchronization;
     var remote = await Remote();
     Check(remote.Files[page].Hash == HashText("captured-before-network") &&
-        remote.Files["library.json"].Hash == HashText("{\"version\":\"before-network\"}"), "Network phase read changing source bytes instead of immutable snapshot");
+        remote.Files[Index].Hash == HashText("{\"version\":\"before-network\"}"), "Network phase read changing source bytes instead of immutable snapshot");
     Check(client.Snapshot.Phase == NativeSyncPhase.Pending, "Newer local edit was not kept pending");
     await client.SyncAsync(Idle);
     AssertSynced(client);
     remote = await Remote();
     Check(remote.Files[page].Hash == HashText("edited-during-network") &&
-        remote.Files["library.json"].Hash == HashText("{\"version\":\"during-network\"}"), "Next pass lost the concurrent local transaction");
+        remote.Files[Index].Hash == HashText("{\"version\":\"during-network\"}"), "Next pass lost the concurrent local transaction");
 }
 
 async Task UnsupportedContentPaths()
 {
-    foreach (var unsupported in new[] { "notebooks/book/assets/page/asset.中文", "notebooks/book/pages/中文.json", "notebooks/book/assets/page/deeper/asset.png" })
+    foreach (var unsupported in new[] { "测试本/分区/photo.png", "测试本/分区/名字:冒号.mojian", ".mojian/assets/page/deeper/asset.png" })
     {
         using var root = new TestWorkspace();
+        var page = NewPage();
+        root.Write(page, "canonical");
         root.Write(unsupported, "original content");
-        root.Write("library.json", JsonSerializer.Serialize(new { referenced = unsupported }));
-        var originalLibrary = root.Read("library.json");
         var target = root.Root + "-clone";
         try
         {
-            var rejected = false;
-            try { NativeSyncClient.CloneWorkspace(root.Root, target); } catch (IOException) { rejected = true; }
-            Check(rejected && !File.Exists(Path.Combine(target, ".mojian-native-workspace")), "Unsupported content silently cloned with activation marker");
-            Check(root.Read(unsupported) == "original content" && root.Read("library.json") == originalLibrary, "Rejected clone changed original data");
+            NativeSyncClient.CloneWorkspace(root.Root, target);
+            Check(!File.Exists(Path.Combine(target, unsupported)) && File.Exists(Path.Combine(target, page)), "Clone copied unsupported content or skipped canonical pages");
+            Check(root.Read(unsupported) == "original content", "Clone changed original data");
             var transport = new TransportFault();
             using var client = new NativeSyncClient(root.Root, endpoint, token, transport);
             await client.SyncAsync(Idle);
-            Check(client.Snapshot.Phase == NativeSyncPhase.Error && transport.Requests == 0 && !File.Exists(root.Private("outbox.json")), "Unsupported content was silently omitted from outgoing snapshot");
+            Check(client.Snapshot.Phase == NativeSyncPhase.Error && client.Status.Contains(unsupported.Split('/')[^1].Split('/')[0], StringComparison.Ordinal) ||
+                client.FailedItems.Keys.Any(path => unsupported.StartsWith(path, StringComparison.Ordinal)), "Unsupported content was not reported: " + client.Status);
+            var remote = await Remote();
+            Check(remote.Files.TryGetValue(page, out var uploaded) && uploaded.Hash == HashText("canonical") && !remote.Files.ContainsKey(unsupported),
+                "One unsupported item stopped the other pages or was uploaded");
         }
         finally { if (Directory.Exists(target)) Directory.Delete(target, true); }
     }
     using var ignored = new TestWorkspace();
-    var page = NewPage();
-    ignored.Write(page, "canonical");
-    foreach (var path in new[] { page + ".previous", page + ".tmp", "notebooks/book/pages/page-sync-conflict-device.json", ".mojian-deletions.previous/archive/notebooks/book/pages/中文.json",
-        ".mojian-corrupt.previous/notebooks/book/pages/page.json.corrupt-20261102-000000-0123456789abcdef0123456789abcdef" })
+    var kept = NewPage();
+    ignored.Write(kept, "canonical");
+    foreach (var path in new[] { kept + ".previous", kept + ".tmp", "测试本/分区/page-sync-conflict-device.mojian", ".mojian-deletions.previous/archive/测试本/中文.mojian",
+        ".mojian-corrupt.previous/测试本/page.mojian.corrupt-20261102-000000-0123456789abcdef0123456789abcdef", ".mojian/previous/测试本/a.mojian.previous", ".mojian/navigation.json" })
         ignored.Write(path, "local-only recovery");
     using var safe = new NativeSyncClient(ignored.Root, endpoint, token, new TransportFault { Offline = true });
-    Check(safe.Scan().Keys.ToHashSet().SetEquals(new[] { "library.json", page }), "Explicit local recovery exclusions were rejected or uploaded");
+    Check(safe.Scan().Keys.ToHashSet().SetEquals(new[] { "测试本", Index, "测试本/分区", kept }) && safe.FailedItems.Count == 0,
+        "Explicit local recovery exclusions were rejected, reported or uploaded");
 }
 
 async Task WireFixture()
@@ -809,7 +820,7 @@ async Task OrderedAddresses()
     {
         initial.DefaultRequestHeaders.Authorization = new("Bearer", token);
         var manifest = await Remote();
-        root.Write("library.json", await initial.GetStringAsync(endpoint + "blobs/" + manifest.Files["library.json"].Hash));
+        root.Write(Index, await initial.GetStringAsync(endpoint + "blobs/" + manifest.Files[Index].Hash));
     }
     var requests = new List<string>();
     using var first = new AddressForwarder(endpoint, "first", requests) { Unavailable = true };
@@ -908,9 +919,9 @@ async Task ExpiredMergeAncestor()
 {
     using var first = new TestWorkspace(); using var second = new TestWorkspace();
     using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
-    var library = (await Remote()).Files.TryGetValue("library.json", out var existingLibrary)
+    var library = (await Remote()).Files.TryGetValue(Index, out var existingLibrary)
         ? await http.GetStringAsync(endpoint + "blobs/" + existingLibrary.Hash) : "{\"notebooks\":[]}";
-    first.Write("library.json", library); second.Write("library.json", library);
+    first.Write(Index, library); second.Write(Index, library);
     var page = NewPage(); var independent = NewPage();
     first.Write(page, "{\"revision\":1,\"strokes\":[{\"id\":\"a\"}]}");
     first.Write(independent, "base q");
@@ -918,7 +929,7 @@ async Task ExpiredMergeAncestor()
     using var one = new NativeSyncClient(first.Root, endpoint, token);
     using var two = new NativeSyncClient(second.Root, endpoint, token, fault);
     await one.SyncAsync(Idle); await two.SyncAsync(Idle);
-    first.Write("library.json", "{\"notebooks\":[]}");
+    first.Write(Index, "{\"notebooks\":[]}");
     await one.SyncAsync(Idle); await two.SyncAsync(Idle);
     fault.MissingBlobHash = (await Remote()).Files[page].Hash;
     first.Write(page, "{\"revision\":2,\"strokes\":[{\"id\":\"a\"},{\"id\":\"remote\"}]}");
@@ -935,7 +946,7 @@ async Task StrokeMerge()
     using var first = new TestWorkspace(); using var second = new TestWorkspace();
     using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
     async Task<string> Blob(string path) => await http.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files[path].Hash);
-    first.Write("library.json", await Blob("library.json")); second.Write("library.json", await Blob("library.json"));
+    first.Write(Index, await Blob(Index)); second.Write(Index, await Blob(Index));
     var page = NewPage();
     first.Write(page, "{\"revision\":1,\"updatedAt\":\"1\",\"strokes\":[{\"id\":\"a\"}]}");
     using var one = new NativeSyncClient(first.Root, endpoint, token); using var two = new NativeSyncClient(second.Root, endpoint, token);
@@ -987,13 +998,13 @@ async Task ConflictReviewFlow()
 {
     using var first = new TestWorkspace(); using var second = new TestWorkspace();
     using var http = new HttpClient(); http.DefaultRequestHeaders.Authorization = new("Bearer", token);
-    var library = await http.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files["library.json"].Hash);
-    first.Write("library.json", library); second.Write("library.json", library);
+    var library = await http.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files[Index].Hash);
+    first.Write(Index, library); second.Write(Index, library);
     var (p, q) = (NewPage(), NewPage());
     first.Write(p, "{\"revision\":1,\"strokes\":[{\"id\":\"a\",\"color\":1}]}"); first.Write(q, "{\"revision\":1,\"strokes\":[{\"id\":\"b\",\"color\":1}]}");
     using var one = new NativeSyncClient(first.Root, endpoint, token); using var two = new NativeSyncClient(second.Root, endpoint, token);
     await one.SyncAsync(Idle); await two.SyncAsync(Idle);
-    first.Write("library.json", """{"notebooks":[]}""");
+    first.Write(Index, """{"notebooks":[]}""");
     await one.SyncAsync(Idle); await two.SyncAsync(Idle);
     first.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":3},{\"id\":\"theirs\"}]}"); first.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":3}]}");
     second.Write(p, "{\"revision\":2,\"strokes\":[{\"id\":\"a\",\"color\":2},{\"id\":\"mine\"}]}"); second.Write(q, "{\"revision\":2,\"strokes\":[{\"id\":\"b\",\"color\":2}]}");
@@ -1017,7 +1028,7 @@ async Task RejectedCommit()
     using (var initial = new HttpClient())
     {
         initial.DefaultRequestHeaders.Authorization = new("Bearer", token);
-        root.Write("library.json", await initial.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files["library.json"].Hash));
+        root.Write(Index, await initial.GetStringAsync(endpoint + "blobs/" + (await Remote()).Files[Index].Hash));
     }
     var fault = new TransportFault { RejectCommitCode = "version_conflict" };
     using var client = new NativeSyncClient(root.Root, endpoint, token, fault);
@@ -1037,18 +1048,21 @@ async Task RejectedCommit()
 async Task DeletedLibrary()
 {
     using var root = new TestWorkspace();
-    using (var client = new NativeSyncClient(root.Root, endpoint, token, new TransportFault
+    var page = NewPage();
+    root.Write(page, "kept page");
+    using (var client = new NativeSyncClient(root.Root, endpoint, token))
     {
-        ChangeManifest = manifest => manifest with { Files = new(manifest.Files) { ["library.json"] = new(null, manifest.Revision) } }
-    }))
+        await client.SyncAsync(Idle); AssertSynced(client);
+    }
+    // An unmounted or emptied library folder must not publish the deletion of every notebook.
+    Directory.Move(root.PathFor("测试本"), root.Private("moved-away"));
+    using (var client = new NativeSyncClient(root.Root, endpoint, token))
     {
         await client.SyncAsync(Idle);
-        Check(client.Snapshot.Phase == NativeSyncPhase.Error && root.Read("library.json") == "{}", "Remote tombstone removed the local index");
+        Check(client.Snapshot.Phase == NativeSyncPhase.Error && client.Status.Contains("笔记库缺失"), "Missing library was not refused: " + client.Status);
     }
-    StageIncoming(root, new() { ["library.json"] = null });
-    using var recovery = NativeSyncClient.ForLocalRecovery(root.Root);
-    Check(!await recovery.RecoverPendingIncomingAsync(Idle) && recovery.HasPendingIncoming, "Unsafe incoming tombstone was accepted");
-    Check(root.Read("library.json") == "{}", "Offline replay removed the local index");
+    Check((await Remote()).Files[page].Hash == HashText("kept page"), "A missing local library deleted remote pages");
+    Directory.Move(root.Private("moved-away"), root.PathFor("测试本"));
 }
 
 async Task RecoveryWithoutCredentials()
@@ -1126,7 +1140,8 @@ sealed class TestWorkspace : IDisposable
     {
         Directory.CreateDirectory(Root);
         File.WriteAllText(Path.Combine(Root, ".mojian-native-workspace"), "isolated test copy");
-        File.WriteAllText(Path.Combine(Root, "library.json"), "{}");
+        Directory.CreateDirectory(Path.Combine(Root, "测试本"));
+        File.WriteAllText(Path.Combine(Root, "测试本", ".mojian-folder.json"), "{}");
     }
     public string PathFor(string relative) => Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar));
     public string Private(params string[] parts) => Path.Combine(new[] { Root, ".mojian-sync" }.Concat(parts).ToArray());

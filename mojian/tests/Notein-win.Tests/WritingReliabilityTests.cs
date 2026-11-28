@@ -60,19 +60,24 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void UnrecoverablePageAndLibraryAreNeverReplacedByEmptyModels()
+    public void UnrecoverablePageAndFolderDescriptorAreNeverReplacedByEmptyModels()
     {
         using var temp = new TemporaryDirectory();
         var store = new WorkspaceStore(temp.Path);
-        var path = store.GetPageDocumentPath("n", "p");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var library = store.LoadLibrary();
+        var notebook = library.ActiveNotebook;
+        var page = notebook.SelectedPage()!;
+        var path = store.GetPageDocumentPath(notebook.Id, page.Id);
         File.WriteAllText(path, "{damaged");
-        for (var i = 0; i < 2; i++) Assert.Throws<InvalidDataException>(() => store.LoadPage("n", "p"));
+        for (var i = 0; i < 2; i++) Assert.Throws<InvalidDataException>(() => store.LoadPage(notebook.Id, page.Id));
         Assert.Equal("{damaged", File.ReadAllText(path));
-        File.WriteAllText(store.LibraryPath, "null");
-        File.WriteAllText(store.LibraryPath + ".previous", "null");
-        Assert.Throws<InvalidDataException>(() => store.LoadLibrary());
-        Assert.Equal("null", File.ReadAllText(store.LibraryPath));
+
+        var descriptor = FolderLibraryFixture.Descriptor(temp.Path);
+        var intact = File.ReadAllText(descriptor);
+        File.WriteAllText(descriptor, "null");
+        var reloaded = new WorkspaceStore(temp.Path).LoadLibrary();
+        Assert.Equal(notebook.Id, reloaded.ActiveNotebook.Id);
+        Assert.NotEqual("null", File.ReadAllText(descriptor));
     }
 
     [Fact]

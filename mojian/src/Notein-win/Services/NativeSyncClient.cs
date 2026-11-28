@@ -118,7 +118,6 @@ public sealed class NativeSyncClient : IDisposable
         NativeSyncStorage.NoLinks(root);
         if (!File.Exists(Path.Combine(root, ".mojian-native-workspace"))) throw new IOException("请先创建原生同步专用副本");
         RejectSyncthingAncestors(root);
-        _ = NativeSyncStorage.Enumerate(root, true).Count();
         var privateDirectory = Path.Combine(root, ".mojian-sync");
         if (Directory.Exists(privateDirectory))
             foreach (var entry in Directory.EnumerateFileSystemEntries(privateDirectory, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }))
@@ -144,18 +143,21 @@ public sealed class NativeSyncClient : IDisposable
             throw new IOException("副本路径必须是原笔记库之外尚不存在的新目录");
         var mutations = NativeSyncMutationEpoch.ForRoot(source);
         var epoch = mutations.Capture() ?? throw new IOException("源笔记库正在修改，请稍后重试");
-        var files = NativeSyncStorage.Enumerate(source).Select(path => Path.GetRelativePath(source, path).Replace('\\', '/'))
-            .Where(NativeSyncStorage.ShouldSyncPath).ToDictionary(path => path, path => NativeSyncStorage.Hash(Path.Combine(source, path)), StringComparer.Ordinal);
-        if (!files.ContainsKey("library.json")) throw new IOException("源目录缺少共享笔记目录");
+        var items = NativeSyncStorage.EnumerateItems(source).Where(item => item.Failure == null).ToArray();
+        if (!items.Any(item => item.Directory && !item.Path.Contains('/') && !item.Path.StartsWith('.')))
+            throw new IOException("源目录没有笔记本文件夹");
+        var files = items.Where(item => !item.Directory).ToDictionary(item => item.Path, item => NativeSyncStorage.Hash(Path.Combine(source, item.Path)), StringComparer.Ordinal);
         Directory.CreateDirectory(target);
+        foreach (var folder in items.Where(item => item.Directory)) Directory.CreateDirectory(Path.Combine(target, folder.Path));
         foreach (var pair in files)
         {
             var output = Path.Combine(target, pair.Key);
             NativeSyncStorage.CopyDurable(Path.Combine(source, pair.Key), output);
             if (NativeSyncStorage.Hash(output) != pair.Value) throw new IOException("复制期间原笔记发生变化，请重试到新目录");
         }
-        if (File.Exists(Path.Combine(source, "settings.json"))) NativeSyncStorage.CopyDurable(Path.Combine(source, "settings.json"), Path.Combine(target, "settings.json"));
-        var finalFiles = NativeSyncStorage.Enumerate(source).Select(path => Path.GetRelativePath(source, path).Replace('\\', '/')).Where(NativeSyncStorage.ShouldSyncPath).ToHashSet(StringComparer.Ordinal);
+        var settings = Path.Combine(source, ".mojian", "workspace-settings.json");
+        if (File.Exists(settings)) NativeSyncStorage.CopyDurable(settings, Path.Combine(target, ".mojian", "workspace-settings.json"));
+        var finalFiles = NativeSyncStorage.EnumerateItems(source).Where(item => item.Failure == null && !item.Directory).Select(item => item.Path).ToHashSet(StringComparer.Ordinal);
         if (!finalFiles.SetEquals(files.Keys) || files.Any(pair => NativeSyncStorage.Hash(Path.Combine(source, pair.Key)) != pair.Value))
             throw new IOException("复制期间原笔记发生变化，请重试到新目录");
         if (!mutations.PublishIfUnchanged(epoch, () => NativeSyncStorage.Save(Path.Combine(target, ".mojian-native-workspace"), Guid.NewGuid().ToString("N"))))
@@ -182,26 +184,54 @@ public sealed class NativeSyncClient : IDisposable
         return null;
     }
 
+    /// <summary>Items skipped by the latest scan or plan, with their reasons; every other item keeps synchronizing.</summary>
+    public IReadOnlyDictionary<string, string> FailedItems => _failures;
+    private Dictionary<string, string> _failures = new(StringComparer.Ordinal);
+    private Dictionary<string, string> _scanFailures = new(StringComparer.Ordinal);
+
     private Dictionary<string, SyncFile> ScanCore()
     {
         var files = new Dictionary<string, SyncFile>(StringComparer.Ordinal);
-        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!File.Exists(Path.Combine(_root, "library.json"))) throw new IOException("本地笔记目录缺失，已阻止同步删除");
-        foreach (var absolute in NativeSyncStorage.Enumerate(_root, true))
+        var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in NativeSyncStorage.EnumerateItems(_root))
         {
-            var path = Path.GetRelativePath(_root, absolute).Replace('\\', '/');
-            if (!NativeSyncStorage.ShouldSyncPath(path)) continue;
-            if (!aliases.Add(path)) throw new IOException("本地同步路径大小写冲突");
-            var before = Stamp(absolute) ?? throw new IOException("文件正在变更");
-            if (_cache.TryGetValue(path, out var cached) && (cached.Length, cached.Modified) == before) files[path] = cached;
+            if (item.Failure != null)
+            {
+                failures[item.Path] = item.Failure;
+                // A skipped item keeps its acknowledged identity, so it is neither uploaded as new nor deleted remotely.
+                foreach (var known in _state.Files.Where(pair => pair.Key == item.Path || pair.Key.StartsWith(item.Path + "/", StringComparison.Ordinal)))
+                    if (known.Value.Hash != null) files[known.Key] = new(known.Value.Hash, -1, -1);
+                continue;
+            }
+            if (item.Directory) { files[item.Path] = new(NativeSyncIdentity.Directory, 0, 0); continue; }
+            var absolute = LocalPath(item.Path);
+            var before = Stamp(absolute);
+            if (before == null) continue;
+            if (_cache.TryGetValue(item.Path, out var cached) && (cached.Length, cached.Modified) == before) files[item.Path] = cached;
             else
             {
-                var hash = NativeSyncStorage.Hash(absolute) ?? throw new IOException("文件正在变更");
-                if (Stamp(absolute) != before) throw new IOException("本地文件正在保存，请稍后重试");
-                files[path] = _cache[path] = new(hash, before.Length, before.Modified);
+                var hash = NativeSyncStorage.Hash(absolute);
+                if (hash == null) continue;
+                if (Stamp(absolute) != before)
+                {
+                    // Still being written: keep its last acknowledged identity and retry on the next pass.
+                    failures[item.Path] = "文件仍在写入，下一轮重试";
+                    if (_state.Files.TryGetValue(item.Path, out var acknowledged) && acknowledged.Hash != null) files[item.Path] = new(acknowledged.Hash, -1, -1);
+                    continue;
+                }
+                files[item.Path] = _cache[item.Path] = new(hash, before.Value.Length, before.Value.Modified);
             }
         }
+        // Two live local names that differ only by case cannot coexist on the server or other devices.
+        foreach (var group in files.Keys.GroupBy(path => path, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1))
+            foreach (var path in group)
+            {
+                failures[path] = $"与 {string.Join("、", group.Where(other => other != path))} 只差大小写，其他设备无法同时保存";
+                if (_state.Files.TryGetValue(path, out var acknowledged) && acknowledged.Hash != null) files[path] = new(acknowledged.Hash, -1, -1);
+                else files.Remove(path);
+            }
         foreach (var path in _cache.Keys.Except(files.Keys).ToArray()) _cache.TryRemove(path, out _);
+        _scanFailures = failures;
         return files;
     }
     private static (long Length, long Modified)? Stamp(string path) => File.Exists(path) ? (new FileInfo(path).Length, File.GetLastWriteTimeUtc(path).Ticks) : null;
@@ -229,9 +259,13 @@ public sealed class NativeSyncClient : IDisposable
         {
             cancellation.ThrowIfCancellationRequested();
             var local = ScanCore();
+            // A missing or unmounted library must never publish the deletion of every notebook.
+            if (!local.Any(pair => pair.Value.Hash == NativeSyncIdentity.Directory && !pair.Key.Contains('/') && !pair.Key.StartsWith('.')) &&
+                _state.Files.Any(pair => pair.Value.Hash == NativeSyncIdentity.Directory && !pair.Key.Contains('/') && !pair.Key.StartsWith('.')))
+                throw new IOException("本地笔记库缺失，已阻止同步删除");
             var changes = local.Keys.Union(_state.Files.Keys).Where(path => local.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path))
                 .Select(path => new SyncChange(path, _state.Files.GetValueOrDefault(path)?.Version ?? 0, local.GetValueOrDefault(path)?.Hash)).ToList();
-            foreach (var change in changes.Where(change => change.Hash != null))
+            foreach (var change in changes.Where(change => NativeSyncIdentity.IsBlob(change.Hash)))
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (_localMutations.Capture() != epoch) { _cache.Clear(); return null; }
@@ -254,8 +288,6 @@ public sealed class NativeSyncClient : IDisposable
     {
         var manifest = await new NativeSyncManifestFeed(_http, _directory).ReadAsync(_state.WorkspaceId, _state.Revision, cancellation).ConfigureAwait(false);
         NativeSyncStorage.ValidateEntries(manifest.Files, manifest.Revision);
-        if (manifest.Files.TryGetValue("library.json", out var library) && library.Hash == null)
-            throw new IOException("远端 library.json 已删除，已停止同步并保留本地库");
         if (string.IsNullOrEmpty(manifest.WorkspaceId) || (_state.WorkspaceId.Length > 0 && _state.WorkspaceId != manifest.WorkspaceId)) throw new IOException("服务器身份变化，已暂停同步，请检查备份");
         if (manifest.Revision < _state.Revision) throw new IOException("服务器版本回退，已暂停同步，请检查备份");
         foreach (var pair in _state.Files)
@@ -320,17 +352,17 @@ public sealed class NativeSyncClient : IDisposable
             if (prepared == null)
             { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
             var (local, outbox) = prepared.Value;
+            var failures = new Dictionary<string, string>(_scanFailures, StringComparer.Ordinal);
+            bool IsHeld(string path) => heldPaths.Contains(path) || failures.Keys.Any(failed => path.StartsWith(failed + "/", StringComparison.Ordinal) || path == failed);
             var outgoingCount = outbox.Changes.Count;
             SetStatus(NativeSyncPhase.Pending, $"本地已保存，待上传 {outgoingCount} 项", outgoingCount);
             var remote = await Manifest(cancellation).ConfigureAwait(false);
             var incoming = new Dictionary<string, NativeSyncIncomingFile>(StringComparer.Ordinal);
             var conflicts = new List<string>();
             var changes = new List<SyncChange>();
-            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in local.Keys.Union(_state.Files.Keys).Union(remote.Files.Keys))
             {
-                if (!aliases.Add(path)) throw new IOException("服务器路径与本地大小写冲突");
-                if (heldPaths.Contains(path)) continue;
+                if (IsHeld(path)) continue;
                 var localHash = local.GetValueOrDefault(path)?.Hash;
                 switch (NativeSyncDecisions.DecideEntry(_state.Files.GetValueOrDefault(path), localHash, remote.Files.GetValueOrDefault(path)))
                 {
@@ -338,6 +370,7 @@ public sealed class NativeSyncClient : IDisposable
                         if (remote.Files.TryGetValue(path, out var equal)) _state.Files[path] = equal;
                         break;
                     case NativeSyncDecision.Conflict: conflicts.Add(path); break;
+                    case NativeSyncDecision.Failed: failures[path] = "同一路径一边是文件、一边是文件夹，请保留其中一个"; break;
                     case NativeSyncDecision.Upload: changes.Add(new(path, remote.Files.GetValueOrDefault(path)?.Version ?? 0, localHash)); break;
                     case NativeSyncDecision.Receive:
                         if (remote.Files.TryGetValue(path, out var entry)) incoming[path] = new(localHash, entry);
@@ -356,28 +389,20 @@ public sealed class NativeSyncClient : IDisposable
             var blocked = heldPaths.Concat(conflicts).ToHashSet(StringComparer.Ordinal);
             if (blocked.Count > 0)
             {
-                const string indexPath = "library.json";
-                var localIndex = ReadDependencyIndex(LocalPath(indexPath));
-                var remoteIndexHash = Hash(remote.Files, indexPath);
-                var indexChanges = local.GetValueOrDefault(indexPath)?.Hash != remoteIndexHash;
-                var remoteIndex = localIndex;
-                if (indexChanges)
-                {
-                    remoteIndex = new JsonObject { ["notebooks"] = new JsonArray() };
-                    if (remoteIndexHash != null)
-                    {
-                        await Download(remoteIndexHash, cancellation).ConfigureAwait(false);
-                        remoteIndex = ReadDependencyIndex(BlobPath(remoteIndexHash));
-                    }
-                }
-                var structuralPaths = local.Keys.Union(remote.Files.Keys)
-                    .Where(path => local.ContainsKey(path) != (Hash(remote.Files, path) != null));
-                var dependencies = NativeSyncDependencies.FromIndexes(localIndex, remoteIndex, indexChanges, structuralPaths);
+                // Page identities come from local heads or downloaded blobs; a held page holds only its own group.
+                foreach (var entry in incoming.Values.Where(entry => NativeSyncIdentity.IsBlob(entry.Target.Hash) && entry.Content == null))
+                    await Download(entry.Target.Hash!, cancellation).ConfigureAwait(false);
+                var dependencies = PageDependencies(local.Keys.Union(remote.Files.Keys).Union(heldPaths), path => remote.Files.GetValueOrDefault(path)?.Hash);
                 var blockedGroups = blocked.Select(dependencies.Group).ToHashSet(StringComparer.Ordinal);
                 changes.RemoveAll(change => blockedGroups.Contains(dependencies.Group(change.Path)));
                 foreach (var path in incoming.Keys.Where(path => blockedGroups.Contains(dependencies.Group(path))).ToArray()) incoming.Remove(path);
                 if (conflicts.Count > 0) await PreserveConflicts(conflicts, remote, cancellation, expectedLocal: local).ConfigureAwait(false);
             }
+            // Large imports go up in server-sized batches; the next pass continues with the rest (deletions first).
+            changes = changes.OrderBy(change => change.Hash == null ? 0 : 1).ToList();
+            var truncated = changes.Count > BatchLimit;
+            if (truncated) changes = changes.Take(BatchLimit).ToList();
+            _failures = failures;
             outbox.WorkspaceId = remote.WorkspaceId;
             outbox.Changes = changes;
             if (changes.Count > 0)
@@ -388,7 +413,7 @@ public sealed class NativeSyncClient : IDisposable
             else File.Delete(OutboxPath);
             if (incoming.Count > 0)
             {
-                foreach (var entry in incoming.Values.Where(entry => entry.Target.Hash != null && entry.Content == null))
+                foreach (var entry in incoming.Values.Where(entry => NativeSyncIdentity.IsBlob(entry.Target.Hash) && entry.Content == null))
                     await Download(entry.Target.Hash!, cancellation).ConfigureAwait(false);
                 var retained = ResumeIncoming();
                 if (retained != null)
@@ -408,7 +433,14 @@ public sealed class NativeSyncClient : IDisposable
             var remaining = await Task.Run(ScanStable, cancellation).ConfigureAwait(false);
             if (remaining == null)
             { SetStatus(NativeSyncPhase.WaitingForIdle, "本地变更事务进行中，等待稳定快照后同步"); return false; }
-            var pending = remaining.Keys.Union(_state.Files.Keys).Count(path => remaining.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path));
+            var pending = remaining.Keys.Union(_state.Files.Keys).Count(path => remaining.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path) && !IsHeld(path));
+            if (truncated) pending = Math.Max(pending, 1);
+            if (failures.Count > 0)
+            {
+                var (failedPath, reason) = failures.First();
+                SetStatus(NativeSyncPhase.Error, $"其他内容已同步；{failures.Count} 项无法同步：{failedPath}（{reason}）", pending);
+                return truncated;
+            }
             if (pending == 0)
             {
                 _state.LastSuccessUtc = DateTimeOffset.UtcNow;
@@ -430,6 +462,31 @@ public sealed class NativeSyncClient : IDisposable
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { SetStatus(NativeSyncPhase.Error, "同步已暂停，本地内容已保留：" + error.Message, Snapshot.PendingFiles); }
         return false;
+    }
+
+    internal int BatchLimit { get; init; } = 20000;
+
+    /// <summary>Page id and PDF owner of each page path, read from the local file head or a downloaded remote blob.</summary>
+    private NativeSyncDependencies PageDependencies(IEnumerable<string> paths, Func<string, string?> remoteHash)
+    {
+        var pages = new List<(string, string?, string?)>();
+        foreach (var path in paths.Distinct().Where(path => path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal)))
+        {
+            string? id = null, owner = null;
+            foreach (var candidate in new[] { LocalPath(path), NativeSyncIdentity.IsBlob(remoteHash(path)) ? BlobPath(remoteHash(path)!) : null })
+            {
+                if (candidate == null || !File.Exists(candidate)) continue;
+                try
+                {
+                    var head = PageFileFormat.ReadHead(candidate);
+                    id ??= head.Id;
+                    owner ??= head.Page?["pdfPage"]?["sourceOwnerPageId"]?.GetValue<string>();
+                }
+                catch (Exception error) when (error is InvalidDataException or JsonException or InvalidOperationException) { }
+            }
+            pages.Add((path, id, owner));
+        }
+        return NativeSyncDependencies.FromPages(pages);
     }
 
     // Staged blobs only back the outbox, incoming journal and conflict capture; once none remain
@@ -460,7 +517,7 @@ public sealed class NativeSyncClient : IDisposable
         SetStatus(NativeSyncPhase.Uploading, $"正在上传 {outbox.Changes.Count} 项", outbox.Changes.Count);
         if (!outbox.Submitted)
         {
-            foreach (var hash in outbox.Changes.Where(change => change.Hash != null).Select(change => change.Hash!).Distinct())
+            foreach (var hash in outbox.Changes.Where(change => NativeSyncIdentity.IsBlob(change.Hash)).Select(change => change.Hash!).Distinct())
             {
                 if (NativeSyncStorage.Hash(BlobPath(hash)) != hash) throw new IOException("待提交快照缺失或损坏，请保留恢复目录");
                 await new NativeSyncBlobTransfer(_http).UploadAsync(hash, BlobPath(hash), cancellation).ConfigureAwait(false);
@@ -513,10 +570,8 @@ public sealed class NativeSyncClient : IDisposable
             plan.Files.Any(pair => !ValidPath(pair.Key) || pair.Value == null || pair.Value.Target == null || !NativeSyncStorage.ValidHash(pair.Value.ExpectedHash)))
             throw new IOException("接收恢复记录损坏");
         NativeSyncStorage.ValidateEntries(plan.Files.ToDictionary(pair => pair.Key, pair => pair.Value.Target), plan.Revision);
-        if (plan.Files.TryGetValue("library.json", out var library) && library.Target.Hash == null)
-            throw new IOException("禁止接收 library.json 删除操作，已保留本地库和接收记录");
         if (plan.Files.Values.Any(entry => entry.Content != null && !NativeSyncStorage.ValidHash(entry.Content))) throw new IOException("接收恢复记录损坏");
-        foreach (var hash in plan.Files.Values.Where(entry => !entry.KeepLocal).Select(entry => entry.WantedHash).OfType<string>().Distinct())
+        foreach (var hash in plan.Files.Values.Where(entry => !entry.KeepLocal).Select(entry => entry.WantedHash).Where(NativeSyncIdentity.IsBlob).OfType<string>().Distinct())
             if (NativeSyncStorage.Hash(BlobPath(hash)) != hash) throw new IOException("接收恢复快照缺失，请保留目录");
         SetStatus(NativeSyncPhase.Receiving, $"正在接收 {plan.Files.Count} 项");
         var conflicts = new List<string>();
@@ -529,22 +584,37 @@ public sealed class NativeSyncClient : IDisposable
         try
         {
             RequireDedicatedWorkspace(_root);
+            var listings = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var replan = new List<string>();
             foreach (var pair in plan.Files)
             {
                 cancellation.ThrowIfCancellationRequested();
                 var target = LocalPath(pair.Key);
                 var before = IncomingStamp(target);
-                var actual = NativeSyncStorage.Hash(target);
+                // A case-insensitive disk resolves `Note.mojian` for `note.mojian`; only the exact spelling is this item.
+                var exact = ExactPath(pair.Key, listings);
+                var actual = !exact ? null : Directory.Exists(target) ? NativeSyncIdentity.Directory : NativeSyncStorage.Hash(target);
                 if (IncomingStamp(target) != before) throw new IOException("接收准备期间本地文件发生变化，请稍后重试");
                 var wanted = pair.Value.WantedHash;
-                if (actual != pair.Value.ExpectedHash && actual != wanted) conflicts.Add(pair.Key);
-                var replacement = actual == wanted || wanted == null
-                    ? null : target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                prepared.Add(new(pair.Key, target, before, actual != wanted, replacement));
+                if (actual != pair.Value.ExpectedHash && actual != wanted)
+                {
+                    // A folder has no content to review: it is planned again on the next pass instead of opening a conflict.
+                    if (actual == NativeSyncIdentity.Directory || wanted == NativeSyncIdentity.Directory || pair.Value.ExpectedHash == NativeSyncIdentity.Directory)
+                    { replan.Add(pair.Key); continue; }
+                    conflicts.Add(pair.Key);
+                }
+                var replacement = actual == wanted || !NativeSyncIdentity.IsBlob(wanted)
+                    ? null : Path.Combine(_directory, "incoming-replacements", Guid.NewGuid().ToString("N") + ".tmp");
+                prepared.Add(new(pair.Key, target, before, actual != wanted, replacement, actual, wanted));
                 if (actual == wanted) continue;
-                if (actual != null) NativeSyncStorage.CopyDurable(target, Path.Combine(_directory, "incoming-backups", pair.Key));
+                if (NativeSyncIdentity.IsBlob(actual)) NativeSyncStorage.CopyDurable(target, Path.Combine(_directory, "incoming-backups", pair.Key));
                 if (replacement != null && !pair.Value.KeepLocal) NativeSyncStorage.CopyDurable(BlobPath(wanted!), replacement);
                 if (IncomingStamp(target) != before) throw new IOException("接收准备期间本地文件发生变化，请稍后重试");
+            }
+            if (replan.Count > 0)
+            {
+                plan = plan with { Files = plan.Files.Where(pair => !replan.Contains(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal) };
+                if (plan.Files.Count == 0) { File.Delete(IncomingPath); return true; }
             }
             var active = ActiveConflictPaths();
             var newConflicts = conflicts.Where(path => !active.Contains(path) || plannedReview.Contains(path)).ToList();
@@ -558,31 +628,27 @@ public sealed class NativeSyncClient : IDisposable
             var remaining = new Dictionary<string, NativeSyncIncomingFile>(StringComparer.Ordinal);
             if (blocked.Length > 0)
             {
-                const string indexPath = "library.json";
-                var localIndex = ReadDependencyIndex(LocalPath(indexPath));
-                var remoteIndex = localIndex;
-                if (plan.Files.TryGetValue(indexPath, out var index) && !index.KeepLocal && index.WantedHash is { } indexHash)
-                    remoteIndex = ReadDependencyIndex(BlobPath(indexHash));
-                var structure = plan.Files.Where(pair => (pair.Value.ExpectedHash == null) != (pair.Value.WantedHash == null)).Select(pair => pair.Key);
-                var dependencies = NativeSyncDependencies.FromIndexes(localIndex, remoteIndex, plan.Files.ContainsKey(indexPath), structure);
+                var dependencies = PageDependencies(plan.Files.Keys.Union(blocked), path => plan.Files.GetValueOrDefault(path)?.WantedHash);
+                var canTrack = true;
                 var groups = blocked.Select(dependencies.Group).ToHashSet(StringComparer.Ordinal);
                 remaining = plan.Files.Where(pair => groups.Contains(dependencies.Group(pair.Key)))
                     .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
-                canDefer = dependencies.Known;
+                canDefer = canTrack;
                 // Undo only verified partial publications in a held component before opening the editor.
                 foreach (var item in prepared.Where(item => remaining.ContainsKey(item.Path) && !item.Changed))
                 {
                     var file = remaining[item.Path];
                     if (file.ExpectedHash == file.WantedHash) continue;
                     string? replacement = null;
-                    if (file.ExpectedHash != null)
+                    if (NativeSyncIdentity.IsBlob(file.ExpectedHash))
                     {
                         var previous = Path.Combine(_directory, "incoming-backups", item.Path);
                         if (NativeSyncStorage.Hash(previous) != file.ExpectedHash) { canDefer = false; break; }
                         replacement = item.Target + "." + Guid.NewGuid().ToString("N") + ".tmp";
                         NativeSyncStorage.CopyDurable(previous, replacement);
                     }
-                    rollback.Add(item with { Replacement = replacement, Changed = true });
+                    // Restoring the acknowledged version: the published bytes are what is on disk now.
+                    rollback.Add(item with { Replacement = replacement, Changed = true, Actual = item.Wanted, Wanted = file.ExpectedHash });
                 }
             }
             var runnable = plan.Files.Where(pair => !remaining.ContainsKey(pair.Key)).ToList();
@@ -625,13 +691,7 @@ public sealed class NativeSyncClient : IDisposable
                         if (IncomingStamp(item.Target) != item.Stamp)
                             throw new IOException("接收发布前本地文件发生变化，接收未完成，请先恢复笔记库");
                     }
-                    foreach (var item in publish.Where(item => item.Changed).OrderBy(item => item.Path == "library.json" ? 1 : 0))
-                    {
-                        if (item.Replacement == null) File.Delete(item.Target);
-                        else if (item.Stamp != null) File.Replace(item.Replacement, item.Target, null);
-                        else File.Move(item.Replacement, item.Target);
-                        _cache.TryRemove(item.Path, out _);
-                    }
+                    Publish(publish.Where(item => item.Changed).ToList());
                     File.Move(stagedState, StatePath, true);
                     foreach (var pair in runnable) _state.Files[pair.Key] = pair.Value.Target;
                     _state.Revision = nextRevision;
@@ -703,7 +763,7 @@ public sealed class NativeSyncClient : IDisposable
                 if (NativeSyncStorage.Hash(LocalPath(path)) != preservedHash) throw new IOException(path + " 在冲突后又改过，请先同步重新比较");
                 var entry = remote.Files.GetValueOrDefault(path);
                 var remoteFile = Path.Combine(folder, "remote", path);
-                if (entry?.Hash is { } hash && NativeSyncStorage.Hash(BlobPath(hash)) != hash)
+                if (entry?.Hash is { } hash && NativeSyncIdentity.IsBlob(hash) && NativeSyncStorage.Hash(BlobPath(hash)) != hash)
                 {
                     if (!File.Exists(remoteFile)) throw new IOException("冲突快照缺失，请保留目录");
                     NativeSyncStorage.CopyDurable(remoteFile, BlobPath(hash));
@@ -748,7 +808,8 @@ public sealed class NativeSyncClient : IDisposable
     /// </summary>
     private async Task<string?> MergeConflict(string path, string? baseHash, string? localHash, string? remoteHash, CancellationToken cancellation)
     {
-        if (!path.EndsWith(".json", StringComparison.Ordinal) || baseHash == null || localHash == null || remoteHash == null) return null;
+        if (!(path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal) || path.EndsWith(".json", StringComparison.Ordinal)) ||
+            !NativeSyncIdentity.IsBlob(baseHash) || !NativeSyncIdentity.IsBlob(localHash) || !NativeSyncIdentity.IsBlob(remoteHash)) return null;
         var localFile = LocalPath(path);
         if (!File.Exists(localFile) || new FileInfo(localFile).Length > MergeLimit) return null;
         try { await Download(baseHash, cancellation).ConfigureAwait(false); }
@@ -780,18 +841,79 @@ public sealed class NativeSyncClient : IDisposable
         }, cancellation).ConfigureAwait(false);
     }
 
-    private sealed record PreparedIncoming(string Path, string Target, (long Length, long Modified, long Created)? Stamp, bool Changed, string? Replacement);
+    private sealed record PreparedIncoming(string Path, string Target, (long Length, long Modified, long Created)? Stamp, bool Changed, string? Replacement,
+        string? Actual = null, string? Wanted = null);
+
+    /// <summary>Exact on-disk spelling of every component below the library root.</summary>
+    private bool ExactPath(string relative, Dictionary<string, HashSet<string>> listings)
+    {
+        var parent = _root;
+        foreach (var part in relative.Split('/'))
+        {
+            if (!listings.TryGetValue(parent, out var names))
+            {
+                try { names = Directory.EnumerateFileSystemEntries(parent).Select(entry => Path.GetFileName(entry)).ToHashSet(StringComparer.Ordinal); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+                listings[parent] = names;
+            }
+            if (!names.Contains(part)) return false;
+            parent = Path.Combine(parent, part);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Case-only renames move the old spelling (delete-then-create would delete the only copy on a case-insensitive
+    /// disk), then folders are created shallow-first, files written, files deleted and folders removed deepest-first.
+    /// A remotely deleted folder that still holds local content is kept; the next pass uploads it again (Syncthing).
+    /// </summary>
+    private void Publish(List<PreparedIncoming> items)
+    {
+        var done = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var old in items.Where(item => item.Wanted == null && item.Actual != null))
+        {
+            var renamed = items.FirstOrDefault(item => item != old && item.Wanted != null && item.Actual == null &&
+                string.Equals(item.Path, old.Path, StringComparison.OrdinalIgnoreCase));
+            if (renamed == null) continue;
+            var temporary = old.Target + ".mojian-case-" + Guid.NewGuid().ToString("N") + ".tmp";
+            if (old.Actual == NativeSyncIdentity.Directory) { Directory.Move(old.Target, temporary); Directory.Move(temporary, renamed.Target); }
+            else { File.Move(old.Target, temporary); File.Move(temporary, renamed.Target); }
+            done.Add(old.Path);
+            if (renamed.Wanted == old.Actual) done.Add(renamed.Path);
+            else if (renamed.Replacement != null) { File.Replace(renamed.Replacement, renamed.Target, null); done.Add(renamed.Path); }
+            _cache.TryRemove(old.Path, out _); _cache.TryRemove(renamed.Path, out _);
+        }
+        static int Depth(string path) => path.Count(character => character == '/');
+        foreach (var item in items.Where(item => !done.Contains(item.Path) && item.Wanted == NativeSyncIdentity.Directory).OrderBy(item => Depth(item.Path)))
+        {
+            if (NativeSyncIdentity.IsBlob(item.Actual)) File.Delete(item.Target);
+            Directory.CreateDirectory(item.Target);
+        }
+        foreach (var item in items.Where(item => !done.Contains(item.Path) && NativeSyncIdentity.IsBlob(item.Wanted)))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(item.Target)!);
+            if (item.Actual == NativeSyncIdentity.Directory) Directory.Delete(item.Target, recursive: false);
+            if (item.Replacement == null) continue;
+            if (item.Stamp != null) File.Replace(item.Replacement, item.Target, null);
+            else File.Move(item.Replacement, item.Target);
+            _cache.TryRemove(item.Path, out _);
+        }
+        foreach (var item in items.Where(item => !done.Contains(item.Path) && item.Wanted == null && NativeSyncIdentity.IsBlob(item.Actual)))
+        { File.Delete(item.Target); _cache.TryRemove(item.Path, out _); }
+        foreach (var item in items.Where(item => !done.Contains(item.Path) && item.Wanted == null && item.Actual == NativeSyncIdentity.Directory)
+            .OrderByDescending(item => Depth(item.Path)))
+        {
+            if (Directory.Exists(item.Target) && !Directory.EnumerateFileSystemEntries(item.Target).Any(entry => !NativeSyncStorage.IsExcluded(
+                    Path.GetRelativePath(_root, entry).Replace('\\', '/'))))
+                Directory.Delete(item.Target, recursive: true);
+        }
+    }
     private static (long Length, long Modified, long Created)? IncomingStamp(string path)
     {
         var file = new FileInfo(path);
         return file.Exists ? (file.Length, file.LastWriteTimeUtc.Ticks, file.CreationTimeUtc.Ticks) : null;
     }
 
-    private static JsonObject? ReadDependencyIndex(string path)
-    {
-        try { return JsonNode.Parse(File.ReadAllBytes(path)) as JsonObject; }
-        catch (JsonException) { return null; }
-    }
 
     private void CompleteConflictReview(string[] choices)
     {
@@ -846,7 +968,7 @@ public sealed class NativeSyncClient : IDisposable
             if (File.Exists(local)) NativeSyncStorage.CopyDurable(local, snapshot);
             if (expectedLocal != null && NativeSyncStorage.Hash(snapshot) != expectedLocal.GetValueOrDefault(path)?.Hash)
                 throw new IOException("保存冲突快照时本地内容已变化，下一轮重试");
-            if (remote.Files.GetValueOrDefault(path)?.Hash is { } hash)
+            if (remote.Files.GetValueOrDefault(path)?.Hash is { } hash && NativeSyncIdentity.IsBlob(hash))
             {
                 if (localOnly)
                 {

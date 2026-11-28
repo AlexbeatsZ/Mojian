@@ -6,13 +6,14 @@ namespace Notein_win.Models;
 /// <summary>A conflicted file as navigation and the review bar show it.</summary>
 public sealed class SyncConflictRow
 {
-    public SyncConflictRow(NativeSyncConflictItem item, string label, bool isSelected = false)
+    public SyncConflictRow(NativeSyncConflictItem item, string label, string? notebookId, string? pageId, bool isSelected = false)
     {
         Item = item;
         Label = label;
         IsSelected = isSelected;
         Mark = SyncConflictReview.MarkOf(item.Action);
-        if (SyncConflictReview.PageOf(item.Path) is { } page) { NotebookId = page.NotebookId; PageId = page.PageId; }
+        NotebookId = notebookId;
+        PageId = pageId;
     }
 
     public NativeSyncConflictItem Item { get; }
@@ -26,9 +27,9 @@ public sealed class SyncConflictRow
     public Brush MarkBrush => ConflictBrushes.For(Mark);
     public bool IsPage => SyncConflictReview.IsPageFile(Item.Path);
     /// <summary>"两边都要" needs both JSON versions (the engine refuses it otherwise).</summary>
-    public bool CanKeepBoth => Item.Path.EndsWith(".json", StringComparison.Ordinal) && Item.LocalFile != null && Item.RemoteFile != null;
+    public bool CanKeepBoth => (IsPage || Item.Path.EndsWith(".json", StringComparison.Ordinal)) && Item.LocalFile != null && Item.RemoteFile != null;
     public string Summary => SyncConflictReview.SummaryText(Item.LocalOnly, Item.RemoteOnly, Item.Changed);
-    public SyncConflictRow WithSelection(bool selected) => new(Item, Label, selected);
+    public SyncConflictRow WithSelection(bool selected) => new(Item, Label, NotebookId, PageId, selected);
 }
 
 public static class ConflictBrushes

@@ -81,7 +81,12 @@ public sealed partial class MainViewModel
     {
         var selectedPage = ActiveWorkspace.SelectedPageId;
         return _syncConflictItems
-            .Select(item => new SyncConflictRow(item, SyncConflictReview.Label(item.Path, ConflictPageTitle)))
+            .Select(item =>
+            {
+                var pageId = SyncConflictReview.PageIdOf(item);
+                var notebookId = pageId == null ? null : _library.Notebooks.FirstOrDefault(notebook => notebook.FindPage(pageId, out _) != null)?.Id;
+                return new SyncConflictRow(item, SyncConflictReview.Label(item.Path), notebookId, pageId);
+            })
             .Select(row => row.WithSelection(row.IsPage && row.NotebookId == ActiveWorkspace.Id && row.PageId == selectedPage))
             .OrderBy(row => row.Path != SyncConflictReview.Library).ThenBy(row => row.Label, StringComparer.Ordinal);
     }

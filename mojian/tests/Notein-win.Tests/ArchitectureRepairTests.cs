@@ -15,10 +15,7 @@ public sealed class ArchitectureRepairTests
         public MainViewModel Model() => new(Root, new PreferencesStore(Path.Combine(Root, "preferences.json")));
         public void Fixture()
         {
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "workspace-v2", "library.json"), Path.Combine(Root, "library.json"));
-            var page = Path.Combine(Root, "notebooks", "book.dot", "pages", "page.dot.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(page)!);
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "workspace-v2", "page.json"), page);
+            FolderLibraryFixture.CopyTo(Root);
         }
         public void Dispose() => Directory.Delete(Root, recursive: true);
     }
@@ -29,13 +26,13 @@ public sealed class ArchitectureRepairTests
         using var temp = new Workspace();
         temp.Fixture();
         var model = temp.Model();
-        var before = File.ReadAllBytes(model.Store.LibraryPath);
+        var before = FolderLibraryFixture.State(model.Store.RootDirectory);
         model.ActiveWorkspace.FindSection("section.dot")!.Expanded = false;
         model.ToggleNotebookExpandCommand.Execute("book.dot");
         model.FocusedDocument!.TextItems.Add(new TextItem { Text = "local edit" });
         model.QueueSaveDocument(model.FocusedDocument);
         model.SaveAll();
-        Assert.Equal(before, File.ReadAllBytes(model.Store.LibraryPath));
+        Assert.Equal(before, FolderLibraryFixture.State(model.Store.RootDirectory));
         var reopened = temp.Model();
         Assert.False(reopened.ActiveWorkspace.Expanded);
         Assert.False(reopened.ActiveWorkspace.FindSection("section.dot")!.Expanded);
@@ -49,16 +46,16 @@ public sealed class ArchitectureRepairTests
         var store = new WorkspaceStore(temp.Root);
         var path = store.GetPageDocumentPath("book.dot", "page.dot");
         using var original = JsonDocument.Parse(File.ReadAllText(path));
-        var expected = original.RootElement.GetProperty("strokes")[0].GetRawText();
+        var expected = FolderLibraryFixture.Content(original).GetProperty("strokes")[0].GetRawText();
         var document = store.LoadPage("book.dot", "page.dot");
         document.TextItems.Add(new TextItem { Text = "another edit" });
         store.SavePage(document);
         using (var saved = JsonDocument.Parse(File.ReadAllText(path)))
-            Assert.Equal(expected, saved.RootElement.GetProperty("strokes")[0].GetRawText());
+            Assert.Equal(expected, FolderLibraryFixture.Content(saved).GetProperty("strokes")[0].GetRawText());
         document.Strokes[0].Points[0].X = 99;
         store.SavePage(document);
         using var changed = JsonDocument.Parse(File.ReadAllText(path));
-        var point = changed.RootElement.GetProperty("strokes")[0].GetProperty("points")[0];
+        var point = FolderLibraryFixture.Content(changed).GetProperty("strokes")[0].GetProperty("points")[0];
         Assert.Equal(99, point.GetProperty("x").GetSingle());
         Assert.Equal("retained", point.GetProperty("futureSample").GetString());
     }
@@ -84,12 +81,12 @@ public sealed class ArchitectureRepairTests
         var model = temp.Model(); var source = model.FocusedDocument!;
         source.Objects.Add(new PageObject { Kind = PageObjectKind.Attachment, AssetName = "missing.bin" });
         model.SaveDocument(source);
-        var before = File.ReadAllBytes(model.Store.LibraryPath);
+        var before = FolderLibraryFixture.State(model.Store.RootDirectory);
         var section = model.ActiveWorkspace.SelectedPageSectionId;
         var count = model.ActiveWorkspace.FindSection(section)!.Pages.Count;
         Assert.Throws<FileNotFoundException>(() => model.CopyPage(section, source.PageId, section));
         Assert.Equal(count, model.ActiveWorkspace.FindSection(section)!.Pages.Count);
-        Assert.Equal(before, File.ReadAllBytes(model.Store.LibraryPath));
+        Assert.Equal(before, FolderLibraryFixture.State(model.Store.RootDirectory));
         Assert.True(File.Exists(model.Store.GetPageDocumentPath(source.NotebookId, source.PageId)));
     }
 

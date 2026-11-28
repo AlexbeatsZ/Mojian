@@ -8,26 +8,54 @@ namespace Notein_win.Services;
 internal static class NativeSyncStorage
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
-    private static readonly Regex PathPattern = new(@"^notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*)\z", RegexOptions.CultureInvariant);
+    // v2 layout: clients no longer create it, but its tombstones stay in the server manifest.
+    private static readonly Regex LegacyPath = new(@"^(library\.json|notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*))\z", RegexOptions.CultureInvariant);
     private static readonly Regex Reserved = new(@"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    internal static bool ValidPath(string path) => !string.IsNullOrEmpty(path) && path.Length < 500 &&
-        (path == "library.json" || PathPattern.IsMatch(path)) &&
-        !path.EndsWith(".previous", StringComparison.Ordinal) && !path.EndsWith(".tmp", StringComparison.Ordinal) &&
-        !path.Contains("-sync-conflict-", StringComparison.Ordinal) &&
-        path.Split('/').All(component => !component.EndsWith('.') && !Reserved.IsMatch(component));
-    internal static bool ValidHash(string? hash) => hash == null || Regex.IsMatch(hash, "\\A[a-f0-9]{64}\\z", RegexOptions.CultureInvariant);
-    internal static bool ShouldSyncPath(string path)
+    private static bool StorableName(string part) => part.Length is > 0 and <= 240 && part is not ("." or "..") &&
+        !part.Any(character => character < 0x20 || character == 0x7f || "\\:*?\"<>|".Contains(character)) &&
+        !part.EndsWith('.') && !part.EndsWith(' ') && !Reserved.IsMatch(part);
+
+    /// <summary>The folder-library v3 path policy, identical to sync-server/protocol.mjs.</summary>
+    internal static bool ValidPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Length >= 1000 || path.Contains('\r') || path.Contains('\n') ||
+            path.EndsWith(".previous", StringComparison.Ordinal) || path.EndsWith(".tmp", StringComparison.Ordinal) ||
+            path.Contains(".tmp-", StringComparison.Ordinal) || path.Contains("-sync-conflict-", StringComparison.Ordinal)) return false;
+        var parts = path.Split('/');
+        if (!parts.All(StorableName)) return false;
+        if (LegacyPath.IsMatch(path)) return true;
+        if (parts[0] == ".mojian") return parts.Length <= 4 && (parts.Length < 2 || parts[1] == "assets");
+        return parts.All(part => !part.StartsWith('.') || part == FolderNames.Descriptor);
+    }
+
+    /// <summary>Files that may exist on the server: pages, folder descriptors and page assets (legacy names only as tombstones).</summary>
+    internal static bool IsLibraryFile(string path) => path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal) ||
+        path == FolderNames.Descriptor || path.EndsWith("/" + FolderNames.Descriptor, StringComparison.Ordinal) ||
+        (path.StartsWith(".mojian/assets/", StringComparison.Ordinal) && path.Split('/').Length == 4);
+
+    internal static bool ValidHash(string? hash) => hash == null || hash == NativeSyncIdentity.Directory ||
+        Regex.IsMatch(hash, "\\A[a-f0-9]{64}\\z", RegexOptions.CultureInvariant);
+
+    /// <summary>Device-local or temporary names that never synchronize and are not reported (hidden state, copies in flight).</summary>
+    internal static bool IsExcluded(string path)
     {
         var parts = path.Split('/');
-        if (parts.Any(part => part == ".mojian-sync" || part.EndsWith(".previous", StringComparison.OrdinalIgnoreCase) ||
-            part.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) || part.Contains("-sync-conflict-", StringComparison.OrdinalIgnoreCase))) return false;
-        if (ValidPath(path)) return true;
-        if (path.Equals("library.json", StringComparison.OrdinalIgnoreCase) ||
-            (parts.Length >= 3 && parts[0].Equals("notebooks", StringComparison.OrdinalIgnoreCase) &&
-                (parts[2].Equals("pages", StringComparison.OrdinalIgnoreCase) || parts[2].Equals("assets", StringComparison.OrdinalIgnoreCase))))
-            throw new IOException("原生同步 v1 不支持此内容路径，已停止以免遗漏笔记或附件：" + path);
-        return false;
+        if (parts[0] == ".mojian" && (parts.Length < 2 || parts[1] != "assets")) return parts.Length > 1;
+        return parts.Any(part => part is ".mojian-sync" or ".DS_Store" or "desktop.ini" or "Thumbs.db" ||
+            (part.StartsWith('.') && part != FolderNames.Descriptor && part != ".mojian") ||
+            part.EndsWith(".previous", StringComparison.OrdinalIgnoreCase) || part.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+            part.Contains(".tmp-", StringComparison.Ordinal) || part.Contains("-sync-conflict-", StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>Why an item that is neither excluded nor valid cannot synchronize, or null when it can.</summary>
+    internal static string? Failure(string path, bool directory)
+    {
+        if (IsExcluded(path)) return null;
+        if (!ValidPath(path)) return "名称含有 \\ : * ? \" < > | 或以空格、句点结尾，其他设备无法保存";
+        if (!directory && !IsLibraryFile(path)) return "不是墨笺页面或附件，未同步";
+        return null;
+    }
+
     internal static bool ValidId(string id) => !string.IsNullOrEmpty(id) && Regex.IsMatch(id, "\\A[A-Za-z0-9_-]{16,80}\\z", RegexOptions.CultureInvariant);
     internal static T Read<T>(string path)
     {
@@ -75,28 +103,47 @@ internal static class NativeSyncStorage
         for (var directory = new DirectoryInfo(root); directory != null; directory = directory.Parent)
             if (directory.Exists && (directory.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("同步目录不能经过链接或目录联接");
     }
-    internal static IEnumerable<string> Enumerate(string root, bool checkSyncthing = false)
+    /// <summary>One item below the library root; <c>Failure</c> explains why it is skipped (Syncthing's failed items).</summary>
+    internal sealed record Item(string Path, bool Directory, string? Failure);
+
+    /// <summary>
+    /// Every library item, folders included. Links, nested Syncthing folders and unreadable entries are reported as
+    /// failed items and skipped; they never stop the rest of the library from synchronizing.
+    /// </summary>
+    internal static IEnumerable<Item> EnumerateItems(string root, string relative = "")
     {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(root))
+        string[] entries;
+        string? unreadable = null;
+        try { entries = Directory.EnumerateFileSystemEntries(System.IO.Path.Combine(root, relative)).ToArray(); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { entries = []; unreadable = error.Message; }
+        if (unreadable != null) { yield return new(relative, true, "无法读取此文件夹：" + unreadable); yield break; }
+        foreach (var entry in entries)
         {
-            var name = Path.GetFileName(entry);
-            if (checkSyncthing && name is ".stfolder" or ".stignore" or ".stversions") throw new IOException("检测到 Syncthing 标记，请选择独立副本");
-            var attributes = File.GetAttributes(entry);
-            if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("同步目录不能包含链接或目录联接");
-            if ((attributes & FileAttributes.Directory) != 0)
-            {
-                if (name == ".mojian-sync") continue;
-                foreach (var path in Enumerate(entry, checkSyncthing)) yield return path;
-            }
-            else yield return entry;
+            var name = System.IO.Path.GetFileName(entry);
+            var path = relative.Length == 0 ? name : relative + "/" + name;
+            if (IsExcluded(path)) continue;
+            FileAttributes? attributes = null;
+            string? failure = null;
+            try { attributes = File.GetAttributes(entry); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { failure = error.Message; }
+            if (attributes == null) { yield return new(path, false, "无法读取：" + failure); continue; }
+            var directory = (attributes.Value & FileAttributes.Directory) != 0;
+            if ((attributes.Value & FileAttributes.ReparsePoint) != 0) { yield return new(path, directory, "链接或目录联接不同步，已跳过"); continue; }
+            if (directory && (File.Exists(System.IO.Path.Combine(entry, ".stfolder")) || Directory.Exists(System.IO.Path.Combine(entry, ".stfolder"))))
+            { yield return new(path, true, "此文件夹由 Syncthing 管理，已跳过"); continue; }
+            yield return new(path, directory, Failure(path, directory));
+            if (directory) foreach (var child in EnumerateItems(root, path)) yield return child;
         }
     }
+
     internal static void ValidateEntries(Dictionary<string, SyncEntry> entries, long revision)
     {
         if (entries == null || revision < 0 || revision > 9007199254740991L) throw new IOException("同步版本无效");
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Like Syncthing, a tombstone keeps its exact spelling; only items that exist must be unique ignoring case.
+        var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in entries)
-            if (!ValidPath(pair.Key) || !paths.Add(pair.Key) || pair.Value == null || !ValidHash(pair.Value.Hash) || pair.Value.Version <= 0 || pair.Value.Version > revision)
-                throw new IOException("同步记录包含无效或冲突路径");
+            if (!ValidPath(pair.Key) || pair.Value == null || !ValidHash(pair.Value.Hash) || pair.Value.Version <= 0 || pair.Value.Version > revision ||
+                (pair.Value.Hash != null && !live.Add(pair.Key)))
+                throw new IOException("同步记录包含无效或冲突路径：" + pair.Key);
     }
 }

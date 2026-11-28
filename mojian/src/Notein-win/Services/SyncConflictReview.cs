@@ -28,25 +28,30 @@ public static class SyncConflictReview
     public static string Letter(ConflictMark mark) => mark switch { ConflictMark.Add => "A", ConflictMark.Delete => "D", _ => "M" };
     public static string ColorHex(ConflictMark mark) => mark switch { ConflictMark.Add => "#73C991", ConflictMark.Delete => "#F14C4C", _ => "#E2C08D" };
 
-    /// <summary><c>notebooks/&lt;nb&gt;/pages/&lt;page&gt;.json</c> and <c>notebooks/&lt;nb&gt;/assets/&lt;page&gt;/...</c> belong to a page.</summary>
-    public static (string NotebookId, string PageId)? PageOf(string path)
+    /// <summary>
+    /// The page a conflicted item belongs to: <c>.mojian/assets/&lt;page&gt;/…</c> by path, a <c>.mojian</c> page by the id in
+    /// either preserved copy's head (page files are named by title, not id).
+    /// </summary>
+    public static string? PageIdOf(NativeSyncConflictItem item)
     {
-        var parts = path.Split('/');
-        if (parts.Length < 4 || parts[0] != "notebooks") return null;
-        if (parts.Length == 4 && parts[2] == "pages" && parts[3].EndsWith(".json", StringComparison.Ordinal)) return (parts[1], parts[3][..^5]);
-        if (parts.Length >= 5 && parts[2] == "assets") return (parts[1], parts[3]);
+        var parts = item.Path.Split('/');
+        if (parts.Length == 4 && parts[0] == ".mojian" && parts[1] == "assets") return parts[2];
+        if (!IsPageFile(item.Path)) return null;
+        foreach (var file in new[] { item.LocalFile, item.RemoteFile })
+        {
+            if (file == null || !File.Exists(file)) continue;
+            try { if (PageFileFormat.ReadHead(file).Id is { } id) return id; }
+            catch (Exception error) when (error is InvalidDataException or JsonException or IOException) { }
+        }
         return null;
     }
 
-    public static bool IsPageFile(string path) => PageOf(path) != null && path.Contains("/pages/", StringComparison.Ordinal);
+    public static bool IsPageFile(string path) => path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal);
 
-    public static string Label(string path, Func<string, string, string?> pageTitle)
-    {
-        if (path == Library) return "笔记目录";
-        if (IsPageFile(path) && PageOf(path) is { } page)
-            return pageTitle(page.NotebookId, page.PageId) is { Length: > 0 } title ? title : page.PageId;
-        return path[(path.LastIndexOf('/') + 1)..];
-    }
+    /// <summary>A page is labelled by its file name, which is its title; other items by their name.</summary>
+    public static string Label(string path) => IsPageFile(path)
+        ? System.IO.Path.GetFileNameWithoutExtension(path)
+        : path[(path.LastIndexOf('/') + 1)..];
 
     /// <summary>"本机 +1 · 服务器 +1 · 改动 1"; zero counts are omitted.</summary>
     public static string SummaryText(int? localOnly, int? remoteOnly, int? changed) => string.Join(" · ", new[]
@@ -59,7 +64,8 @@ public static class SyncConflictReview
     public static JsonObject? ReadObject(string? file)
     {
         if (file == null || !File.Exists(file) || new FileInfo(file).Length > PreviewLimit) return null;
-        try { return JsonNode.Parse(File.ReadAllBytes(file)) as JsonObject; }
+        // A folder-library page keeps strokes in "content"; previews compare that part.
+        try { return JsonNode.Parse(File.ReadAllBytes(file)) is JsonObject root ? root["content"] as JsonObject ?? root : null; }
         catch (JsonException) { return null; }
     }
 

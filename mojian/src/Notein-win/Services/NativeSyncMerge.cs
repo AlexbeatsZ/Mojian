@@ -32,8 +32,10 @@ internal static class NativeSyncMerge
         try { merged = MergeObject(@base, local, remote); }
         catch (Conflict) { return null; }
         if (SameIgnoringVolatile(merged, remote)) return new Result.Remote();
-        if (merged.ContainsKey("revision")) merged["revision"] = (merged["revision"]?.GetValue<long>() ?? 0) + 1;
-        if (merged.ContainsKey("updatedAt")) merged["updatedAt"] = now ?? DateTimeOffset.UtcNow.ToString("O");
+        // A folder-library page keeps its revision and edit time in "content".
+        var editable = merged["content"] as JsonObject ?? merged;
+        if (editable.ContainsKey("revision")) editable["revision"] = (editable["revision"]?.GetValue<long>() ?? 0) + 1;
+        if (editable.ContainsKey("updatedAt")) editable["updatedAt"] = now ?? DateTimeOffset.UtcNow.ToString("O");
         return new Result.Merged(merged);
     }
 
@@ -41,9 +43,11 @@ internal static class NativeSyncMerge
     public static JsonObject Union(JsonObject local, JsonObject remote, string? now = null)
     {
         var merged = (JsonObject)UnionValue(local, remote)!;
-        if (merged.ContainsKey("revision"))
-            merged["revision"] = Math.Max(local["revision"]?.GetValue<long>() ?? 0, remote["revision"]?.GetValue<long>() ?? 0) + 1;
-        if (merged.ContainsKey("updatedAt")) merged["updatedAt"] = now ?? DateTimeOffset.UtcNow.ToString("O");
+        var editable = merged["content"] as JsonObject ?? merged;
+        var (ours, theirs) = (local["content"] as JsonObject ?? local, remote["content"] as JsonObject ?? remote);
+        if (editable.ContainsKey("revision"))
+            editable["revision"] = Math.Max(ours["revision"]?.GetValue<long>() ?? 0, theirs["revision"]?.GetValue<long>() ?? 0) + 1;
+        if (editable.ContainsKey("updatedAt")) editable["updatedAt"] = now ?? DateTimeOffset.UtcNow.ToString("O");
         return merged;
     }
 
@@ -123,7 +127,7 @@ internal static class NativeSyncMerge
 
     private static bool SameIgnoringVolatile(JsonObject left, JsonObject right) =>
         left.Select(pair => pair.Key).Union(right.Select(pair => pair.Key)).Except(VolatileKeys)
-            .All(key => Equal(Value(left, key), Value(right, key)));
+            .All(key => key == "content" && left[key] is JsonObject l && right[key] is JsonObject r ? SameIgnoringVolatile(l, r) : Equal(Value(left, key), Value(right, key)));
 
     private static JsonNode? Value(JsonObject source, string key) => source.TryGetPropertyValue(key, out var value) ? value : Absent;
     private static bool IsAbsent(JsonNode? node) => ReferenceEquals(node, Absent);

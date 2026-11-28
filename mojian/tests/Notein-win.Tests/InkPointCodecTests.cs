@@ -68,20 +68,18 @@ public sealed class InkPointCodecTests
         try
         {
             Directory.CreateDirectory(root);
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "workspace-v2", "library.json"), Path.Combine(root, "library.json"));
-            var page = Path.Combine(root, "notebooks", "book.dot", "pages", "page.dot.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(page)!);
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "workspace-v2", "page.json"), page);
+            FolderLibraryFixture.CopyTo(root);
+            var page = Path.Combine(root, "共享样例", "样例分区", "黄金页面.mojian");
             var store = new WorkspaceStore(root);
             var document = store.LoadPage("book.dot", "page.dot");
-            var legacy = JsonNode.Parse(File.ReadAllText(page))!["strokes"]![0]!.ToJsonString();
+            var legacy = JsonNode.Parse(File.ReadAllText(page))!["content"]!["strokes"]![0]!.ToJsonString();
             document.Strokes.Add(new StrokeRecord
             {
                 Id = "stroke-new", BrushProfile = FountainV2Model.Profile,
                 Points = Enumerable.Range(0, 50).Select(i => new InkPoint(i * 1.37f, 20 + i * .21f, .3f + i / 100f, elapsedMilliseconds: i * 4)).ToList(),
             });
             store.SavePage(document);
-            var saved = JsonNode.Parse(File.ReadAllText(page))!["strokes"]!.AsArray();
+            var saved = JsonNode.Parse(File.ReadAllText(page))!["content"]!["strokes"]!.AsArray();
             // The legacy stroke has a per-point extension field: verbatim array.
             Assert.Equal(legacy, saved[0]!.ToJsonString());
             Assert.Null(saved[1]!["points"]);
@@ -95,8 +93,8 @@ public sealed class InkPointCodecTests
             Assert.DoesNotContain(stroke.AdditionalData ?? [], pair => pair.Key == "pointsCoded");
             reloaded.TextItems.Add(new TextItem { Text = "edit elsewhere" });
             new WorkspaceStore(root).SavePage(reloaded);
-            Assert.Equal((string)JsonNode.Parse(bytes)!["strokes"]![1]!["pointsCoded"]!,
-                (string)JsonNode.Parse(File.ReadAllText(page))!["strokes"]![1]!["pointsCoded"]!);
+            Assert.Equal((string)JsonNode.Parse(bytes)!["content"]!["strokes"]![1]!["pointsCoded"]!,
+                (string)JsonNode.Parse(File.ReadAllText(page))!["content"]!["strokes"]![1]!["pointsCoded"]!);
             // Clipboard/history/.mjn serializers keep plain arrays for older readers.
             var plain = JsonSerializer.SerializeToNode(stroke, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
             Assert.NotNull(plain["points"]);

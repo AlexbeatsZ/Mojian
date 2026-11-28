@@ -9,6 +9,7 @@
     <Compile Include="../../src/Notein-win/Services/NativeSync*.cs" Link="Services/%(Filename)%(Extension)" />
     <Compile Include="../../src/Notein-win/Services/InkPointCodec.cs" Link="Services/InkPointCodec.cs" />
     <Compile Include="../../src/Notein-win/Services/WorkspaceFileGate.cs" Link="Services/WorkspaceFileGate.cs" />
+    <Compile Include="../../src/Notein-win/Services/FolderLibrary.cs" Link="Services/FolderLibrary.cs" />
     <None Include="../../../shared/fixtures/sync-decisions.json" Link="sync-decisions.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../shared/fixtures/json-merge.json" Link="json-merge.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../../shared/fixtures/json-review.json" Link="json-review.json" CopyToOutputDirectory="PreserveNewest" />

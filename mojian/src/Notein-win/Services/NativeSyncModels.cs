@@ -5,11 +5,79 @@ using System.IO;
 
 namespace Notein_win.Services;
 
+/// <summary>
+/// A file (<c>Hash</c> is its SHA-256), a folder (<c>Hash</c> is <see cref="NativeSyncIdentity.Directory"/>) or a tombstone
+/// (<c>Hash</c> null). On the wire a folder is <c>{"hash":null,"directory":true}</c> (file-sync-core 0.4.0); inside the
+/// client it is one identity string so every comparison treats files and folders alike.
+/// </summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(SyncEntryJsonConverter))]
 public sealed record SyncEntry(string? Hash, long Version);
+
+public static class NativeSyncIdentity
+{
+    public const string Directory = "directory";
+    /// <summary>True when the identity names stored bytes (a blob), not a folder or tombstone.</summary>
+    public static bool IsBlob(string? hash) => hash != null && hash != Directory;
+}
+
+internal sealed class SyncEntryJsonConverter : System.Text.Json.Serialization.JsonConverter<SyncEntry>
+{
+    public override SyncEntry Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var document = JsonDocument.ParseValue(ref reader);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object) throw new JsonException("同步条目无效");
+        string? hash = null; long version = 0; var directory = false;
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.NameEquals("hash")) hash = property.Value.ValueKind == JsonValueKind.Null ? null : property.Value.GetString();
+            else if (property.NameEquals("version")) version = property.Value.GetInt64();
+            else if (property.NameEquals("directory")) directory = property.Value.ValueKind == JsonValueKind.True;
+        }
+        if (directory && hash != null) throw new JsonException("文件夹条目不能带哈希");
+        if (hash == NativeSyncIdentity.Directory) throw new JsonException("同步条目无效");
+        return new SyncEntry(directory ? NativeSyncIdentity.Directory : hash, version);
+    }
+
+    public override void Write(Utf8JsonWriter writer, SyncEntry value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        if (value.Hash == NativeSyncIdentity.Directory) { writer.WriteNull("hash"); writer.WriteNumber("version", value.Version); writer.WriteBoolean("directory", true); }
+        else { if (value.Hash == null) writer.WriteNull("hash"); else writer.WriteString("hash", value.Hash); writer.WriteNumber("version", value.Version); }
+        writer.WriteEndObject();
+    }
+}
+
+internal sealed class SyncChangeJsonConverter : System.Text.Json.Serialization.JsonConverter<SyncChange>
+{
+    public override SyncChange Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var document = JsonDocument.ParseValue(ref reader);
+        var root = document.RootElement;
+        var path = root.GetProperty("path").GetString() ?? throw new JsonException("同步变更无效");
+        var version = root.GetProperty("expectedVersion").GetInt64();
+        var hash = root.TryGetProperty("hash", out var value) && value.ValueKind != JsonValueKind.Null ? value.GetString() : null;
+        var directory = root.TryGetProperty("directory", out var flag) && flag.ValueKind == JsonValueKind.True;
+        if (hash == NativeSyncIdentity.Directory || (directory && hash != null)) throw new JsonException("同步变更无效");
+        return new SyncChange(path, version, directory ? NativeSyncIdentity.Directory : hash);
+    }
+
+    public override void Write(Utf8JsonWriter writer, SyncChange value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("path", value.Path);
+        writer.WriteNumber("expectedVersion", value.ExpectedVersion);
+        if (NativeSyncIdentity.IsBlob(value.Hash)) writer.WriteString("hash", value.Hash); else writer.WriteNull("hash");
+        // `directory` is omitted for files so v1 operation fingerprints stay byte-identical.
+        if (value.Hash == NativeSyncIdentity.Directory) writer.WriteBoolean("directory", true);
+        writer.WriteEndObject();
+    }
+}
 public enum NativeSyncChoice { Local, Remote, Both }
 /// <summary>One conflicted file; Action is what taking the server's version does here: add, delete or modify.</summary>
 public sealed record NativeSyncConflictItem(string Path, string Action, string? LocalFile, string? RemoteFile, int? LocalOnly, int? RemoteOnly, int? Changed);
 public sealed record SyncManifest(string WorkspaceId, long Revision, Dictionary<string, SyncEntry> Files);
+[System.Text.Json.Serialization.JsonConverter(typeof(SyncChangeJsonConverter))]
 public sealed record SyncChange(string Path, long ExpectedVersion, string? Hash);
 public sealed record SyncReceipt(string WorkspaceId, string OperationId, long Revision, Dictionary<string, SyncEntry> Files);
 public sealed record SyncFile(string Hash, long Length, long Modified);

@@ -122,7 +122,7 @@ public class WorkspaceDeletionTransactionTests
         var library = store.LoadLibrary();
         var notebook = library.ActiveNotebook;
         var path = store.GetPageDocumentPath(notebook.Id, notebook.SelectedPage()!.Id);
-        File.AppendAllText(store.LibraryPath, " ");
+        FolderLibraryFixture.SimulateRemoteChange(store.RootDirectory);
         var candidate = library.CopyForSave();
         candidate.DeleteNotebook(notebook.Id);
 
@@ -141,7 +141,7 @@ public class WorkspaceDeletionTransactionTests
         var document = vm.PrimaryDocument;
         var notebook = vm.ActiveWorkspace;
         var page = notebook.SelectedPage()!;
-        File.AppendAllText(vm.Store.LibraryPath, " ");
+        FolderLibraryFixture.SimulateRemoteChange(vm.Store.RootDirectory);
 
         Assert.Throws<IOException>(() => vm.DeletePage(notebook.FocusedSectionId!, page.Id));
 
@@ -156,7 +156,7 @@ public class WorkspaceDeletionTransactionTests
     {
         using var temp = new TemporaryDirectory();
         var vm = new MainViewModel(Path.Combine(temp.Path, "workspace"), new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
-        File.AppendAllText(vm.Store.LibraryPath, " ");
+        FolderLibraryFixture.SimulateRemoteChange(vm.Store.RootDirectory);
         Assert.Throws<IOException>(() => vm.SaveAll());
         var applied = false;
 
@@ -191,24 +191,25 @@ public class WorkspaceDeletionTransactionTests
     {
         using var temp = new TemporaryDirectory();
         var vm = new MainViewModel(Path.Combine(temp.Path, "workspace"), new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
-        var original = File.ReadAllText(vm.Store.LibraryPath);
+        var descriptor = FolderLibraryFixture.Descriptor(vm.Store.RootDirectory);
+        var original = File.ReadAllText(descriptor);
         Assert.Throws<IOException>(() => vm.TryApplyNativeSync(() =>
         {
-            File.WriteAllText(vm.Store.LibraryPath, "partial incoming");
+            File.WriteAllText(descriptor, "partial incoming");
             throw new IOException("apply interrupted");
         }, () => true));
 
         Assert.True(vm.NativeSyncRecoveryRequired);
         Assert.False(vm.CanApplyNativeSync);
         Assert.Throws<IOException>(() => vm.SaveAll());
-        Assert.Equal("partial incoming", File.ReadAllText(vm.Store.LibraryPath));
+        Assert.Equal("partial incoming", File.ReadAllText(descriptor));
         Assert.Throws<IOException>(() => vm.TryRecoverNativeSync(() => throw new IOException("recovery failed")));
         Assert.True(vm.NativeSyncRecoveryRequired);
 
-        Assert.True(vm.TryRecoverNativeSync(() => File.WriteAllText(vm.Store.LibraryPath, original)));
+        Assert.True(vm.TryRecoverNativeSync(() => File.WriteAllText(descriptor, original)));
 
         Assert.False(vm.NativeSyncRecoveryRequired);
         Assert.True(vm.CanApplyNativeSync);
-        Assert.Equal(original, File.ReadAllText(vm.Store.LibraryPath));
+        Assert.Equal(original, File.ReadAllText(descriptor));
     }
 }

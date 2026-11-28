@@ -49,7 +49,9 @@ export async function convert(source, output) {
 
   const writeFolder = async (directory, item, sortKey, omitted, relative) => {
     await fs.mkdir(directory, { recursive: true });
-    await writeJson(path.join(directory, FOLDER_DESCRIPTOR), { version: 3, id: item.id, sortKey, ...pick(item, ['id', 'title', ...omitted]) });
+    // Navigation (expansion, focus, selection) is device-local and never enters a synchronized descriptor.
+    await writeJson(path.join(directory, FOLDER_DESCRIPTOR), { version: 3, id: item.id, sortKey,
+      ...pick(item, ['id', 'title', 'expanded', 'focusedSectionId', 'selectedPageSectionId', 'selectedPageId', ...omitted]) });
     report.folders.push({ id: item.id, title: item.title, path: relative });
   };
 
