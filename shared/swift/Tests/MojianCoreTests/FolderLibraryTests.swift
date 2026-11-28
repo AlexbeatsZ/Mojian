@@ -69,6 +69,22 @@ final class FolderLibraryTests: XCTestCase {
         XCTAssertEqual(reread[0].sections[0].children[0].pages.map(\.id), [first.id])
     }
 
+    /// A merge moves pages out of a section and removes the section in one save; the pages must survive.
+    func testRemovingASectionKeepsPagesMovedOutOfItInTheSameSave() throws {
+        let root = try scratch().appendingPathComponent("library")
+        let store = try CanonicalStore(root: root, create: true)
+        store.discard = { try FileManager.default.removeItem(at: $0) }
+        let books = try store.loadLibrary()
+        let book = books[0], source = book.sections[0], page = source.pages[0]
+        let target = Section(title: "目标"); book.sections.append(target)
+        try store.saveLibrary(books)
+        source.pages.removeAll(); target.pages = [page]; book.sections.removeAll { $0.id == source.id }
+        try store.saveLibrary(books)
+        XCTAssertEqual(try store.pageURL(notebook: book.id, page: page.id).path, root.appendingPathComponent("\(book.title)/目标/开始书写.mojian").path)
+        XCTAssertNoThrow(try store.loadPage(notebook: book.id, page: page.id))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(book.title).path).filter { !$0.hasPrefix(".") }, ["目标"])
+    }
+
     func testReadOnlyNeverWritesAndAdoptsUnmarkedFoldersWithStableIds() throws {
         let root = try scratch()
         try FileManager.default.copyItem(at: shared.appendingPathComponent("fixtures/workspace-v3"), to: root.appendingPathComponent("lib"))

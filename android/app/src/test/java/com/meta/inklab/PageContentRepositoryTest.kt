@@ -185,6 +185,29 @@ class PageContentRepositoryTest {
     }
 
     @Test
+    fun removingASectionKeepsPagesMovedOutOfItInTheSameSave() {
+        val temporaryRoot = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
+        val root = Files.createTempDirectory(temporaryRoot.toPath(), "mojian-merge").toFile()
+        try {
+            val appearance = """"appearance":{"paperKind":0,"theme":0,"background":5,"pageColor":"#1B1B1B","showTitle":true,"sheetCount":1,"width":793.7,"height":1122.5,"infiniteWidth":793.7,"infiniteHeight":1122.5}"""
+            FolderLibrary(root).apply(org.json.JSONObject("""{"version":2,"notebooks":[{"id":"book","title":"本","sections":[
+                {"id":"source","title":"来源","children":[],"pages":[{"id":"page","title":"页",$appearance}]},
+                {"id":"target","title":"目标","children":[],"pages":[]}]}]}"""))
+            val repository = PageContentRepository(root)
+            val library = repository.loadLibrary()
+            repository.save(repository.load("book", "page").also { it.sharedSource.put("kept", true) })
+            val notebook = library.activeNotebook()
+            val page = notebook.sections.first { it.id == "source" }.pages.single()
+            notebook.sections.first { it.id == "target" }.pages += page
+            notebook.sections.removeAll { it.id == "source" }
+            assertTrue(repository.saveLibrary(library))
+            assertEquals(java.io.File(root, "本/目标/页.mojian"), repository.pageFile("book", "page"))
+            assertTrue(repository.load("book", "page").sharedSource.getBoolean("kept"))
+            assertEquals(listOf("目标"), java.io.File(root, "本").list()!!.filter { !it.startsWith(".") })
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun deletingNotebookRemovesAllNestedAssetsAndPagesButPreservesOtherNotebooks() {
         val temporaryRoot = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
         val root = Files.createTempDirectory(temporaryRoot.toPath(), "mojian-notebook-delete").toFile()

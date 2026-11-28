@@ -9,8 +9,6 @@ namespace Notein_win.Services;
 public enum ConflictMark { Modify, Add, Delete }
 
 /// <summary>One library change between the two sides of a library.json conflict.</summary>
-public sealed record LibraryChange(LibraryChangeSide Side, string Label);
-public enum LibraryChangeSide { Local, Remote, Changed }
 
 /// <summary>Strokes the canvas preview marks: only on the server (green), only here (red), this device's version of strokes both changed (yellow).</summary>
 public sealed record StrokeDiff(IReadOnlyList<StrokeRecord> Remote, IReadOnlyList<StrokeRecord> Local, IReadOnlyList<StrokeRecord> Changed)
@@ -21,7 +19,6 @@ public sealed record StrokeDiff(IReadOnlyList<StrokeRecord> Remote, IReadOnlyLis
 /// <summary>Pure review rules shared in meaning with Android's SyncConflictReview.kt.</summary>
 public static class SyncConflictReview
 {
-    public const string Library = "library.json";
     private const long PreviewLimit = 64L * 1024 * 1024;
 
     public static ConflictMark MarkOf(string action) => action switch { "add" => ConflictMark.Add, "delete" => ConflictMark.Delete, _ => ConflictMark.Modify };
@@ -84,43 +81,8 @@ public static class SyncConflictReview
             Decode(ours.Where(pair => theirs.TryGetValue(pair.Key, out var other) && !Same(other, pair.Value)).Select(pair => pair.Value)));
     }
 
-    /// <summary>Pages/sections only on one side or changed on both, labeled by their title trail.</summary>
-    public static List<LibraryChange> LibraryChanges(JsonObject local, JsonObject remote)
-    {
-        var changes = new List<LibraryChange>();
-        static string Title(JsonObject item) => item["title"] is JsonValue value && value.TryGetValue<string>(out var text) && text.Length > 0 ? text : Id(item) ?? string.Empty;
-        void Add(LibraryChangeSide side, IEnumerable<string> trail, JsonObject item) => changes.Add(new(side, string.Join(" / ", trail.Append(Title(item)))));
-        void Walk(JsonObject left, JsonObject right, List<string> trail)
-        {
-            foreach (var key in left.Select(p => p.Key).Concat(right.Select(p => p.Key)).Distinct())
-            {
-                if (left[key] is not JsonArray a || right[key] is not JsonArray b) continue;
-                if (!(a.Count == 0 || Identified(a)) || !(b.Count == 0 || Identified(b)) || a.Count + b.Count == 0) continue;
-                var ours = ById(a); var theirs = ById(b);
-                foreach (var (id, item) in ours)
-                {
-                    if (!theirs.TryGetValue(id, out var other)) { Add(LibraryChangeSide.Local, trail, item); continue; }
-                    if (Same(item, other)) continue;
-                    if (HasIdentifiedChildren(item) || HasIdentifiedChildren(other))
-                    {
-                        if (!SameIgnoringArrays(item, other)) Add(LibraryChangeSide.Changed, trail, item);
-                        Walk(item, other, [.. trail, Title(item)]);
-                    }
-                    else Add(LibraryChangeSide.Changed, trail, item);
-                }
-                foreach (var (id, item) in theirs) if (!ours.ContainsKey(id)) Add(LibraryChangeSide.Remote, trail, item);
-            }
-        }
-        Walk(local, remote, []);
-        return changes;
-    }
-
     private static string? Id(JsonObject item) => item["id"] is JsonValue value && value.TryGetValue<string>(out var id) && id.Length > 0 ? id : null;
     private static bool Identified(JsonArray array) => array.Count > 0 && array.All(item => item is JsonObject o && Id(o) != null);
-    private static bool HasIdentifiedChildren(JsonObject item) => item.Any(pair => pair.Value is JsonArray array && Identified(array));
-    private static bool SameIgnoringArrays(JsonObject left, JsonObject right) =>
-        left.Select(p => p.Key).Concat(right.Select(p => p.Key)).Distinct()
-            .Where(key => left[key] is not JsonArray && right[key] is not JsonArray).All(key => Same(left[key], right[key]));
 
     private static Dictionary<string, JsonObject> ById(JsonArray? array)
     {

@@ -485,10 +485,17 @@ public final class FolderLibrary: @unchecked Sendable {
             if fm.fileExists(atPath: assets.path) { try discard(assets) }
             index.pages.removeValue(forKey: id); index.pageMeta.removeValue(forKey: id); index.keys.removeValue(forKey: id); index.pageOwner.removeValue(forKey: id)
         }
+        // A removed folder is only renamed aside here: pages and sections moved out of it (a merge, a move before a
+        // delete) still live inside it. What remains is discarded once every kept item is in place.
+        var removedFolders = [(URL, String)]()
         for (id, relative) in index.folders.filter({ !wanted.contains($0.key) }).sorted(by: { $0.value.count > $1.value.count }) {
-            let folder = url(relative)
-            if fm.fileExists(atPath: folder.path) { try discard(folder) }
             index.folders.removeValue(forKey: id); index.folderMeta.removeValue(forKey: id); index.keys.removeValue(forKey: id)
+            let folder = url(relative)
+            guard isDirectory(folder) else { continue }
+            let aside = folder.deletingLastPathComponent().appendingPathComponent(".mojian-remove-\(UUID().uuidString)")
+            try move(folder, to: aside)
+            moveIndex(relative, to: self.relative(aside), page: false)
+            removedFolders.append((aside, folder.lastPathComponent))
         }
 
         var keys = [String: String]()
@@ -566,6 +573,14 @@ public final class FolderLibrary: @unchecked Sendable {
                 try writePageHead(item, target: target, key: keys[item.id]!, beforeWrite: beforeWrite, afterWrite: afterWrite)
             }
             index.keys[item.id] = keys[item.id]!
+        }
+        for (aside, name) in removedFolders where isDirectory(aside) {
+            // Discarded under its own name where possible, so the Trash shows the folder the user deleted.
+            let named = aside.deletingLastPathComponent().appendingPathComponent(".mojian-trash-\(UUID().uuidString)").appendingPathComponent(name)
+            if (try? fm.createDirectory(at: named.deletingLastPathComponent(), withIntermediateDirectories: true)) != nil,
+               (try? move(aside, to: named)) != nil {
+                try discard(named); try? fm.removeItem(at: named.deletingLastPathComponent())
+            } else { try discard(aside) }
         }
     }
 

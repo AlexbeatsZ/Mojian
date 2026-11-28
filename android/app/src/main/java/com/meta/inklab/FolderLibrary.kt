@@ -401,9 +401,17 @@ class FolderLibrary(val root: File) {
             assetDirectory(id).deleteRecursively()
             index.pages.remove(id); index.pageMeta.remove(id); index.keys.remove(id); index.pageOwner.remove(id)
         }
+        // A removed folder is only renamed aside here: pages and sections moved out of it (a merge, a move before a
+        // delete) still live inside it. What remains is deleted once every kept item is in place.
+        val removedFolders = mutableListOf<File>()
         for ((id, relative) in index.folders.filterKeys { it !in wanted }.entries.sortedByDescending { it.value.length }) {
-            absolute(relative).deleteRecursively()
             index.folders.remove(id); index.folderMeta.remove(id); index.keys.remove(id)
+            val folder = absolute(relative)
+            if (!folder.isDirectory) continue
+            val aside = File(folder.parentFile, ".mojian-remove-${java.util.UUID.randomUUID()}")
+            check(folder.renameTo(aside)) { "无法移除 ${folder.name}" }
+            moveIndex(relative, aside.relativeTo(root).invariantSeparatorsPath, false)
+            removedFolders += aside
         }
 
         val keys = mutableMapOf<String, String>()
@@ -467,6 +475,7 @@ class FolderLibrary(val root: File) {
             }
             index.keys[item.id] = keys.getValue(item.id)
         }
+        removedFolders.filter { it.exists() }.forEach { it.deleteRecursively() }
     }
 
     private fun descriptorExtras(json: JSONObject) = JSONObject(json.toString()).apply {

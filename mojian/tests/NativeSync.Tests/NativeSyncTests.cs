@@ -450,8 +450,9 @@ async Task IncomingPreparationThread()
 async Task IncomingPublicationFailure()
 {
     using var root = new TestWorkspace();
-    var firstPage = NewPage();
-    var secondPage = NewPage();
+    // Files publish in path order; the locked second page must come after the first.
+    var firstPage = "测试本/分区/1-" + Guid.NewGuid().ToString("N") + ".mojian";
+    var secondPage = "测试本/分区/2-" + Guid.NewGuid().ToString("N") + ".mojian";
     root.Write(firstPage, "old first");
     root.Write(secondPage, "old second");
     StageIncoming(root, new() { [Index] = "new index", [firstPage] = "new first", [secondPage] = "new second" });
@@ -764,7 +765,10 @@ async Task SnapshotAfterNetworkMutation()
 
 async Task UnsupportedContentPaths()
 {
-    foreach (var unsupported in new[] { "测试本/分区/photo.png", "测试本/分区/名字:冒号.mojian", ".mojian/assets/page/deeper/asset.png" })
+    // Windows cannot even create a name with a colon (NTFS reads it as a data stream); other systems can.
+    var names = new[] { "测试本/分区/photo.png", ".mojian/assets/page/deeper/asset.png" };
+    if (!OperatingSystem.IsWindows()) names = [.. names, "测试本/分区/名字:冒号.mojian"];
+    foreach (var unsupported in names)
     {
         using var root = new TestWorkspace();
         var page = NewPage();

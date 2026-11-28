@@ -108,6 +108,8 @@ public class WorkspaceDeletionTransactionTests
         var path = store.GetPageDocumentPath(notebook.Id, page.Id);
         var original = File.ReadAllText(path);
         WorkspaceDeletionTransaction.Execute(temp.Path, new[] { path }, () => { });
+        // A crash between staging and commit leaves the staging folder without its commit mark.
+        foreach (var mark in Directory.EnumerateFiles(Path.Combine(temp.Path, ".mojian-deletions.previous"), "committed", SearchOption.AllDirectories)) File.Delete(mark);
 
         new WorkspaceStore(temp.Path).LoadLibrary();
 

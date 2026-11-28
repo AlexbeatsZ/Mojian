@@ -616,7 +616,8 @@ public sealed class NativeSyncClient : IDisposable
             RequireDedicatedWorkspace(_root);
             var listings = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             var replan = new List<string>();
-            foreach (var pair in plan.Files)
+            // Deterministic publication order: an interrupted batch always stops at the same file.
+            foreach (var pair in plan.Files.OrderBy(pair => pair.Key, StringComparer.Ordinal))
             {
                 cancellation.ThrowIfCancellationRequested();
                 var target = LocalPath(pair.Key);

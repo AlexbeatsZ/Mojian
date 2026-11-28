@@ -53,9 +53,10 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         store.SavePage(doc);
         File.WriteAllText(store.GetPageDocumentPath("n", "p"), "{damaged");
         Assert.Single(store.LoadPage("n", "p").Strokes);
-        // Unsupported names under notebooks/ halt native sync, so the damaged copy lives outside it.
-        Assert.Empty(Directory.GetFiles(Path.Combine(temp.Path, "notebooks"), "*.corrupt-*", SearchOption.AllDirectories));
-        var preserved = Assert.Single(Directory.GetFiles(Path.Combine(temp.Path, WorkspaceStore.CorruptRecoveryDirectory, "notebooks", "n", "pages"), "p.json.corrupt-*"));
+        // The damaged copy lives outside the synchronized folders, mirroring its path.
+        Assert.Empty(Directory.GetFiles(temp.Path, "*.corrupt-*", SearchOption.AllDirectories)
+            .Where(path => !Path.GetRelativePath(temp.Path, path).StartsWith(WorkspaceStore.CorruptRecoveryDirectory, StringComparison.Ordinal)));
+        var preserved = Assert.Single(Directory.GetFiles(Path.Combine(temp.Path, WorkspaceStore.CorruptRecoveryDirectory), "p.json.corrupt-*", SearchOption.AllDirectories));
         Assert.Equal("{damaged", File.ReadAllText(preserved));
     }
 
@@ -68,6 +69,9 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         var notebook = library.ActiveNotebook;
         var page = notebook.SelectedPage()!;
         var path = store.GetPageDocumentPath(notebook.Id, page.Id);
+        // Unrecoverable: no previous version to fall back to.
+        var previous = Path.Combine(temp.Path, FolderNames.HiddenRoot, "previous", Path.GetRelativePath(temp.Path, path) + ".previous");
+        if (File.Exists(previous)) File.Delete(previous);
         File.WriteAllText(path, "{damaged");
         for (var i = 0; i < 2; i++) Assert.Throws<InvalidDataException>(() => store.LoadPage(notebook.Id, page.Id));
         Assert.Equal("{damaged", File.ReadAllText(path));
@@ -75,9 +79,20 @@ public sealed class WritingReliabilityTests(ITestOutputHelper output)
         var descriptor = FolderLibraryFixture.Descriptor(temp.Path);
         var intact = File.ReadAllText(descriptor);
         File.WriteAllText(descriptor, "null");
+        // With no previous descriptor the folder is adopted under a new id; its sections and pages stay.
         var reloaded = new WorkspaceStore(temp.Path).LoadLibrary();
-        Assert.Equal(notebook.Id, reloaded.ActiveNotebook.Id);
+        Assert.Equal(notebook.Title, reloaded.ActiveNotebook.Title);
+        Assert.Equal(notebook.Sections.Select(section => section.Title), reloaded.ActiveNotebook.Sections.Select(section => section.Title));
+        Assert.Contains(reloaded.ActiveNotebook.Sections.SelectMany(section => section.Pages), item => item.Id == page.Id);
         Assert.NotEqual("null", File.ReadAllText(descriptor));
+        // With a previous version the identity is recovered too.
+        File.WriteAllText(FolderLibraryFixture.Descriptor(temp.Path) + ".tmp-copy", File.ReadAllText(descriptor));
+        var previousDescriptor = Path.Combine(temp.Path, FolderNames.HiddenRoot, "previous", Path.GetRelativePath(temp.Path, descriptor) + ".previous");
+        Directory.CreateDirectory(Path.GetDirectoryName(previousDescriptor)!);
+        File.Move(descriptor + ".tmp-copy", previousDescriptor, overwrite: true);
+        var adoptedId = reloaded.ActiveNotebook.Id;
+        File.WriteAllText(descriptor, "null");
+        Assert.Equal(adoptedId, new WorkspaceStore(temp.Path).LoadLibrary().Notebooks.Single(item => item.Title == notebook.Title).Id);
     }
 
     [Fact]

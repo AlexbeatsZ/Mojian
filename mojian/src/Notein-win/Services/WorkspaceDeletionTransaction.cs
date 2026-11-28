@@ -26,12 +26,33 @@ public static class WorkspaceDeletionTransaction
                 File.Move(Path.Combine(root, relative), destination);
             }
             commit();
+            // Without this mark a restart restores every staged file: the folder tree is the library, so a file moved
+            // aside before the commit would otherwise look deleted.
+            File.WriteAllText(Path.Combine(directory, Committed), string.Empty);
         }
         catch (Exception original)
         {
             try { Restore(root, directory, _ => true); }
             catch (Exception rollback) { throw new IOException($"删除失败，恢复尚未完成。请保留恢复目录：{directory}", new AggregateException(original, rollback)); }
             throw;
+        }
+    }
+
+    private const string Committed = "committed";
+
+    /// <summary>Restores the files of deletions interrupted between staging and commit; run before reading the library.</summary>
+    public static void RecoverInterrupted(string root)
+    {
+        using var mutation = NativeSyncMutationEpoch.ForRoot(root).BeginMutation();
+        lock (WorkspaceFileGate.ForRoot(root))
+        {
+            var parent = Path.Combine(root, ".mojian-deletions.previous");
+            if (!Directory.Exists(parent)) return;
+            foreach (var directory in Directory.EnumerateDirectories(parent).Where(directory => !File.Exists(Path.Combine(directory, Committed))))
+            {
+                Restore(root, directory, _ => true);
+                File.WriteAllText(Path.Combine(directory, Committed), string.Empty);
+            }
         }
     }
 

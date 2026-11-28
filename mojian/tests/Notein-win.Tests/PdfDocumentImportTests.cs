@@ -63,10 +63,10 @@ public class PdfDocumentImportTests
     {
         using var temp = new TemporaryDirectory();
         var vm = new MainViewModel(Path.Combine(temp.Path, "workspace"), new PreferencesStore(Path.Combine(temp.Path, "preferences.json")));
-        var before = File.ReadAllText(Path.Combine(vm.WorkspaceRoot, "library.json"));
+        var before = FolderLibraryFixture.State(vm.WorkspaceRoot);
         var selected = vm.FocusedDocument;
         Assert.Throws<FileNotFoundException>(() => { vm.AddPdfDocument("missing", [new(1, 1, 612, 792, [1])], Path.Combine(temp.Path, "missing.pdf"), false); });
-        Assert.Equal(before, File.ReadAllText(Path.Combine(vm.WorkspaceRoot, "library.json")));
+        Assert.Equal(before, FolderLibraryFixture.State(vm.WorkspaceRoot));
         Assert.Same(selected, vm.FocusedDocument);
         Assert.Throws<InvalidDataException>(() => vm.AddPdfDocument("empty", [], "unused", false));
     }

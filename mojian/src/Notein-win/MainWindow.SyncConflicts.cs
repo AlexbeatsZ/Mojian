@@ -98,7 +98,6 @@ public partial class MainWindow
 
     internal async Task ResolveSyncConflictAsync(SyncConflictRow row, NativeSyncChoice choice)
     {
-        if (ViewModel.SyncConflictNeedsLibraryFirst(row, choice)) { ShowConflictNotice("先处理笔记目录"); return; }
         var discarded = row.Item.LocalOnly ?? 0;
         if (choice == NativeSyncChoice.Remote && (discarded > 0 || row.Mark == ConflictMark.Delete) &&
             !ConfirmSyncChoice(row.Mark == ConflictMark.Delete ? $"删除「{row.Label}」？" : $"移除本机独有的 {discarded} 项？")) return;
@@ -145,9 +144,6 @@ public partial class MainWindow
 
     internal Window BuildSyncConflictDialog(SyncConflictRow row)
     {
-        var changes = row.Path == SyncConflictReview.Library &&
-            SyncConflictReview.ReadObject(row.Item.LocalFile) is { } local && SyncConflictReview.ReadObject(row.Item.RemoteFile) is { } remote
-            ? SyncConflictReview.LibraryChanges(local, remote) : [];
         var secondary = (Brush)FindResource("TextSecondary");
         var primary = (Brush)FindResource("TextPrimary");
         var panel = new StackPanel();
@@ -156,15 +152,6 @@ public partial class MainWindow
         title.Inlines.Add(new System.Windows.Documents.Run(row.Label));
         panel.Children.Add(title);
         if (row.Summary.Length > 0) panel.Children.Add(new TextBlock { Text = row.Summary, Foreground = secondary, FontSize = 12, Margin = new Thickness(0, 0, 0, 8) });
-        var list = new StackPanel();
-        foreach (var change in changes)
-            list.Children.Add(new TextBlock
-            {
-                Text = (change.Side switch { LibraryChangeSide.Local => "本机：", LibraryChangeSide.Remote => "服务器：", _ => "改动：" }) + change.Label,
-                Foreground = ConflictBrushes.For(change.Side switch { LibraryChangeSide.Local => ConflictMark.Delete, LibraryChangeSide.Remote => ConflictMark.Add, _ => ConflictMark.Modify }),
-                FontSize = 12.5, Margin = new Thickness(0, 3, 0, 3), TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-        if (changes.Count > 0) panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 320, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var dialog = new Window
         {
             Title = "同步冲突", Width = 460, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,

@@ -106,6 +106,7 @@ public sealed class WorkspaceStore
 
     private NotebookLibrary LoadLibraryCore()
     {
+        WorkspaceDeletionTransaction.RecoverInterrupted(RootDirectory);
         var index = new Index();
         var folders = ReadFolders(string.Empty, index, notebookId: null);
         ResolveDuplicates(index, _index);
@@ -308,12 +309,13 @@ public sealed class WorkspaceStore
         lock (_sync) return SaveLibraryCore(library);
     }
 
-    private bool SaveLibraryCore(NotebookLibrary library)
+    /// <param name="structureChecked">The deletion transaction checked the structure before moving its files aside.</param>
+    private bool SaveLibraryCore(NotebookLibrary library, bool structureChecked = false)
     {
         WriteNavigation(library);
         var snapshot = Snapshot(library);
         if (snapshot == _snapshot) return false;
-        if (_structure != null && _structure != StructureSignature())
+        if (!structureChecked && _structure != null && _structure != StructureSignature())
             throw new IOException("笔记库已在另一台设备更新，已阻止覆盖。请等待同步完成并重新加载笔记库。");
         Apply(library);
         _snapshot = snapshot;
@@ -402,11 +404,18 @@ public sealed class WorkspaceStore
             if (Directory.Exists(assets)) Directory.Delete(assets, recursive: true);
             _index.Pages.Remove(id); _index.PageMeta.Remove(id); _index.Keys.Remove(id); _index.PageOwner.Remove(id);
         }
+        // A removed folder is only renamed aside here: pages and sections moved out of it (a merge, a move before a
+        // delete) still live inside it. What remains is deleted once every kept item is in place.
+        var removedFolders = new List<string>();
         foreach (var (id, relative) in _index.Folders.Where(pair => !wanted.Contains(pair.Key)).OrderByDescending(pair => pair.Value.Length).ToArray())
         {
-            var path = Absolute(relative);
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
             _index.Folders.Remove(id); _index.FolderMeta.Remove(id); _index.Keys.Remove(id);
+            var path = Absolute(relative);
+            if (!Directory.Exists(path)) continue;
+            var aside = Path.Combine(Path.GetDirectoryName(path)!, $".mojian-remove-{Guid.NewGuid():N}");
+            Directory.Move(path, aside);
+            MoveIndexPrefix(relative, Path.GetRelativePath(RootDirectory, aside).Replace('\\', '/'), false);
+            removedFolders.Add(aside);
         }
 
         // Names and keys per parent. An item keeps its current name while that name still represents its title.
@@ -475,6 +484,7 @@ public sealed class WorkspaceStore
             }
             _index.Keys[item.Id] = keys[item.Id];
         }
+        foreach (var aside in removedFolders.Where(Directory.Exists)) Directory.Delete(aside, recursive: true);
 
         string? CurrentRelative(Placement item) => item.IsPage ? _index.Pages.GetValueOrDefault(item.Id) : _index.Folders.GetValueOrDefault(item.Id);
         string? CurrentAbsolute(Placement item) => CurrentRelative(item) is { } relative ? Absolute(relative) : null;
@@ -521,11 +531,14 @@ public sealed class WorkspaceStore
         else
         {
             var pending = PendingPath(page.Id);
+            var pendingStamp = PageStamp(pending);
             var content = File.Exists(pending) ? File.ReadAllBytes(pending)
                 : JsonSerializer.SerializeToUtf8Bytes(new PageDocument(notebookId, page.Id), PageJsonOptions);
             AtomicWrite(path, PageFileFormat.Compose(page.Id, key, meta, content));
             if (File.Exists(pending)) File.Delete(pending);
-            RememberLocalVersion(path, null);
+            // The open document saved while staged is this device's version of the library file.
+            RememberLocalVersion(path, pendingStamp);
+            if (_localVersions.Remove(pending, out var staged)) _localVersions[path].UnionWith(staged);
             _index.Pages[page.Id] = Path.GetRelativePath(RootDirectory, path).Replace('\\', '/');
             _index.PageRaw[page.Id] = metaJson;
         }
@@ -649,14 +662,23 @@ public sealed class WorkspaceStore
         var path = PagePath(pageId);
         RestoreMissingCurrent(path);
         if (!File.Exists(path)) { Observe(path); throw new PageContentMissingException(notebookId, pageId); }
-        var bytes = File.ReadAllBytes(path);
-        var content = _index.Pages.ContainsKey(pageId) ? PageFileFormat.ReadContent(bytes) : bytes;
+        var inLibrary = _index.Pages.ContainsKey(pageId);
+        PageDocument Parse(byte[] raw)
+        {
+            var content = inLibrary ? PageFileFormat.ReadContent(raw) : raw;
+            return JsonSerializer.Deserialize<PageDocument>(content.Span, PageJsonOptions) ?? throw new JsonException("页面为空");
+        }
         PageDocument document;
-        try { document = JsonSerializer.Deserialize<PageDocument>(content.Span, PageJsonOptions) ?? throw new JsonException("页面为空"); }
+        try { document = Parse(File.ReadAllBytes(path)); }
         catch (JsonException error)
         {
+            // The damaged bytes are kept; the last successful save (.mojian/previous) replaces them.
             PreserveCorruptFile(path, RootDirectory);
-            throw new InvalidDataException($"无法读取页面，原文件已保留：{path}", error);
+            var recovery = PreviousPath(path);
+            if (!File.Exists(recovery)) throw new InvalidDataException($"无法读取页面，原文件已保留：{path}", error);
+            try { document = Parse(File.ReadAllBytes(recovery)); }
+            catch (JsonException recoveryError) { throw new InvalidDataException($"当前和恢复版本均无效，已停止加载：{path}", recoveryError); }
+            File.Copy(recovery, path, overwrite: true);
         }
         document.NotebookId = notebookId;
         document.PageId = pageId;
@@ -723,7 +745,7 @@ public sealed class WorkspaceStore
             if (pageIds == null && _index.Folders.TryGetValue(notebookId, out var notebookFolder))
                 files.AddRange(Directory.EnumerateFiles(Absolute(notebookFolder), "*", SearchOption.AllDirectories));
             foreach (var path in files.Distinct()) GuardExternalWrite(path);
-            WorkspaceDeletionTransaction.Execute(RootDirectory, files.Distinct(), () => SaveLibraryCore(library));
+            WorkspaceDeletionTransaction.Execute(RootDirectory, files.Distinct(), () => SaveLibraryCore(library, structureChecked: true));
         }
     }
 

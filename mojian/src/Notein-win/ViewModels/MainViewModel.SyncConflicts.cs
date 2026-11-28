@@ -72,11 +72,6 @@ public sealed partial class MainViewModel
         ConflictRows().FirstOrDefault(row => row.IsPage && row.NotebookId == document.NotebookId && row.PageId == document.PageId);
 
     /// <summary>Whether taking the server's deletion of this page must wait for the library conflict (else reload restores the page from .previous).</summary>
-    public bool SyncConflictNeedsLibraryFirst(SyncConflictRow row, NativeSyncChoice choice) =>
-        choice == NativeSyncChoice.Remote && row.Mark == ConflictMark.Delete && row.IsPage &&
-        _syncConflictItems.Any(item => item.Path == SyncConflictReview.Library) &&
-        _library.Notebooks.FirstOrDefault(notebook => notebook.Id == row.NotebookId)?.FindPage(row.PageId, out _) != null;
-
     private IEnumerable<SyncConflictRow> ConflictRows()
     {
         var selectedPage = ActiveWorkspace.SelectedPageId;
@@ -88,7 +83,7 @@ public sealed partial class MainViewModel
                 return new SyncConflictRow(item, SyncConflictReview.Label(item.Path), notebookId, pageId);
             })
             .Select(row => row.WithSelection(row.IsPage && row.NotebookId == ActiveWorkspace.Id && row.PageId == selectedPage))
-            .OrderBy(row => row.Path != SyncConflictReview.Library).ThenBy(row => row.Label, StringComparer.Ordinal);
+            .OrderBy(row => row.Label, StringComparer.Ordinal).ThenBy(row => row.Path, StringComparer.Ordinal);
     }
 
     private string? ConflictPageTitle(string notebookId, string pageId)
