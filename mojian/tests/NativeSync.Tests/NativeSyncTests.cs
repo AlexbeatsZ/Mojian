@@ -61,10 +61,17 @@ await Run("strokes written on two devices merge and a volatile-only resave takes
 await Run("expired merge ancestor preserves conflict and receives independent pages", ExpiredMergeAncestor);
 await Run("shared keep-both and summary fixtures match Android", ReviewFixture);
 await Run("reviewed conflicts resolve per file, keep both and resume sync", ConflictReviewFlow);
+await Run("folders replicate as items: empty sections, renames and deletions", FolderItems);
+await Run("a remotely deleted folder that gained local content is kept and uploaded again", FolderWithLocalContent);
+await Run("case-only renames of pages and folders keep content", CaseOnlyRename);
+await Run("large change sets upload in server-sized batches", BatchedUpload);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
 async Task Run(string name, Func<Task> scenario)
 {
+    // Mandatory sharing locks exist only on Windows; elsewhere these scenarios cannot reach their failure boundary.
+    if (!OperatingSystem.IsWindows() && name.StartsWith("failed second replacement", StringComparison.Ordinal))
+    { Console.WriteLine("SKIP (needs Windows file locks) " + name); return; }
     await scenario();
     passed++;
     Console.WriteLine("PASS " + name);
@@ -786,7 +793,8 @@ async Task UnsupportedContentPaths()
         ".mojian-corrupt.previous/测试本/page.mojian.corrupt-20261102-000000-0123456789abcdef0123456789abcdef", ".mojian/previous/测试本/a.mojian.previous", ".mojian/navigation.json" })
         ignored.Write(path, "local-only recovery");
     using var safe = new NativeSyncClient(ignored.Root, endpoint, token, new TransportFault { Offline = true });
-    Check(safe.Scan().Keys.ToHashSet().SetEquals(new[] { "测试本", Index, "测试本/分区", kept }) && safe.FailedItems.Count == 0,
+    // `.mojian` itself is a folder item (it holds synchronized assets); its device-local contents are excluded.
+    Check(safe.Scan().Keys.ToHashSet().SetEquals(new[] { "测试本", Index, "测试本/分区", kept, ".mojian" }) && safe.FailedItems.Count == 0,
         "Explicit local recovery exclusions were rejected, reported or uploaded");
 }
 
@@ -803,8 +811,12 @@ async Task WireFixture()
     AssertSynced(client);
     Check(capture.CommitBodies.Count == 1, "Golden fixture emitted an unexpected operation count");
     var actual = JsonNode.Parse(capture.CommitBodies[0])!;
-    foreach (var field in new[] { "workspaceId", "deviceId", "operationId" }) expected[field] = actual[field]!.DeepClone();
-    Check(JsonNode.DeepEquals(actual, expected), "Windows commit JSON does not match shared wire fixture");
+    var pageChange = actual["changes"]!.AsArray().Single(change => change!["path"]!.GetValue<string>() == page);
+    Check(JsonNode.DeepEquals(pageChange, expected["changes"]![0]), "Windows page change JSON does not match shared wire fixture");
+    Check(actual.AsObject().Select(pair => pair.Key).Order().SequenceEqual(expected.AsObject().Select(pair => pair.Key).Order()), "Commit envelope changed");
+    // Folder items travel in the same operation as {"hash":null,"directory":true}; the descriptor of the test notebook is a file.
+    Check(actual["changes"]!.AsArray().Where(change => change != pageChange && change!["path"]!.GetValue<string>() != Index)
+        .All(change => change!["hash"] == null && change["directory"]?.GetValue<bool>() == true), "Folder items are not wire folder entries");
     var remote = await Remote();
     Check(remote.Files[page].Hash == fixture["hash"]!.GetValue<string>(), "Golden fixture hash rejected by server");
     File.Delete(root.PathFor(page));
@@ -1048,6 +1060,7 @@ async Task RejectedCommit()
 async Task DeletedLibrary()
 {
     using var root = new TestWorkspace();
+    await AdoptSharedIndex(root);
     var page = NewPage();
     root.Write(page, "kept page");
     using (var client = new NativeSyncClient(root.Root, endpoint, token))
@@ -1055,14 +1068,16 @@ async Task DeletedLibrary()
         await client.SyncAsync(Idle); AssertSynced(client);
     }
     // An unmounted or emptied library folder must not publish the deletion of every notebook.
-    Directory.Move(root.PathFor("测试本"), root.Private("moved-away"));
+    var notebooks = Directory.EnumerateDirectories(root.Root).Select(Path.GetFileName).Where(name => !name!.StartsWith('.')).ToArray();
+    Directory.CreateDirectory(root.Private("moved-away"));
+    foreach (var name in notebooks) Directory.Move(root.PathFor(name!), root.Private("moved-away", name!));
     using (var client = new NativeSyncClient(root.Root, endpoint, token))
     {
         await client.SyncAsync(Idle);
         Check(client.Snapshot.Phase == NativeSyncPhase.Error && client.Status.Contains("笔记库缺失"), "Missing library was not refused: " + client.Status);
     }
     Check((await Remote()).Files[page].Hash == HashText("kept page"), "A missing local library deleted remote pages");
-    Directory.Move(root.Private("moved-away"), root.PathFor("测试本"));
+    foreach (var name in notebooks) Directory.Move(root.Private("moved-away", name!), root.PathFor(name!));
 }
 
 async Task RecoveryWithoutCredentials()
@@ -1074,6 +1089,92 @@ async Task RecoveryWithoutCredentials()
     Check(root.Read(page) == "downloaded page", "Recovery lost the staged page");
     try { await recovery.SyncAsync(Idle); throw new Exception("Recovery client permitted networking"); }
     catch (InvalidOperationException) { }
+}
+
+async Task<string> UniqueNotebook() => "本-" + Guid.NewGuid().ToString("N")[..8];
+
+// Scenarios share one server: a new workspace first takes the server's copy of the shared test notebook descriptor.
+async Task AdoptSharedIndex(params TestWorkspace[] roots)
+{
+    if ((await Remote()).Files.GetValueOrDefault(Index)?.Hash is not { } shared || !NativeSyncIdentity.IsBlob(shared)) return;
+    using var http = new HttpClient();
+    http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+    var text = await http.GetStringAsync(endpoint + "blobs/" + shared);
+    foreach (var root in roots) root.Write(Index, text);
+}
+
+async Task FolderItems()
+{
+    using var first = new TestWorkspace();
+    using var second = new TestWorkspace();
+    await AdoptSharedIndex(first, second);
+    var book = await UniqueNotebook();
+    Directory.CreateDirectory(first.PathFor(book + "/空分区/子分区"));
+    first.Write(book + "/旧分区/页.mojian", PageFile(Guid.NewGuid().ToString("N"), "page"));
+    using var writer = new NativeSyncClient(first.Root, endpoint, token);
+    using var reader = new NativeSyncClient(second.Root, endpoint, token);
+    await writer.SyncAsync(Idle); await reader.SyncAsync(Idle);
+    Check(Directory.Exists(second.PathFor(book + "/空分区/子分区")), "Empty folders did not replicate");
+    Directory.Move(first.PathFor(book + "/旧分区"), first.PathFor(book + "/新分区"));
+    Directory.Delete(first.PathFor(book + "/空分区"), recursive: true);
+    await writer.SyncAsync(Idle); AssertSynced(writer);
+    await reader.SyncAsync(Idle); AssertSynced(reader);
+    Check(File.Exists(second.PathFor(book + "/新分区/页.mojian")) && !Directory.Exists(second.PathFor(book + "/旧分区")) &&
+        !Directory.Exists(second.PathFor(book + "/空分区")), "Folder rename or deletion left the old folder behind");
+}
+
+async Task FolderWithLocalContent()
+{
+    using var first = new TestWorkspace();
+    using var second = new TestWorkspace();
+    await AdoptSharedIndex(first, second);
+    var book = await UniqueNotebook();
+    first.Write(book + "/共享/a.mojian", PageFile(Guid.NewGuid().ToString("N"), "a"));
+    using var writer = new NativeSyncClient(first.Root, endpoint, token);
+    using var reader = new NativeSyncClient(second.Root, endpoint, token);
+    await writer.SyncAsync(Idle); await reader.SyncAsync(Idle);
+    second.Write(book + "/共享/离线新页.mojian", PageFile(Guid.NewGuid().ToString("N"), "offline"));
+    Directory.Delete(first.PathFor(book + "/共享"), recursive: true);
+    await writer.SyncAsync(Idle);
+    await reader.SyncAsync(Idle);
+    await reader.SyncAsync(Idle);
+    Check(File.Exists(second.PathFor(book + "/共享/离线新页.mojian")) && !File.Exists(second.PathFor(book + "/共享/a.mojian")), "Local content in a deleted folder was lost");
+    await writer.SyncAsync(Idle);
+    Check(File.Exists(first.PathFor(book + "/共享/离线新页.mojian")), "Kept folder was not uploaded again");
+}
+
+async Task CaseOnlyRename()
+{
+    using var first = new TestWorkspace();
+    using var second = new TestWorkspace();
+    await AdoptSharedIndex(first, second);
+    var book = await UniqueNotebook();
+    first.Write(book + "/Folder/Note.mojian", PageFile(Guid.NewGuid().ToString("N"), "note body"));
+    using var writer = new NativeSyncClient(first.Root, endpoint, token);
+    using var reader = new NativeSyncClient(second.Root, endpoint, token);
+    await writer.SyncAsync(Idle); await reader.SyncAsync(Idle);
+    File.Move(first.PathFor(book + "/Folder/Note.mojian"), first.PathFor(book + "/Folder/note.tmp-case"));
+    File.Move(first.PathFor(book + "/Folder/note.tmp-case"), first.PathFor(book + "/Folder/note.mojian"));
+    Directory.Move(first.PathFor(book + "/Folder"), first.PathFor(book + "/folder-tmp"));
+    Directory.Move(first.PathFor(book + "/folder-tmp"), first.PathFor(book + "/folder"));
+    await writer.SyncAsync(Idle); AssertSynced(writer);
+    await reader.SyncAsync(Idle); AssertSynced(reader);
+    Check(Directory.EnumerateFileSystemEntries(second.PathFor(book)).Select(Path.GetFileName).SequenceEqual(["folder"]), "Folder case did not follow");
+    Check(Directory.EnumerateFiles(second.PathFor(book + "/folder")).Select(Path.GetFileName).SequenceEqual(["note.mojian"]), "Page case did not follow");
+    Check(second.Read(book + "/folder/note.mojian").Contains("note body"), "Case-only rename lost content");
+}
+
+async Task BatchedUpload()
+{
+    using var root = new TestWorkspace();
+    await AdoptSharedIndex(root);
+    var book = await UniqueNotebook();
+    for (var i = 0; i < 7; i++) root.Write($"{book}/批量/{i}.mojian", PageFile(Guid.NewGuid().ToString("N"), "p" + i));
+    using var client = new NativeSyncClient(root.Root, endpoint, token) { BatchLimit = 3 };
+    for (var pass = 0; pass < 5 && client.Snapshot.Phase != NativeSyncPhase.Synced; pass++) await client.SyncAsync(Idle);
+    AssertSynced(client);
+    var remote = await Remote();
+    Check(Enumerable.Range(0, 7).All(i => remote.Files.GetValueOrDefault($"{book}/批量/{i}.mojian")?.Hash != null), "Batched upload lost changes");
 }
 
 sealed class AddressForwarder : IDisposable

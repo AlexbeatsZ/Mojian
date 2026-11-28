@@ -26,7 +26,8 @@ public static class OutlineCompaction
             as JsonObject ?? throw new JsonException("页面数据无效。");
         int candidates = 0, compacted = 0, unmatched = 0, packed = 0;
         long before = 0, after = 0;
-        if (root["strokes"] is JsonArray strokes)
+        // A folder-library page keeps its strokes in "content".
+        if ((root["content"] as JsonObject ?? root)["strokes"] is JsonArray strokes)
         {
             foreach (var node in strokes)
             {
@@ -62,15 +63,14 @@ public static class OutlineCompaction
             !path.Contains('c') && !path.Contains('l');
     }
 
-    /// <summary>Compacts every page under <paramref name="root"/>/notebooks/*/pages; returns per-page results.</summary>
+    /// <summary>Compacts every <c>.mojian</c> page of the folder library under <paramref name="root"/>; returns per-page results.</summary>
     public static IReadOnlyList<(string Path, Result Result, long BytesBefore, long BytesAfter)> CompactLibrary(string root, long minimumBytes, bool write,
         Func<string, bool>? include = null, bool packPoints = false)
     {
         var results = new List<(string, Result, long, long)>();
-        var notebooks = Path.Combine(root, "notebooks");
-        foreach (var file in Directory.EnumerateFiles(notebooks, "*.json", SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(root, "*" + FolderNames.PageExtension, SearchOption.AllDirectories))
         {
-            if (!string.Equals(Path.GetFileName(Path.GetDirectoryName(file)), "pages", StringComparison.Ordinal)) continue;
+            if (Path.GetRelativePath(root, file).Split(Path.DirectorySeparatorChar).Any(part => part.StartsWith('.'))) continue;
             if (include != null && !include(file)) continue;
             var length = new FileInfo(file).Length;
             if (length < minimumBytes) continue;

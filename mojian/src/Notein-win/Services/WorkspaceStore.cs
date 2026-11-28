@@ -28,8 +28,11 @@ public sealed class WorkspaceStore
         public Dictionary<string, string> Pages { get; } = new();         // page id -> relative file
         public Dictionary<string, string> Keys { get; } = new();          // item id -> sortKey
         public Dictionary<string, string> PageMeta { get; } = new();      // page id -> "page" JSON as stored
+        public Dictionary<string, string> PageRaw { get; } = new();       // page id -> "page" object text exactly as on disk
         public Dictionary<string, string> FolderMeta { get; } = new();    // folder id -> descriptor extras JSON
         public Dictionary<string, string> PageOwner { get; } = new();     // page id -> notebook id
+        public Dictionary<string, NotePage> PageObjects { get; } = new(); // relative page file -> loaded page
+        public List<(string Path, string OriginalId)> Duplicates { get; } = new();
     }
 
     private static string? PageStamp(string path) => Stamp(path) is { } stamp ? $"{stamp.Length}:{stamp.Modified}" : null;
@@ -104,7 +107,9 @@ public sealed class WorkspaceStore
     private NotebookLibrary LoadLibraryCore()
     {
         var index = new Index();
-        var notebooks = ReadFolders(string.Empty, index, notebookId: null).Select(folder => ToNotebook(folder, index)).ToList();
+        var folders = ReadFolders(string.Empty, index, notebookId: null);
+        ResolveDuplicates(index, _index);
+        var notebooks = folders.Select(folder => ToNotebook(folder, index)).ToList();
         if (notebooks.Count == 0)
         {
             // An empty root beside existing sync state or pages is an accident, not a new library: a sample would be
@@ -135,7 +140,7 @@ public sealed class WorkspaceStore
     /// <summary>Folders below <paramref name="relative"/>, adopting folders and pages created outside Mojian.</summary>
     private List<FolderRead> ReadFolders(string relative, Index index, string? notebookId)
     {
-        var directory = Path.Combine(RootDirectory, relative);
+        var directory = Absolute(relative);
         var result = new List<FolderRead>();
         foreach (var path in Directory.EnumerateDirectories(directory))
         {
@@ -189,7 +194,7 @@ public sealed class WorkspaceStore
     private List<(NotePage Page, string SortKey)> ReadPages(string relative, Index index, string notebookId)
     {
         var pages = new List<(NotePage Page, string SortKey)>();
-        foreach (var path in Directory.EnumerateFiles(Path.Combine(RootDirectory, relative), "*" + FolderNames.PageExtension))
+        foreach (var path in Directory.EnumerateFiles(Absolute(relative), "*" + FolderNames.PageExtension))
         {
             var name = Path.GetFileName(path);
             if (FolderNames.IsHidden(name)) continue;
@@ -198,23 +203,61 @@ public sealed class WorkspaceStore
             catch (Exception error) when (error is InvalidDataException or JsonException) { continue; }
             var page = head.Page?.Deserialize<NotePage>(JsonOptions) ?? new NotePage();
             var id = head.Id;
-            if (string.IsNullOrWhiteSpace(id) || index.Pages.ContainsKey(id) || !IsSafeId(id))
+            var relativeFile = Combine(relative, name);
+            if (!string.IsNullOrWhiteSpace(id) && IsSafeId(id) && index.Pages.ContainsKey(id))
             {
-                // A page copied in a file manager keeps its content under a new identity.
+                // A copy made in a file manager: which file keeps the identity is decided after the whole walk.
+                index.Duplicates.Add((relativeFile, id));
+                id = IdFactory.New("page");
+            }
+            else if (string.IsNullOrWhiteSpace(id) || !IsSafeId(id))
+            {
                 id = IdFactory.New("page");
                 var bytes = File.ReadAllBytes(path);
                 AtomicWrite(path, PageFileFormat.Compose(id, head.SortKey ?? string.Empty, head.Page ?? new JsonObject(), PageFileFormat.ReadContent(bytes).Span));
             }
             page.Id = id;
             page.Title = name[..^FolderNames.PageExtension.Length];
-            var relativePath = Combine(relative, name);
+            var relativePath = relativeFile;
+            index.PageObjects[relativePath] = page;
             index.Pages[id] = relativePath;
             index.PageOwner[id] = notebookId;
             index.PageMeta[id] = PageMetadata(page).ToJsonString(CompactOptions);
+            index.PageRaw[id] = (head.Page ?? new JsonObject()).ToJsonString(CompactOptions);
             pages.Add((page, FractionalIndex.IsValid(head.SortKey) ? head.SortKey! : string.Empty));
         }
         AssignMissingKeys(pages.Select(item => (item.Page.Id, item.SortKey, item.Page.Title)).ToList(), index);
         return pages.OrderBy(item => index.Keys[item.Page.Id], StringComparer.Ordinal).ThenBy(item => item.Page.Title, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// Two files carrying one page id: the file the previous index knew keeps it (otherwise the older file); the other
+    /// copy is written back under its new id, so navigation, assets and sync never follow the copy.
+    /// </summary>
+    private void ResolveDuplicates(Index index, Index previous)
+    {
+        foreach (var (copyPath, originalId) in index.Duplicates)
+        {
+            var firstPath = index.Pages[originalId];
+            var copyPage = index.PageObjects[copyPath];
+            var copyId = copyPage.Id;
+            var copyWins = previous.Pages.TryGetValue(originalId, out var known)
+                ? known == copyPath
+                : File.GetCreationTimeUtc(Absolute(copyPath)) < File.GetCreationTimeUtc(Absolute(firstPath));
+            var (loserPath, loserId) = copyWins ? (firstPath, copyId) : (copyPath, copyId);
+            if (copyWins)
+            {
+                var firstPage = index.PageObjects[firstPath];
+                firstPage.Id = copyId; copyPage.Id = originalId;
+                index.Pages[originalId] = copyPath; index.Pages[copyId] = firstPath;
+                foreach (var map in new[] { index.PageMeta, index.PageRaw, index.Keys, index.PageOwner })
+                    if (map.Remove(originalId, out var value)) { if (map.Remove(copyId, out var other)) map[originalId] = other; map[copyId] = value; }
+            }
+            var loser = Absolute(loserPath);
+            var head = PageFileFormat.ReadHead(loser);
+            AtomicWrite(loser, PageFileFormat.Compose(loserId, head.SortKey ?? string.Empty, head.Page ?? new JsonObject(), PageFileFormat.ReadContent(File.ReadAllBytes(loser)).Span));
+        }
+        index.Duplicates.Clear();
     }
 
     /// <summary>Items without a valid key sort after keyed items by name; their keys are written on the next save.</summary>
@@ -347,7 +390,7 @@ public sealed class WorkspaceStore
         // when the user deleted them; anything left is removed here).
         foreach (var (id, relative) in _index.Pages.Where(pair => !wanted.Contains(pair.Key)).ToArray())
         {
-            var path = Path.Combine(RootDirectory, relative);
+            var path = Absolute(relative);
             if (File.Exists(path)) { GuardExternalWrite(path); File.Delete(path); }
             ForgetPath(path);
             var assets = AssetDirectory(id);
@@ -356,7 +399,7 @@ public sealed class WorkspaceStore
         }
         foreach (var (id, relative) in _index.Folders.Where(pair => !wanted.Contains(pair.Key)).OrderByDescending(pair => pair.Value.Length).ToArray())
         {
-            var path = Path.Combine(RootDirectory, relative);
+            var path = Absolute(relative);
             if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
             _index.Folders.Remove(id); _index.FolderMeta.Remove(id); _index.Keys.Remove(id);
         }
@@ -392,7 +435,7 @@ public sealed class WorkspaceStore
         var staged = new Dictionary<string, string>();
         foreach (var item in moving.OrderByDescending(item => CurrentRelative(item)!.Length))
         {
-            var current = Path.Combine(RootDirectory, CurrentRelative(item)!);
+            var current = Absolute(CurrentRelative(item)!);
             var temporary = Path.Combine(Path.GetDirectoryName(current)!, $".mojian-move-{Guid.NewGuid():N}");
             if (item.IsPage) { GuardExternalWrite(current); File.Move(current, temporary); }
             else Directory.Move(current, temporary);
@@ -401,7 +444,7 @@ public sealed class WorkspaceStore
         }
         foreach (var item in placements)
         {
-            var target = Path.Combine(RootDirectory, FinalRelative(item));
+            var target = Absolute(FinalRelative(item));
             if (!item.IsPage)
             {
                 if (staged.TryGetValue(item.Id, out var from)) { Directory.Move(CurrentAbsolute(item)!, target); }
@@ -429,7 +472,7 @@ public sealed class WorkspaceStore
         }
 
         string? CurrentRelative(Placement item) => item.IsPage ? _index.Pages.GetValueOrDefault(item.Id) : _index.Folders.GetValueOrDefault(item.Id);
-        string? CurrentAbsolute(Placement item) => CurrentRelative(item) is { } relative ? Path.Combine(RootDirectory, relative) : null;
+        string? CurrentAbsolute(Placement item) => CurrentRelative(item) is { } relative ? Absolute(relative) : null;
         string? ParentRelativeOf(Placement item, string? _) => item.Parent == null ? string.Empty : _index.Folders.GetValueOrDefault(item.Parent);
     }
 
@@ -440,7 +483,7 @@ public sealed class WorkspaceStore
         bool Under(string path) => path == from || path.StartsWith(from + "/", StringComparison.Ordinal);
         string Rebase(string path) => to + path[from.Length..];
         foreach (var (id, path) in _index.Pages.ToArray())
-            if (Under(path)) { RenameGuards(Path.Combine(RootDirectory, path), Path.Combine(RootDirectory, Rebase(path))); _index.Pages[id] = Rebase(path); }
+            if (Under(path)) { RenameGuards(Absolute(path), Absolute(Rebase(path))); _index.Pages[id] = Rebase(path); }
         if (page) return;
         foreach (var (id, path) in _index.Folders.ToArray()) if (Under(path)) _index.Folders[id] = Rebase(path);
     }
@@ -464,8 +507,11 @@ public sealed class WorkspaceStore
             if (_index.PageMeta.GetValueOrDefault(page.Id) == metaJson && _index.Keys.GetValueOrDefault(page.Id) == key) return;
             var before = PageStamp(path);
             var bytes = File.ReadAllBytes(path);
-            AtomicWrite(path, PageFileFormat.Compose(page.Id, key, meta, PageFileFormat.ReadContent(bytes).Span));
+            // Metadata changed: write the normalized form; an unchanged head keeps its stored bytes.
+            var head = _index.PageMeta.GetValueOrDefault(page.Id) == metaJson ? StoredHead(page.Id) : meta;
+            AtomicWrite(path, PageFileFormat.Compose(page.Id, key, head, PageFileFormat.ReadContent(bytes).Span));
             RememberLocalVersion(path, before);
+            _index.PageRaw[page.Id] = head.ToJsonString(CompactOptions);
         }
         else
         {
@@ -476,9 +522,17 @@ public sealed class WorkspaceStore
             if (File.Exists(pending)) File.Delete(pending);
             RememberLocalVersion(path, null);
             _index.Pages[page.Id] = Path.GetRelativePath(RootDirectory, path).Replace('\\', '/');
+            _index.PageRaw[page.Id] = metaJson;
         }
         _index.PageMeta[page.Id] = metaJson;
     }
+
+    /// <summary>
+    /// The head written with a page save: the bytes read from disk while the metadata is unchanged, so saving strokes
+    /// never reorders or rewrites what other devices see in the page head.
+    /// </summary>
+    private JsonObject StoredHead(string pageId) =>
+        JsonNode.Parse(_index.PageRaw.TryGetValue(pageId, out var raw) ? raw : _index.PageMeta[pageId])!.AsObject();
 
     /// <summary>A snapshot taken before this store rewrote the head is still this device's own version.</summary>
     private void RememberLocalVersion(string path, string? before)
@@ -564,7 +618,7 @@ public sealed class WorkspaceStore
     private string PagePath(string pageId)
     {
         EnsureIndex();
-        return _index.Pages.TryGetValue(pageId, out var relative) ? Path.Combine(RootDirectory, relative) : PendingPath(pageId);
+        return _index.Pages.TryGetValue(pageId, out var relative) ? Absolute(relative) : PendingPath(pageId);
     }
 
     /// <summary>Page access before the first library load (exports, tools) builds the id-to-path index on demand.</summary>
@@ -573,6 +627,7 @@ public sealed class WorkspaceStore
         if (_indexed) return;
         var index = new Index();
         ReadFolders(string.Empty, index, notebookId: null);
+        ResolveDuplicates(index, _index);
         _index = index;
         _indexed = true;
     }
@@ -627,7 +682,7 @@ public sealed class WorkspaceStore
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var content = JsonSerializer.SerializeToUtf8Bytes(snapshot, PageJsonOptions);
             var bytes = _index.Pages.ContainsKey(snapshot.PageId)
-                ? PageFileFormat.Compose(snapshot.PageId, _index.Keys[snapshot.PageId], JsonNode.Parse(_index.PageMeta[snapshot.PageId])!.AsObject(), content)
+                ? PageFileFormat.Compose(snapshot.PageId, _index.Keys[snapshot.PageId], StoredHead(snapshot.PageId), content)
                 : content;
             var encodeMs = clock.Elapsed.TotalMilliseconds;
             AtomicWrite(path, bytes);
@@ -656,12 +711,12 @@ public sealed class WorkspaceStore
             var removedPages = pageIds ?? _index.PageOwner.Where(pair => pair.Value == notebookId).Select(pair => pair.Key).ToArray();
             foreach (var pageId in removedPages)
             {
-                if (_index.Pages.TryGetValue(pageId, out var relative)) files.Add(Path.Combine(RootDirectory, relative));
+                if (_index.Pages.TryGetValue(pageId, out var relative)) files.Add(Absolute(relative));
                 var assets = AssetDirectory(pageId);
                 if (Directory.Exists(assets)) files.AddRange(Directory.EnumerateFiles(assets, "*", SearchOption.AllDirectories));
             }
             if (pageIds == null && _index.Folders.TryGetValue(notebookId, out var notebookFolder))
-                files.AddRange(Directory.EnumerateFiles(Path.Combine(RootDirectory, notebookFolder), "*", SearchOption.AllDirectories));
+                files.AddRange(Directory.EnumerateFiles(Absolute(notebookFolder), "*", SearchOption.AllDirectories));
             foreach (var path in files.Distinct()) GuardExternalWrite(path);
             WorkspaceDeletionTransaction.Execute(RootDirectory, files.Distinct(), () => SaveLibraryCore(library));
         }
@@ -780,6 +835,8 @@ public sealed class WorkspaceStore
     // ---- Names and atomic files --------------------------------------------------------------------------------
 
     private static string Combine(string parent, string name) => parent.Length == 0 ? name : parent + "/" + name;
+    /// <summary>The absolute path of an index-relative path, with this platform's separators.</summary>
+    private string Absolute(string relative) => Path.Combine(RootDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
 
     private static bool IsSafeId(string id)
     {

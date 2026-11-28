@@ -14,7 +14,7 @@ static int Run(string[] args)
         return 2;
     }
     var root = Path.GetFullPath(args[0]);
-    if (!File.Exists(Path.Combine(root, "library.json")) || !Directory.Exists(Path.Combine(root, "notebooks")))
+    if (!Directory.Exists(root) || !Directory.EnumerateFiles(root, "*.mojian", SearchOption.AllDirectories).Any())
     {
         Console.Error.WriteLine($"not a Mojian library: {root}");
         return 2;

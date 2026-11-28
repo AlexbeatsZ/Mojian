@@ -185,7 +185,8 @@ public sealed class NativeSyncClient : IDisposable
     }
 
     /// <summary>Items skipped by the latest scan or plan, with their reasons; every other item keeps synchronizing.</summary>
-    public IReadOnlyDictionary<string, string> FailedItems => _failures;
+    public IReadOnlyDictionary<string, string> FailedItems =>
+        _scanFailures.Concat(_failures).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal);
     private Dictionary<string, string> _failures = new(StringComparer.Ordinal);
     private Dictionary<string, string> _scanFailures = new(StringComparer.Ordinal);
 
@@ -506,8 +507,11 @@ public sealed class NativeSyncClient : IDisposable
     {
         if (outbox.WorkspaceId != _state.WorkspaceId || outbox.DeviceId != _state.DeviceId || !NativeSyncStorage.ValidId(outbox.OperationId) ||
             outbox.Changes == null || outbox.Changes.Count is < 1 or > 20000 ||
-            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L || change.Path == "library.json" && change.Hash == null) ||
-            outbox.Changes.Select(change => change.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != outbox.Changes.Count)
+            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L) ||
+            outbox.Changes.Select(change => change.Path).Distinct(StringComparer.Ordinal).Count() != outbox.Changes.Count ||
+            // A case-only rename retires one spelling and creates another in the same batch.
+            outbox.Changes.Where(change => change.Hash != null).Select(change => change.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+                outbox.Changes.Count(change => change.Hash != null))
             throw new IOException("同步待提交记录损坏，请保留恢复目录");
     }
     private async Task<bool> Commit(NativeSyncOutbox outbox, CancellationToken cancellation)
@@ -777,7 +781,7 @@ public sealed class NativeSyncClient : IDisposable
                         incoming[path] = new(preservedHash, entry ?? throw new IOException("服务器没有该文件的版本"));
                         break;
                     default:
-                        if (entry == null || preservedHash == null || !File.Exists(remoteFile) || !path.EndsWith(".json", StringComparison.Ordinal) ||
+                        if (entry == null || preservedHash == null || !File.Exists(remoteFile) || !(path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal) || path.EndsWith(".json", StringComparison.Ordinal)) ||
                             JsonNode.Parse(File.ReadAllBytes(preserved)) is not JsonObject ours || JsonNode.Parse(File.ReadAllBytes(remoteFile)) is not JsonObject theirs)
                             throw new IOException("只有两边都存在的笔记文件可以保留两边");
                         var bytes = System.Text.Encoding.UTF8.GetBytes(NativeSyncMerge.Union(ours, theirs).ToJsonString(NativeSyncMerge.Output));
