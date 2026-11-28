@@ -30,13 +30,19 @@ class NativeSyncProtocolTest {
     }
 
     @Test fun reservedNamesTrailingDotsAndCaseCollisionsAreRejected() {
-        listOf("notebooks/CON/pages/page.json", "notebooks/book/pages/lpt0.json", "notebooks/book/assets/page/image.").forEach {
+        listOf("测试本/CON/page.mojian", "测试本/lpt0.mojian", ".mojian/assets/page/image.", "测试本/尾空格 /页.mojian").forEach {
             assertFalse(NativeSyncClient.validPath(it))
         }
-        val files = JSONObject().put("notebooks/book/pages/page.json", NativeSyncEntry(null, 1).json())
-            .put("notebooks/book/pages/PAGE.json", NativeSyncEntry(null, 1).json())
+        val hash = "a".repeat(64)
+        fun parse(files: JSONObject) = NativeSyncManifest.parse(JSONObject().put("workspaceId", "workspace").put("revision", 1).put("files", files))
         assertThrows(IllegalArgumentException::class.java) {
-            NativeSyncManifest.parse(JSONObject().put("workspaceId", "workspace").put("revision", 1).put("files", files))
+            parse(JSONObject().put("测试本/page.mojian", NativeSyncEntry(hash, 1).json()).put("测试本/PAGE.mojian", NativeSyncEntry(hash, 1).json()))
         }
+        // A case-only rename leaves the old spelling as a tombstone beside the new live entry.
+        val renamed = parse(JSONObject().put("测试本/page.mojian", NativeSyncEntry(null, 1).json()).put("测试本/Page.mojian", NativeSyncEntry(hash, 1).json()))
+        assertEquals(hash, renamed.files.getValue("测试本/Page.mojian").hash)
+        val folder = parse(JSONObject().put("测试本", NativeSyncEntry(NativeSyncFiles.DIRECTORY, 1).json()))
+        assertEquals(NativeSyncFiles.DIRECTORY, folder.files.getValue("测试本").hash)
+        assertTrue(NativeSyncEntry(NativeSyncFiles.DIRECTORY, 1).json().getBoolean("directory"))
     }
 }

@@ -4,52 +4,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NavigationMutationTest {
-    @Test
-    fun realRemoteLibraryConflictPreservesDeletedPagesAndUnknownFields() {
+    private fun isolated(name: String, action: (java.io.File, PageContentRepository) -> Unit) {
         val parent = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
-        val root = java.nio.file.Files.createTempDirectory(parent.toPath(), "mojian-navigation-conflict").toFile()
+        val root = java.nio.file.Files.createTempDirectory(parent.toPath(), name).toFile()
         try {
-            val original = NotebookLibrary.sample()
-            val source = SharedWorkspaceCodec.encodeLibrary(original, org.json.JSONObject().put("version", 2).put("extension", "keep"))
-            root.resolve("library.json").writeText(source.toString())
-            val repository = PageContentRepository(root)
-            val library = repository.loadLibrary()
-            val notebook = library.activeNotebook()
-            val page = notebook.allSections().flatMap { it.pages }.first()
-            repository.save(PageInsertDocument(notebook.id, page.id))
-            val asset = repository.assetDirectory(notebook.id, page.id).resolve("original.bin").apply { writeText("original") }
-            val mutation = NavigationMutation()
-            mutation.afterCommit { repository.deleteNotebookData(notebook.id) }
-            library.deleteNotebook(notebook.id)
-            val remote = org.json.JSONObject(source.toString()).put("remote", true)
-            root.resolve("library.json").writeText(remote.toString())
-            assertThrows(IllegalStateException::class.java) { mutation.commit { repository.saveLibrary(library) } }
-            assertTrue(repository.pageFile(notebook.id, page.id).isFile)
-            assertEquals("original", asset.readText())
-            assertEquals("keep", org.json.JSONObject(root.resolve("library.json").readText()).getString("extension"))
-            assertTrue(org.json.JSONObject(root.resolve("library.json").readText()).getBoolean("remote"))
+            FolderLibrary(root).apply(SharedWorkspaceCodec.encodeLibrary(NotebookLibrary.sample(), org.json.JSONObject().put("version", 2)))
+            action(root, PageContentRepository(root))
         } finally { root.deleteRecursively() }
     }
 
     @Test
-    fun remoteReintroductionAfterCommitPreventsCleanup() {
-        val parent = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
-        val root = java.nio.file.Files.createTempDirectory(parent.toPath(), "mojian-navigation-reintroduced").toFile()
-        try {
-            val source = SharedWorkspaceCodec.encodeLibrary(NotebookLibrary.sample(), org.json.JSONObject().put("version", 2))
-            root.resolve("library.json").writeText(source.toString())
-            val repository = PageContentRepository(root)
-            val library = repository.loadLibrary()
-            val notebook = library.activeNotebook()
-            val page = notebook.allSections().flatMap { it.pages }.first()
-            repository.save(PageInsertDocument(notebook.id, page.id))
-            library.deleteNotebook(notebook.id)
-            repository.saveLibrary(library)
-            root.resolve("library.json").writeText(source.toString())
-            assertThrows(IllegalStateException::class.java) { repository.deletePageData(notebook.id, page.id) }
-            assertThrows(IllegalStateException::class.java) { repository.deleteNotebookData(notebook.id) }
-            assertTrue(repository.pageFile(notebook.id, page.id).isFile)
-        } finally { root.deleteRecursively() }
+    fun remoteFolderChangeRefusesDeletionAndKeepsPagesAndAssets() = isolated("mojian-navigation-conflict") { root, repository ->
+        val library = repository.loadLibrary()
+        val notebook = library.activeNotebook()
+        val page = notebook.allSections().flatMap { it.pages }.first()
+        repository.save(repository.load(notebook.id, page.id))
+        val asset = repository.assetDirectory(notebook.id, page.id).resolve("original.bin").apply { writeText("original") }
+        val pageFile = repository.pageFile(notebook.id, page.id)
+        val mutation = NavigationMutation()
+        mutation.afterCommit { repository.deleteNotebookData(notebook.id) }
+        library.deleteNotebook(notebook.id)
+        val remote = java.io.File(repository.notebookDirectory(notebook.id), "另一台设备的分区").apply { assertTrue(mkdirs()) }
+        assertThrows(IllegalStateException::class.java) { mutation.commit { repository.saveLibrary(library) } }
+        assertTrue(pageFile.isFile)
+        assertEquals("original", asset.readText())
+        assertTrue(remote.isDirectory)
+    }
+
+    @Test
+    fun remoteReintroductionAfterCommitPreventsCleanup() = isolated("mojian-navigation-reintroduced") { root, repository ->
+        val library = repository.loadLibrary()
+        val notebook = library.activeNotebook()
+        val page = notebook.allSections().flatMap { it.pages }.first()
+        repository.save(repository.load(notebook.id, page.id))
+        val directory = repository.notebookDirectory(notebook.id)
+        library.deleteNotebook(notebook.id)
+        assertTrue(repository.saveLibrary(library))
+        assertFalse(directory.exists())
+        val asset = java.io.File(root, ".mojian/assets/${page.id}/kept.bin").apply { parentFile!!.mkdirs(); writeText("kept") }
+        java.io.File(directory, "另一台设备的分区").mkdirs()
+        assertThrows(IllegalStateException::class.java) { repository.deletePageData(notebook.id, page.id) }
+        assertThrows(IllegalStateException::class.java) { repository.deleteNotebookData(notebook.id) }
+        assertTrue(asset.isFile)
     }
 
     @Test

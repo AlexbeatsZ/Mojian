@@ -27,6 +27,18 @@ class SharedWorkspaceTest {
         "sections":[{"id":"section","title":"分区","expanded":true,"children":[],"pages":[{"id":"page","title":"页面","createdAt":"2026-10-01T00:00:00Z","updatedAt":"2026-10-01T00:00:00Z",
         "sourcePage":"retain","appearance":{"paperKind":1,"theme":1,"background":10,"pageColor":"#AABBCC","showTitle":false,"sheetCount":2,"width":793.7,"height":1122.5,"infiniteWidth":1000,"infiniteHeight":1400,"sourceAppearance":"retain"}}]}]}]}""")
 
+    /** The library as real folders; [content] goes into the page file under its stored head. */
+    private fun folderLibrary(root: File, content: JSONObject? = null): File {
+        FolderLibrary(root).apply(library())
+        val file = File(root, "笔记/分区/页面.mojian")
+        check(file.isFile) { "page file missing" }
+        content?.let { writeContent(file, it) }
+        return file
+    }
+    private fun writeContent(file: File, content: JSONObject, head: PageFileFormat.Head = PageFileFormat.readHead(file)) =
+        file.writeText(PageFileFormat.compose(head.id!!, head.sortKey!!, head.page!!, content).toString())
+    private fun contentOf(file: File) = JSONObject(file.readText()).getJSONObject("content")
+
     @Test fun canonicalLibraryRoundTripPreservesSourceAndLocalSelectionDoesNotRewriteIt() {
         val source=library()
         val decoded=SharedWorkspaceCodec.decodeLibrary(source)
@@ -89,45 +101,46 @@ class SharedWorkspaceTest {
     @Test fun repositoryRejectsCorruptionMissingReceivedPagesAndStaleWrites() {
         val root=Files.createTempDirectory(File(System.getProperty("java.io.tmpdir"),".agents").apply{mkdirs()}.toPath(),"mojian-shared-test").toFile()
         try {
-            File(root,"library.json").writeText(library().toString())
+            // A page is its file: there is no listed-but-not-yet-received state to reject.
+            val file=folderLibrary(root, page())
+            val head=PageFileFormat.readHead(file)
             val repository=PageContentRepository(root)
             val loadedLibrary=repository.loadLibrary()
-            assertThrows(IllegalStateException::class.java) { repository.load("book","page") }
-            val file=repository.pageFile("book","page").apply { parentFile!!.mkdirs();writeText(page().toString()) }
+            assertEquals(file, repository.pageFile("book","page"))
             val document=repository.load("book","page")
             assertSame(document,repository.load("book","page")) // Native display/export share one parsed received page.
             repository.save(document)
             assertEquals(3,document.sharedSource.getLong("revision"))
-            assertFalse(File(file.parentFile,"page.json.previous").exists())
+            val previous=FolderLibrary(root).previousFile(file)
+            assertFalse(previous.exists())
             document.sharedSource.put("edited",true)
             // An actual edit replaces the source; change object geometry to exercise the canonical write.
             document.objects.single().documentX+=2f
             repository.save(document)
-            assertTrue(File(file.parentFile,"page.json.previous").isFile)
+            assertTrue(previous.isFile)
+            assertEquals(head.page.toString(), PageFileFormat.readHead(file).page.toString())
             file.writeText("corrupt")
             assertEquals(3, repository.load("book", "page").sharedSource.getLong("revision"))
             assertTrue(root.resolve(".mojian-corrupt.previous").walkTopDown().any { it.isFile && it.readText() == "corrupt" })
             assertThrows(IllegalStateException::class.java) { repository.save(document) }
-            assertEquals(3, JSONObject(file.readText()).getLong("revision"))
-            file.writeText(page().put("remoteChange",true).toString())
+            assertEquals(3, contentOf(file).getLong("revision"))
+            writeContent(file, page().put("remoteChange",true))
             repository.load("book","page") // An export/read must not authorize an older document to overwrite this version.
             assertThrows(IllegalStateException::class.java) { repository.save(document) }
             loadedLibrary.activeNotebook().title="local rename"
-            File(root,"library.json").writeText(library().put("remoteChange",true).toString())
+            val remote=FolderLibraryFixture.remoteFolder(root, "笔记")
             assertThrows(IllegalStateException::class.java) { repository.saveLibrary(loadedLibrary) }
-            assertTrue(JSONObject(File(root,"library.json").readText()).getBoolean("remoteChange"))
+            assertTrue(remote.isDirectory && File(root, "笔记").isDirectory)
         } finally { root.deleteRecursively() }
     }
 
     @Test fun browsingDoesNotRewriteCanonicalFilesOrReportALibraryMutation() {
         val root=Files.createTempDirectory(File(System.getProperty("java.io.tmpdir"),".agents").apply{mkdirs()}.toPath(),"mojian-view-only").toFile()
         try {
-            val libraryFile=File(root,"library.json").apply { writeText(library().toString()) }
+            folderLibrary(root, page())
             val repository=PageContentRepository(root)
             val loaded=repository.loadLibrary()
-            val pageFile=repository.pageFile("book","page").apply { parentFile!!.mkdirs();writeText(page().toString()) }
-            val beforeLibrary=libraryFile.readText()
-            val beforePage=pageFile.readText()
+            val before=FolderLibraryFixture.files(root)
             val beforeEpoch=LocalMutationEpoch.forWorkspace(root).capture()
             val viewport=ViewportState()
             val memory=PageViewportMemory<String>()
@@ -137,12 +150,12 @@ class SharedWorkspaceTest {
                 assertFalse(repository.saveLibrary(loaded))
             }
             assertEquals(viewport.snapshot(),memory.recall("book/page"))
-            assertEquals(beforeLibrary,libraryFile.readText())
-            assertEquals(beforePage,pageFile.readText())
+            assertEquals(before,FolderLibraryFixture.files(root))
             assertEquals(beforeEpoch,LocalMutationEpoch.forWorkspace(root).capture())
             loaded.activeNotebook().title="real rename"
             assertTrue(repository.saveLibrary(loaded))
             assertEquals("real rename",PageContentRepository(root).loadLibrary().activeNotebook().title)
+            assertTrue(File(root,"real rename/分区/页面.mojian").isFile)
             assertFalse(repository.saveLibrary(loaded))
         } finally { root.deleteRecursively() }
     }

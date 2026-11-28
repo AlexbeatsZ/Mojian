@@ -12,19 +12,20 @@ class ArchitectureRepairTest {
         val root = Files.createTempDirectory(parent.toPath(), "mojian-architecture-").toFile()
         try { action(root) } finally { root.deleteRecursively() }
     }
-    private fun fixture(name: String): String = requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/workspace-v2/$name.json"))
-        .bufferedReader().use { it.readText() }
-
     @Test fun sharedGoldenHierarchyPreservesExtensionsAndNavigationIsLocal() = isolated { root ->
-        val index = root.resolve("library.json").apply { writeText(fixture("library")) }
+        FolderLibraryFixture.copyTo(root)
         val repository = PageContentRepository(root)
         val library = repository.loadLibrary()
-        val before = index.readText()
+        val before = FolderLibraryFixture.files(root)
         val notebook = library.activeNotebook()
+        assertEquals(listOf("共享样例"), library.notebooks.map { it.title })
+        assertEquals("黄金页面", notebook.allSections().single().pages.single().title)
         notebook.expanded = false
         notebook.allSections().first().expanded = false
-        assertFalse(SharedWorkspaceCodec.encodeLibrary(library, JSONObject(before)).toString(), repository.saveLibrary(library))
-        assertEquals(before, index.readText())
+        notebook.selectSection(notebook.allSections().first().id)
+        assertTrue(notebook.selectPage(notebook.allSections().first().id, "page.dot"))
+        assertFalse(repository.saveLibrary(library))
+        assertEquals(before, FolderLibraryFixture.files(root))
         val navigation = WorkspaceNavigationPreferences.encode(library)
         val reopened = repository.loadLibrary()
         WorkspaceNavigationPreferences.restore(reopened, navigation)
@@ -33,9 +34,13 @@ class ArchitectureRepairTest {
         assertEquals("page.dot", reopened.activeNotebook().selectedPageId)
         reopened.activeNotebook().title = "renamed"
         assertTrue(repository.saveLibrary(reopened))
-        val saved = JSONObject(index.readText())
-        assertTrue(saved.getJSONObject("futureLibrary").getBoolean("kept"))
-        assertEquals("retained", saved.getJSONArray("notebooks").getJSONObject(0).getString("futureNotebook"))
+        assertFalse(File(root, FolderLibraryFixture.NOTEBOOK).exists())
+        val descriptor = JSONObject(File(root, "renamed/${FolderNames.DESCRIPTOR}").readText())
+        assertEquals("book.dot", descriptor.getString("id"))
+        assertEquals("retained", descriptor.getString("futureNotebook"))
+        assertFalse(descriptor.has("expanded"))
+        val head = PageFileFormat.readHead(File(root, "renamed/样例分区/黄金页面.mojian"))
+        assertTrue(head.page!!.getBoolean("futurePage"))
     }
 
     @Test fun assetFailurePublishesNoPartialBytesAndBlocksSyncDuringWriting() = isolated { root ->
@@ -76,12 +81,18 @@ class ArchitectureRepairTest {
         } finally { queue.close() }
     }
 
-    @Test fun recoveryRestoresMissingIndexAndKeepsCorruptBytes() = isolated { root ->
-        root.resolve("library.json.previous").writeText(fixture("library"))
+    @Test fun recoveryRestoresCorruptDescriptorAndPageAndKeepsCorruptBytes() = isolated { root ->
+        FolderLibraryFixture.copyTo(root)
+        val descriptor = File(root, "${FolderLibraryFixture.NOTEBOOK}/${FolderNames.DESCRIPTOR}")
+        val folder = FolderLibrary(root)
+        folder.previousFile(descriptor).apply { parentFile!!.mkdirs(); writeText(descriptor.readText()) }
+        descriptor.writeText("{corrupt")
         val repository = PageContentRepository(root)
         assertEquals("book.dot", repository.loadLibrary().activeNotebookId)
-        val page = repository.pageFile("book.dot", "page.dot").apply { parentFile!!.mkdirs() }
-        File(page.path + ".previous").writeText(fixture("page"))
+        assertEquals("book.dot", JSONObject(descriptor.readText()).getString("id"))
+        val page = repository.pageFile("book.dot", "page.dot")
+        assertEquals(File(root, FolderLibraryFixture.PAGE), page)
+        folder.previousFile(page).apply { parentFile!!.mkdirs(); writeText(page.readText()) }
         page.writeText("corrupt data")
         assertEquals(5, repository.load("book.dot", "page.dot").sharedSource.getLong("revision"))
         assertTrue(root.resolve(".mojian-corrupt.previous").walkTopDown().any { it.isFile && it.readText() == "corrupt data" })

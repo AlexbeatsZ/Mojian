@@ -779,13 +779,8 @@ class MainActivity : Activity() {
         if (workspaceLoaded && ::sectionList.isInitialized) renderWorkspace()
     }
 
-    /** Titles seen while a conflicted page was still listed, so it keeps its name after the library drops it. */
-    private val conflictPageTitles = HashMap<String, String>()
-
-    private fun conflictEntries(): List<ConflictEntry> = SyncConflictReview.entries(syncConflictItems) { notebookId, pageId ->
-        val key = "$notebookId/$pageId"
-        notebookLibrary.notebooks.firstOrNull { it.id == notebookId }?.allSections()?.asSequence()?.flatMap { it.pages.asSequence() }
-            ?.firstOrNull { it.id == pageId }?.title?.also { conflictPageTitles[key] = it } ?: conflictPageTitles[key]
+    private fun conflictEntries(): List<ConflictEntry> = SyncConflictReview.entries(syncConflictItems) { pageId ->
+        notebookLibrary.notebooks.firstOrNull { notebook -> notebook.allSections().any { section -> section.pages.any { it.id == pageId } } }?.id
     }
 
     private fun pageConflictMark(notebookId: String, pageId: String): ConflictMark? {
@@ -883,7 +878,9 @@ class MainActivity : Activity() {
         conflictPreview.clear()
         ioExecutor.execute {
             val result = runCatching {
-                fun read(file: File?) = file?.takeIf { it.isFile && it.length() <= CONFLICT_PREVIEW_LIMIT }?.bufferedReader(Charsets.UTF_8)?.use(StreamingJson::readObject)
+                // A folder-library page keeps its strokes in "content".
+                fun read(file: File?) = file?.takeIf { it.isFile && it.length() <= CONFLICT_PREVIEW_LIMIT }?.bufferedReader(Charsets.UTF_8)
+                    ?.use(StreamingJson::readObject)?.let { it.optJSONObject("content") ?: it }
                 fun decode(strokes: List<org.json.JSONObject>) = strokes.mapNotNull { json ->
                     runCatching { SharedStrokeCodec.decode(json, { it.argb }).also { SharedStrokeCodec.path(it) } }.getOrNull()
                 }
@@ -902,10 +899,6 @@ class MainActivity : Activity() {
         val local = entry.item.local
         val remote = entry.item.remote
         ioExecutor.execute {
-            val changes = if (entry.path == SyncConflictReview.LIBRARY && local != null && remote != null) runCatching {
-                fun read(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
-                SyncConflictReview.libraryChanges(read(local), read(remote))
-            }.getOrElse { emptyList() } else emptyList()
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 val list = LinearLayout(this).apply {
@@ -914,7 +907,6 @@ class MainActivity : Activity() {
                     SyncConflictReview.summaryText(entry.item.summary).takeIf(String::isNotEmpty)?.let { summary ->
                         addView(TextView(this@MainActivity).apply { text = summary; setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f); setPadding(0, 0, 0, dp(6)) })
                     }
-                    changes.forEach { addView(conflictChangeRow(this@MainActivity, it)) }
                 }
                 val dialog = AlertDialog.Builder(this)
                     .setTitle("${entry.mark.letter}  ${entry.label}")
@@ -931,13 +923,6 @@ class MainActivity : Activity() {
         if (conflictResolving) return
         val discarded = entry.item.summary?.localOnly ?: 0
         val deletes = entry.item.action == "delete"
-        // A page file deleted while library.json still lists it is restored from `.previous` on reload
-        // and uploaded again, so the library conflict must be settled first.
-        if (choice == NativeSyncChoice.REMOTE && deletes && entry.isPage && syncConflictItems.any { it.path == SyncConflictReview.LIBRARY } &&
-            notebookLibrary.notebooks.any { notebook -> notebook.id == entry.notebookId && notebook.allSections().any { section -> section.pages.any { it.id == entry.pageId } } }) {
-            Toast.makeText(this, "先处理笔记目录", Toast.LENGTH_SHORT).show()
-            return
-        }
         if (choice == NativeSyncChoice.REMOTE && (discarded > 0 || deletes) && !confirmed) {
             AlertDialog.Builder(this).setMessage(if (deletes) "删除「${entry.label}」？" else "移除本机独有的 $discarded 项？")
                 .setPositiveButton("采用服务器") { _, _ -> resolveConflict(entry, choice, confirmed = true) }
@@ -1048,9 +1033,9 @@ class MainActivity : Activity() {
             }
             val target = WorkspaceFolderSelection.resolveLocalTree(android.provider.DocumentsContract.getTreeDocumentId(uri), volumes)
             require(target.isDirectory && target.canWrite()) { "文件夹不可写，请检查存储权限" }
-            if (File(target, "library.json").isFile) activateWorkspaceFolder(target)
+            if (FolderLibrary(target).isLibrary()) activateWorkspaceFolder(target)
             else {
-                require(target.list()?.isEmpty() == true) { "此目录不是墨笺笔记库；请选择包含 library.json 的目录，或空文件夹" }
+                require(target.list()?.isEmpty() == true) { "此目录不是墨笺笔记库；请选择含笔记本文件夹的墨笺笔记库，或空文件夹" }
                 AlertDialog.Builder(this).setTitle("在空文件夹新建笔记库？").setMessage(target.path)
                     .setNegativeButton("取消", null).setPositiveButton("新建并打开") { _, _ -> activateWorkspaceFolder(target, create = true) }.show()
             }

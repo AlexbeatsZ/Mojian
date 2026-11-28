@@ -12,33 +12,44 @@ import org.junit.Test
 class SyncConflictReviewTest {
     private val review = JSONArray(requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/json-review.json")).bufferedReader().use { it.readText() })
 
-    @Test
-    fun pathsMapToPagesAndAssets() {
-        assertEquals("n1" to "p1", SyncConflictReview.pageOf("notebooks/n1/pages/p1.json"))
-        assertEquals("n1" to "p1", SyncConflictReview.pageOf("notebooks/n1/assets/p1/image.png"))
-        assertNull(SyncConflictReview.pageOf("library.json"))
-        assertNull(SyncConflictReview.pageOf("notebooks/n1/notebook.json"))
+    private fun pageFile(directory: File, id: String) = File(directory, "$id.mojian").apply {
+        writeText(PageFileFormat.compose(id, "a0", JSONObject().put("title", id), JSONObject().put("strokes", JSONArray())).toString())
     }
 
     @Test
-    fun entriesLabelLibraryPagesAndAssetsWithLibraryFirst() {
+    fun pagesAreIdentifiedByHeadAndAssetsByFolder() {
+        val directory = createTempDirectory()
+        val head = pageFile(directory, "p1")
+        assertEquals("p1", SyncConflictReview.pageIdOf(NativeSyncConflictItem("数学/作业/第 4 题.mojian", "modify", head, null, null)))
+        assertEquals("p1", SyncConflictReview.pageIdOf(NativeSyncConflictItem(".mojian/assets/p1/image.png", "add", null, File("r"), null)))
+        assertNull(SyncConflictReview.pageIdOf(NativeSyncConflictItem("数学/.mojian-folder.json", "modify", File("l"), File("r"), null)))
+        assertNull(SyncConflictReview.pageIdOf(NativeSyncConflictItem("数学/坏页.mojian", "modify", File(directory, "missing"), null, null)))
+    }
+
+    @Test
+    fun entriesLabelPagesByFileNameWithPagesFirst() {
+        val directory = createTempDirectory()
         val items = listOf(
-            NativeSyncConflictItem("notebooks/n/assets/p/scan.png", "add", null, File("r"), null),
-            NativeSyncConflictItem("notebooks/n/pages/p.json", "modify", File("l"), File("r"), NativeSyncMerge.Summary(1, 1, 1)),
-            NativeSyncConflictItem("notebooks/n/pages/gone.json", "delete", File("l"), null, null),
-            NativeSyncConflictItem("library.json", "modify", File("l"), File("r"), null),
+            NativeSyncConflictItem(".mojian/assets/p/scan.png", "add", null, File("r"), null),
+            NativeSyncConflictItem("数学/作业 4.mojian", "modify", pageFile(directory, "p"), File("r"), NativeSyncMerge.Summary(1, 1, 1)),
+            NativeSyncConflictItem("数学/gone.mojian", "delete", pageFile(directory, "gone"), null, null),
+            NativeSyncConflictItem("数学/.mojian-folder.json", "modify", File("l"), File("r"), null),
         )
-        val entries = SyncConflictReview.entries(items) { _, page -> if (page == "p") "作业 4" else null }
-        assertEquals(listOf("笔记目录", "gone", "scan.png", "作业 4"), entries.map { it.label })
+        val entries = SyncConflictReview.entries(items) { page -> if (page == "p") "n" else null }
+        assertEquals(listOf("gone", "作业 4", ".mojian-folder.json", "scan.png"), entries.map { it.label })
         val page = entries.single { it.label == "作业 4" }
         assertTrue(page.isPage && page.canKeepBoth)
+        assertEquals("n", page.notebookId)
         assertEquals(ConflictMark.MODIFY, page.mark)
         assertEquals(ConflictMark.DELETE, entries.single { it.label == "gone" }.mark)
         val asset = entries.single { it.label == "scan.png" }
         assertEquals(ConflictMark.ADD, asset.mark)
         assertFalse(asset.isPage || asset.canKeepBoth)
         assertEquals("p", asset.pageId)
+        assertTrue(entries.single { it.label == ".mojian-folder.json" }.canKeepBoth)
     }
+
+    private fun createTempDirectory() = kotlin.io.path.createTempDirectory("conflict-review").toFile().apply { deleteOnExit() }
 
     @Test
     fun summaryTextOmitsZeroCounts() {
@@ -66,26 +77,5 @@ class SyncConflictReviewTest {
         val added = SyncConflictReview.strokeDiff(null, remote)
         assertEquals(1, added.remote.size)
         assertTrue(added.local.isEmpty())
-    }
-
-    @Test
-    fun libraryChangesListPagesAndSectionsOfEachSide() {
-        val case = review.getJSONObject(1)
-        val changes = SyncConflictReview.libraryChanges(case.getJSONObject("local"), case.getJSONObject("remote"))
-        assertEquals(
-            listOf(
-                LibraryChange(LibraryChange.Side.CHANGED, "n / s / mine"),
-                LibraryChange(LibraryChange.Side.LOCAL, "n / s / q"),
-                LibraryChange(LibraryChange.Side.REMOTE, "n / t"),
-            ),
-            changes,
-        )
-    }
-
-    @Test
-    fun libraryChangesSeeAPageRemovedFromAnOtherwiseEmptySection() {
-        val local = JSONObject("""{"notebooks":[{"id":"n","title":"数学","sections":[{"id":"s","title":"作业","pages":[]}]}]}""")
-        val remote = JSONObject("""{"notebooks":[{"id":"n","title":"数学","sections":[{"id":"s","title":"作业","pages":[{"id":"p","title":"第 5 题"}]}]}]}""")
-        assertEquals(listOf(LibraryChange(LibraryChange.Side.REMOTE, "数学 / 作业 / 第 5 题")), SyncConflictReview.libraryChanges(local, remote))
     }
 }

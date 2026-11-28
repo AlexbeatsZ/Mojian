@@ -5,12 +5,13 @@ import org.json.JSONObject
 
 class PageContentRepository(val root: File, private val hashFile: (File) -> String? = NativeSyncFiles::hash) {
     private val localMutations = LocalMutationEpoch.forWorkspace(root)
+    /** The v3 folder library: notebooks/sections are folders, pages `<title>.mojian`, assets `.mojian/assets/<page>`. */
+    val folder = FolderLibrary(root)
     private val observed = mutableMapOf<String, String?>()
     private val loadedPages = mutableMapOf<String, java.lang.ref.WeakReference<PageInsertDocument>>()
     private var librarySource: JSONObject? = null
-    @Volatile private var libraryContent: String? = null
-    private data class LibraryIdentity(val content: String, val physical: String?, val stamp: String?)
-    @Volatile private var libraryIdentity: LibraryIdentity? = null
+    /** Structure signature (folders, page names, descriptors) when the library was last read or written. */
+    @Volatile private var libraryIdentity: String? = null
     private val receivedPages = mutableSetOf<String>()
     // Bytes this process last read or wrote, with every stamp observed for them. HyperOS FUSE
     // later rewrites a replaced file's mtime to the replaced file's old value, so a stamp change
@@ -25,25 +26,14 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     /** Phase timings of the last completed page save, for on-device diagnosis. */
     @Volatile var lastSaveTimings: String = ""
         private set
-    val isShared get() = File(root,"library.json").isFile
+    val isShared get() = folder.isLibrary()
 
     @Synchronized
     fun loadLibrary(): NotebookLibrary {
-        val file = File(root,"library.json")
-        var text: String
-        var source: JSONObject
-        val library = try {
-            text = file.readText(Charsets.UTF_8)
-            source = JSONObject(text)
-            SharedWorkspaceCodec.decodeLibrary(source)
-        } catch (error: Exception) {
-            restoreJson(file) { SharedWorkspaceCodec.decodeLibrary(it) }
-            text = file.readText(Charsets.UTF_8)
-            source = JSONObject(text)
-            SharedWorkspaceCodec.decodeLibrary(source)
-        }
-        librarySource = source; libraryContent = text
-        libraryIdentity = LibraryIdentity(text, physical(file), stamp(file))
+        val source = folder.read()
+        val library = SharedWorkspaceCodec.decodeLibrary(source)
+        librarySource = source
+        libraryIdentity = folder.signature()
         receivedPages.clear()
         library.notebooks.forEach { notebook -> notebook.allSections().forEach { section ->
             section.pages.forEach { receivedPages += "${notebook.id}/${it.id}" }
@@ -51,32 +41,48 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         return library
     }
 
+    /** Synchronized structure only: navigation is device-local and never makes a library "changed". */
+    private fun shared(json: JSONObject): String {
+        val local = setOf("expanded", "focusedSectionId", "selectedPageSectionId", "selectedPageId", "pagePaneMode", "activeNotebookId")
+        fun strip(value: Any?): Any? = when (value) {
+            is JSONObject -> JSONObject().also { result -> value.keys().forEach { key -> if (key !in local) result.put(key, strip(value.get(key))) } }
+            is org.json.JSONArray -> org.json.JSONArray().also { result -> for (i in 0 until value.length()) result.put(strip(value.get(i))) }
+            else -> value
+        }
+        return WorkspaceJson.fingerprint(strip(json) as JSONObject)
+    }
+
     fun saveLibrary(library: NotebookLibrary): Boolean {
         val source = librarySource ?: return false
         val next = SharedWorkspaceCodec.encodeLibrary(library, source)
-        if (next.toString() == source.toString()) return false
+        if (shared(next) == shared(source)) return false
         synchronized(this) {
             check(librarySource === source) { "笔记库已重新加载，请重试操作" }
-            val file = File(root, "library.json")
             check(!libraryChanged()) { "笔记库已在另一台设备更新，请重新加载后编辑" }
-            val text = next.toString()
-            atomicWrite(file, beforeReplace = {
-                check(!libraryChanged()) { "笔记库已在另一台设备更新，请重新加载后编辑" }
-            }) { it.write(text) }
-            librarySource = next; libraryContent = text
-            libraryIdentity = LibraryIdentity(text, physical(file), stamp(file))
+            localMutations.begin().use {
+                folder.apply(next, beforeWrite = { file ->
+                    if (observed.containsKey(file.path)) check(unchanged(file, observed[file.path], verifyContent = true)) {
+                        "页面已在另一台设备更新，已阻止覆盖；请重新加载"
+                    }
+                }, afterWrite = { file, movedFrom ->
+                    // This store's own head rewrite or move: the page bytes stay this device's version.
+                    movedFrom?.let { from -> observed.remove(from)?.let { observed[file.path] = it }; identities.remove(from)?.let { identities[file.path] = it }
+                        loadedPages.remove(from)?.let { loadedPages[file.path] = it } }
+                    val stamp = stamp(file)
+                    hashFile(file)?.let { hash -> remember(file, hash, physical(file), stamp, observed[file.path]) }
+                    if (observed.containsKey(file.path)) observed[file.path] = stamp
+                    loadedPages[file.path]?.get()?.diskStamp = stamp
+                })
+            }
+            librarySource = next
+            libraryIdentity = folder.signature()
             return true
         }
     }
 
     fun libraryChanged(): Boolean {
         val known = libraryIdentity ?: return false
-        val file = File(root, "library.json")
-        if (!file.isFile) return true
-        // Shared writers publish by rename. Stable inode + size avoids whole-index UI reads.
-        val identity = physical(file)
-        if (identity != null && identity == known.physical) return false
-        return file.readText(Charsets.UTF_8) != known.content
+        return folder.signature() != known
     }
     @Synchronized
     fun pageChanged(notebookId: String,pageId: String): Boolean {
@@ -124,25 +130,19 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     @Synchronized
     fun load(notebookId: String, pageId: String): PageInsertDocument {
         val file = pageFile(notebookId, pageId)
-        if (!file.isFile) restoreJson(file) { json ->
-            val restored = SharedWorkspaceCodec.decodeDocument(json)
-            require(restored.notebookId == notebookId && restored.pageId == pageId) { "Page identity mismatch" }
-        }
+        if (!file.isFile) restoreJson(file) { json -> requireIdentity(contentOf(json, notebookId, pageId), notebookId, pageId) }
         check(file.isFile || "$notebookId/$pageId" !in receivedPages) { "页面文件尚未同步完成，请稍后重新加载" }
         var generation=stamp(file)
         loadedPages[file.path]?.get()?.takeIf { it.diskStamp==generation }?.let { return it }
         removeStaleTemporaries(file)
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val source = if (file.isFile) try {
-            readJson(file, digest).also { SharedWorkspaceCodec.decodeDocument(it) }
+            contentOf(readJson(file, digest), notebookId, pageId).also { SharedWorkspaceCodec.decodeDocument(it) }
         } catch (error: Exception) {
-            restoreJson(file) { json ->
-                val restored = SharedWorkspaceCodec.decodeDocument(json)
-                require(restored.notebookId == notebookId && restored.pageId == pageId) { "Page identity mismatch" }
-            }
+            restoreJson(file) { json -> requireIdentity(contentOf(json, notebookId, pageId), notebookId, pageId) }
             digest.reset()
             generation = stamp(file)
-            readJson(file, digest)
+            contentOf(readJson(file, digest), notebookId, pageId)
         } else null
         val readHash = source?.let { hex(digest.digest()) }
         val document = source?.let(SharedWorkspaceCodec::decodeDocument) ?: PageInsertDocument(notebookId,pageId)
@@ -158,6 +158,17 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         document.diskStamp = generation
         loadedPages[file.path]=java.lang.ref.WeakReference(document)
         return document
+    }
+
+    /** A folder-library page's editable part; staged content of a page not yet in the library is already bare. */
+    private fun contentOf(file: JSONObject, notebookId: String, pageId: String): JSONObject {
+        val content = if (file.optInt("version") == 3 && file.has("content")) file.getJSONObject("content") else file
+        return content.put("notebookId", notebookId).put("pageId", pageId).also { if (!it.has("version")) it.put("version", 2) }
+    }
+
+    private fun requireIdentity(content: JSONObject, notebookId: String, pageId: String) {
+        val restored = SharedWorkspaceCodec.decodeDocument(content)
+        require(restored.notebookId == notebookId && restored.pageId == pageId) { "Page identity mismatch" }
     }
 
     @Synchronized
@@ -179,7 +190,12 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         json.put("revision",document.sharedSource.optLong("revision")+1).put("updatedAt",java.time.Instant.now().toString())
         val encoded = System.nanoTime()
         if (strokeTextPath != file.path) { strokeTextPath = file.path; strokeText = StrokeTextCache() }
-        val writtenHash = atomicWrite(file,json,expectedStamp,strokeText)
+        // A library page keeps its stored head; content staged before the page joins the library is written bare.
+        val pageId = document.pageId
+        val output = folder.index.pages[pageId]?.let {
+            PageFileFormat.compose(pageId, folder.index.keys[pageId].orEmpty(), JSONObject(folder.index.pageMeta[pageId] ?: "{}"), json)
+        } ?: json
+        val writtenHash = atomicWrite(file,output,expectedStamp,strokeText)
         val written = System.nanoTime()
         document.sharedSource = json
         document.diskFingerprint = WorkspaceJson.fingerprint(json)
@@ -201,7 +217,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
      */
     private fun removeStaleTemporaries(file: File, now: Long = System.currentTimeMillis()) {
         val prefix = "${file.name}."
-        file.parentFile?.listFiles { candidate ->
+        folder.temporaryFile(file).parentFile?.listFiles { candidate ->
             candidate.isFile && candidate.name.startsWith(prefix) && candidate.name.endsWith(".tmp") &&
                 now - candidate.lastModified() > STALE_TEMPORARY_MS
         }?.forEach { it.delete() }
@@ -223,7 +239,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     private fun atomicWrite(file: File,beforeReplace: ()->Unit = {},rotatePrevious: Boolean = true,write: (java.io.Writer)->Unit): String {
         localMutations.begin().use {
             check(file.parentFile!!.isDirectory || file.parentFile!!.mkdirs()) { "Unable to create workspace directory" }
-            val temp = File(file.parentFile,"${file.name}.${java.util.UUID.randomUUID()}.tmp")
+            val temp = folder.temporaryFile(file).also { it.parentFile!!.mkdirs() }
             val digest = java.security.MessageDigest.getInstance("SHA-256")
             try {
                 java.io.FileOutputStream(temp).use { stream ->
@@ -233,7 +249,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
                     write(writer);writer.flush();stream.fd.sync()
                 }
                 beforeReplace()
-                if (rotatePrevious && file.isFile) file.copyTo(File(file.parentFile,"${file.name}.previous"),overwrite=true)
+                if (rotatePrevious && file.isFile) file.copyTo(folder.previousFile(file).also { it.parentFile!!.mkdirs() },overwrite=true)
                 java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             } finally { temp.delete() }
             return hex(digest.digest())
@@ -252,7 +268,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         if (file.isFile) {
             try { read(file); return }
             catch (error: Exception) {
-                val previous = File(file.path + ".previous")
+                val previous = folder.previousFile(file)
                 val restored = try { read(previous) } catch (_: Exception) { throw error }
                 val corrupt = File(root, ".mojian-corrupt.previous/${file.relativeTo(root).path}.${java.util.UUID.randomUUID()}")
                 corrupt.parentFile!!.mkdirs()
@@ -260,7 +276,7 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
                 atomicWrite(file, rotatePrevious = false) { it.write(restored.toString()) }
             }
         } else {
-            val previous = File(file.path + ".previous")
+            val previous = folder.previousFile(file)
             if (previous.isFile) {
                 val restored = read(previous)
                 atomicWrite(file, rotatePrevious = false) { it.write(restored.toString()) }
@@ -285,25 +301,18 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
         }
     }
 
-    fun pageFile(notebookId: String, pageId: String): File =
-        File(File(File(root, "notebooks"), safeId(notebookId)), "pages/${safeId(pageId)}.json")
+    /** The page's file in the folder library, or its staged content before the page joins the library. */
+    fun pageFile(notebookId: String, pageId: String): File = folder.pagePath(pageId) ?: folder.pendingFile(pageId)
 
-    fun assetDirectory(notebookId: String, pageId: String): File =
-        File(File(File(root, "notebooks"), safeId(notebookId)), "assets/${safeId(pageId)}").apply { mkdirs() }
+    fun assetDirectory(notebookId: String, pageId: String): File = folder.assetDirectory(pageId).apply { mkdirs() }
 
-    fun notebookDirectory(notebookId: String): File =
-        File(File(root, "notebooks"), safeId(notebookId))
+    fun notebookDirectory(notebookId: String): File = folder.index.folders[notebookId]?.let { File(root, it) } ?: File(root, ".mojian/missing/$notebookId")
 
+    /** Folder deletions happen when the library is saved; this removes content of pages that never joined it. */
     @Synchronized
     fun deleteNotebookData(notebookId: String) {
         localMutations.begin().use {
             check(!isShared || !libraryChanged()) { "笔记库已更新，删除清理待重新加载后重试" }
-            if (isShared && currentLibrary().notebooks.any { it.id == notebookId }) return
-            val directory = notebookDirectory(notebookId).canonicalFile
-            require(directory.parentFile == File(root, "notebooks").canonicalFile) {
-                "Notebook directory must be inside the workspace"
-            }
-            check(!directory.exists() || directory.deleteRecursively()) { "Unable to delete notebook data" }
         }
     }
 
@@ -311,20 +320,15 @@ class PageContentRepository(val root: File, private val hashFile: (File) -> Stri
     fun deletePageData(notebookId: String, pageId: String) {
         localMutations.begin().use {
             check(!isShared || !libraryChanged()) { "笔记库已更新，删除清理待重新加载后重试" }
-            if (isShared && currentLibrary().notebooks.firstOrNull { it.id == notebookId }?.allSections()
-                    ?.flatMap { it.pages }?.any { it.id == pageId || it.pdfPage?.sourceOwnerPageId == pageId } == true) return
-            val page = pageFile(notebookId, pageId)
+            if (folder.pagePath(pageId) != null) return
+            if (librarySource?.let { source -> SharedWorkspaceCodec.decodeLibrary(source).notebooks.flatMap { it.allSections() }
+                    .flatMap { it.pages }.any { it.pdfPage?.sourceOwnerPageId == pageId } } == true) return
+            val page = folder.pendingFile(pageId)
             check(!page.exists() || page.delete()) { "Unable to delete page data" }
-            val previous = File(page.path + ".previous")
-            check(!previous.exists() || previous.delete()) { "Unable to delete page recovery data" }
             observed.remove(page.path); identities.remove(page.path); loadedPages.remove(page.path)
-            val assets = assetDirectory(notebookId, pageId)
-            check(assets.deleteRecursively()) { "Unable to delete page assets" }
+            check(folder.assetDirectory(pageId).deleteRecursively()) { "Unable to delete page assets" }
         }
     }
-
-    private fun currentLibrary(): NotebookLibrary = SharedWorkspaceCodec.decodeLibrary(
-        JSONObject(File(root, "library.json").readText(Charsets.UTF_8)))
 
     fun copyPageData(
         sourceNotebookId: String,

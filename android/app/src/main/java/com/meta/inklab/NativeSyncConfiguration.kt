@@ -93,10 +93,21 @@ data class NativeSyncConfiguration(val endpoint: String = DEFAULT_ENDPOINT, val 
             val origin = source.canonicalFile
             val destination = target.canonicalFile
             require(!destination.exists() && !destination.toPath().startsWith(origin.toPath())) { "请选择原笔记库之外尚不存在的新目录" }
-            require(File(origin, "library.json").isFile) { "原笔记库必须使用共享文件夹格式" }
-            val before = NativeSyncClient.scanWorkspace(origin)
+            require(FolderLibrary(origin).isLibrary()) { "原笔记库必须使用共享文件夹格式" }
+            val scanner = NativeSyncHashCache()
+            val before = scanner.scan(origin)
+            // A copy that silently left items behind would look complete; name what cannot be copied instead.
+            require(scanner.failures.isEmpty()) {
+                "原笔记库有 ${scanner.failures.size} 项无法同步，未复制：" +
+                    scanner.failures.entries.take(3).joinToString("；") { (path, reason) -> "$path（$reason）" }
+            }
             check(destination.mkdirs()) { "无法创建副本目录" }
-            before.forEach { (path, hash) -> NativeSyncFiles.copyVerified(NativeSyncFiles.safeFile(origin, path), NativeSyncFiles.safeFile(destination, path), hash) }
+            // Folders are items of their own, so an empty section survives the copy (shallow paths sort first).
+            before.toSortedMap().forEach { (path, hash) ->
+                val copy = NativeSyncFiles.safeFile(destination, path)
+                if (hash == NativeSyncFiles.DIRECTORY) check(copy.isDirectory || copy.mkdirs()) { "无法创建副本文件夹：$path" }
+                else NativeSyncFiles.copyVerified(NativeSyncFiles.safeFile(origin, path), copy, hash)
+            }
             check(before == NativeSyncClient.scanWorkspace(origin)) { "原笔记在复制期间发生变化，请重试到新目录" }
             NativeSyncFiles.atomicJson(File(destination, ".mojian-native-workspace"), JSONObject().put("id", java.util.UUID.randomUUID().toString()))
             requireDedicatedWorkspace(destination)

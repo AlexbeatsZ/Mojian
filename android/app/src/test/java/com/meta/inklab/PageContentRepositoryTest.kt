@@ -61,8 +61,9 @@ class PageContentRepositoryTest {
             val repository = PageContentRepository(root)
             val live = repository.load("book", "page")
             val snapshot = PageInsertDocument("book", "page", sharedSource = org.json.JSONObject().put("extension", "unsaved"))
-            root.resolve("notebooks").mkdirs()
-            val blocker = root.resolve("notebooks/book").apply { writeText("blocks page directory") }
+            // Content of a page that has not joined the library is staged in `.mojian/pending`.
+            root.resolve(".mojian").mkdirs()
+            val blocker = root.resolve(".mojian/pending").apply { writeText("blocks page directory") }
             queue.submit(repository, live, snapshot) { }
             val tasks = ArrayDeque<Runnable>()
             val loader = LatestPageLoader<String?, String>(java.util.concurrent.Executor { tasks.addLast(it) }) { it() }
@@ -138,9 +139,11 @@ class PageContentRepositoryTest {
             val beforeSave = requireNotNull(epoch.capture())
             repository.save(PageInsertDocument("book", "saved"))
             assertTrue(requireNotNull(epoch.capture()) > beforeSave)
-            root.resolve("notebooks/blocked").writeText("blocks directory creation")
+            // The atomic write stages under `.mojian/tmp`; a file there makes the write itself fail.
+            root.resolve(".mojian/tmp").deleteRecursively()
+            root.resolve(".mojian/tmp").writeText("blocks temporary files")
             val beforeFailure = requireNotNull(epoch.capture())
-            assertThrows(IllegalStateException::class.java) { repository.save(PageInsertDocument("blocked", "page")) }
+            assertThrows(Exception::class.java) { repository.save(PageInsertDocument("book", "blocked")) }
             assertTrue(requireNotNull(epoch.capture()) > beforeFailure)
             assertTrue(epoch.publishIfUnchanged(requireNotNull(epoch.capture())) { })
         } finally { root.deleteRecursively() }
@@ -186,20 +189,31 @@ class PageContentRepositoryTest {
         val temporaryRoot = java.io.File(System.getProperty("java.io.tmpdir"), ".agents").apply { mkdirs() }
         val root = Files.createTempDirectory(temporaryRoot.toPath(), "mojian-notebook-delete").toFile()
         try {
+            FolderLibrary(root).apply(org.json.JSONObject("""{"version":2,"activeNotebookId":"keep","notebooks":[
+                {"id":"delete","title":"删除","sections":[{"id":"s1","title":"分区","children":[{"id":"s3","title":"子分区","children":[],
+                    "pages":[{"id":"page-two","title":"二","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","appearance":{"paperKind":0,"theme":0,"background":5,"pageColor":"#1B1B1B","showTitle":true,"sheetCount":1,"width":793.7,"height":1122.5,"infiniteWidth":793.7,"infiniteHeight":1122.5}}]}],"pages":[{"id":"page-one","title":"一","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","appearance":{"paperKind":0,"theme":0,"background":5,"pageColor":"#1B1B1B","showTitle":true,"sheetCount":1,"width":793.7,"height":1122.5,"infiniteWidth":793.7,"infiniteHeight":1122.5}}]}]},
+                {"id":"keep","title":"保留","sections":[{"id":"s2","title":"分区","children":[],"pages":[{"id":"page","title":"页","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","appearance":{"paperKind":0,"theme":0,"background":5,"pageColor":"#1B1B1B","showTitle":true,"sheetCount":1,"width":793.7,"height":1122.5,"infiniteWidth":793.7,"infiniteHeight":1122.5}}]}]}]}"""))
             val repository = PageContentRepository(root)
-            for (pageId in listOf("page-one", "page-two")) {
-                repository.save(PageInsertDocument("delete", pageId))
-                repository.assetDirectory("delete", pageId).resolve("original.pdf").writeBytes(byteArrayOf(1, 2))
+            val library = repository.loadLibrary()
+            for (pageId in listOf("page-one", "page-two", "page")) {
+                repository.save(repository.load("x", pageId).also { it.sharedSource.put("edited", pageId) })
+                repository.assetDirectory("x", pageId).resolve("original.pdf").writeBytes(byteArrayOf(1, 2))
             }
-            repository.save(PageInsertDocument("keep", "page"))
+            val notebook = repository.notebookDirectory("delete")
+            assertTrue(java.io.File(notebook, "分区/子分区/二.mojian").isFile)
 
+            library.selectNotebook("keep")
+            assertTrue(library.deleteNotebook("delete"))
+            assertTrue(repository.saveLibrary(library))
             repository.deleteNotebookData("delete")
 
-            assertFalse(repository.notebookDirectory("delete").exists())
+            assertFalse(notebook.exists())
+            assertFalse(root.resolve(".mojian/assets/page-one").exists())
+            assertFalse(root.resolve(".mojian/assets/page-two").exists())
             assertTrue(repository.pageFile("keep", "page").isFile)
-            assertThrows(IllegalArgumentException::class.java) { repository.deleteNotebookData("..") }
-            assertThrows(IllegalArgumentException::class.java) { repository.deleteNotebookData(".") }
-            assertTrue(repository.pageFile("keep", "page").isFile)
+            assertTrue(root.resolve(".mojian/assets/page/original.pdf").isFile)
+            assertThrows(IllegalArgumentException::class.java) { repository.assetDirectory("keep", "..") }
+            assertThrows(IllegalArgumentException::class.java) { repository.assetDirectory("keep", ".") }
         } finally {
             root.deleteRecursively()
         }
@@ -240,7 +254,8 @@ class PageContentRepositoryTest {
         try {
             val repository = PageContentRepository(root)
             repository.save(PageInsertDocument("book", "page"))
-            val pages = repository.pageFile("book", "page").parentFile!!
+            // Page writes stage their temporaries under `.mojian/tmp`, never beside a page.
+            val pages = root.resolve(".mojian/tmp").apply { mkdirs() }
             val old = pages.resolve("page.json.dead.tmp").apply { writeText("partial") }
             assertTrue(old.setLastModified(System.currentTimeMillis() - PageContentRepository.STALE_TEMPORARY_MS - 60_000))
             val recent = pages.resolve("page.json.inflight.tmp").apply { writeText("partial") }

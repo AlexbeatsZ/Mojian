@@ -9,8 +9,13 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
+/**
+ * A file (hash = SHA-256), a folder (hash = [NativeSyncFiles.DIRECTORY]) or a tombstone (hash = null). On the wire a folder is
+ * `{"hash":null,"directory":true}` (file-sync-core 0.4.0); inside the client it is one identity string.
+ */
 data class NativeSyncEntry(val hash: String?, val version: Long) {
-    fun json() = JSONObject().put("hash", hash ?: JSONObject.NULL).put("version", version)
+    fun json() = JSONObject().put("hash", if (hash == NativeSyncFiles.DIRECTORY) JSONObject.NULL else hash ?: JSONObject.NULL)
+        .put("version", version).apply { if (hash == NativeSyncFiles.DIRECTORY) put("directory", true) }
 }
 
 data class NativeSyncManifest(val workspaceId: String, val revision: Long, val files: Map<String, NativeSyncEntry>, val operationId: String? = null) {
@@ -28,11 +33,15 @@ data class NativeSyncManifest(val workspaceId: String, val revision: Long, val f
             val insensitive = mutableSetOf<String>()
             entries.keys().forEach { path ->
                 require(NativeSyncFiles.validPath(path)) { "Invalid synchronized path" }
-                require(insensitive.add(path.lowercase(java.util.Locale.ROOT))) { "Case-colliding synchronized paths" }
                 val item = entries.getJSONObject(path)
                 require(item.has("hash")) { "Missing content hash" }
-                val hash = if (item.isNull("hash")) null else item.getString("hash")
-                require(hash == null || NativeSyncFiles.validHash(hash)) { "Invalid content hash" }
+                val directory = item.optBoolean("directory", false)
+                val stored = if (item.isNull("hash")) null else item.getString("hash")
+                require(stored == null || NativeSyncFiles.validHash(stored)) { "Invalid content hash" }
+                require(!directory || stored == null) { "Folder entries carry no hash" }
+                val hash = if (directory) NativeSyncFiles.DIRECTORY else stored
+                // Like Syncthing, a tombstone keeps its spelling; only existing items must be unique ignoring case.
+                require(hash == null || insensitive.add(path.lowercase(java.util.Locale.ROOT))) { "Case-colliding synchronized paths" }
                 val version = NativeSyncFiles.safeInteger(item, "version")
                 require(version in 1..revision) { "Invalid file version" }
                 files[path] = NativeSyncEntry(hash, version)
@@ -45,22 +54,52 @@ data class NativeSyncManifest(val workspaceId: String, val revision: Long, val f
 }
 
 data class NativeSyncChange(val path: String, val expectedVersion: Long, val hash: String?) {
-    fun json() = JSONObject().put("path", path).put("expectedVersion", expectedVersion).put("hash", hash ?: JSONObject.NULL)
+    // `directory` is omitted for files so v1 operation fingerprints stay byte-identical.
+    fun json() = JSONObject().put("path", path).put("expectedVersion", expectedVersion)
+        .put("hash", if (NativeSyncFiles.isBlob(hash)) hash else JSONObject.NULL).apply { if (hash == NativeSyncFiles.DIRECTORY) put("directory", true) }
 }
 
 internal object NativeSyncFiles {
+    /** A folder's identity inside the client; never a blob. */
+    const val DIRECTORY = "directory"
+    fun isBlob(hash: String?) = hash != null && hash != DIRECTORY
     private val reserved = Regex("^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\\.|$)", RegexOption.IGNORE_CASE)
-    private val pathPattern = Regex("^notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*)$")
-    fun validPath(path: String) = path.length < 500 && (path == "library.json" || pathPattern.matches(path)) &&
-        !path.endsWith(".previous") && !path.endsWith(".tmp") && !path.contains("-sync-conflict-") &&
-        path.split('/').all { !it.endsWith('.') && !reserved.containsMatchIn(it) }
-    fun validHash(hash: String) = Regex("^[a-f0-9]{64}$").matches(hash)
-    fun ignoredLocalPath(path: String) = path.substringBefore('/') in setOf(".mojian-sync", "_migration", "_backup", "_backups", ".recovery") ||
-        path.endsWith(".tmp") || path.endsWith(".previous") || path.contains("-sync-conflict-")
-    fun canonicalCandidate(path: String): Boolean {
+    // v2 layout: clients no longer create it, but its tombstones stay in the server manifest.
+    private val legacyPath = Regex("^(library\\.json|notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*))$")
+    private fun storableName(part: String) = part.isNotEmpty() && part.length <= 240 && part != "." && part != ".." &&
+        part.none { it.code < 0x20 || it.code == 0x7f || it in "\\:*?\"<>|" } && !part.endsWith('.') && !part.endsWith(' ') && !reserved.containsMatchIn(part)
+
+    /** The folder-library v3 path policy, identical to sync-server/protocol.mjs. */
+    fun validPath(path: String): Boolean {
+        if (path.isEmpty() || path.length >= 1000 || '\r' in path || '\n' in path || path.endsWith(".previous") || path.endsWith(".tmp") ||
+            path.contains(".tmp-") || path.contains("-sync-conflict-")) return false
         val parts = path.split('/')
-        return parts.size >= 3 && parts[0].equals("notebooks", ignoreCase = true) &&
-            (parts[2].equals("pages", ignoreCase = true) || parts[2].equals("assets", ignoreCase = true))
+        if (!parts.all(::storableName)) return false
+        if (legacyPath.matches(path)) return true
+        if (parts[0] == ".mojian") return parts.size <= 4 && (parts.size < 2 || parts[1] == "assets")
+        return parts.all { !it.startsWith('.') || it == FolderNames.DESCRIPTOR }
+    }
+    fun validHash(hash: String) = Regex("^[a-f0-9]{64}$").matches(hash)
+
+    /** Files that may exist on the server: pages, folder descriptors and page assets. */
+    fun isLibraryFile(path: String) = path.endsWith(FolderNames.PAGE_EXTENSION) || path == FolderNames.DESCRIPTOR ||
+        path.endsWith("/" + FolderNames.DESCRIPTOR) || (path.startsWith(".mojian/assets/") && path.split('/').size == 4)
+
+    /** Device-local or temporary names that never synchronize and are not reported. */
+    fun ignoredLocalPath(path: String): Boolean {
+        val parts = path.split('/')
+        if (parts[0] == ".mojian" && (parts.size < 2 || parts[1] != "assets")) return parts.size > 1
+        return parts.any { part -> part in setOf(".mojian-sync", "_migration", "_backup", "_backups", ".recovery", ".DS_Store", "desktop.ini", "Thumbs.db") ||
+            (part.startsWith('.') && part != FolderNames.DESCRIPTOR && part != ".mojian") ||
+            part.endsWith(".previous") || part.endsWith(".tmp") || part.contains(".tmp-") || part.contains("-sync-conflict-") }
+    }
+
+    /** Why an item that is neither ignored nor valid cannot synchronize, or null when it can. */
+    fun failure(path: String, directory: Boolean): String? = when {
+        ignoredLocalPath(path) -> null
+        !validPath(path) -> "名称含有 \\ : * ? \" < > | 或以空格、句点结尾，其他设备无法保存"
+        !directory && !isLibraryFile(path) -> "不是墨笺页面或附件，未同步"
+        else -> null
     }
     fun validId(id: String) = Regex("^[A-Za-z0-9_-]{16,80}$").matches(id)
     fun safeInteger(source: JSONObject, key: String): Long {
@@ -141,8 +180,13 @@ internal object NativeSyncFiles {
         require(entry.has("hash"))
         val path = entry.getString("path")
         val version = safeInteger(entry, "expectedVersion")
-        val hash = if (entry.isNull("hash")) null else entry.getString("hash")
-        require(validPath(path) && version >= 0 && (hash == null || validHash(hash)))
-        NativeSyncChange(path, version, hash)
-    }.also { require(it.size in 1..20000 && it.map { change -> change.path.lowercase(java.util.Locale.ROOT) }.distinct().size == it.size) }
+        val stored = if (entry.isNull("hash")) null else entry.getString("hash")
+        val directory = entry.optBoolean("directory", false)
+        require(validPath(path) && version >= 0 && (stored == null || validHash(stored)) && (!directory || stored == null))
+        NativeSyncChange(path, version, if (directory) DIRECTORY else stored)
+    }.also { changes ->
+        // A case-only rename retires one spelling and creates another in the same batch.
+        val live = changes.filter { it.hash != null }.map { it.path.lowercase(java.util.Locale.ROOT) }
+        require(changes.size in 1..20000 && changes.map { it.path }.distinct().size == changes.size && live.distinct().size == live.size)
+    }
 }

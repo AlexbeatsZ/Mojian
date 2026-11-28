@@ -1,88 +1,42 @@
 package com.meta.inklab
 
-import org.json.JSONArray
-import org.json.JSONObject
-
-/** Dependency components of the current synchronization plan. */
+/**
+ * Dependency components of a folder-library v3 plan: a page file, its assets under `.mojian/assets/<page-id>` and the
+ * page that owns its PDF source form one group; folders and descriptors are independent (Syncthing semantics), so one
+ * held page never holds back its whole section. Same rules as the Windows NativeSyncDependencies.
+ */
 internal class NativeSyncDependencies private constructor() {
     private val parents = mutableMapOf<String, String>()
-    private var unknown = false
-    val known: Boolean get() = !unknown
+    private val pageOfPath = mutableMapOf<String, String>()
 
-    fun group(path: String): String = if (unknown) LIBRARY else root(pageKey(path))
+    fun group(path: String): String = root(key(path))
 
-    private fun root(key: String): String {
-        var group = key
-        while (true) group = parents[group] ?: return group
+    private fun key(path: String): String {
+        pageOfPath[path]?.let { return it }
+        val parts = path.split('/')
+        if (parts.size == 4 && parts[0] == ".mojian" && parts[1] == "assets") return "page:${parts[2]}"
+        return "path:$path"
+    }
+
+    private fun root(group: String): String {
+        var current = group
+        while (true) current = parents[current] ?: return current
     }
 
     private fun connect(left: String, right: String) {
-        val first = root(left)
-        val second = root(right)
-        if (first != second) parents[second] = first
+        val a = root(left); val b = root(right)
+        if (a != b) parents[b] = a
     }
 
     companion object {
-        private const val LIBRARY = "library.json"
-
-        fun fromIndexes(local: JSONObject?, remote: JSONObject?, indexChanges: Boolean, structuralPaths: Iterable<String>): NativeSyncDependencies {
-            val dependencies = NativeSyncDependencies()
-            try {
-                val ours = readIndex(requireNotNull(local))
-                val theirs = readIndex(requireNotNull(remote))
-                for (index in listOf(ours, theirs)) {
-                    index.forEach { (page, reference) ->
-                        reference.sourceOwner?.let { dependencies.connect(page, it) }
-                    }
-                }
-                if (indexChanges) {
-                    for (page in ours.keys + theirs.keys) {
-                        if (ours[page] != theirs[page]) dependencies.connect(LIBRARY, page)
-                    }
-                    for (path in structuralPaths) dependencies.connect(LIBRARY, pageKey(path))
-                }
-            } catch (_: org.json.JSONException) {
-                dependencies.unknown = true
-            } catch (_: IllegalArgumentException) {
-                dependencies.unknown = true
+        /** [pages]: page file path to its page id and PDF owner page id, read from local heads or downloaded blobs. */
+        fun fromPages(pages: List<Triple<String, String?, String?>>): NativeSyncDependencies = NativeSyncDependencies().apply {
+            pages.forEach { (path, pageId, owner) ->
+                if (pageId == null) return@forEach
+                pageOfPath[path] = "page:$pageId"
+                connect("page:$pageId", "path:$path")
+                if (owner != null) connect("page:$pageId", "page:$owner")
             }
-            return dependencies
-        }
-
-        private fun pageKey(path: String): String {
-            if (path == LIBRARY) return LIBRARY
-            val parts = path.split('/')
-            return "${parts[1]}/" + if (parts[2] == "pages") parts[3].removeSuffix(".json") else parts[3]
-        }
-
-        private data class Reference(val sourceOwner: String?, val sourceAsset: String?, val renderedAsset: String?)
-
-        private fun readIndex(index: JSONObject): Map<String, Reference> {
-            fun objects(source: JSONObject, key: String, required: Boolean = false): Sequence<JSONObject> {
-                if (!source.has(key) && !required) return emptySequence()
-                val array: JSONArray = source.getJSONArray(key)
-                return (0 until array.length()).asSequence().map(array::getJSONObject)
-            }
-            val pages = mutableMapOf<String, Reference>()
-            fun visit(notebook: String, sections: Sequence<JSONObject>) {
-                for (section in sections) {
-                    for (page in objects(section, "pages")) {
-                        val pageId = page.getString("id")
-                        val path = "notebooks/$notebook/pages/$pageId.json"
-                        require(NativeSyncFiles.validPath(path)) { "笔记目录页路径无效" }
-                        val pdf = if (page.isNull("pdfPage")) null else page.getJSONObject("pdfPage")
-                        val owner = pdf?.optString("sourceOwnerPageId")?.ifEmpty { null }
-                        val source = pdf?.optString("sourceAssetName")?.ifEmpty { null }
-                            ?: page.optString("pdfSourceAssetName").ifEmpty { null }
-                        val rendered = pdf?.optString("renderedAssetName")?.ifEmpty { null }
-                        require(owner == null || NativeSyncFiles.validPath("notebooks/$notebook/pages/$owner.json")) { "PDF 素材所有者无效" }
-                        require(pages.put(pageKey(path), Reference(owner?.let { "$notebook/$it" }, source, rendered)) == null) { "笔记目录包含重复页标识" }
-                    }
-                    visit(notebook, objects(section, "children"))
-                }
-            }
-            for (notebook in objects(index, "notebooks", required = true)) visit(notebook.getString("id"), objects(notebook, "sections", required = true))
-            return pages
         }
     }
 }

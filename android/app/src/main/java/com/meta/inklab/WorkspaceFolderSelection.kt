@@ -23,6 +23,7 @@ internal object WorkspaceFolderSelection {
         require(root.isDirectory && root.canWrite() && !Files.isSymbolicLink(root.toPath())) { "请选择可写的本地文件夹" }
         require(root.list()?.isEmpty() == true) { "新笔记库必须使用空文件夹；不会覆盖已有文件" }
         val library = NotebookLibrary(mutableListOf(NotebookWorkspace("notebook-${UUID.randomUUID()}", "新笔记本", mutableListOf())))
-        NativeSyncFiles.atomicJson(File(root, "library.json"), SharedWorkspaceCodec.encodeLibrary(library, JSONObject().put("version", 2)))
+        File(root, FolderNames.HIDDEN_ROOT).mkdirs()
+        FolderLibrary(root).apply(SharedWorkspaceCodec.encodeLibrary(library, JSONObject().put("version", 2).put("notebooks", org.json.JSONArray())))
     }
 }

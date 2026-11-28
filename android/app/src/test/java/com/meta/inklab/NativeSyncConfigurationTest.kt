@@ -31,10 +31,11 @@ class NativeSyncConfigurationTest {
     }
 
     @Test fun pathsExcludeTraversalStateRecoveryAndDevicePreferences() {
-        listOf("../library.json", "settings.json", ".mojian-sync/state.json", "notebooks/book/pages/p.json.previous", "notebooks/book/pages/p-sync-conflict-x.json").forEach {
-            assertFalse(NativeSyncClient.validPath(it))
+        listOf("../测试本/p.mojian", ".mojian/workspace-settings.json", ".mojian/navigation.json", ".mojian-sync/state.json",
+            "测试本/p.mojian.previous", "测试本/p-sync-conflict-x.mojian", "测试本/.hidden.mojian").forEach {
+            assertFalse(it, NativeSyncClient.validPath(it))
         }
-        assertTrue(NativeSyncClient.validPath("notebooks/book/assets/page/original.pdf"))
+        listOf(".mojian/assets/page/original.pdf", "测试本/分区/页.mojian", "测试本/.mojian-folder.json").forEach { assertTrue(it, NativeSyncClient.validPath(it)) }
     }
 
     @Test fun configurationStaysPrivateAndCloneRequiresFreshExternalTarget() {
@@ -42,7 +43,8 @@ class NativeSyncConfigurationTest {
         val directory = Files.createTempDirectory(parent.toPath(), "mojian-native-config").toFile()
         try {
             val source = File(directory, "source").apply { mkdirs() }
-            File(source, "library.json").writeText("{}")
+            File(source, "测试本/.mojian-folder.json").apply { parentFile!!.mkdirs(); writeText("{}") }
+            File(source, "测试本/空分区").mkdirs()
             val privateDirectory = File(directory, "private").apply { mkdirs() }
             val config = NativeSyncConfiguration("https://example.com/mojian-sync/v1", "secret-token", true)
             config.save(privateDirectory, source)
@@ -53,7 +55,8 @@ class NativeSyncConfigurationTest {
             assertThrows(IllegalArgumentException::class.java) { NativeSyncConfiguration.cloneWorkspace(source, File(source, "nested")) }
             val target = File(directory, "target")
             NativeSyncConfiguration.cloneWorkspace(source, target)
-            assertEquals("{}", File(target, "library.json").readText())
+            assertEquals("{}", File(target, "测试本/.mojian-folder.json").readText())
+            assertTrue(File(target, "测试本/空分区").isDirectory)
             assertThrows(IllegalArgumentException::class.java) { NativeSyncConfiguration.cloneWorkspace(source, target) }
             val syncthing = File(directory, "syncthing").apply { mkdirs() }
             File(syncthing, ".stfolder").mkdir()

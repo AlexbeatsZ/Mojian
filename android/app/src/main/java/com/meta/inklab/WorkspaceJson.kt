@@ -51,7 +51,10 @@ internal object WorkspaceJson {
                     first=false
                     writer.write(JSONObject.quote(key));writer.write(":")
                     val item=value.get(key)
-                    if(cache!=null && key==STROKES && item is JSONArray) writeStrokes(item,writer,cache) else write(item,writer,null)
+                    // A folder-library page keeps its strokes in "content"; the stroke cache follows it there.
+                    if(cache!=null && key==STROKES && item is JSONArray) writeStrokes(item,writer,cache)
+                    else if(cache!=null && key=="content" && item is JSONObject) write(item,writer,cache)
+                    else write(item,writer,null)
                 }
                 writer.write("}")
             }

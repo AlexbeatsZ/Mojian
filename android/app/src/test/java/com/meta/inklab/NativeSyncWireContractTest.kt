@@ -75,6 +75,7 @@ class NativeSyncWireContractTest {
                     NativeSyncDecision.Receive -> "download"
                     NativeSyncDecision.Upload -> "upload"
                     NativeSyncDecision.Conflict -> "conflict"
+                    NativeSyncDecision.Failed -> "failed"
                 }
                 val expected = step.getJSONObject("expected")
                 assertEquals(trace.getString("id"), expected.getString("decision"), actual)
@@ -104,33 +105,36 @@ class NativeSyncWireContractTest {
             require(endpoint != null && endpoint.startsWith("http://127.0.0.1:")) { "Node server did not announce loopback endpoint" }
             fun workspace(name: String) = File(directory, name).apply {
                 mkdirs(); File(this, ".mojian-native-workspace").writeText("isolated test")
-                File(this, "library.json").writeText("isolated-index")
+                File(this, "测试本").mkdirs()
+                File(this, "测试本/.mojian-folder.json").writeText("""{"version":3,"id":"isolated-notebook","sortKey":"a0"}""")
             }
             val firstRoot = workspace("first")
             val secondRoot = workspace("second")
             val first = NativeSyncClient(firstRoot, endpoint, token)
             val second = NativeSyncClient(secondRoot, endpoint, token)
             val idle: (() -> Unit) -> Boolean = { action -> action(); true }
-            val path = "notebooks/book/pages/page.json"
-            val firstPage = NativeSyncFiles.safeFile(firstRoot, path).apply { parentFile!!.mkdirs(); writeText("first-device-content") }
-            File(firstRoot, "library.json").writeText("isolated-index")
+            val path = "测试本/分区/页面.mojian"
+            fun page(text: String) = """{"version":3,"id":"wire-page","sortKey":"a0","page":{},"content":{"text":"$text"}}"""
+            val firstPage = NativeSyncFiles.safeFile(firstRoot, path).apply { parentFile!!.mkdirs(); writeText(page("first-device-content")) }
             first.sync(idle)
             second.sync(idle)
             val secondPage = NativeSyncFiles.safeFile(secondRoot, path)
             assertTrue("${first.status}; ${second.status}", secondPage.isFile)
-            assertEquals("first-device-content", secondPage.readText())
-            secondPage.writeText("second-device-edit")
+            assertEquals(page("first-device-content"), secondPage.readText())
+            assertTrue(File(secondRoot, "测试本/分区").isDirectory)
+            secondPage.writeText(page("second-device-edit"))
             second.sync(idle)
             first.sync(idle)
-            assertEquals("${first.status}; ${second.status}", "second-device-edit", firstPage.readText())
+            assertEquals("${first.status}; ${second.status}", page("second-device-edit"), firstPage.readText())
             assertTrue(secondPage.delete())
             second.sync(idle)
             first.sync(idle)
             assertFalse("${first.status}; ${second.status}", firstPage.exists())
             val remote = NativeSyncHttpTransport(endpoint, token).manifest { false }
             assertNull(remote.files.getValue(path).hash)
-            assertEquals(3L, remote.revision)
-            val asset = NativeSyncFiles.safeFile(firstRoot, "notebooks/book/assets/page/attachment.pdf")
+            assertEquals(3L, remote.files.getValue(path).version)
+            assertEquals(NativeSyncFiles.DIRECTORY, remote.files.getValue("测试本/分区").hash)
+            val asset = NativeSyncFiles.safeFile(firstRoot, ".mojian/assets/wire-page/attachment.pdf")
             asset.parentFile!!.mkdirs()
             asset.writeBytes(ByteArray(8 * 1024 * 1024 + 391) { (it % 193).toByte() })
             val hash = requireNotNull(NativeSyncFiles.hash(asset))
@@ -147,7 +151,7 @@ class NativeSyncWireContractTest {
             } finally { partial.disconnect() }
             first.sync(idle)
             second.sync(idle)
-            assertEquals(second.status, hash, NativeSyncFiles.hash(File(secondRoot, "notebooks/book/assets/page/attachment.pdf")))
+            assertEquals(second.status, hash, NativeSyncFiles.hash(File(secondRoot, ".mojian/assets/wire-page/attachment.pdf")))
             assertFalse(first.hasPendingIncoming)
             assertFalse(second.hasPendingIncoming)
         } finally {

@@ -43,6 +43,34 @@ internal class StreamingJson private constructor(private val reader: Reader) {
             if (parser.peek() != -1) throw JSONException("Unexpected content after JSON document")
             return value as? JSONObject ?: throw JSONException("Expected a JSON object")
         }
+
+        /**
+         * The members of a top-level object that precede [stop] (a folder-library page's `content`), without reading
+         * further: listing a library parses only each page head, never its strokes.
+         */
+        fun readUntil(reader: Reader, stop: String): JSONObject {
+            val parser = StreamingJson(reader)
+            parser.skipWhitespace()
+            if (parser.next() != '{') throw JSONException("Expected a JSON object")
+            val result = JSONObject()
+            parser.skipWhitespace()
+            if (parser.peek() == '}'.code) return result
+            while (true) {
+                parser.skipWhitespace()
+                if (parser.next() != '"') throw JSONException("Expected a property name")
+                val name = parser.string()
+                if (name == stop) return result
+                parser.skipWhitespace()
+                if (parser.next() != ':') throw JSONException("Expected ':' after $name")
+                result.put(name, parser.value())
+                parser.skipWhitespace()
+                when (parser.next()) {
+                    ',' -> continue
+                    '}' -> return result
+                    else -> throw JSONException("Expected ',' or '}'")
+                }
+            }
+        }
     }
 
     private fun peek(): Int {

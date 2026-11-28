@@ -14,7 +14,7 @@ internal enum class ConflictMark(val letter: String, val color: Int) {
     }
 }
 
-/** A conflicted file as navigation shows it; [notebookId]/[pageId] are set for page JSON and page assets. */
+/** A conflicted item as navigation shows it; [pageId] is set for page files and page assets, [notebookId] while the page is listed. */
 internal data class ConflictEntry(
     val item: NativeSyncConflictItem,
     val label: String,
@@ -23,44 +23,40 @@ internal data class ConflictEntry(
 ) {
     val path get() = item.path
     val mark get() = ConflictMark.of(item.action)
-    val isJson get() = item.path.endsWith(".json")
+    val isJson get() = SyncConflictReview.mergeable(item.path)
     /** "两边都要" needs both JSON versions (the engine refuses it otherwise). */
     val canKeepBoth get() = isJson && item.local != null && item.remote != null
-    val isPage get() = pageId != null && item.path.endsWith(".json") && item.path.contains("/pages/")
-}
-
-/** One library change between the two sides of a library.json conflict. */
-internal data class LibraryChange(val side: Side, val label: String) {
-    enum class Side(val symbol: String) { LOCAL("本机："), REMOTE("服务器："), CHANGED("改动：") }
+    val isPage get() = pageId != null && SyncConflictReview.isPageFile(item.path)
 }
 
 /** Strokes the canvas preview marks: only on the server (green), only here (red), and this device's version of strokes both changed (yellow). */
 internal data class StrokeDiff(val remote: List<JSONObject>, val local: List<JSONObject>, val changed: List<JSONObject>)
 
 internal object SyncConflictReview {
-    const val LIBRARY = "library.json"
+    fun isPageFile(path: String) = path.endsWith(FolderNames.PAGE_EXTENSION)
+    fun mergeable(path: String) = isPageFile(path) || path.endsWith(".json")
 
-    /** `notebooks/<nb>/pages/<page>.json` and `notebooks/<nb>/assets/<page>/...` belong to a page. */
-    fun pageOf(path: String): Pair<String, String>? {
-        val parts = path.split('/')
-        if (parts.size < 4 || parts[0] != "notebooks") return null
-        return when {
-            parts.size == 4 && parts[2] == "pages" && parts[3].endsWith(".json") -> parts[1] to parts[3].removeSuffix(".json")
-            parts.size >= 5 && parts[2] == "assets" -> parts[1] to parts[3]
-            else -> null
+    /**
+     * The page a conflicted item belongs to: `.mojian/assets/<page>/…` by path, a page file by the id in either
+     * preserved copy's head (page files are named by title, not id).
+     */
+    fun pageIdOf(item: NativeSyncConflictItem): String? {
+        val parts = item.path.split('/')
+        if (parts.size == 4 && parts[0] == FolderNames.HIDDEN_ROOT && parts[1] == "assets") return parts[2]
+        if (!isPageFile(item.path)) return null
+        return listOfNotNull(item.local, item.remote).firstNotNullOfOrNull { file ->
+            runCatching { PageFileFormat.readHead(file).id }.getOrNull()
         }
     }
 
-    fun entries(items: List<NativeSyncConflictItem>, pageTitle: (String, String) -> String?): List<ConflictEntry> =
+    /** A page is labelled by its file name, which is its title; other items by their name. */
+    fun label(path: String) = path.substringAfterLast('/').let { if (isPageFile(path)) it.removeSuffix(FolderNames.PAGE_EXTENSION) else it }
+
+    fun entries(items: List<NativeSyncConflictItem>, notebookOf: (String) -> String?): List<ConflictEntry> =
         items.map { item ->
-            val page = pageOf(item.path)
-            val label = when {
-                item.path == LIBRARY -> "笔记目录"
-                page != null && item.path.contains("/pages/") -> pageTitle(page.first, page.second)?.takeIf(String::isNotBlank) ?: page.second
-                else -> item.path.substringAfterLast('/')
-            }
-            ConflictEntry(item, label, page?.first, page?.second)
-        }.sortedWith(compareBy({ it.path != LIBRARY }, { it.label }))
+            val pageId = pageIdOf(item)
+            ConflictEntry(item, label(item.path), pageId?.let(notebookOf), pageId)
+        }.sortedWith(compareBy({ !it.isPage }, { it.label }, { it.path }))
 
     /** "本机 +1 · 服务器 +1 · 改动 1"; zero counts are omitted. */
     fun summaryText(summary: NativeSyncMerge.Summary?): String {
@@ -82,45 +78,9 @@ internal object SyncConflictReview {
         )
     }
 
-    /** Pages/sections only on one side or changed on both, labeled by their title trail. */
-    fun libraryChanges(local: JSONObject, remote: JSONObject): List<LibraryChange> {
-        val changes = mutableListOf<LibraryChange>()
-        fun title(item: JSONObject) = item.optString("title").ifBlank { item.optString("id") }
-        fun walk(left: JSONObject, right: JSONObject, trail: List<String>) {
-            for (key in (left.keyNames() + right.keyNames()).distinct()) {
-                val a = left.opt(key) as? JSONArray ?: continue
-                val b = right.opt(key) as? JSONArray ?: continue
-                if (!(a.length() == 0 || identified(a)) || !(b.length() == 0 || identified(b)) || a.length() + b.length() == 0) continue
-                val ours = byId(a); val theirs = byId(b)
-                for ((id, item) in ours) {
-                    val other = theirs[id]
-                    when {
-                        other == null -> changes += LibraryChange(LibraryChange.Side.LOCAL, (trail + title(item)).joinToString(" / "))
-                        same(item, other) -> Unit
-                        hasIdentifiedChildren(item) || hasIdentifiedChildren(other) -> {
-                            if (!sameIgnoringArrays(item, other)) changes += LibraryChange(LibraryChange.Side.CHANGED, (trail + title(item)).joinToString(" / "))
-                            walk(item, other, trail + title(item))
-                        }
-                        else -> changes += LibraryChange(LibraryChange.Side.CHANGED, (trail + title(item)).joinToString(" / "))
-                    }
-                }
-                theirs.filterKeys { it !in ours }.values.forEach { changes += LibraryChange(LibraryChange.Side.REMOTE, (trail + title(it)).joinToString(" / ")) }
-            }
-        }
-        walk(local, remote, emptyList())
-        return changes
-    }
-
     private fun JSONObject.keyNames(): List<String> = keys().asSequence().toList()
 
     private fun identified(array: JSONArray) = array.length() > 0 && (0 until array.length()).all { (array.opt(it) as? JSONObject)?.optString("id")?.isNotEmpty() == true }
-
-    private fun hasIdentifiedChildren(item: JSONObject) = item.keyNames().any { (item.opt(it) as? JSONArray)?.let(::identified) == true }
-
-    private fun sameIgnoringArrays(left: JSONObject, right: JSONObject): Boolean {
-        val keys = (left.keyNames() + right.keyNames()).distinct().filter { left.opt(it) !is JSONArray && right.opt(it) !is JSONArray }
-        return keys.all { same(left.opt(it), right.opt(it)) }
-    }
 
     private fun byId(array: JSONArray?): LinkedHashMap<String, JSONObject> {
         val result = LinkedHashMap<String, JSONObject>()

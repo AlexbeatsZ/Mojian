@@ -15,49 +15,72 @@ internal class NativeSyncHashCache(private val hashFile: (File) -> String? = Nat
 
     fun invalidate(path: String) { entries.remove(path) }
 
-    fun scan(root: File, cancelled: () -> Boolean = { false }, rejectSyncthing: Boolean = false): Map<String, String> {
+    /** Items skipped by the latest scan with their reasons (Syncthing's failed items); every other item keeps syncing. */
+    @Volatile var failures: Map<String, String> = emptyMap()
+        private set
+
+    /**
+     * Every library item: files by SHA-256, folders as [NativeSyncFiles.DIRECTORY]. Links, nested Syncthing folders, names
+     * other devices cannot store, non-page files and files still being written are failed items; they never stop the scan.
+     */
+    fun scan(root: File, cancelled: () -> Boolean = { false }, @Suppress("UNUSED_PARAMETER") rejectSyncthing: Boolean = false): Map<String, String> {
         val result = linkedMapOf<String, String>()
-        val insensitive = mutableSetOf<String>()
-        Files.walkFileTree(root.toPath(), object : SimpleFileVisitor<Path>() {
-            private fun validate(path: Path) {
-                if (cancelled() || Thread.currentThread().isInterrupted) throw CancellationException()
-                require(!Files.isSymbolicLink(path)) { "同步副本不允许符号链接" }
-                require(!rejectSyncthing || path.fileName.toString() != ".stfolder") { "专用副本内不能包含 Syncthing 文件夹" }
-            }
+        val failed = linkedMapOf<String, String>()
+        val base = root.toPath()
+        Files.walkFileTree(base, object : SimpleFileVisitor<Path>() {
+            private fun relative(path: Path) = base.relativize(path).toString().replace('\\', '/')
+            private fun checkCancelled() { if (cancelled() || Thread.currentThread().isInterrupted) throw CancellationException() }
 
             override fun preVisitDirectory(path: Path, attributes: BasicFileAttributes): FileVisitResult {
-                validate(path)
-                val relative = root.toPath().relativize(path).toString().replace('\\', '/')
-                return if (path != root.toPath() && NativeSyncFiles.ignoredLocalPath(relative)) FileVisitResult.SKIP_SUBTREE else FileVisitResult.CONTINUE
+                checkCancelled()
+                if (path == base) return FileVisitResult.CONTINUE
+                val name = relative(path)
+                if (NativeSyncFiles.ignoredLocalPath(name)) return FileVisitResult.SKIP_SUBTREE
+                val reason = when {
+                    Files.isSymbolicLink(path) -> "符号链接或联接不同步，已跳过"
+                    Files.exists(path.resolve(".stfolder")) -> "此文件夹由 Syncthing 管理，已跳过"
+                    else -> NativeSyncFiles.failure(name, true)
+                }
+                if (reason != null) { failed[name] = reason; return FileVisitResult.SKIP_SUBTREE }
+                result[name] = NativeSyncFiles.DIRECTORY
+                return FileVisitResult.CONTINUE
             }
 
             override fun visitFile(path: Path, attributes: BasicFileAttributes): FileVisitResult {
-                validate(path)
-                if (!attributes.isRegularFile) return FileVisitResult.CONTINUE
-                val relative = root.toPath().relativize(path).toString().replace('\\', '/')
-                if (NativeSyncFiles.ignoredLocalPath(relative)) return FileVisitResult.CONTINUE
-                if (!NativeSyncFiles.validPath(relative)) {
-                    require(!NativeSyncFiles.canonicalCandidate(relative)) { "同步不支持此页面或附件路径，请保留原库并调整命名：$relative" }
-                    return FileVisitResult.CONTINUE
-                }
-                require(insensitive.add(relative.lowercase(Locale.ROOT))) { "本地同步路径大小写冲突" }
-                val cached = entries[relative]
+                checkCancelled()
+                val name = relative(path)
+                if (NativeSyncFiles.ignoredLocalPath(name)) return FileVisitResult.CONTINUE
+                if (attributes.isSymbolicLink) { failed[name] = "符号链接或联接不同步，已跳过"; return FileVisitResult.CONTINUE }
+                if (!attributes.isRegularFile) { failed[name] = "不是普通文件，已跳过"; return FileVisitResult.CONTINUE }
+                NativeSyncFiles.failure(name, false)?.let { failed[name] = it; return FileVisitResult.CONTINUE }
+                val cached = entries[name]
                 val hash = if (cached != null && cached.size == attributes.size() && cached.modified == attributes.lastModifiedTime() && cached.key == attributes.fileKey()) cached.hash
                 else {
-                    val file = NativeSyncFiles.safeFile(root, relative)
-                    val value = requireNotNull(hashFile(file))
+                    val value = hashFile(path.toFile()) ?: return FileVisitResult.CONTINUE
                     val after = Files.readAttributes(path, BasicFileAttributes::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                    // Not mtime: HyperOS rewrites a renamed file's mtime later, which would fail whole passes.
-                    // Mojian publishes by rename, so a real replacement changes the inode or size.
-                    check(after.isRegularFile && after.size() == attributes.size() && after.fileKey() == attributes.fileKey()) { "本地文件正在修改，下次重试" }
-                    entries[relative] = Entry(after.size(), after.lastModifiedTime(), after.fileKey(), value)
+                    // Not mtime: HyperOS rewrites a renamed file's mtime later. Mojian publishes by rename, so a real
+                    // replacement changes the inode or size; a file still being written is retried on the next pass.
+                    if (!(after.isRegularFile && after.size() == attributes.size() && after.fileKey() == attributes.fileKey())) {
+                        failed[name] = "文件仍在写入，下一轮重试"; return FileVisitResult.CONTINUE
+                    }
+                    entries[name] = Entry(after.size(), after.lastModifiedTime(), after.fileKey(), value)
                     value
                 }
-                result[relative] = hash
+                result[name] = hash
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun visitFileFailed(path: Path, error: java.io.IOException): FileVisitResult {
+                failed[relative(path)] = "无法读取：${error.message}"
                 return FileVisitResult.CONTINUE
             }
         })
+        // Two live names that differ only by case cannot coexist on the server or on other devices.
+        result.keys.groupBy { it.lowercase(Locale.ROOT) }.values.filter { it.size > 1 }.forEach { names ->
+            names.forEach { name -> failed[name] = "与 ${names.filter { it != name }.joinToString("、")} 只差大小写，其他设备无法同时保存"; result.remove(name) }
+        }
         entries.keys.retainAll(result.keys)
+        failures = failed
         return result
     }
 }

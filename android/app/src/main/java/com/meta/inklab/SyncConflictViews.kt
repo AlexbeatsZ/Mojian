@@ -23,12 +23,6 @@ internal object ConflictColors {
     const val BAR = 0xF0262626.toInt()
     const val TEXT = 0xFFE8E8E8.toInt()
     const val BUTTON = 0xFF3A3A3A.toInt()
-
-    fun side(side: LibraryChange.Side) = when (side) {
-        LibraryChange.Side.LOCAL -> LOCAL
-        LibraryChange.Side.REMOTE -> REMOTE
-        LibraryChange.Side.CHANGED -> CHANGED
-    }
 }
 
 /**
@@ -152,13 +146,4 @@ internal fun conflictLetter(context: Context, mark: ConflictMark): TextView = Te
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
     typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
     contentDescription = when (mark) { ConflictMark.MODIFY -> "冲突：两边都改过"; ConflictMark.ADD -> "冲突：服务器新增"; ConflictMark.DELETE -> "冲突：服务器已删除" }
-}
-
-internal fun conflictChangeRow(context: Context, change: LibraryChange): TextView = TextView(context).apply {
-    text = change.side.symbol + change.label
-    setTextColor(ConflictColors.side(change.side))
-    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-    maxLines = 2
-    val pad = (4 * resources.displayMetrics.density).toInt()
-    setPadding(0, pad, 0, pad)
 }

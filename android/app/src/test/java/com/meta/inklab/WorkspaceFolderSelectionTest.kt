@@ -2,6 +2,7 @@ package com.meta.inklab
 
 import java.io.File
 import java.nio.file.Files
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -25,10 +26,12 @@ class WorkspaceFolderSelectionTest {
             val library = PageContentRepository(root).loadLibrary()
             assertEquals(1, library.notebooks.size)
             assertTrue(library.activeNotebook().sections.isEmpty())
-            val original = File(root, "library.json").readText()
+            val descriptor = File(root, "${library.activeNotebook().title}/${FolderNames.DESCRIPTOR}")
+            assertEquals(library.activeNotebook().id, JSONObject(descriptor.readText()).getString("id"))
+            val original = FolderLibraryFixture.files(root)
             assertThrows(IllegalArgumentException::class.java) { WorkspaceFolderSelection.createEmptyLibrary(root) }
-            assertEquals(original, File(root, "library.json").readText())
-            File(root, "library.json").delete()
+            assertEquals(original, FolderLibraryFixture.files(root))
+            root.listFiles()!!.forEach { it.deleteRecursively() }
             File(root, "unrelated.txt").writeText("keep")
             assertThrows(IllegalArgumentException::class.java) { WorkspaceFolderSelection.createEmptyLibrary(root) }
             assertEquals("keep", File(root, "unrelated.txt").readText())

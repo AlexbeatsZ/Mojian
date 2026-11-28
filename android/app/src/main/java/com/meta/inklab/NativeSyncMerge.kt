@@ -28,8 +28,10 @@ object NativeSyncMerge {
     fun merge(base: JSONObject, local: JSONObject, remote: JSONObject, now: String = java.time.Instant.now().toString()): Result? {
         val merged = try { mergeObject(base, local, remote) } catch (_: Conflict) { return null }
         if (sameIgnoringVolatile(merged, remote)) return Result.Remote
-        if (merged.has("revision")) merged.put("revision", merged.optLong("revision") + 1)
-        if (merged.has("updatedAt")) merged.put("updatedAt", now)
+        // A folder-library page keeps its revision and edit time in "content".
+        val editable = merged.optJSONObject("content") ?: merged
+        if (editable.has("revision")) editable.put("revision", editable.optLong("revision") + 1)
+        if (editable.has("updatedAt")) editable.put("updatedAt", now)
         return Result.Merged(merged)
     }
 
@@ -39,8 +41,11 @@ object NativeSyncMerge {
      */
     fun union(local: JSONObject, remote: JSONObject, now: String = java.time.Instant.now().toString()): JSONObject {
         val merged = unionValue(null, local, remote) as JSONObject
-        if (merged.has("revision")) merged.put("revision", maxOf(local.optLong("revision"), remote.optLong("revision")) + 1)
-        if (merged.has("updatedAt")) merged.put("updatedAt", now)
+        val editable = merged.optJSONObject("content") ?: merged
+        val ours = local.optJSONObject("content") ?: local
+        val theirs = remote.optJSONObject("content") ?: remote
+        if (editable.has("revision")) editable.put("revision", maxOf(ours.optLong("revision"), theirs.optLong("revision")) + 1)
+        if (editable.has("updatedAt")) editable.put("updatedAt", now)
         return merged
     }
 
@@ -109,7 +114,10 @@ object NativeSyncMerge {
 
     private fun sameIgnoringVolatile(left: JSONObject, right: JSONObject): Boolean {
         val keys = (left.keyNames() + right.keyNames()) - volatileKeys
-        return keys.all { equal(value(left, it), value(right, it)) }
+        return keys.all { key ->
+            val l = left.opt(key); val r = right.opt(key)
+            if (key == "content" && l is JSONObject && r is JSONObject) sameIgnoringVolatile(l, r) else equal(value(left, key), value(right, key))
+        }
     }
 
     private fun value(source: JSONObject, key: String): Any = if (source.has(key)) source.get(key) else Absent
