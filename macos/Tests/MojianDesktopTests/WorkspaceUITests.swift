@@ -36,8 +36,9 @@ final class WorkspaceUITests: XCTestCase {
         try s.rename(n, "主笔记本"); try s.rename(chemistry, "无机化学"); try s.rename(page, "速率")
         var books = try reloaded(s)
         XCTAssertEqual(books[0].title, "主笔记本"); XCTAssertEqual(books[0].sections.last?.title, "无机化学"); XCTAssertEqual(books[0].sections.last?.pages[0].title, "速率")
-        let file = try s.store.checked("notebooks/\(n.id)/pages/\(page.id).json")
+        let file = try s.store.pageURL(notebook: n.id, page: page.id)
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertTrue(file.path.hasSuffix("主笔记本/无机化学/速率.mojian"), file.path)
         try s.delete(page, from: chemistry, in: n)
         books = try reloaded(s)
         XCTAssertTrue(books[0].sections.last?.pages.isEmpty ?? false); XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
@@ -47,18 +48,21 @@ final class WorkspaceUITests: XCTestCase {
     }
     @MainActor func testDeletingLastNotebookLeavesFreshEmptyNotebook() async throws {
         let s = try session(), n = s.notebook!
+        let folder = s.store.folder.url(s.store.folder.index.folders[n.id]!)
         try s.delete(n)
         let books = try reloaded(s)
         XCTAssertEqual(books.count, 1); XCTAssertNotEqual(books[0].id, n.id); XCTAssertTrue(books[0].pages.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: s.store.root.appendingPathComponent("notebooks/\(n.id)").path))
+        // The replacement may reuse the default title; the folder must no longer be the deleted notebook.
+        let descriptor = try? JSON.read(Data(contentsOf: folder.appendingPathComponent(FolderNames.descriptor)))
+        XCTAssertNotEqual(descriptor?["id"].string, n.id)
         XCTAssertTrue(s.notebook === s.notebooks[0])
     }
     @MainActor func testReadOnlyLibraryRefusesHierarchyEdits() async throws {
         let writable = try session(), root = writable.store.root
-        let index = try Data(contentsOf: root.appendingPathComponent("library.json"))
+        let index = librarySnapshot(root)
         let reader = try DesktopSession(store: CanonicalStore(root: root), preferences: prefs), n = reader.notebook!
         XCTAssertThrowsError(try reader.rename(n, "x")); XCTAssertThrowsError(try reader.delete(n))
-        XCTAssertEqual(index, try Data(contentsOf: root.appendingPathComponent("library.json")))
+        XCTAssertEqual(index, librarySnapshot(root))
     }
     @MainActor func testPresetsAreAddOnlyAndDeviceLocal() async throws {
         let s = try session(), count = s.presets.count
@@ -74,10 +78,10 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertEqual(s.presets.lastIndex { $0.tool == .pen }! + 1, s.presets.firstIndex { $0.tool == .shape }!)
     }
     @MainActor func testExpansionAndAppearanceEdits() async throws {
-        let s = try session(), n = s.notebook!, index = s.store.root.appendingPathComponent("library.json")
-        let before = try Data(contentsOf: index)
+        let s = try session(), n = s.notebook!
+        let before = librarySnapshot(s.store.root)
         s.toggleCollapsed(n.sections[0].id)
-        XCTAssertEqual(before, try Data(contentsOf: index))
+        XCTAssertEqual(before, librarySnapshot(s.store.root))
         XCTAssertTrue(try DesktopSession(store: CanonicalStore(root: s.store.root), preferences: prefs).isCollapsed(n.sections[0].id))
         try s.setPaper("A4"); try s.setTitleVisible(false); try s.setBackground("DOTS_WIDE")
         let page = AppearanceBridge.display(try reloaded(s)[0].pages[0])

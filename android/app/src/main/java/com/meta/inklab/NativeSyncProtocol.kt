@@ -65,6 +65,7 @@ internal object NativeSyncFiles {
     fun isBlob(hash: String?) = hash != null && hash != DIRECTORY
     private val reserved = Regex("^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\\.|$)", RegexOption.IGNORE_CASE)
     // v2 layout: clients no longer create it, but its tombstones stay in the server manifest.
+    fun isLegacy(path: String) = legacyPath.matches(path)
     private val legacyPath = Regex("^(library\\.json|notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*))$")
     private fun storableName(part: String) = part.isNotEmpty() && part.length <= 240 && part != "." && part != ".." &&
         part.none { it.code < 0x20 || it.code == 0x7f || it in "\\:*?\"<>|" } && !part.endsWith('.') && !part.endsWith(' ') && !reserved.containsMatchIn(part)

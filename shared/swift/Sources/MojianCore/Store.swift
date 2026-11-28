@@ -44,10 +44,12 @@ public final class WorkspaceStore: @unchecked Sendable {
     }
 
     public func pageURL(notebook: String, page: String) throws -> URL {
-        try canonical.checked("notebooks/\(Self.safe(notebook))/pages/\(Self.safe(page)).json")
+        _ = try Self.safe(notebook)
+        return try canonical.pageURL(notebook: notebook, page: Self.safe(page))
     }
     public func assets(notebook: String, page: String) throws -> URL {
-        try canonical.checked("notebooks/\(Self.safe(notebook))/assets/\(Self.safe(page))")
+        _ = try Self.safe(notebook)
+        return try canonical.assetDirectory(page: Self.safe(page))
     }
     public func loadLibrary() throws -> [Notebook] { try queue.sync { try canonical.loadLibrary() } }
     public func validate(_ notebooks: [Notebook]) throws {
@@ -73,26 +75,26 @@ public final class WorkspaceStore: @unchecked Sendable {
             "activePageId": .string(activePage ?? ""),
             "expanded": .object(Dictionary(uniqueKeysWithValues: notebooks.flatMap(\.allSections).map { ($0.id, JSON.bool($0.expanded)) }))
         ])
-        enqueue("library.json") {
+        enqueue("library") {
             try self.canonical.saveLibrarySnapshot(snapshot)
-            try self.writeLocal(navigation, name: "ios-navigation.json")
+            try self.writeLocal(navigation, name: ".mojian/ios-navigation.json")
         }
     }
     public func lastPageID() -> String? {
         queue.sync {
-            if let local = try? readLocal("ios-navigation.json") { return local["activePageId"].string }
-            return (try? readLocal("library.json"))?["activePageId"].string
+            if let local = try? readLocal(".mojian/ios-navigation.json") { return local["activePageId"].string }
+            return nil
         }
     }
     public func saveViewport(_ viewport: Viewport, page: String) {
         let value = JSON.object(["scale": .number(viewport.scale), "translationX": .number(viewport.x), "translationY": .number(viewport.y)])
-        enqueue("ios-viewports.json") {
-            var json = (try? self.readLocal("ios-viewports.json")) ?? .object([:])
+        enqueue(".mojian/ios-viewports.json") {
+            var json = (try? self.readLocal(".mojian/ios-viewports.json")) ?? .object([:])
             json[page] = value
-            try self.writeLocal(json, name: "ios-viewports.json")
+            try self.writeLocal(json, name: ".mojian/ios-viewports.json")
         }
     }
-    public func viewport(page: String) -> JSON? { queue.sync { (try? readLocal("ios-viewports.json"))?[page] } }
+    public func viewport(page: String) -> JSON? { queue.sync { (try? readLocal(".mojian/ios-viewports.json"))?[page] } }
     public func writePage(_ document: PageDocument) throws {
         try queue.sync { _ = try canonical.writePage(document, incrementRevision: false) }
     }
@@ -107,13 +109,13 @@ public final class WorkspaceStore: @unchecked Sendable {
         try queue.sync { if let error = failures.values.first { throw error } }
     }
     public func saveSettings(_ settings: Settings) {
-        enqueue("ios-settings.json") { try self.writeLocal(JSON.read(JSONEncoder().encode(settings)), name: "ios-settings.json") }
+        enqueue(".mojian/ios-settings.json") { try self.writeLocal(JSON.read(JSONEncoder().encode(settings)), name: ".mojian/ios-settings.json") }
     }
     public func loadSettings() throws -> Settings {
         try queue.sync {
-            let url = root.appendingPathComponent("ios-settings.json")
+            let url = try canonical.checked(".mojian/ios-settings.json")
             guard FileManager.default.fileExists(atPath: url.path) else { return Settings() }
-            return try JSONDecoder().decode(Settings.self, from: readLocal("ios-settings.json").data())
+            return try JSONDecoder().decode(Settings.self, from: readLocal(".mojian/ios-settings.json").data())
         }
     }
     public func writeAsset(_ data: Data, notebook: String, page: String, name: String) throws {
@@ -127,6 +129,8 @@ public final class WorkspaceStore: @unchecked Sendable {
     private func readLocal(_ name: String) throws -> JSON { try JSON.read(Data(contentsOf: canonical.checked(name))) }
     private func writeLocal(_ json: JSON, name: String) throws {
         guard !canonical.readOnly else { throw MojianError.invalid("当前笔记库为只读") }
-        try json.data().write(to: canonical.checked(name), options: .atomic)
+        let url = try canonical.checked(name)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try json.data().write(to: url, options: .atomic)
     }
 }

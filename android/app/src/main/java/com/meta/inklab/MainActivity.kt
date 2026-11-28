@@ -474,7 +474,9 @@ class MainActivity : Activity() {
             showWorkspaceSelection()
             return
         }
-        try { initializeWorkspaceRepository() } catch (error: Exception) { showWorkspaceLoadFailure(error); return }
+        try { initializeWorkspaceRepository() }
+        catch (pending: FirstReceivePending) { showFirstReceive(pending.root); return }
+        catch (error: Exception) { showWorkspaceLoadFailure(error); return }
         selectIncomingNote(intent.data)
         assetStore = AssetStore(this, pageContentRepository)
         pdfPageImporter = PdfPageImporter(pageContentRepository, assetStore)
@@ -576,6 +578,16 @@ class MainActivity : Activity() {
                 val recovery = NativeSyncClient(root, configuration.endpoint, configuration.token)
                 check(recovery.recoverIncoming()) { recovery.status }
             }
+            if (File(root, "library.json").exists() || File(root, "notebooks").isDirectory && !File(root, "notebooks/${FolderNames.DESCRIPTOR}").isFile) {
+                // The v2 layout is retired once; the folder library arrives through ordinary sync.
+                val configuration = NativeSyncConfiguration.load(this, root)
+                val unsynced = NativeSyncClient(root, configuration.endpoint, configuration.token).retireLegacyLayout()
+                getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).edit().putString(KEY_LEGACY_NOTICE, if (unsynced.isEmpty()) null else
+                    "旧格式中有 ${unsynced.size} 个文件的修改未同步，已保存在 .mojian/legacy-v2：${unsynced.take(3).joinToString("、")}").apply()
+            }
+            // Right after the v2 layout is retired the folder library has not arrived yet: receive it before opening.
+            if (FolderLibrary(root).read().getJSONArray("notebooks").length() == 0 && File(root, ".mojian-sync/state.json").isFile)
+                throw FirstReceivePending(root)
             notebookLibrary = pageContentRepository.loadLibrary()
             WorkspaceNavigationPreferences.restore(notebookLibrary, prefs.getString(KEY_WORKSPACE_NAVIGATION, null))
             prefs.edit().putString("sharedWorkspaceRoot",root.absolutePath).apply()
@@ -586,6 +598,39 @@ class MainActivity : Activity() {
             if(page != null) workspace.allSections().firstOrNull { sectionNode -> sectionNode.pages.any { it.id==page } }?.let { workspace.selectPage(it.id,page) }
         }
         workspaceLoaded = true
+    }
+
+    private class FirstReceivePending(val root: File) : Exception("正在接收文件夹格式笔记")
+
+    /** Receives the folder library into an empty (just migrated) library, then opens it; failures show their reason. */
+    private fun showFirstReceive(root: File) {
+        val status = TextView(this).apply { setTextColor(TEXT_PRIMARY) }
+        val notice = getSharedPreferences(OPTIONS_PREFERENCES, MODE_PRIVATE).getString(KEY_LEGACY_NOTICE, null)
+        fun show(text: String) { status.text = listOfNotNull("笔记库已改为真实文件夹格式；旧格式文件已移到 .mojian/legacy-v2。", notice, text).joinToString("\n\n") }
+        val retry = android.widget.Button(this).apply { text = "重试"; visibility = View.GONE }
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(30), dp(24), dp(24)); setBackgroundColor(NAV_BACKGROUND)
+            addView(status); addView(retry)
+        })
+        fun start() {
+            retry.visibility = View.GONE
+            show("正在从服务器接收笔记…")
+            Thread {
+                val result = runCatching {
+                    val configuration = NativeSyncConfiguration.load(this, root)
+                    val client = NativeSyncClient(root, configuration.endpoint, configuration.token,
+                        { value -> runOnUiThread { show(value) } }, NativeSyncAddressTransport(configuration, { value -> runOnUiThread { show(value) } }))
+                    client.sync({ action -> action(); true })
+                    check(FolderLibrary(root).read().getJSONArray("notebooks").length() > 0) { client.status }
+                }
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    result.onSuccess { recreate() }.onFailure { show("接收未完成：${it.message}"); retry.visibility = View.VISIBLE }
+                }
+            }.start()
+        }
+        retry.setOnClickListener { start() }
+        start()
     }
 
     private fun showWorkspaceLoadFailure(error: Exception) {
@@ -8721,6 +8766,7 @@ class MainActivity : Activity() {
         private const val KEY_PRESSURE_DWELL_MILLIS = "pressure-dwell-millis"
         private const val KEY_PANORAMA_SENSITIVITY = "panorama-sensitivity"
         private const val KEY_ACTIVE_NOTEBOOK_ID = "active-notebook-id"
+        private const val KEY_LEGACY_NOTICE = "legacy-v2-notice"
         private const val KEY_FOCUSED_SECTION_ID = "focused-section-id"
         private const val KEY_SELECTED_PAGE_ID = "selected-page-id"
         private const val KEY_PAGE_VIEW_SETTINGS = "page-view-settings"

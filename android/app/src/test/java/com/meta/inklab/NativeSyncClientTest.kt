@@ -113,6 +113,35 @@ class NativeSyncClientTest {
         assertNull(server.remote.files.getValue(INDEX).hash)
     }
 
+    @Test fun retiredV2LayoutIsKeptAsideAndFolderLibraryArrivesWithoutTouchingLegacyEntries() = isolated { _, root, server ->
+        val engine = client(root, server)
+        engine.sync(idle)
+        root.put("library.json", "v2 index")
+        root.put("notebooks/book/pages/p.json", "v2 edit never uploaded")
+        val stateFile = File(root, ".mojian-sync/state.json")
+        val state = NativeSyncFiles.read(stateFile)
+        state.getJSONObject("files").put("library.json", NativeSyncEntry(NativeSyncFiles.hash(File(root, "library.json")), state.getLong("revision")).json())
+        NativeSyncFiles.atomicJson(stateFile, state)
+        server.update("library.json", "v2 index")
+        server.update("library.json", null)
+        server.update("测试本/页.mojian", text("page", "v3"))
+
+        val restarted = client(root, server)
+        assertEquals(listOf("notebooks/book/pages/p.json"), restarted.retireLegacyLayout())
+        assertFalse(File(root, "library.json").exists() || File(root, "notebooks").exists())
+        val backup = File(root, ".mojian/legacy-v2").listFiles()!!.single()
+        assertEquals("v2 edit never uploaded", File(backup, "notebooks/book/pages/p.json").readText())
+        assertEquals("notebooks/book/pages/p.json", File(backup, "unsynced.txt").readText())
+        assertTrue(restarted.retireLegacyLayout().isEmpty())
+
+        val commits = server.commits
+        restarted.sync(idle)
+        assertEquals(text("page", "v3"), File(root, "测试本/页.mojian").readText())
+        assertNull(server.remote.files.getValue("library.json").hash)
+        assertFalse(server.remote.files.keys.any { it.startsWith("notebooks/") })
+        assertTrue(server.commits - commits <= 1) // at most the hidden .mojian folder item
+    }
+
     @Test fun remoteFoldersAreCreatedAndEmptyDeletedFoldersRemoved() = isolated { _, root, server ->
         root.put(INDEX, "base")
         val engine = client(root, server)

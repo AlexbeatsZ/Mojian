@@ -652,7 +652,14 @@ public sealed partial class MainViewModel : ObservableObject
             throw new WorkspaceLibraryMissingException(root, $"上次使用的笔记目录已不存在，已停止加载，不会在原路径新建笔记库：{root}");
         _store = new WorkspaceStore(root);
         RecoverNativeSyncBeforeOpen(_store.RootDirectory);
-        _library = _store.LoadLibrary();
+        RetireLegacyLayoutBeforeOpen(_store.RootDirectory);
+        try { _library = _store.LoadLibrary(); }
+        catch (WorkspaceLibraryMissingException) when (File.Exists(Path.Combine(_store.RootDirectory, ".mojian-sync", "state.json")) &&
+                                                      NativeSyncConfiguration.Load(_store.RootDirectory).Enabled)
+        {
+            // Right after the v2 layout is retired the folder library has not arrived yet: receive it before opening.
+            throw new FirstReceiveRequiredException(_store.RootDirectory);
+        }
         _settings = _store.LoadSettings();
         _settings.Navigation?.Restore(_library, _settings.PagePaneMode);
         if (_preferences.PageTheme is not { } theme || !Enum.IsDefined(theme))
@@ -1195,6 +1202,19 @@ public sealed partial class MainViewModel : ObservableObject
         RefreshNavigation();
         RefreshTools();
         NotifyAllWorkspaceProperties();
+    }
+
+    private static void RetireLegacyLayoutBeforeOpen(string root)
+    {
+        if (!File.Exists(Path.Combine(root, "library.json")) &&
+            !(Directory.Exists(Path.Combine(root, "notebooks")) && !File.Exists(Path.Combine(root, "notebooks", FolderNames.Descriptor)))) return;
+        if (!File.Exists(Path.Combine(root, ".mojian-sync", "state.json")))
+            throw new IOException("旧格式笔记库没有同步记录，无法确认已上传；请先用 tools/folder-library 转换：" + root);
+        using var client = NativeSyncClient.ForLocalRecovery(root);
+        var unsynced = client.RetireLegacyLayout();
+        if (unsynced.Count > 0)
+            File.WriteAllText(Path.Combine(root, FolderNames.HiddenRoot, "legacy-v2-notice.txt"),
+                $"旧格式中有 {unsynced.Count} 个文件的修改未同步，已保存在 .mojian/legacy-v2：{string.Join("、", unsynced.Take(3))}");
     }
 
     private void RecoverNativeSyncBeforeOpen(string root)

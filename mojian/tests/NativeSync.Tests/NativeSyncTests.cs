@@ -64,6 +64,7 @@ await Run("reviewed conflicts resolve per file, keep both and resume sync", Conf
 await Run("folders replicate as items: empty sections, renames and deletions", FolderItems);
 await Run("a remotely deleted folder that gained local content is kept and uploaded again", FolderWithLocalContent);
 await Run("case-only renames of pages and folders keep content", CaseOnlyRename);
+await Run("retired v2 layout is kept aside and never uploaded", RetiredLegacyLayout);
 await Run("large change sets upload in server-sized batches", BatchedUpload);
 Console.WriteLine($"Windows native sync: {passed} isolated scenarios passed");
 
@@ -1162,6 +1163,26 @@ async Task CaseOnlyRename()
     Check(Directory.EnumerateFileSystemEntries(second.PathFor(book)).Select(Path.GetFileName).SequenceEqual(["folder"]), "Folder case did not follow");
     Check(Directory.EnumerateFiles(second.PathFor(book + "/folder")).Select(Path.GetFileName).SequenceEqual(["note.mojian"]), "Page case did not follow");
     Check(second.Read(book + "/folder/note.mojian").Contains("note body"), "Case-only rename lost content");
+}
+
+async Task RetiredLegacyLayout()
+{
+    using var root = new TestWorkspace();
+    await AdoptSharedIndex(root);
+    using (var client = new NativeSyncClient(root.Root, endpoint, token)) { await client.SyncAsync(Idle); AssertSynced(client); }
+    root.Write("library.json", "v2 index");
+    root.Write("notebooks/old/pages/p.json", "v2 page");
+    IReadOnlyList<string> unsynced;
+    using (var recovery = NativeSyncClient.ForLocalRecovery(root.Root)) unsynced = recovery.RetireLegacyLayout();
+    Check(unsynced.SequenceEqual(["library.json", "notebooks/old/pages/p.json"]), "Unsynced v2 files were not reported: " + string.Join(",", unsynced));
+    Check(!File.Exists(root.PathFor("library.json")) && !Directory.Exists(root.PathFor("notebooks")), "v2 layout stayed in the library");
+    var backup = Directory.EnumerateDirectories(root.PathFor(".mojian/legacy-v2")).Single();
+    Check(File.ReadAllText(Path.Combine(backup, "notebooks/old/pages/p.json")) == "v2 page" && File.Exists(Path.Combine(backup, "unsynced.txt")), "v2 backup incomplete");
+    using (var recovery = NativeSyncClient.ForLocalRecovery(root.Root)) Check(recovery.RetireLegacyLayout().Count == 0, "Second retirement was not a no-op");
+    using var synced = new NativeSyncClient(root.Root, endpoint, token);
+    await synced.SyncAsync(Idle); AssertSynced(synced);
+    var remote = await Remote();
+    Check(!remote.Files.Keys.Any(path => path == "library.json" || path.StartsWith("notebooks/", StringComparison.Ordinal)), "A v2 path reached the server");
 }
 
 async Task BatchedUpload()

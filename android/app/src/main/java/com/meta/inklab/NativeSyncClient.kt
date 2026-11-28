@@ -163,7 +163,8 @@ class NativeSyncClient(
             val changes = mutableListOf<NativeSyncChange>()
             val incoming = linkedMapOf<String, NativeSyncEntry>()
             val conflicts = mutableListOf<String>()
-            val paths = (checkpoint.keys + local.keys + remote.files.keys).toSet()
+            // v2 names are retired by the folder library: a v3 client never uploads, receives or deletes them.
+            val paths = (checkpoint.keys + local.keys + remote.files.keys).filterNot(NativeSyncFiles::isLegacy).toSet()
             paths.sorted().forEach { path ->
                 if (path in heldPaths || isHeldFailure(path)) return@forEach
                 val ours = local[path]
@@ -350,6 +351,33 @@ class NativeSyncClient(
 
     private fun readJson(file: File) = file.bufferedReader(Charsets.UTF_8).use(StreamingJson::readObject)
 
+    /**
+     * Moves the v2 layout (`library.json`, `notebooks/`) left from before the folder library into
+     * `.mojian/legacy-v2/<time>/`, once and without contacting the server (docs/design/folder-library.md "Migration").
+     * Nothing is deleted. Returns the v2 files whose bytes differ from the last synchronized version: those edits never
+     * reached the server and stay only in that folder, so the caller must show them.
+     */
+    fun retireLegacyLayout(): List<String> {
+        val index = File(root, "library.json")
+        val notebooks = File(root, "notebooks")
+        val legacyFolder = notebooks.isDirectory && !File(notebooks, FolderNames.DESCRIPTOR).isFile
+        if (!index.exists() && !legacyFolder) return emptyList()
+        check(stateFile.isFile) { "旧格式笔记库没有同步记录，无法确认已上传；请先用 tools/folder-library 转换" }
+        loadState()
+        val files = listOfNotNull(index.takeIf { it.isFile }) + if (legacyFolder) notebooks.walkTopDown().filter { it.isFile }.toList() else emptyList()
+        val unsynced = files.map { it.relativeTo(root).invariantSeparatorsPath }.filter { path ->
+            NativeSyncFiles.isLegacy(path) && checkpoint[path]?.hash != NativeSyncFiles.hash(File(root, path))
+        }
+        val target = File(root, "${FolderNames.HIDDEN_ROOT}/legacy-v2/${java.time.Instant.now().toString().replace(':', '-')}")
+        check(target.mkdirs()) { "无法创建旧格式备份文件夹" }
+        if (unsynced.isNotEmpty()) File(target, "unsynced.txt").writeText(unsynced.joinToString("\n"))
+        if (index.exists()) check(index.renameTo(File(target, "library.json"))) { "无法移走旧格式 library.json" }
+        if (legacyFolder) check(notebooks.renameTo(File(target, "notebooks"))) { "无法移走旧格式 notebooks 文件夹" }
+        File(root, "library.json.previous").takeIf { it.isFile }?.renameTo(File(target, "library.json.previous"))
+        hashCache.invalidate("library.json")
+        return unsynced
+    }
+
     /** Server-sized upload batches; the next pass continues with the rest. */
     internal var batchLimit = 20000
     /** Items skipped by the latest pass with their reasons; every other item keeps synchronizing. */
@@ -375,6 +403,7 @@ class NativeSyncClient(
         check(request.getString("workspaceId") == workspaceId) { "同步发件箱身份不匹配" }
         check(request.getString("deviceId") == deviceId && NativeSyncFiles.validId(request.getString("operationId"))) { "同步操作身份不匹配" }
         val changes = NativeSyncFiles.changes(request.getJSONArray("changes"))
+        check(changes.none { NativeSyncFiles.isLegacy(it.path) }) { "禁止上传旧格式路径" }
         changes.mapNotNull { it.hash }.filter(NativeSyncFiles::isBlob).distinct().forEach { hash ->
             checkCancelled(cancelled)
             val snapshot = blob(hash)

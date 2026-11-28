@@ -63,3 +63,23 @@ v2 path); upgrade every device immediately. An old client would apply the tombst
 its library, and a v3 client cannot read v2, so the two must not run against one library at once.
 The server keeps tombstones indefinitely, so the policy keeps accepting the v2 path shapes
 (`library.json`, `notebooks/<id>/pages|assets/…`) as valid names; clients never create them.
+
+### Device side
+
+A device keeps its v2 files until its v3 client starts. Windows and Android then, offline and before
+reading the library, move `library.json` and `notebooks/` into `.mojian/legacy-v2/<UTC time>/`
+(never deleted). Files whose bytes differ from the last synchronized version are listed in
+`unsynced.txt` there and shown on screen: those edits never reached the server. The library is then
+empty, so the app shows a receiving screen, runs one sync and opens when the folders arrived; a
+failure shows its reason with a retry button. A v2 library without sync state is refused with a
+pointer to `tools/folder-library` instead of being moved. v3 clients never plan, upload or receive a
+v2 path, so an un-migrated server cannot be damaged by them.
+
+The Mac read-only receiver has no local edits: it receives the migration commit like any update.
+Tombstones delete the v2 files (kept in its recovery folder), folders the server does not list are
+removed once nothing synchronized remains in them, and the first receive runs before the library is
+opened. Read-only opening never writes; folders without an id get one derived from their path.
+
+A page file whose head cannot be read keeps its place through the head of its previous version
+(`.mojian/previous`), and loading the page recovers the content from there, on every client.
+

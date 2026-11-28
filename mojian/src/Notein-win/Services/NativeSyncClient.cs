@@ -264,7 +264,7 @@ public sealed class NativeSyncClient : IDisposable
             if (!local.Any(pair => pair.Value.Hash == NativeSyncIdentity.Directory && !pair.Key.Contains('/') && !pair.Key.StartsWith('.')) &&
                 _state.Files.Any(pair => pair.Value.Hash == NativeSyncIdentity.Directory && !pair.Key.Contains('/') && !pair.Key.StartsWith('.')))
                 throw new IOException("本地笔记库缺失，已阻止同步删除");
-            var changes = local.Keys.Union(_state.Files.Keys).Where(path => local.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path))
+            var changes = local.Keys.Union(_state.Files.Keys).Where(path => !NativeSyncStorage.IsLegacy(path) && local.GetValueOrDefault(path)?.Hash != Hash(_state.Files, path))
                 .Select(path => new SyncChange(path, _state.Files.GetValueOrDefault(path)?.Version ?? 0, local.GetValueOrDefault(path)?.Hash)).ToList();
             foreach (var change in changes.Where(change => NativeSyncIdentity.IsBlob(change.Hash)))
             {
@@ -312,6 +312,32 @@ public sealed class NativeSyncClient : IDisposable
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { SetStatus(NativeSyncPhase.Error, "接收恢复未完成，暂时不能打开笔记库：" + error.Message); return false; }
         finally { _running.Release(); }
+    }
+
+    /// <summary>
+    /// Moves the v2 layout (<c>library.json</c>, <c>notebooks/</c>) left from before the folder library into
+    /// <c>.mojian/legacy-v2/&lt;time&gt;/</c>, once and offline (docs/design/folder-library.md "Migration"). Nothing is deleted.
+    /// Returns the v2 files whose bytes differ from the last synchronized version: those edits never reached the server and
+    /// stay only in that folder, so the caller must show them.
+    /// </summary>
+    public IReadOnlyList<string> RetireLegacyLayout()
+    {
+        var index = Path.Combine(_root, "library.json");
+        var notebooks = Path.Combine(_root, "notebooks");
+        var legacyFolder = Directory.Exists(notebooks) && !File.Exists(Path.Combine(notebooks, FolderNames.Descriptor));
+        if (!File.Exists(index) && !legacyFolder) return [];
+        if (!File.Exists(StatePath)) throw new IOException("旧格式笔记库没有同步记录，无法确认已上传；请先用 tools/folder-library 转换");
+        var files = (File.Exists(index) ? new[] { index } : []).Concat(legacyFolder ? Directory.EnumerateFiles(notebooks, "*", SearchOption.AllDirectories) : []);
+        var unsynced = files.Select(file => Path.GetRelativePath(_root, file).Replace('\\', '/'))
+            .Where(path => NativeSyncStorage.IsLegacy(path) && _state.Files.GetValueOrDefault(path)?.Hash != NativeSyncStorage.Hash(Path.Combine(_root, path)))
+            .Order(StringComparer.Ordinal).ToList();
+        var target = Path.Combine(_root, FolderNames.HiddenRoot, "legacy-v2", DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ssZ"));
+        Directory.CreateDirectory(target);
+        if (unsynced.Count > 0) File.WriteAllLines(Path.Combine(target, "unsynced.txt"), unsynced);
+        if (File.Exists(index)) File.Move(index, Path.Combine(target, "library.json"));
+        if (File.Exists(index + ".previous")) File.Move(index + ".previous", Path.Combine(target, "library.json.previous"));
+        if (legacyFolder) Directory.Move(notebooks, Path.Combine(target, "notebooks"));
+        return unsynced;
     }
 
     public bool RecoverPendingIncoming() => RecoverPendingIncomingAsync(action => { action(); return Task.FromResult(true); }).GetAwaiter().GetResult();
@@ -363,7 +389,7 @@ public sealed class NativeSyncClient : IDisposable
             var changes = new List<SyncChange>();
             foreach (var path in local.Keys.Union(_state.Files.Keys).Union(remote.Files.Keys))
             {
-                if (IsHeld(path)) continue;
+                if (IsHeld(path) || NativeSyncStorage.IsLegacy(path)) continue;
                 var localHash = local.GetValueOrDefault(path)?.Hash;
                 switch (NativeSyncDecisions.DecideEntry(_state.Files.GetValueOrDefault(path), localHash, remote.Files.GetValueOrDefault(path)))
                 {
@@ -507,7 +533,7 @@ public sealed class NativeSyncClient : IDisposable
     {
         if (outbox.WorkspaceId != _state.WorkspaceId || outbox.DeviceId != _state.DeviceId || !NativeSyncStorage.ValidId(outbox.OperationId) ||
             outbox.Changes == null || outbox.Changes.Count is < 1 or > 20000 ||
-            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L) ||
+            outbox.Changes.Any(change => change == null || !ValidPath(change.Path) || NativeSyncStorage.IsLegacy(change.Path) || !NativeSyncStorage.ValidHash(change.Hash) || change.ExpectedVersion < 0 || change.ExpectedVersion > 9007199254740991L) ||
             outbox.Changes.Select(change => change.Path).Distinct(StringComparer.Ordinal).Count() != outbox.Changes.Count ||
             // A case-only rename retires one spelling and creates another in the same batch.
             outbox.Changes.Where(change => change.Hash != null).Select(change => change.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=

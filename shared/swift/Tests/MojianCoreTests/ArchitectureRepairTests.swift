@@ -8,27 +8,38 @@ final class ArchitectureRepairTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }
         return url
     }
-    func fixture(_ name: String) throws -> Data {
+    /// The shared v3 sample library (shared/fixtures/workspace-v3) as a Mac-writable library.
+    func v3Library() throws -> URL {
         let shared = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return try Data(contentsOf: shared.appendingPathComponent("fixtures/workspace-v2/\(name).json"))
-    }
-    func testGoldenHierarchyAndAppearanceAreSharedAndLossless() throws {
-        let root = try scratch()
-        try fixture("library").write(to: root.appendingPathComponent("library.json"))
+        let root = try scratch().appendingPathComponent("library")
+        try FileManager.default.copyItem(at: shared.appendingPathComponent("fixtures/workspace-v3"), to: root)
         try Data().write(to: root.appendingPathComponent(".mojian-macos-library"))
+        return root
+    }
+    let goldenPage = "共享样例/样例分区/黄金页面.mojian"
+    func testGoldenHierarchyAndAppearanceAreSharedAndLossless() throws {
+        let root = try v3Library()
         let store = try CanonicalStore(root: root, writable: true)
+        store.discard = { try FileManager.default.removeItem(at: $0) }
         let books = try store.loadLibrary()
+        XCTAssertEqual(books.map(\.title), ["共享样例"])
         let page = books[0].pages[0]
         XCTAssertEqual(page.paper, "BOUNDLESS")
         XCTAssertEqual(page.view["backgroundFormat"], .string("GRID_STANDARD"))
         books[0].title = "renamed"
         books[0].sections[0].expanded = false
         try store.saveLibrary(books)
-        let saved = try JSON.read(Data(contentsOf: root.appendingPathComponent("library.json")))
-        XCTAssertEqual(saved["futureLibrary"]["kept"], .bool(true))
-        XCTAssertEqual(saved["notebooks"].array[0]["futureNotebook"], .string("retained"))
-        XCTAssertEqual(saved["notebooks"].array[0]["sections"].array[0]["expanded"], .bool(true))
-        XCTAssertEqual(saved["notebooks"].array[0]["sections"].array[0]["pages"].array[0]["appearance"]["futureAppearance"], .string("kept"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("共享样例").path))
+        let notebook = try JSON.read(Data(contentsOf: root.appendingPathComponent("renamed/.mojian-folder.json")))
+        XCTAssertEqual(notebook["id"], .string("book.dot"))
+        XCTAssertEqual(notebook["futureNotebook"], .string("retained"))
+        let section = try JSON.read(Data(contentsOf: root.appendingPathComponent("renamed/样例分区/.mojian-folder.json")))
+        XCTAssertEqual(section["futureSection"], .number(7))
+        XCTAssertEqual(section["expanded"], .null) // navigation stays on this device
+        let head = try PageFileFormat.readHead(root.appendingPathComponent("renamed/样例分区/黄金页面.mojian"))
+        XCTAssertEqual(head.id, "page.dot")
+        XCTAssertEqual(head.page["appearance"]["futureAppearance"], .string("kept"))
+        XCTAssertEqual(try CanonicalStore(root: root).loadLibrary()[0].title, "renamed")
     }
     func testNewCanonicalPagesHaveOneAppearanceRepresentation() {
         let page = CanonicalStore.newPage(title: "new", paper: "A4")
@@ -46,7 +57,8 @@ final class ArchitectureRepairTests: XCTestCase {
         var document = try store.loadPage(notebook: book.id, page: page.id)
         document.texts = [.object(["id": .string("text"), "text": .string("edit")])]
         try store.writePage(document)
-        let url = try store.checked("notebooks/\(book.id)/pages/\(page.id).json")
+        let url = try store.pageURL(notebook: book.id, page: page.id)
+        XCTAssertEqual(url.lastPathComponent, "开始书写.mojian")
         try Data("broken".utf8).write(to: url)
         let reader = try CanonicalStore(root: root)
         _ = try reader.loadPage(notebook: book.id, page: page.id)
@@ -79,18 +91,18 @@ final class ArchitectureRepairTests: XCTestCase {
         XCTAssertThrowsError(try InkPoints.decode("1:AQ=="))
         XCTAssertThrowsError(try InkPoints.decode("2:AA=="))
 
-        let root = try scratch()
-        try fixture("library").write(to: root.appendingPathComponent("library.json"))
-        try Data().write(to: root.appendingPathComponent(".mojian-macos-library"))
-        let page = root.appendingPathComponent("notebooks/book.dot/pages/page.dot.json")
-        try FileManager.default.createDirectory(at: page.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try fixture("page").write(to: page)
+        let root = try v3Library()
+        let page = root.appendingPathComponent(goldenPage)
+        let head = try PageFileFormat.headPrefix(Data(contentsOf: page))
         let store = try CanonicalStore(root: root, writable: true)
+        _ = try store.loadLibrary()
         var document = try store.loadPage(notebook: "book.dot", page: "page.dot")
         document.strokes.append(Settings().completedStroke((0..<30).map { InkSample(x: Double($0) * 1.3, y: 7, pressure: 0.4, elapsed: Double($0 * 4)) }))
         let returned = try store.writePage(document)
         XCTAssertEqual(returned.strokes[1]["points"].array.count, 30)
-        let disk = try JSON.read(Data(contentsOf: page))["strokes"].array
+        // Content goes under the head bytes exactly as another device wrote them.
+        XCTAssertEqual(try PageFileFormat.headPrefix(Data(contentsOf: page)), head)
+        let disk = try JSON.read(Data(contentsOf: page))["content"]["strokes"].array
         XCTAssertNotEqual(disk[0]["points"], .null) // per-point extension field keeps the array
         XCTAssertEqual(disk[1]["points"], .null)
         XCTAssertTrue(disk[1]["pointsCoded"].string.hasPrefix(InkPoints.prefix))

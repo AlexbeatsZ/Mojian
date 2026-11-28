@@ -200,7 +200,12 @@ public sealed class WorkspaceStore
             if (FolderNames.IsHidden(name)) continue;
             PageFileFormat.Head head;
             try { head = PageFileFormat.ReadHead(path); }
-            catch (Exception error) when (error is InvalidDataException or JsonException) { continue; }
+            catch (Exception error) when (error is InvalidDataException or JsonException)
+            {
+                // A corrupt page keeps its place through the previous version's head; loading it recovers the content.
+                try { head = PageFileFormat.ReadHead(PreviousPath(path)); }
+                catch (Exception previous) when (previous is InvalidDataException or JsonException or IOException) { continue; }
+            }
             var page = head.Page?.Deserialize<NotePage>(JsonOptions) ?? new NotePage();
             var id = head.Id;
             var relativeFile = Combine(relative, name);
@@ -1024,6 +1029,11 @@ public sealed class WorkspaceStore
 public sealed class PageContentMissingException(string notebookId, string pageId)
     : IOException($"页面内容尚未同步，已停止加载：{notebookId}/{pageId}");
 
+/// <summary>The folder library is empty because it has not been received yet (just after the v2 layout was retired).</summary>
+public sealed class FirstReceiveRequiredException(string root) : IOException("正在接收文件夹格式笔记")
+{
+    public string Root { get; } = root;
+}
 public sealed class WorkspaceLibraryMissingException(string root, string? detail = null)
     : IOException(detail ?? $"笔记库为空，但目录已有同步状态或数据，已停止加载：{root}")
 {

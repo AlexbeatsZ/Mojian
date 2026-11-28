@@ -21,6 +21,8 @@ struct ReadOnlySyncResult: Codable, Sendable {
     var revision: Int64
     var changed: Int
     var liveFiles: Int
+    /// Local items that cannot be compared with the server, with the reason; everything else was received.
+    var skipped: [String: String] = [:]
 }
 
 /// Receive-only by construction: this engine can only fetch manifests and immutable blobs.
@@ -43,7 +45,8 @@ actor ReadOnlySync {
         guard self.root == root.standardizedFileURL else { throw MojianError.invalid("同步笔记库不允许符号链接") }
         self.configuration = configuration; self.factory = factory
         _ = try configuration.routes()
-        guard fm.fileExists(atPath: self.root.appendingPathComponent("library.json").path),
+        // A v2 copy (library.json) is still accepted: its first v3 receive retires the old files.
+        guard FolderLibrary.isLibrary(self.root) || fm.fileExists(atPath: self.root.appendingPathComponent("library.json").path),
               !fm.fileExists(atPath: self.root.appendingPathComponent(".mojian-macos-library").path),
               !fm.fileExists(atPath: self.root.appendingPathComponent(".mojian-native-workspace").path),
               !fm.fileExists(atPath: self.root.appendingPathComponent(".mojian-sync/state.json").path) else {
@@ -110,20 +113,22 @@ actor ReadOnlySync {
         guard let transport = route, let remote else { throw MojianError.invalid("暂时无法连接同步服务器，将自动重试") }
         defer { (transport as? ReadOnlySyncHTTP)?.close() }
         try remote.validate(expectedWorkspace: configuration.workspaceId, previous: state?.manifest)
-        let local = try scan()
+        let scanned = try scan(), local = scanned.files
         if state == nil && !configuration.allowInitialReplacement { throw MojianError.invalid("此副本尚未确认接收服务器版本") }
         var changes = [String: ReadOnlySyncChange]()
-        for path in Set(remote.files.keys).union(local.keys) {
+        for path in Set(remote.files.keys.filter { remote.files[$0]?.directory != true }).union(local.keys) {
             let current = local[path]?.hash, target = remote.files[path]?.hash
             if let state, current != state.manifest.files[path]?.hash && current != target {
                 throw MojianError.invalid("本地文件发生意外修改，已保留并停止接收：\(path)")
             }
             if current != target { changes[path] = ReadOnlySyncChange(expectedHash: current, targetHash: target) }
         }
-        if changes.isEmpty {
+        // Folders carry no content: missing live folders are created and leftover empty ones removed on publication.
+        let folders = folderChanges(remote: remote, local: scanned.directories)
+        if changes.isEmpty && !folders {
             let next = ReadOnlySyncState(endpoint: configuration.endpoint, manifest: remote, stamps: local.mapValues(\.stamp))
             try ReadOnlySyncFiles.write(next, to: localURL("state.json")); state = next
-            return ReadOnlySyncResult(revision: remote.revision, changed: 0, liveFiles: remote.files.values.filter { $0.hash != nil }.count)
+            return ReadOnlySyncResult(revision: remote.revision, changed: 0, liveFiles: remote.files.values.filter { $0.hash != nil }.count, skipped: scanned.skipped)
         }
         let blobs = try localURL("blobs")
         try fm.createDirectory(at: blobs, withIntermediateDirectories: true)
@@ -148,7 +153,14 @@ actor ReadOnlySync {
         let incoming = ReadOnlySyncIncoming(operationId: UUID().uuidString, endpoint: configuration.endpoint, manifest: remote, changes: changes)
         try ReadOnlySyncFiles.write(incoming, to: incomingURL)
         await progress("正在更新笔记 · 只读")
-        return try await publish(incoming, apply: apply)
+        var result = try await publish(incoming, apply: apply)
+        result.skipped = scanned.skipped
+        return result
+    }
+
+    private func folderChanges(remote: ReadOnlySyncManifest, local: Set<String>) -> Bool {
+        let live = Set(remote.files.filter { $0.value.directory == true }.map(\.key))
+        return !live.isSubset(of: local) || !local.isSubset(of: live)
     }
 
     private func validate(_ incoming: ReadOnlySyncIncoming) throws {
@@ -157,7 +169,8 @@ actor ReadOnlySync {
         }
         try incoming.manifest.validate(expectedWorkspace: configuration.workspaceId, previous: state?.manifest)
         for (path, change) in incoming.changes {
-            guard ReadOnlySyncFiles.validPath(path), change.targetHash == incoming.manifest.files[path]?.hash,
+            guard ReadOnlySyncFiles.validPath(path), incoming.manifest.files[path]?.directory != true,
+                  change.targetHash == incoming.manifest.files[path]?.hash,
                   change.expectedHash == nil || ReadOnlySyncFiles.validHash(change.expectedHash!) else {
                 throw MojianError.invalid("只读同步恢复记录无效")
             }
@@ -165,34 +178,35 @@ actor ReadOnlySync {
     }
     private func localURL(_ relative: String) throws -> URL { try ReadOnlySyncFiles.checked(".mojian-sync/macos-readonly/" + relative, root: root) }
     private struct Local: Sendable { var hash: String; var stamp: ReadOnlySyncStamp }
-    private func scan() throws -> [String: Local] {
-        var result = [String: Local]()
-        func visit(_ relative: String) throws {
-            let url = try ReadOnlySyncFiles.checked(relative, root: root), stamp = try ReadOnlySyncStamp(url)
-            let hash: String
-            if state?.stamps[relative] == stamp, let known = state?.manifest.files[relative]?.hash { hash = known }
-            else { hash = try ReadOnlySyncFiles.hash(url) }
-            result[relative] = Local(hash: hash, stamp: stamp)
-        }
-        try visit("library.json")
+    private struct Scan: Sendable { var files: [String: Local]; var directories: Set<String>; var skipped: [String: String] }
+    /// Every received file and folder. An item that cannot be on the server is reported and left alone (Syncthing).
+    private func scan() throws -> Scan {
+        var result = Scan(files: [:], directories: [], skipped: [:])
         func walk(_ relative: String, depth: Int) throws {
-            guard depth < 12 else { throw MojianError.invalid("笔记文件夹层级无效") }
-            let folder = try ReadOnlySyncFiles.checked(relative, root: root)
+            guard depth < 64 else { throw MojianError.invalid("笔记文件夹层级过深：\(relative)") }
+            let folder = relative.isEmpty ? root : try ReadOnlySyncFiles.checked(relative, root: root)
             for name in try fm.contentsOfDirectory(atPath: folder.path) {
                 guard name != ".stfolder" else { throw MojianError.invalid("同步文件夹含 Syncthing 标记") }
-                let path = relative + "/" + name
-                let url = try ReadOnlySyncFiles.checked(path, root: root)
-                let attributes = try fm.attributesOfItem(atPath: url.path)
-                if attributes[.type] as? FileAttributeType == .typeDirectory {
+                let path = relative.isEmpty ? name : relative + "/" + name
+                if ReadOnlySyncFiles.ignored(path) { continue }
+                let url = folder.appendingPathComponent(name)
+                let type = try fm.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType
+                if type == .typeSymbolicLink { result.skipped[path] = "符号链接不会同步"; continue }
+                if type == .typeDirectory {
+                    if let reason = ReadOnlySyncFiles.failure(path, directory: true) { result.skipped[path] = reason; continue }
+                    result.directories.insert(path)
                     try walk(path, depth: depth + 1); continue
                 }
-                if path.hasSuffix(".previous") || path.hasSuffix(".tmp") || path.contains("-sync-conflict-") { continue }
-                guard ReadOnlySyncFiles.validPath(path) else { throw MojianError.invalid("笔记库含不支持的文件：\(path)") }
-                try visit(path)
+                guard type == .typeRegular else { result.skipped[path] = "不是普通文件"; continue }
+                if let reason = ReadOnlySyncFiles.failure(path, directory: false) { result.skipped[path] = reason; continue }
+                let stamp = try ReadOnlySyncStamp(url)
+                let hash: String
+                if state?.stamps[path] == stamp, let known = state?.manifest.files[path]?.hash { hash = known }
+                else { hash = try ReadOnlySyncFiles.hash(url) }
+                result.files[path] = Local(hash: hash, stamp: stamp)
             }
         }
-        let notebooks = try ReadOnlySyncFiles.checked("notebooks", root: root)
-        if fm.fileExists(atPath: notebooks.path) { try walk("notebooks", depth: 0) }
+        try walk("", depth: 0)
         return result
     }
 
@@ -204,15 +218,15 @@ actor ReadOnlySync {
     }
     private func publish(_ incoming: ReadOnlySyncIncoming, apply: Apply) async throws -> ReadOnlySyncResult {
         try validate(incoming)
-        let local = try scan()
-        for path in Set(local.keys).union(incoming.manifest.files.keys) where incoming.changes[path] == nil {
+        let local = try scan().files
+        for path in Set(local.keys).union(incoming.manifest.files.keys.filter { incoming.manifest.files[$0]?.directory != true }) where incoming.changes[path] == nil {
             guard local[path]?.hash == incoming.manifest.files[path]?.hash else {
                 throw MojianError.invalid("下载期间本地笔记发生变化，恢复记录已保留：\(path)")
             }
         }
         var prepared = [Prepared]()
         var stamps = local.mapValues(\.stamp)
-        for path in incoming.changes.keys.sorted(by: { a, b in a == "library.json" ? false : b == "library.json" ? true : a < b }) {
+        for path in incoming.changes.keys.sorted() {
             try Task.checkCancellation()
             let change = incoming.changes[path]!, current = local[path]?.hash
             if current == change.targetHash { continue }
@@ -244,6 +258,7 @@ actor ReadOnlySync {
         try ReadOnlySyncFiles.write(next, to: stateStage)
         try Task.checkCancellation()
         let operations = prepared, observed = local, root = root
+        let liveFolders = incoming.manifest.files.filter { $0.value.directory == true }.map(\.key).sorted { $0.count < $1.count }
         let action: @Sendable () throws -> Void = {
             try Task.checkCancellation()
             // Preflight the complete observed snapshot before the first canonical mutation.
@@ -252,14 +267,18 @@ actor ReadOnlySync {
                 guard (try? ReadOnlySyncStamp(url)) == value.stamp else { throw MojianError.invalid("发布前笔记文件发生变化") }
             }
             for operation in operations {
-                let current = FileManager.default.fileExists(atPath: operation.target.path) ? try ReadOnlySyncStamp(operation.target) : nil
+                // Exact spelling: on a case-insensitive volume `Note.mojian` would otherwise find `note.mojian`.
+                let current = ReadOnlySyncFiles.exists(operation.target) ? try ReadOnlySyncStamp(operation.target) : nil
                 guard current == operation.expectedStamp else { throw MojianError.invalid("发布前笔记文件发生变化") }
             }
             // Once started, finish the batch even if foreground cancellation arrives during publication.
-            for operation in operations {
-                if let replacement = operation.replacement { try ReadOnlySyncFiles.rename(replacement, to: operation.target) }
-                else { try FileManager.default.removeItem(at: operation.target) }
+            // Deletions first, so a case-only rename never deletes the file it just wrote; then folders shallow-first.
+            for operation in operations where operation.replacement == nil { try FileManager.default.removeItem(at: operation.target) }
+            for path in liveFolders {
+                try FileManager.default.createDirectory(at: try ReadOnlySyncFiles.checked(path, root: root), withIntermediateDirectories: true)
             }
+            for operation in operations { if let replacement = operation.replacement { try ReadOnlySyncFiles.rename(replacement, to: operation.target) } }
+            try ReadOnlySyncFiles.pruneFolders(root: root, keep: Set(liveFolders))
             try ReadOnlySyncFiles.rename(stateStage, to: stateTarget)
         }
         try await apply(action)

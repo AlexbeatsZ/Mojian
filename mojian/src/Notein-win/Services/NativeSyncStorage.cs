@@ -9,6 +9,8 @@ internal static class NativeSyncStorage
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     // v2 layout: clients no longer create it, but its tombstones stay in the server manifest.
+    /// <summary>v2 names retired by the folder library: a v3 client never uploads, receives or deletes them.</summary>
+    public static bool IsLegacy(string path) => LegacyPath.IsMatch(path);
     private static readonly Regex LegacyPath = new(@"^(library\.json|notebooks/[A-Za-z0-9_-][A-Za-z0-9._-]*/(pages/[A-Za-z0-9_-][A-Za-z0-9._-]*\.json|assets/[A-Za-z0-9_-][A-Za-z0-9._-]*/[A-Za-z0-9_-][A-Za-z0-9._-]*))\z", RegexOptions.CultureInvariant);
     private static readonly Regex Reserved = new(@"^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static bool StorableName(string part) => part.Length is > 0 and <= 240 && part is not ("." or "..") &&

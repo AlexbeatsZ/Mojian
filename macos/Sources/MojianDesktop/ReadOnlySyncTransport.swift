@@ -59,6 +59,10 @@ extension ReadOnlySyncConfiguration {
 struct ReadOnlySyncEntry: Codable, Equatable, Sendable {
     var hash: String?
     var version: Int64
+    /// Folder items (file-sync-core 0.4.0) have no hash.
+    var directory: Bool? = nil
+    /// What the item is: a blob hash, ``ReadOnlySyncFiles/directory`` or nil for a tombstone.
+    var identity: String? { directory == true ? ReadOnlySyncFiles.directory : hash }
 }
 struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
     var workspaceId: String
@@ -72,10 +76,11 @@ struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
               previous == nil || revision >= previous!.revision else {
             throw MojianError.invalid("同步服务器版本回退，已停止接收")
         }
+        // Case-insensitive uniqueness holds only among live items: a case-only rename leaves the old spelling as a tombstone.
         var folded = Set<String>()
         for (path, entry) in files {
-            guard ReadOnlySyncFiles.validPath(path), folded.insert(path.lowercased()).inserted,
-                  entry.version > 0, entry.version <= revision,
+            guard ReadOnlySyncFiles.validPath(path), entry.identity == nil || folded.insert(path.lowercased()).inserted,
+                  entry.version > 0, entry.version <= revision, entry.directory != true || entry.hash == nil,
                   entry.hash == nil || ReadOnlySyncFiles.validHash(entry.hash!) else {
                 throw MojianError.invalid("同步清单含无效路径或版本")
             }
@@ -83,7 +88,7 @@ struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
         if let previous {
             for (path, old) in previous.files {
                 guard let entry = files[path], entry.version >= old.version,
-                      entry.version != old.version || entry.hash == old.hash else {
+                      entry.version != old.version || entry.identity == old.identity else {
                     throw MojianError.invalid("同步清单丢失或改写已有版本")
                 }
             }
@@ -91,7 +96,10 @@ struct ReadOnlySyncManifest: Codable, Equatable, Sendable {
                 throw MojianError.invalid("同步清单在同一版本发生变化")
             }
         }
-        guard files["library.json"]?.hash != nil else { throw MojianError.invalid("同步清单缺少笔记目录") }
+        // A manifest without any notebook folder would empty the library.
+        guard files.contains(where: { $0.value.directory == true && !$0.key.contains("/") && !$0.key.hasPrefix(".") }) else {
+            throw MojianError.invalid("同步清单缺少笔记本文件夹")
+        }
     }
 }
 

@@ -45,6 +45,7 @@ public partial class App : Application
         base.OnStartup(e);
         PenFeedback.Install();
         try { new MainWindow().Show(); }
+        catch (FirstReceiveRequiredException pending) { new FirstReceiveWindow(pending.Root, () => new MainWindow().Show()).Show(); }
         catch (WorkspaceLibraryMissingException missing)
         {
             if (!OpenChosenWorkspace(missing)) Shutdown(-1);

@@ -295,7 +295,9 @@ class FolderLibrary(val root: File) {
         val pages = mutableListOf<JSONObject>()
         absolute(relative).listFiles()?.filter { it.isFile && it.name.endsWith(FolderNames.PAGE_EXTENSION) && !it.name.startsWith('.') }
             ?.sortedBy { it.name }?.forEach { file ->
-                val head = runCatching { PageFileFormat.readHead(file) }.getOrNull() ?: return@forEach
+                // A corrupt page keeps its place through the previous version's head; loading it recovers the content.
+                val head = runCatching { PageFileFormat.readHead(file) }.getOrNull()
+                    ?: runCatching { PageFileFormat.readHead(previousFile(file)) }.getOrNull() ?: return@forEach
                 val relativeFile = combine(relative, file.name)
                 var id = head.id.orEmpty()
                 if (id.isNotEmpty() && safe(id) && id in index.pages) {

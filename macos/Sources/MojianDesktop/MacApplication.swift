@@ -76,6 +76,8 @@ import MojianCore
                 do {
                     // No model may load a partially published batch, including when offline.
                     _ = try await engine.recover()
+                    // A copy still in the v2 layout becomes a folder library through its first receive.
+                    if !FolderLibrary.isLibrary(url) { _ = try await engine.synchronize() }
                     let controller = try openLocal(url, create: false, writable: false, preferences: preferences)
                     if configuration.enabled {
                         let receiver = ReadOnlySyncController(window: controller, engine: engine)
@@ -294,11 +296,13 @@ import MojianCore
             guard NSApp.sendAction(#selector(MacWindow.performRedo(_:)), to: actionTarget, from: nil) else { throw MojianError.invalid("原生菜单重做响应链未连接") }; guard controller.session.document?.strokes.count == 1 else { throw MojianError.invalid("重做未执行") }
             controller.session.mutate { $0.texts.append(.object(["id": .string("text-qa"), "text": .string("墨笺 macOS · 原生笔记\nCanonical local-first workspace"), "x": .number(80), "y": .number(250), "width": .number(440), "height": .number(120), "fontSize": .number(24)])) }
             canvas.rebind(); try controller.session.flush()
-            let pageURL = try controller.session.store.checked("notebooks/\(controller.session.notebook!.id)/pages/\(page.id).json")
-            let before = try Data(contentsOf: pageURL), index = try Data(contentsOf: workspace.appendingPathComponent("library.json"))
+            let store = controller.session.store
+            let pageURL = try store.pageURL(notebook: controller.session.notebook!.id, page: page.id)
+            let indexURL = store.folder.url(store.folder.index.folders[controller.session.notebook!.id]! + "/" + FolderNames.descriptor)
+            let before = try Data(contentsOf: pageURL), index = try Data(contentsOf: indexURL)
             canvas.zoom(0.5); canvas.zoom(64); canvas.zoom(1); controller.toggleTheme(nil); controller.toggleTheme(nil)
             try controller.session.flush()
-            guard before == (try Data(contentsOf: pageURL)), index == (try Data(contentsOf: workspace.appendingPathComponent("library.json"))) else { throw MojianError.invalid("浏览修改了共享文件") }
+            guard before == (try Data(contentsOf: pageURL)), index == (try Data(contentsOf: indexURL)) else { throw MojianError.invalid("浏览修改了共享文件") }
             let reread = try controller.session.store.loadPage(notebook: controller.session.notebook!.id, page: page.id)
             guard reread.strokes.count == 1, reread.texts.count == 1 else { throw MojianError.invalid("持久化重读失败") }
             let pdf = try controller.pdfData(); try pdf.write(to: root.appendingPathComponent("native-output.pdf"))

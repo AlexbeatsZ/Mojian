@@ -11,10 +11,11 @@ final class StoreTests: XCTestCase {
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: temp) }
     func create() throws -> CanonicalStore { try CanonicalStore(root: temp.appendingPathComponent("workspace"), create: true) }
-    func testCanonicalV2AndSequentialRevisionPreserveUnknownFields() throws {
+    func testFolderLibraryAndSequentialRevisionPreserveUnknownFields() throws {
         let store = try create(), books = try store.loadLibrary(), page = books[0].pages[0]
-        let index = try JSON.read(Data(contentsOf: store.root.appendingPathComponent("library.json")))
-        XCTAssertEqual(index["version"], .number(2)); XCTAssertNotEqual(index["notebooks"].array[0]["sections"].array[0]["pages"].array[0]["appearance"], .null)
+        let head = try PageFileFormat.readHead(store.pageURL(notebook: books[0].id, page: page.id))
+        XCTAssertEqual(head.version, 3); XCTAssertEqual(head.id, page.id); XCTAssertNotEqual(head.page["appearance"], .null)
+        XCTAssertEqual(try store.pageURL(notebook: books[0].id, page: page.id).lastPathComponent, "开始书写.mojian")
         var d = try store.loadPage(notebook: books[0].id, page: page.id)
         d.json["future"] = .object(["retain": .bool(true)]); d.strokes = [Settings().stroke([InkSample(x: 10, y: 20), InkSample(x: 70, y: 90)])]
         _ = try store.writePage(d); d.json["secondEdit"] = .bool(true); _ = try store.writePage(d)
@@ -23,15 +24,15 @@ final class StoreTests: XCTestCase {
     }
     func testExternalLibraryOpenIsBytePreservingAndRejectsWrites() throws {
         let writer = try create(), books = try writer.loadLibrary(), root = writer.root
-        let index = try Data(contentsOf: root.appendingPathComponent("library.json"))
+        let index = librarySnapshot(root)
         let reader = try CanonicalStore(root: root), read = try reader.loadLibrary()
         let d = try reader.loadPage(notebook: read[0].id, page: read[0].pages[0].id)
         XCTAssertThrowsError(try reader.saveLibrary(books)); XCTAssertThrowsError(try reader.writePage(d))
-        XCTAssertEqual(index, try Data(contentsOf: root.appendingPathComponent("library.json")))
+        XCTAssertEqual(index, librarySnapshot(root))
     }
     func testExternalEditPreventsStaleOverwrite() throws {
         let store = try create(), n = try store.loadLibrary()[0], p = n.pages[0]
-        let d = try store.loadPage(notebook: n.id, page: p.id), url = try store.checked("notebooks/\(n.id)/pages/\(p.id).json")
+        let d = try store.loadPage(notebook: n.id, page: p.id), url = try store.pageURL(notebook: n.id, page: p.id)
         var remote = d; remote.json["external"] = .string("newer")
         try remote.json.data().write(to: url, options: .atomic)
         XCTAssertThrowsError(try store.writePage(d)); XCTAssertEqual(try JSON.read(Data(contentsOf: url))["external"], .string("newer"))
@@ -40,7 +41,7 @@ final class StoreTests: XCTestCase {
         let store = try create(), n = try store.loadLibrary()[0], p = n.pages[0]
         var d = try store.loadPage(notebook: n.id, page: p.id); d.json["revision"] = .number(7)
         _ = try store.writePage(d, incrementRevision: false)
-        let url = try store.checked("notebooks/\(n.id)/pages/\(p.id).json"), previous = url.appendingPathExtension("previous")
+        let url = try store.pageURL(notebook: n.id, page: p.id), previous = store.folder.previousURL(url)
         let good = try Data(contentsOf: previous); try Data("corrupt".utf8).write(to: url)
         let recovered = try store.loadPage(notebook: n.id, page: p.id)
         XCTAssertEqual(try Data(contentsOf: url), Data("corrupt".utf8)); XCTAssertEqual(try Data(contentsOf: previous), good)
@@ -48,7 +49,7 @@ final class StoreTests: XCTestCase {
     }
     func testMissingIndexedPageThrowsRatherThanBecomingBlank() throws {
         let store = try create(), n = try store.loadLibrary()[0]
-        let url = try store.checked("notebooks/\(n.id)/pages/\(n.pages[0].id).json")
+        let url = try store.pageURL(notebook: n.id, page: n.pages[0].id)
         try FileManager.default.removeItem(at: url)
         XCTAssertThrowsError(try store.loadPage(notebook: n.id, page: n.pages[0].id))
     }
@@ -78,17 +79,16 @@ final class StoreTests: XCTestCase {
         let store = try create(), prefsName = "com.meta.mojian.tests.\(UUID().uuidString)", prefs = UserDefaults(suiteName: prefsName)!
         defer { prefs.removePersistentDomain(forName: prefsName) }
         let session = try DesktopSession(store: store, preferences: prefs), n = session.notebook!, p = session.page!
-        let pageURL = try store.checked("notebooks/\(n.id)/pages/\(p.id).json"), indexURL = store.root.appendingPathComponent("library.json")
-        let a = try Data(contentsOf: pageURL), b = try Data(contentsOf: indexURL)
+        let a = librarySnapshot(store.root)
         session.remember(Viewport(scale: 64, x: 200, y: -5000)); session.dark.toggle(); try session.select(n, session.section, p); try session.flush()
-        XCTAssertEqual(a, try Data(contentsOf: pageURL)); XCTAssertEqual(b, try Data(contentsOf: indexURL))
+        XCTAssertEqual(a, librarySnapshot(store.root))
     }
     @MainActor func testFailedSaveKeepsDirtyStateAndBlocksNavigation() async throws {
         let store = try create(), prefsName = "com.meta.mojian.tests.\(UUID().uuidString)", prefs = UserDefaults(suiteName: prefsName)!
         defer { prefs.removePersistentDomain(forName: prefsName) }
         let session = try DesktopSession(store: store, preferences: prefs), n = session.notebook!, p = session.page!
         session.mutate { $0.strokes.append(Settings().stroke([InkSample(x: 10, y: 30)])) }
-        let url = try store.checked("notebooks/\(n.id)/pages/\(p.id).json")
+        let url = try store.pageURL(notebook: n.id, page: p.id)
         try Data("external".utf8).write(to: url, options: .atomic)
         XCTAssertThrowsError(try session.select(n, nil, nil)); XCTAssertTrue(session.dirty); XCTAssertEqual(session.page?.id, p.id)
         XCTAssertEqual(session.document?.strokes.count, 1); XCTAssertNotNil(session.saveError)

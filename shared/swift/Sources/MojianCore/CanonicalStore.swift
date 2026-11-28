@@ -1,34 +1,28 @@
 import Foundation
 import Darwin
 
-/// Canonical v2 folders. Existing external folders are opened without creating or rewriting files.
+/// The v3 folder library (docs/design/folder-library.md): notebooks and sections are folders, pages `<title>.mojian`,
+/// assets `.mojian/assets/<page>`. Existing external folders are opened without creating or rewriting files.
 public final class CanonicalStore: @unchecked Sendable {
     private let mutex = NSRecursiveLock()
     public let root: URL
     public let readOnly: Bool
+    public let folder: FolderLibrary
     private var recovered = [String]()
-    public var recoveredFiles: [String] { mutex.lock(); defer { mutex.unlock() }; return recovered }
+    public var recoveredFiles: [String] { mutex.lock(); defer { mutex.unlock() }; return recovered + folder.recovered }
     private var lockDescriptor: Int32 = -1
-    private var observed = [String: Stamp]()
-    private var pageRevisions = [String: Double]()
-    private let repairOnRead: Bool
+    /// Page id -> stamp of the bytes this store last read or wrote (absent: never read).
+    private var observed = [String: Stamp?]()
     private var validated = [String: Stamp]()
-    private var cachedJSON = [String: JSON]()
-    private func cache(_ json: JSON, relative: String) {
-        if relative.hasPrefix("notebooks/") {
-            cachedJSON = cachedJSON.filter { !$0.key.hasPrefix("notebooks/") || $0.key == relative }
-        }
-        cachedJSON[relative] = json
-    }
-    private var librarySource: JSON = .object([:])
+    private var cachedContent = [String: JSON]()
+    private var pageRevisions = [String: Double]()
+    private var librarySource: JSON = .object(["version": .number(2), "notebooks": .array([])])
+    private var librarySignature: String?
     private let fm = FileManager.default
-    /// Removal of unreferenced page files; tests substitute a private folder for the user's Trash.
-    public var discard: (URL) throws -> Void = { url in
-        #if os(macOS)
-        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
-        #else
-        throw MojianError.invalid("请使用笔记库恢复目录保存删除内容")
-        #endif
+    /// Removal of pages, assets and folders the library no longer lists; tests substitute a private folder for the user's Trash.
+    public var discard: (URL) throws -> Void {
+        get { folder.discard }
+        set { folder.discard = newValue }
     }
     private struct Stamp: Equatable {
         var size: UInt64, modified: Date, inode: UInt64
@@ -39,16 +33,21 @@ public final class CanonicalStore: @unchecked Sendable {
             inode = (a[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
         }
     }
+    private func stamp(_ url: URL) throws -> Stamp? { fm.fileExists(atPath: url.path) ? try Stamp(url) : nil }
+
     public init(root: URL, create: Bool = false, writable: Bool = false, owner: String = "macos") throws {
         self.root = root.standardizedFileURL.resolvingSymlinksInPath()
-        repairOnRead = owner == "archive"
         readOnly = !create && !writable
+        folder = FolderLibrary(root: self.root, readOnly: readOnly)
+        #if os(macOS)
+        folder.discard = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+        #endif
         if create {
             if fm.fileExists(atPath: self.root.path) {
                 guard try fm.contentsOfDirectory(atPath: self.root.path).isEmpty else { throw MojianError.invalid("请选择空文件夹创建笔记库") }
             } else { try fm.createDirectory(at: self.root, withIntermediateDirectories: true) }
         } else {
-            guard fm.fileExists(atPath: self.root.appendingPathComponent("library.json").path) || fm.fileExists(atPath: self.root.appendingPathComponent("library.json.previous").path) else { throw MojianError.invalid("所选文件夹不是墨笺笔记库") }
+            guard FolderLibrary.isLibrary(self.root) else { throw MojianError.invalid("所选文件夹不是墨笺笔记库") }
         }
         if !readOnly {
             guard ![".stfolder", ".mojian-sync", ".mojian-native-workspace"].contains(where: { fm.fileExists(atPath: self.root.appendingPathComponent($0).path) }) else {
@@ -66,9 +65,10 @@ public final class CanonicalStore: @unchecked Sendable {
             }
         }
         if create {
-            try Data("Mojian local library v2\n".utf8).write(to: checked(".mojian-\(owner)-library"), options: .atomic)
+            try Data("Mojian local library v3\n".utf8).write(to: checked(".mojian-\(owner)-library"), options: .atomic)
+            try fm.createDirectory(at: checked(FolderNames.hiddenRoot), withIntermediateDirectories: true)
+            librarySignature = folder.signature()
             let n = Notebook(sections: [Section(title: "笔记", pages: [Self.newPage(title: "开始书写")])])
-            librarySource = .object(["version": .number(2), "notebooks": .array([n.json])])
             for page in n.pages { try writePage(PageDocument(notebook: n.id, page: page.id), incrementRevision: false) }
             try saveLibrary([n])
         }
@@ -81,202 +81,190 @@ public final class CanonicalStore: @unchecked Sendable {
         page.view = view; AppearanceBridge.makeCanonical(page)
         return page
     }
+    /// A path below the library root; folder and page names are titles, so any storable name is accepted.
     public func checked(_ relative: String) throws -> URL {
         mutex.lock(); defer { mutex.unlock() }
-        let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
+        let parts = relative.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.isEmpty, !relative.hasPrefix("/"), !relative.contains("\\") else { throw MojianError.invalid("无效路径") }
         var url = root
         for part in parts {
-            _ = try WorkspaceStore.safeComponent(String(part)); url.appendPathComponent(String(part))
+            guard !part.isEmpty, part != ".", part != "..", !part.contains("\0"), part.utf8.count < 256 else { throw MojianError.invalid("无效路径") }
+            url.appendPathComponent(part)
             if let attrs = try? fm.attributesOfItem(atPath: url.path), attrs[.type] as? FileAttributeType == .typeSymbolicLink {
                 throw MojianError.invalid("笔记库不允许符号链接：\(relative)")
             }
         }
-        // Validated path components cannot leave root. Existing symlinks are rejected above.
         return url
     }
     private func writable() throws { if readOnly { throw MojianError.invalid("当前笔记库为只读") } }
-    private func read(_ relative: String, validate: (JSON) throws -> Void) throws -> JSON {
-        let url = try checked(relative), previous = try checked(relative + ".previous")
-        let exists = fm.fileExists(atPath: url.path)
-        observed[relative] = exists ? try Stamp(url) : nil
-        if exists {
-            // Read errors propagate; only invalid data may recover from the previous revision.
-            let data = try Data(contentsOf: url)
-            do {
-                let j = try JSON.read(data); try validate(j)
-                validated[relative] = observed[relative]; cache(j, relative: relative)
-                return j
-            }
-            catch {
-                guard fm.fileExists(atPath: previous.path) else { throw error }
-                let j = try JSON.read(Data(contentsOf: previous)); try validate(j)
-                if !readOnly {
-                    let recovery = try checked(".mojian-corrupt.previous/\(UUID().uuidString)/\(relative)")
-                    try fm.createDirectory(at: recovery.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try atomic(data, to: recovery)
-                    if repairOnRead {
-                        try atomic(j.data(), to: url)
-                        observed[relative] = try Stamp(url); validated[relative] = observed[relative]
-                    }
-                }
-                cache(j, relative: relative); recovered.append(relative); return j
-            }
-        }
-        let j = try JSON.read(Data(contentsOf: previous)); try validate(j)
-        if !readOnly && repairOnRead {
-            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try atomic(j.data(), to: url)
-            observed[relative] = try Stamp(url); validated[relative] = observed[relative]
-        }
-        cache(j, relative: relative); recovered.append(relative); return j
-    }
-    private func write(_ json: JSON, relative: String, validate: (JSON) throws -> Void) throws {
-        try writable(); try validate(json)
-        let url = try checked(relative)
-        let stamp = fm.fileExists(atPath: url.path) ? try Stamp(url) : nil
-        guard observed[relative] == stamp else { throw MojianError.invalid("文件已被外部修改，已阻止覆盖。请重新打开笔记库。") }
-        if stamp != nil, validated[relative] == stamp, cachedJSON[relative] == json { return }
-        let data = try json.data()
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if stamp != nil {
-            let old = try Data(contentsOf: url)
-            if validated[relative] == stamp {
-                try atomic(old, to: try checked(relative + ".previous"))
-            }
-        }
-        try atomic(data, to: url); observed[relative] = try Stamp(url)
-        validated[relative] = observed[relative]; cache(json, relative: relative)
-    }
-    private func atomic(_ data: Data, to url: URL) throws {
-        let temp = url.deletingLastPathComponent().appendingPathComponent(".macos-\(UUID().uuidString).tmp")
-        defer { try? fm.removeItem(at: temp) }
-        guard fm.createFile(atPath: temp.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw MojianError.invalid("无法创建保存临时文件") }
-        let handle = try FileHandle(forWritingTo: temp)
-        do { try handle.write(contentsOf: data); try handle.synchronize(); try handle.close() }
-        catch { try? handle.close(); throw error }
-        guard Darwin.rename(temp.path, url.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-    }
-    private static func validateLibrary(_ j: JSON) throws {
-        guard [1.0, 2.0].contains(j["version"].number()), case .array(let books) = j["notebooks"] else { throw MojianError.invalid("笔记库索引格式或版本无效") }
-        var identifiers = Set<String>()
-        func id(_ j: JSON) throws {
-            guard case .object = j else { throw MojianError.invalid("索引节点格式无效") }
-            _ = try WorkspaceStore.safe(j["id"].string)
-            guard identifiers.insert(j["id"].string).inserted else { throw MojianError.invalid("索引中存在重复标识") }
-        }
-        func sections(_ value: JSON, depth: Int) throws {
-            guard depth < 100, case .array(let nodes) = value else { throw MojianError.invalid("分区结构无效或嵌套过深") }
-            for s in nodes {
-                try id(s)
-                guard case .array(let pages) = s["pages"] else { throw MojianError.invalid("页面列表格式无效") }
-                for page in pages { try id(page) }
-                if s["children"] != .null { try sections(s["children"], depth: depth + 1) }
-            }
-        }
-        for book in books { try id(book); try sections(book["sections"], depth: 0) }
-    }
+
     public func loadLibrary() throws -> [Notebook] {
         mutex.lock(); defer { mutex.unlock() }
-        librarySource = try read("library.json", validate: Self.validateLibrary)
+        librarySource = try folder.read()
+        librarySignature = folder.signature()
         return librarySource["notebooks"].array.map(Notebook.init)
+    }
+    /// True when another program (a sync receiver, a file manager) changed folders, page names or descriptors.
+    public var libraryChanged: Bool {
+        mutex.lock(); defer { mutex.unlock() }
+        return librarySignature.map { $0 != folder.signature() } ?? false
     }
     public func saveLibrary(_ notebooks: [Notebook]) throws {
         mutex.lock(); defer { mutex.unlock() }
         try saveLibrarySnapshot(.array(notebooks.map(\.json)))
     }
+    private static let navigation: Set<String> = ["expanded", "focusedSectionId", "selectedPageSectionId", "selectedPageId", "pagePaneMode", "activeNotebookId"]
+    /// Synchronized structure only: navigation is device-local and never makes the library "changed".
+    private static func shared(_ json: JSON) -> JSON {
+        switch json {
+        case .object(let values): return .object(values.filter { !navigation.contains($0.key) }.mapValues(shared))
+        case .array(let items): return .array(items.map(shared))
+        default: return json
+        }
+    }
     public func saveLibrarySnapshot(_ notebooks: JSON) throws {
         mutex.lock(); defer { mutex.unlock() }
-        var j = librarySource
-        j["version"] = .number(2)
-        j["notebooks"] = .array(notebooks.array.map { notebook in
-            let old = librarySource["notebooks"].array.first { $0["id"] == notebook["id"] } ?? .object([:])
-            return Self.preserveNavigation(notebook, previous: old, notebook: true)
+        try writable()
+        var next = librarySource
+        next["version"] = .number(2); next["notebooks"] = notebooks
+        guard Self.shared(next) != Self.shared(librarySource) else { return }
+        guard !libraryChanged else { throw MojianError.invalid("笔记库已被外部修改，已阻止覆盖。请重新打开笔记库。") }
+        try folder.apply(next, beforeWrite: { id, url in
+            if let expected = self.observed[id] { guard try self.stamp(url) == expected else { throw MojianError.invalid("文件已被外部修改，已阻止覆盖。请重新打开笔记库。") } }
+        }, afterWrite: { id, url in
+            // This store's own head rewrite or move: the page bytes stay the version it read.
+            if self.observed[id] != nil {
+                let current = try Stamp(url)
+                if self.validated[id] == self.observed[id] ?? nil { self.validated[id] = current }
+                self.observed[id] = current
+            }
         })
-        try write(j, relative: "library.json", validate: Self.validateLibrary); librarySource = j
-    }
-    private static func preserveNavigation(_ source: JSON, previous: JSON, notebook: Bool) -> JSON {
-        var values = source.dictionary
-        let fields = notebook ? ["expanded", "focusedSectionId", "selectedPageSectionId", "selectedPageId"] : ["expanded"]
-        for field in fields {
-            if let old = previous.dictionary[field] { values[field] = old }
-            else { values.removeValue(forKey: field) }
-        }
-        let key = notebook ? "sections" : "children"
-        if source[key] != .null {
-            values[key] = .array(source[key].array.map { section in
-                let old = previous[key].array.first { $0["id"] == section["id"] } ?? .object([:])
-                return preserveNavigation(section, previous: old, notebook: false)
-            })
-        }
-        return .object(values)
+        librarySource = next
+        librarySignature = folder.signature()
     }
 
+    /// The file holding a page: its library file, or its staged content before the page joins the library.
+    public func pageURL(notebook: String, page: String) throws -> URL {
+        mutex.lock(); defer { mutex.unlock() }
+        return try folder.pageURL(page) ?? folder.pendingURL(page)
+    }
+    private func content(of json: JSON, notebook: String, page: String) throws -> JSON {
+        // Assigning a key would turn any non-object (`[]`, a string) into an empty page instead of recovering it.
+        guard case .object = json else { throw MojianError.invalid("页面格式无效或版本不受支持") }
+        var content = json["version"].number() == 3 && json["content"] != .null ? json["content"] : json
+        content["notebookId"] = .string(notebook); content["pageId"] = .string(page)
+        if content["version"] == .null { content["version"] = .number(2) }
+        return content
+    }
     public func loadPage(notebook: String, page: String) throws -> PageDocument {
         mutex.lock(); defer { mutex.unlock() }
-        let relative = "notebooks/\(try WorkspaceStore.safe(notebook))/pages/\(try WorkspaceStore.safe(page)).json"
-        let j = try read(relative) { j in
-            let d = try PageDocument(j)
-            guard d.pageID == page, d.notebookID == notebook else { throw MojianError.invalid("页面标识与索引不匹配") }
+        _ = try WorkspaceStore.safe(notebook); _ = try WorkspaceStore.safe(page)
+        let url = try pageURL(notebook: notebook, page: page)
+        guard fm.fileExists(atPath: url.path) else { throw MojianError.invalid("页面文件缺失：\(folder.relative(url))") }
+        let current = try Stamp(url)
+        // Read errors propagate; only invalid data may recover from the previous revision.
+        let data = try Data(contentsOf: url)
+        var json: JSON
+        do {
+            json = try content(of: try JSON.read(data), notebook: notebook, page: page); _ = try PageDocument(json)
+            validated[page] = current
+        } catch {
+            let previous = folder.previousURL(url)
+            guard fm.fileExists(atPath: previous.path) else { throw error }
+            json = try content(of: try JSON.read(Data(contentsOf: previous)), notebook: notebook, page: page); _ = try PageDocument(json)
+            if !readOnly {
+                let recovery = try checked(".mojian-corrupt.previous/\(UUID().uuidString)/\(folder.relative(url))")
+                try fm.createDirectory(at: recovery.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: recovery)
+            }
+            validated.removeValue(forKey: page)
+            recovered.append(folder.relative(url))
         }
-        pageRevisions["\(notebook)/\(page)"] = j["revision"].number()
-        return try PageDocument(j)
+        observed[page] = current
+        cachedContent[page] = json
+        pageRevisions["\(notebook)/\(page)"] = json["revision"].number()
+        return try PageDocument(json)
     }
     @discardableResult public func writePage(_ document: PageDocument, incrementRevision: Bool = true) throws -> PageDocument {
         mutex.lock(); defer { mutex.unlock() }
-        let relative = "notebooks/\(try WorkspaceStore.safe(document.notebookID))/pages/\(try WorkspaceStore.safe(document.pageID)).json"
         try writable()
-        let url = try checked(relative)
-        let current = fm.fileExists(atPath: url.path) ? try Stamp(url) : nil
-        guard observed[relative] == current else { throw MojianError.invalid("文件已被外部修改，已阻止覆盖。请重新打开笔记库。") }
+        _ = try WorkspaceStore.safe(document.notebookID); let page = try WorkspaceStore.safe(document.pageID)
+        let url = try pageURL(notebook: document.notebookID, page: page)
+        let current = try stamp(url)
+        guard (observed[page] ?? nil) == current else { throw MojianError.invalid("文件已被外部修改，已阻止覆盖。请重新打开笔记库。") }
         // Disk form packs eligible point arrays (shared/ink-points.md); the returned document is expanded.
         let packed = InkPoints.pack(document.json)
-        if incrementRevision, validated[relative] == current, let previous = cachedJSON[relative] {
-            func content(_ json: JSON) -> JSON { .object(json.dictionary.filter { $0.key != "revision" && $0.key != "updatedAt" }) }
-            if content(previous) == content(packed) { return try PageDocument(previous) }
+        if incrementRevision, current != nil, validated[page] == current, let previous = cachedContent[page] {
+            func body(_ json: JSON) -> JSON { .object(json.dictionary.filter { $0.key != "revision" && $0.key != "updatedAt" }) }
+            if body(previous) == body(packed) { return try PageDocument(previous) }
         }
         var d = document
         d.json = packed
         if incrementRevision {
-            d.json["revision"] = .number(max(d.json["revision"].number(), pageRevisions["\(d.notebookID)/\(d.pageID)"] ?? 0) + 1)
+            d.json["revision"] = .number(max(d.json["revision"].number(), pageRevisions["\(d.notebookID)/\(page)"] ?? 0) + 1)
             d.json["updatedAt"] = .string(ISO8601DateFormatter().string(from: Date()))
         }
-        try write(d.json, relative: relative) { _ = try PageDocument($0) }; pageRevisions["\(d.notebookID)/\(d.pageID)"] = d.json["revision"].number(); return try PageDocument(d.json)
+        _ = try PageDocument(d.json)
+        let contentData = try d.json.data()
+        let data: Data
+        if current != nil, folder.index.pages[page] != nil {
+            // Content goes under the head bytes as stored; head edits happen only through the library.
+            // A corrupt current file takes its head from the previous version, as the library listing did.
+            let previous = folder.previousURL(url)
+            if let prefix = PageFileFormat.headPrefix(try Data(contentsOf: url)) ?? (try? Data(contentsOf: previous)).flatMap(PageFileFormat.headPrefix) {
+                data = PageFileFormat.recompose(prefix: prefix, content: contentData)
+            } else {
+                let head = (try? PageFileFormat.readHead(url)) ?? (try? PageFileFormat.readHead(previous))
+                data = try PageFileFormat.compose(id: page, sortKey: head?.sortKey ?? folder.index.keys[page] ?? "a0", page: head?.page ?? .object([:]), content: contentData)
+            }
+        } else { data = contentData }
+        // A corrupt current file is never rotated over the valid previous version it was recovered from.
+        try folder.atomic(data, to: url, keepPrevious: current == nil || validated[page] == current)
+        let written = try Stamp(url)
+        observed[page] = written; validated[page] = written; cachedContent[page] = d.json
+        pageRevisions["\(d.notebookID)/\(page)"] = d.json["revision"].number()
+        return try PageDocument(d.json)
     }
     public func writeAsset(_ data: Data, notebook: String, page: String, name: String) throws {
         mutex.lock(); defer { mutex.unlock() }
         try writable()
-        let url = try checked("notebooks/\(WorkspaceStore.safe(notebook))/assets/\(WorkspaceStore.safe(page))/\(WorkspaceStore.safe(name))")
+        _ = try WorkspaceStore.safe(notebook)
+        let url = try folder.assetDirectory(page).appendingPathComponent(WorkspaceStore.safe(name))
+        _ = try checked(folder.relative(url))
         guard !fm.fileExists(atPath: url.path) else { throw MojianError.invalid("资源文件已存在") }
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try atomic(data, to: url)
+        try folder.atomic(data, to: url, keepPrevious: false)
     }
-    /// Called only after the index no longer references these pages. Files go to the macOS Trash
-    /// (recoverable); a failed move leaves an unreferenced orphan rather than a dangling index entry.
+    /// Removes staged content and assets of pages the library no longer lists (listed pages are removed by
+    /// `saveLibrary`). Files go to the macOS Trash (recoverable); a failed move leaves an unreferenced orphan.
     @discardableResult public func trash(notebook: String, pages: [String]) -> [String] {
         mutex.lock(); defer { mutex.unlock() }
-        guard !readOnly, let nb = try? WorkspaceStore.safe(notebook) else { return pages }
+        guard !readOnly else { return pages }
         return pages.filter { id in
-            guard let page = try? WorkspaceStore.safe(id) else { return true }
-            let moved = ["notebooks/\(nb)/pages/\(page).json", "notebooks/\(nb)/pages/\(page).json.previous", "notebooks/\(nb)/assets/\(page)"].map(moveToTrash)
+            guard (try? WorkspaceStore.safe(id)) != nil, folder.index.pages[id] == nil,
+                  let pending = try? folder.pendingURL(id), let assets = try? folder.assetDirectory(id) else { return true }
+            let moved = [pending, folder.previousURL(pending), assets].map(moveToTrash)
+            observed.removeValue(forKey: id); validated.removeValue(forKey: id); cachedContent.removeValue(forKey: id)
             return moved.contains(false)
         }
     }
+    /// The notebook folder itself is removed by `saveLibrary`; nothing else remains to clean.
     @discardableResult public func trashNotebook(_ notebook: String) -> Bool {
         mutex.lock(); defer { mutex.unlock() }
-        guard !readOnly, let nb = try? WorkspaceStore.safe(notebook) else { return false }
-        return moveToTrash("notebooks/\(nb)")
+        return !readOnly && folder.index.folders[notebook] == nil
     }
-    private func moveToTrash(_ relative: String) -> Bool {
-        guard let url = try? checked(relative) else { return false }
+    private func moveToTrash(_ url: URL) -> Bool {
         guard fm.fileExists(atPath: url.path) else { return true }
         do { try discard(url) } catch { return false }
-        observed = observed.filter { !$0.key.hasPrefix(relative) }
         return true
     }
     public func assetURL(_ name: String, document: PageDocument, owner: String? = nil) throws -> URL {
         mutex.lock(); defer { mutex.unlock() }
-        return try checked("notebooks/\(WorkspaceStore.safe(document.notebookID))/assets/\(WorkspaceStore.safe(owner ?? document.pageID))/\(WorkspaceStore.safe(name))")
+        let url = try folder.assetDirectory(owner ?? document.pageID).appendingPathComponent(WorkspaceStore.safe(name))
+        return try checked(folder.relative(url))
+    }
+    public func assetDirectory(page: String) throws -> URL {
+        mutex.lock(); defer { mutex.unlock() }
+        return try folder.assetDirectory(page)
     }
 }
 

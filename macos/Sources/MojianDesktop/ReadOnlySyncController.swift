@@ -23,7 +23,11 @@ import AppKit
                 }, progress: { [weak self] text in
                     await self?.status(text)
                 })
-                self?.status("笔记已同步 · 只读")
+                if result.skipped.isEmpty { self?.status("笔记已同步 · 只读") }
+                else {
+                    let shown = result.skipped.sorted { $0.key < $1.key }.prefix(3).map { "\($0.key)（\($0.value)）" }.joined(separator: "；")
+                    self?.status("笔记已同步 · 只读；\(result.skipped.count) 项未同步：\(shown)")
+                }
                 self?.window?.session.syncRevision = result.revision
             } catch {
                 guard !Task.isCancelled else { self?.status("只读同步已暂停 · 返回前台后继续"); return }
