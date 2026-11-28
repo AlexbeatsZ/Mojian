@@ -17,15 +17,12 @@ public class SyncConflictReviewTests
     [Fact]
     public void PathsLabelsAndSummaryFollowTheSharedContract()
     {
-        Assert.Equal(("nb", "p1"), SyncConflictReview.PageOf("notebooks/nb/pages/p1.json"));
-        Assert.Equal(("nb", "p1"), SyncConflictReview.PageOf("notebooks/nb/assets/p1/scan.png"));
-        Assert.Null(SyncConflictReview.PageOf("library.json"));
-        Assert.True(SyncConflictReview.IsPageFile("notebooks/nb/pages/p1.json"));
-        Assert.False(SyncConflictReview.IsPageFile("notebooks/nb/assets/p1/scan.png"));
-        Assert.Equal("笔记目录", SyncConflictReview.Label("library.json", (_, _) => null));
-        Assert.Equal("作业 4", SyncConflictReview.Label("notebooks/nb/pages/p1.json", (_, _) => "作业 4"));
-        Assert.Equal("p1", SyncConflictReview.Label("notebooks/nb/pages/p1.json", (_, _) => null));
-        Assert.Equal("scan.png", SyncConflictReview.Label("notebooks/nb/assets/p1/scan.png", (_, _) => "作业 4"));
+        Assert.Equal("p1", SyncConflictReview.PageIdOf(new(".mojian/assets/p1/scan.png", "add", null, null, null, null, null)));
+        Assert.Null(SyncConflictReview.PageIdOf(new("化学/.mojian-folder.json", "modify", null, null, null, null, null)));
+        Assert.True(SyncConflictReview.IsPageFile("化学/有机/作业 4.mojian"));
+        Assert.False(SyncConflictReview.IsPageFile(".mojian/assets/p1/scan.png"));
+        Assert.Equal("作业 4", SyncConflictReview.Label("化学/有机/作业 4.mojian"));
+        Assert.Equal("scan.png", SyncConflictReview.Label(".mojian/assets/p1/scan.png"));
         Assert.Equal("本机 +1 · 服务器 +2 · 改动 1", SyncConflictReview.SummaryText(1, 2, 1));
         Assert.Equal("服务器 +3", SyncConflictReview.SummaryText(0, 3, null));
         Assert.Equal(ConflictMark.Add, SyncConflictReview.MarkOf("add"));
@@ -85,7 +82,7 @@ public class SyncConflictReviewTests
                 var draft = AddPageWithStrokes(model, "旧草稿", Waves(2, 1));
                 AddPageWithStrokes(model, "作业 6", []);
                 var notebookId = model.ActiveWorkspace.Id;
-                string PagePath(NotePage page) => $"notebooks/{notebookId}/pages/{page.Id}.json";
+                string PagePath(NotePage page) => Path.GetRelativePath(root, model.Store.GetPageDocumentPath(notebookId, page.Id)).Replace('\\', '/');
 
                 // The engine's conflict folder: local/<path> and remote/<path> copies.
                 var folder = Path.Combine(root, "conflict");
@@ -98,23 +95,17 @@ public class SyncConflictReviewTests
                 }
                 var localPage = JsonNode.Parse(File.ReadAllText(model.Store.GetPageDocumentPath(notebookId, homework.Id)))!.AsObject();
                 var remotePage = localPage.DeepClone().AsObject();
-                var strokes = remotePage["strokes"]!.AsArray();
+                var strokes = remotePage["content"]!["strokes"]!.AsArray();
                 strokes.RemoveAt(1);                                         // only here: red
                 strokes[2]!["widthMm"] = 1.4;                                // changed on both: yellow
                 foreach (var added in Waves(2, 4))                           // only on the server: green
                     strokes.Add(JsonSerializer(added));
-                var localLibrary = JsonNode.Parse(File.ReadAllText(model.Store.LibraryPath))!.AsObject();
-                var remoteLibrary = localLibrary.DeepClone().AsObject();
-                var sections = remoteLibrary["notebooks"]!.AsArray().First(notebook => (string?)notebook!["id"] == notebookId)!["sections"]!.AsArray();
-                var pages = sections.Select(section => section!["pages"]!.AsArray()).First(list => list.Any(page => (string?)page!["id"] == draft.Id));
-                pages.Remove(pages.First(page => (string?)page!["id"] == draft.Id));
-                sections.Add(JsonNode.Parse("""{"id":"section-review","title":"复习","children":[],"pages":[]}"""));
 
                 NativeSyncConflictItem Item(string path, string? local, string? remote)
                 {
                     var l = local == null ? null : Copy("local", path, local);
                     var r = remote == null ? null : Copy("remote", path, remote);
-                    var summary = l != null && r != null && path.EndsWith(".json", StringComparison.Ordinal)
+                    var summary = l != null && r != null && path.EndsWith(".mojian", StringComparison.Ordinal)
                         ? NativeSyncMerge.Summarize(JsonNode.Parse(local!)!.AsObject(), JsonNode.Parse(remote!)!.AsObject()) : null;
                     return new(path, l == null ? "add" : r == null ? "delete" : "modify", l, r, summary?.LocalOnly, summary?.RemoteOnly, summary?.Changed);
                 }
@@ -122,13 +113,12 @@ public class SyncConflictReviewTests
                 {
                     Item(PagePath(homework), localPage.ToJsonString(), remotePage.ToJsonString()),
                     Item(PagePath(draft), File.ReadAllText(model.Store.GetPageDocumentPath(notebookId, draft.Id)), null),
-                    Item($"notebooks/{notebookId}/assets/{homework5.Id}/scan.png", null, "png"),
-                    Item("library.json", localLibrary.ToJsonString(), remoteLibrary.ToJsonString()),
+                    Item($".mojian/assets/{homework5.Id}/scan.png", null, "png"),
                 };
                 model.SetSyncConflicts(items);
 
-                Assert.Equal(new[] { "笔记目录", "scan.png", "作业 4", "旧草稿" }, model.SyncConflictRows.Select(row => row.Label));
-                Assert.Equal(new[] { "M", "A", "M", "D" }, model.SyncConflictRows.Select(row => row.Letter));
+                Assert.Equal(new[] { "scan.png", "作业 4", "旧草稿" }, model.SyncConflictRows.Select(row => row.Label));
+                Assert.Equal(new[] { "A", "M", "D" }, model.SyncConflictRows.Select(row => row.Letter));
                 var pageMarks = model.PagePaneRows.Where(row => row.Page != null).ToDictionary(row => row.Page!.Title, row => row.ConflictLetter);
                 Assert.Equal("M", pageMarks["作业 4"]);
                 Assert.Equal("M", pageMarks["作业 5"]);
@@ -176,24 +166,9 @@ public class SyncConflictReviewTests
                 ((Button)window.FindName("ConflictKeepBothButton")).Command.Execute("Both");
                 Assert.Equal((PagePath(homework), NativeSyncChoice.Both), requested.Single());
 
-                // A deleted page that the local library still lists waits for the library conflict.
+                // Without a shared index, taking the server's deletion of a page proceeds directly.
                 window.ResolveSyncConflictAsync(model.SyncConflictRows.Single(row => row.Label == "旧草稿"), NativeSyncChoice.Remote).GetAwaiter().GetResult();
-                Assert.Equal("先处理笔记目录", model.SyncConflictNotice);
-                Idle(window);
-                Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("SyncConflictNotice")).Visibility);
-
-                var libraryRow = model.SyncConflictRows.Single(row => row.Path == "library.json");
-                dialog = window.BuildSyncConflictDialog(libraryRow);
-                dialog.Owner = window;
-                dialog.Show();
-                Idle(dialog);
-                var lines = Descendants(dialog).OfType<TextBlock>().Select(text => text.Text).ToList();
-                Assert.Contains(lines, line => line.StartsWith("本机：", StringComparison.Ordinal) && line.EndsWith("旧草稿", StringComparison.Ordinal));
-                Assert.Contains(lines, line => line.StartsWith("服务器：", StringComparison.Ordinal) && line.EndsWith("复习", StringComparison.Ordinal));
-                Assert.Equal(3, Descendants(dialog).OfType<Button>().Count());
-                Render(dialog, "conflict-review-library.png");
-                dialog.Close();
-                dialog = null;
+                Assert.Contains((PagePath(draft), NativeSyncChoice.Remote), requested);
 
                 model.SetSyncConflicts([]);
                 Idle(window);

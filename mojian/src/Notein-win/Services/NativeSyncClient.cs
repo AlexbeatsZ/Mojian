@@ -731,7 +731,7 @@ public sealed class NativeSyncClient : IDisposable
             var local = Path.Combine(folder, "local", path); var remote = Path.Combine(folder, "remote", path);
             string? l = File.Exists(local) ? local : null, r = File.Exists(remote) ? remote : null;
             NativeSyncMerge.Summary? summary = null;
-            if (path.EndsWith(".json", StringComparison.Ordinal) && l != null && r != null && new FileInfo(l).Length <= MergeLimit && new FileInfo(r).Length <= MergeLimit)
+            if ((path.EndsWith(FolderNames.PageExtension, StringComparison.Ordinal) || path.EndsWith(".json", StringComparison.Ordinal)) && l != null && r != null && new FileInfo(l).Length <= MergeLimit && new FileInfo(r).Length <= MergeLimit)
                 try { if (JsonNode.Parse(File.ReadAllBytes(l)) is JsonObject lo && JsonNode.Parse(File.ReadAllBytes(r)) is JsonObject ro) summary = NativeSyncMerge.Summarize(lo, ro); }
                 catch (JsonException) { }
             return new NativeSyncConflictItem(path, l == null ? "add" : r == null ? "delete" : "modify", l, r, summary?.LocalOnly, summary?.RemoteOnly, summary?.Changed);
